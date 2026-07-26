@@ -34,8 +34,14 @@ export class RedisBus implements BusPort {
     });
   }
 
-  async publish(topic: string, e: AgentEvent): Promise<void> {
-    await this.pub.publish(topic, JSON.stringify(e));
+  /** 发布同样要超时:断连时命令无限排队,会把调用方拖住。 */
+  async publish(topic: string, e: AgentEvent, timeoutMs = 2000): Promise<void> {
+    await Promise.race([
+      this.pub.publish(topic, JSON.stringify(e)),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("redis publish timeout")), timeoutMs),
+      ),
+    ]);
   }
 
   subscribe(topic: string, cb: (e: AgentEvent) => void): Unsubscribe {
@@ -56,9 +62,21 @@ export class RedisBus implements BusPort {
     };
   }
 
-  /** 订阅是异步注册的;需要"订阅已生效"再发布时用它等待。 */
-  async ready(topic: string): Promise<void> {
-    await this.sub.subscribe(topic);
+  /**
+   * 等订阅在服务端真正生效。
+   *
+   * 【必须带超时】ioredis 配了 maxRetriesPerRequest: null,断连时命令会【无限排队】
+   * 而不是快速失败 —— 光 try/catch 抓不住,调用方会直接挂死。
+   * 实测:Redis 停机后请求卡在这里直到客户端超时,任务连入队都没走到。
+   * 超时后按"订阅没生效"处理,由调用方决定降级(通常是照常入队、放弃实时流)。
+   */
+  async ready(topic: string, timeoutMs = 2000): Promise<void> {
+    await Promise.race([
+      this.sub.subscribe(topic),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("redis subscribe timeout")), timeoutMs),
+      ),
+    ]);
   }
 
   async close(): Promise<void> {

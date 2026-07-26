@@ -60,10 +60,27 @@ export async function POST(req: Request) {
       req.signal.addEventListener("abort", finish, { once: true });
 
       try {
-        // 等订阅生效再入队,避免 worker 抢先发出的首批事件丢失
-        await bus.ready?.(topicOf(sessionId));
+        // 等订阅生效再入队,避免 worker 抢先发出的首批事件丢失。
+        // 总线故障不阻止提交 —— 队列在 MySQL,任务照常执行,只是没有实时过程。
+        let busUsable = true;
+        try {
+          await bus.ready?.(topicOf(sessionId));
+        } catch {
+          busUsable = false;
+          send({ kind: "status", label: "事件通道不可用,本次无实时过程", state: "degraded" });
+        }
         await runs.create({ id: runId, sessionId, prompt });
         send({ kind: "status", label: "已入队", state: "pending" });
+
+        // 总线不可用时已知收不到事件,立即收流,别让客户端白等到超时
+        if (!busUsable) {
+          send({
+            kind: "result",
+            status: "success",
+            summary: "任务已提交,但事件通道不可用 —— 请稍后查询结果",
+          });
+          finish();
+        }
       } catch (err) {
         send({
           kind: "result",

@@ -73,10 +73,31 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       req.signal.addEventListener("abort", finish, { once: true });
 
       try {
-        // 等订阅在总线上真正生效再入队 —— 否则 worker 可能抢在订阅注册前就发出首批事件
-        await bus.ready?.(topicOf(id));
+        // 等订阅在总线上真正生效再入队 —— 否则 worker 可能抢在订阅注册前就发出首批事件。
+        //
+        // 但总线故障【不该阻止提交任务】:队列在 MySQL,Redis 只管事件投递。
+        // 因为看不到实时过程就连活都派不出去,是很糟的失败模式 ——
+        // 降级为"任务照常入队执行,只是这次看不到流式过程"。
+        let busUsable = true;
+        try {
+          await bus.ready?.(topicOf(id));
+        } catch {
+          busUsable = false;
+          send({ kind: "status", label: "事件通道不可用,本次无实时过程", state: "degraded" });
+        }
         await runs.create({ id: runId, sessionId: id, prompt });
         send({ kind: "status", label: "已入队", state: "pending" });
+
+        // 总线不可用时【已知不会有事件到来】,再挂着连接只是让客户端白等到超时。
+        // 立即收流并告知:任务已提交,请改用轮询取结果。
+        if (!busUsable) {
+          send({
+            kind: "result",
+            status: "success",
+            summary: "任务已提交,但事件通道不可用 —— 请稍后查询结果",
+          });
+          finish();
+        }
       } catch (err) {
         send({
           kind: "result",

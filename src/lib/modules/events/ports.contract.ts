@@ -130,6 +130,19 @@ export function busContract(name: string, harness: BusHarness): void {
       }
     });
 
+    it("ready 与 publish 都在有限时间内返回 —— 断连时不能挂死调用方", async () => {
+      // 真实教训:ioredis 的 maxRetriesPerRequest: null 会让命令无限排队,
+      // 调用方 await 下去就再也回不来。契约要求实现方自带超时。
+      const bus = await harness.makeBus();
+      const t = harness.topic("bounded");
+      const started = Date.now();
+      const off = bus.subscribe(t, () => {});
+      await bus.ready?.(t);
+      await bus.publish(t, { kind: "text", text: "x" });
+      expect(Date.now() - started).toBeLessThan(10_000);
+      off();
+    });
+
     it("无订阅者时发布不报错", async () => {
       const bus = await harness.makeBus();
       await expect(

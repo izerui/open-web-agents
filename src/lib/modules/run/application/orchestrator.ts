@@ -127,14 +127,23 @@ export class RunOrchestrator {
     const spec = buildSpec(assistant.config, ctx, { model, knowledgeContext });
 
     const topic = topicOf(cmd.sessionId);
+    // 事件投递是【辅助能力】:发不出去只是看不到过程,绝不该让用户的这一轮运行失败。
+    // 重放缓冲同理 —— 当前内存实现不会抛,但换成 Redis 支撑的实现后一定会。
     const publish = (e: AgentEvent) => {
-      this.deps.replay?.record(topic, e);
-      // 事件投递失败不应中断 agent 运行
+      try {
+        this.deps.replay?.record(topic, e);
+      } catch {
+        // 缓冲写入失败只影响断线重连的回放质量,不影响本次运行
+      }
       void this.deps.bus.publish(topic, e).catch(() => {});
     };
 
     // 新一轮开始清空重放缓冲,免得把上一轮的事件回放给这一轮
-    this.deps.replay?.reset(topic);
+    try {
+      this.deps.replay?.reset(topic);
+    } catch {
+      // 同上:缓冲故障不牵连运行
+    }
     publish({ kind: "status", label: "运行中", state: "running" });
     // 让用户看得到"这次回答参考了知识库",而不是凭空多出一些内容
     if (knowledgeContext) {
