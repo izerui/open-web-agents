@@ -10,6 +10,11 @@ interface Grant {
   permission: "read" | "write";
 }
 
+interface GroupOption {
+  id: string;
+  name: string;
+}
+
 /**
  * 助手分享面板。
  * 只在已保存的助手上显示 —— 新建中的助手还没 id,谈不上分享。
@@ -20,6 +25,8 @@ export function SharePanel({ assistantId }: { assistantId: string }) {
   const [permission, setPermission] = useState<"read" | "write">("read");
   const [msg, setMsg] = useState<string | null>(null);
   const [denied, setDenied] = useState(false);
+  const [groupOptions, setGroupOptions] = useState<GroupOption[]>([]);
+  const [groupId, setGroupId] = useState("");
 
   const reload = useCallback(async () => {
     const res = await fetch(`/api/assistants/${assistantId}/share`);
@@ -34,6 +41,10 @@ export function SharePanel({ assistantId }: { assistantId: string }) {
 
   useEffect(() => {
     void reload();
+    void fetch("/api/groups")
+      .then((r) => r.json())
+      .then((d: { groups?: GroupOption[] }) => setGroupOptions(d.groups ?? []))
+      .catch(() => {});
   }, [reload]);
 
   async function share(target: string) {
@@ -71,6 +82,8 @@ export function SharePanel({ assistantId }: { assistantId: string }) {
     (g) => g.principalType === "*" || g.principalId === PUBLIC_PRINCIPAL,
   );
   const userGrants = grants.filter((g) => g.principalType === "user");
+  const groupGrants = grants.filter((g) => g.principalType === "group");
+  const groupName = (id: string) => groupOptions.find((g) => g.id === id)?.name ?? id;
   const field =
     "rounded border border-black/15 bg-transparent px-2 py-1 text-xs outline-none focus:border-black/40 dark:border-white/20";
 
@@ -123,11 +136,49 @@ export function SharePanel({ assistantId }: { assistantId: string }) {
         </button>
       </div>
 
+      {groupOptions.length > 0 && (
+        <div className="flex gap-2">
+          <select
+            className={`${field} flex-1`}
+            value={groupId}
+            onChange={(e) => setGroupId(e.target.value)}
+          >
+            <option value="">选择用户组…</option>
+            {groupOptions.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="rounded bg-black px-3 py-1 text-white text-xs disabled:opacity-40 dark:bg-white dark:text-black"
+            onClick={() => groupId && share(`group:${groupId}`)}
+            disabled={!groupId}
+          >
+            分享给全组
+          </button>
+        </div>
+      )}
+
       {msg && <p className="text-red-600 text-xs">{msg}</p>}
 
-      {userGrants.length === 0 && !publicGrant && (
+      {userGrants.length === 0 && groupGrants.length === 0 && !publicGrant && (
         <p className="text-xs opacity-40">尚未分享给任何人</p>
       )}
+      {groupGrants.map((g) => (
+        <div key={g.id} className="flex items-center gap-2 text-xs">
+          <span className="flex-1 truncate">👥 {groupName(g.principalId)}</span>
+          <span className="opacity-55">{g.permission === "write" ? "可修改" : "可使用"}</span>
+          <button
+            type="button"
+            className="text-red-600 underline opacity-70 hover:opacity-100"
+            onClick={() => revoke(g.id)}
+          >
+            撤销
+          </button>
+        </div>
+      ))}
       {userGrants.map((g) => (
         <div key={g.id} className="flex items-center gap-2 text-xs">
           <span className="flex-1 truncate font-mono opacity-70">{g.principalId}</span>

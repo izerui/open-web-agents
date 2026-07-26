@@ -7,17 +7,13 @@ import type { Principal } from "@/lib/modules/access/domain/principal";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function subjectOf(p: Principal) {
-  return p.type === "web" ? { userId: p.userId, role: p.role } : { userId: p.ownerId };
-}
-
 /**
  * 只有对助手有 write 权限的人才能改它的分享设置 ——
  * 否则被分享 read 的人可以把别人的助手再公开出去。
  */
 async function requireWrite(req: Request, assistantId: string) {
   const { assistants, grants, auth } = getContainer();
-  const subject = subjectOf(await auth.resolveWeb(req));
+  const subject = await auth.resolveSubject(req);
   const assistant = await assistants.get(assistantId);
   if (!assistant) return { error: Response.json({ error: "not found" }, { status: 404 }) };
 
@@ -47,7 +43,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 }
 
 interface ShareBody {
-  /** "public" 表示公开给所有登录用户;否则是目标用户邮箱。 */
+  /**
+   * 分享目标:
+   * - "public"        → 所有登录用户
+   * - "group:<组 id>" → 整个团队
+   * - 其它            → 按邮箱找具体用户
+   */
   target?: string;
   permission?: "read" | "write";
 }
@@ -73,6 +74,24 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         resourceId: id,
         principalType: "*",
         principalId: PUBLIC_PRINCIPAL,
+        permission,
+      });
+      return Response.json({ grant: g }, { status: 201 });
+    }
+
+    if (target.startsWith("group:")) {
+      const groupId = target.slice(6);
+      // 组必须存在 —— 否则授权记录永远匹配不上任何人,界面却显示已分享
+      const { groups } = getContainer();
+      if (!(await groups.get(groupId))) {
+        return Response.json({ error: "组不存在" }, { status: 404 });
+      }
+      const g = await grants.grant({
+        id: randomUUID().replace(/-/g, "").slice(0, 24),
+        resourceType: "assistant",
+        resourceId: id,
+        principalType: "group",
+        principalId: groupId,
         permission,
       });
       return Response.json({ grant: g }, { status: 201 });

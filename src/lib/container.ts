@@ -6,8 +6,10 @@ import path from "node:path";
 import { type Db, createDb } from "@/lib/db/client";
 import { type Env, loadEnv } from "@/lib/env";
 import { MysqlGrantRepo } from "@/lib/modules/access/adapters/mysql-grant-repo";
+import { MysqlGroupRepo } from "@/lib/modules/access/adapters/mysql-group-repo";
 import { Authorizer } from "@/lib/modules/access/application/authorize";
 import { PUBLIC_PRINCIPAL } from "@/lib/modules/access/domain/grants";
+import type { GroupRepo } from "@/lib/modules/access/group-ports";
 import type { GrantRepo } from "@/lib/modules/access/ports";
 import { createClaudeSdkEngine } from "@/lib/modules/agent-engine/adapters/claude-sdk/default-engine";
 import type { EnginePort } from "@/lib/modules/agent-engine/ports";
@@ -48,6 +50,7 @@ export interface Container {
   replay: ReplayBuffer;
   apiKeys: ApiKeyRepo;
   grants: GrantRepo;
+  groups: GroupRepo;
   users: UserRepo;
   secrets: SecretBox;
   authService: AuthService;
@@ -131,6 +134,7 @@ function build(): Container {
   const replay = new ReplayBuffer();
   const apiKeys = new MysqlApiKeyRepo(db);
   const grants = new MysqlGrantRepo(db);
+  const groupRepo = new MysqlGroupRepo(db);
   const users = new MysqlUserRepo(db);
   const secrets = new SecretBox(env.secretKey);
   const authService = new AuthService({
@@ -143,6 +147,7 @@ function build(): Container {
     sessions,
     authRequired: env.authRequired,
     currentUser: (req) => authService.currentUser(req),
+    groupIdsOf: (userId) => groupRepo.groupIdsOf(userId),
   });
   const engine = createClaudeSdkEngine(env.dataDir, gateway, env.sandbox);
 
@@ -218,6 +223,7 @@ function build(): Container {
     replay,
     apiKeys,
     grants,
+    groups: groupRepo,
     users,
     secrets,
     authService,

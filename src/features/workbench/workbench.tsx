@@ -109,6 +109,9 @@ export function Workbench() {
               <Link href="/builder" className="underline opacity-60 hover:opacity-100">
                 构建器
               </Link>
+              <Link href="/groups" className="underline opacity-60 hover:opacity-100">
+                组
+              </Link>
               <Link href="/usage" className="underline opacity-60 hover:opacity-100">
                 用量
               </Link>

@@ -1,29 +1,23 @@
 import { randomUUID } from "node:crypto";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
-import { filterVisible, hasResourceAccess, isPublic } from "@/lib/modules/access/domain/grants";
-import type { Principal } from "@/lib/modules/access/domain/principal";
+import {
+  type Subject,
+  filterVisible,
+  hasResourceAccess,
+  isPublic,
+} from "@/lib/modules/access/domain/grants";
 import type { AssistantConfig } from "@/lib/modules/assistant/domain/config";
 import { validateAssistantConfig } from "@/lib/modules/assistant/domain/validate-config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-interface Subject {
-  userId: string;
-  role?: "admin" | "user";
-}
-
-/** 取出授权判定用的主体。API Key 以其归属用户的身份参与判定。 */
-function subjectOf(p: Principal): Subject {
-  return p.type === "web" ? { userId: p.userId, role: p.role } : { userId: p.ownerId };
-}
-
 /** 列出调用方可见的助手:自己的 + 被分享的 + 公开的(admin 看全部)。 */
 export async function GET(req: Request) {
   const { assistants, grants, auth } = getContainer();
   try {
-    const subject = subjectOf(await auth.resolveWeb(req));
+    const subject = await auth.resolveSubject(req);
     const all = await assistants.list();
     // 一次拉齐该类型的授权,避免逐个助手查一次(N+1)
     const allGrants = await grants.listForType("assistant");
@@ -64,7 +58,7 @@ export async function POST(req: Request) {
   try {
     const principal = await auth.resolveWeb(req);
     auth.assertCanManageAssistants(principal);
-    subject = subjectOf(principal);
+    subject = await auth.subjectOf(principal);
   } catch (err) {
     const res = authErrorResponse(err);
     if (res) return res;

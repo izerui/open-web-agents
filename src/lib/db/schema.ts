@@ -1,7 +1,16 @@
 // Drizzle schema — 对应设计文档 §5 数据模型的 9 张表。
 // JSON 列承载灵活配置;金额/token 一律整数或字符串,不用 float。
 
-import { bigint, index, int, json, mysqlTable, timestamp, varchar } from "drizzle-orm/mysql-core";
+import {
+  bigint,
+  index,
+  int,
+  json,
+  mysqlTable,
+  timestamp,
+  uniqueIndex,
+  varchar,
+} from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: varchar("id", { length: 36 }).primaryKey(),
@@ -145,6 +154,37 @@ export const accessGrants = mysqlTable(
     permission: varchar("permission", { length: 16 }).notNull(),
   },
   (t) => ({ byResource: index("idx_grants_resource").on(t.resourceType, t.resourceId) }),
+);
+
+/** 用户组:让"分享给整个团队"成为可能,而不必逐个点人。 */
+export const groups = mysqlTable(
+  "groups",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    name: varchar("name", { length: 255 }).notNull(),
+    description: varchar("description", { length: 1024 }),
+    ownerId: varchar("owner_id", { length: 36 }).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => ({ byOwner: index("idx_groups_owner").on(t.ownerId) }),
+);
+
+/**
+ * 组成员。
+ * (group_id, user_id) 唯一 —— 同一人重复加入会让授权判定与成员计数都出错。
+ */
+export const groupMembers = mysqlTable(
+  "group_members",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    groupId: varchar("group_id", { length: 36 }).notNull(),
+    userId: varchar("user_id", { length: 36 }).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => ({
+    uniqMember: uniqueIndex("uniq_group_member").on(t.groupId, t.userId),
+    byUser: index("idx_group_members_user").on(t.userId),
+  }),
 );
 
 /** 工具级每用户配置(admin 全局 + 每用户两层里的用户层)。 */
