@@ -2,7 +2,7 @@
 
 /** 谁在调用。web = 平台内人类(当前单用户);apiKey = 第三方系统。 */
 export type Principal =
-  | { type: "web"; userId: string }
+  | { type: "web"; userId: string; role?: "admin" | "user" }
   | { type: "apiKey"; keyId: string; ownerId: string; assistantId?: string };
 
 /** 资源的归属信息(从库里读出后传入)。 */
@@ -29,8 +29,11 @@ const deny = (reason: string): Decision => ({ allowed: false, reason });
  */
 export function canAccessSession(p: Principal, s: SessionOwnership): Decision {
   if (p.type === "web") {
-    // 历史会话可能没有 ownerId(单用户时期创建);此时按放行处理,避免旧数据不可读
-    if (!s.ownerId) return ALLOW;
+    if (!s.ownerId) {
+      // 无归属的历史数据(单用户时期创建)。开了登录之后若一律放行,任何新用户都能
+      // 读到这些会话 —— 故只对 admin 开放:既不丢旧数据,也不构成跨用户泄露。
+      return p.role === "admin" ? ALLOW : deny("session has no owner");
+    }
     return s.ownerId === p.userId ? ALLOW : deny("session belongs to another user");
   }
 

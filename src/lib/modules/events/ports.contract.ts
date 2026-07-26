@@ -12,8 +12,11 @@ export interface BusHarness {
   topic(base: string): string;
 }
 
-/** 等到条件成立或超时,避免固定 sleep 带来的 flaky。 */
-async function waitFor(cond: () => boolean, timeoutMs = 2000): Promise<void> {
+/**
+ * 等到条件成立或超时,避免固定 sleep 带来的 flaky。
+ * 上限给足:与构建等任务并发跑时,Redis 往返会明显变慢(实测出现过一次 2s 不够)。
+ */
+async function waitFor(cond: () => boolean, timeoutMs = 5000): Promise<void> {
   const start = Date.now();
   while (!cond()) {
     if (Date.now() - start > timeoutMs) throw new Error("waitFor 超时");

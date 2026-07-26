@@ -16,6 +16,14 @@ export interface WorkerOptions {
   idleMs?: number;
   /** 孤儿回收扫描间隔。 */
   reclaimMs?: number;
+  /**
+   * 单次运行的墙钟上限,到点中断。
+   *
+   * 为什么必须有:maxTurns 只限轮次,拦不住"卡在一次网络调用上"的情况
+   * (实测把 base_url 指到不可达网关,运行会一直挂着 —— 心跳持续续租,
+   * worker 被永久占住,任务也永远不落终态)。
+   */
+  maxDurationMs?: number;
   now?: () => number;
 }
 
@@ -24,6 +32,8 @@ const DEFAULTS = {
   heartbeatMs: 15_000,
   idleMs: 500,
   reclaimMs: 30_000,
+  /** 30 分钟:够跑长任务,又不至于让卡死的运行永久占用 worker。 */
+  maxDurationMs: 30 * 60_000,
 };
 
 export interface RunPayloadSource {
@@ -51,6 +61,7 @@ export class RunWorker {
       heartbeatMs: options.heartbeatMs ?? DEFAULTS.heartbeatMs,
       idleMs: options.idleMs ?? DEFAULTS.idleMs,
       reclaimMs: options.reclaimMs ?? DEFAULTS.reclaimMs,
+      maxDurationMs: options.maxDurationMs ?? DEFAULTS.maxDurationMs,
       now: options.now ?? (() => Date.now()),
     };
   }
@@ -71,6 +82,8 @@ export class RunWorker {
     const heartbeat = setInterval(() => {
       void this.repo.touch(claimed.id, this.opts.now() + this.opts.leaseMs).catch(() => {});
     }, this.opts.heartbeatMs);
+    // 墙钟超时:到点强制中断,保证任务必定落终态、worker 必定被释放
+    const timeout = setTimeout(() => abort.abort(), this.opts.maxDurationMs);
 
     try {
       const prompt = (await this.repo.getPrompt(claimed.id)) ?? "";
@@ -96,6 +109,7 @@ export class RunWorker {
       await this.repo.complete(claimed.id, nextRunState("running", "finishErr"));
     } finally {
       clearInterval(heartbeat);
+      clearTimeout(timeout);
     }
     return true;
   }

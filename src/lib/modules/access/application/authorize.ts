@@ -12,17 +12,19 @@ import { extractApiKey, hashApiKey, looksLikeApiKey } from "@/lib/modules/identi
 import type { ApiKeyRepo } from "@/lib/modules/identity/ports";
 import type { SessionRepo } from "@/lib/modules/session/ports";
 
-/** 单用户 MVP 的固定 web 主体;接入登录后改为从会话 cookie 解析。 */
+/**
+ * 关闭登录时(OWA_AUTH_REQUIRED=0,仅本地开发)使用的固定主体。
+ * 开启登录后一切 web 请求都必须解析出真实用户。
+ */
 export const WEB_USER_ID = "local-user";
 
 export interface AuthDeps {
   apiKeys: ApiKeyRepo;
   sessions: SessionRepo;
-  /**
-   * 是否要求网页侧登录。当前 MVP 无登录,网页请求一律视为本地单用户;
-   * 接入 NextAuth 后这里换成真实会话解析。
-   */
-  webAuthDisabled?: boolean;
+  /** 是否要求网页侧登录。生产必须为 true。 */
+  authRequired: boolean;
+  /** 从 cookie 解析当前登录用户。 */
+  currentUser(req: Request): Promise<{ id: string; role?: "admin" | "user" } | null>;
 }
 
 export class Unauthorized extends Error {
@@ -60,13 +62,19 @@ export class Authorizer {
 
   /**
    * 解析网页侧主体。
-   * 带了 API Key 就按 key 走(便于用 key 直接调网页同款接口);否则回落到本地单用户。
+   * 带了 API Key 就按 key 走(便于用 key 直接调网页同款接口);否则读登录 cookie。
    */
   async resolveWeb(req: Request): Promise<Principal> {
     const plain = extractApiKey(req.headers);
     if (plain) return this.requireApiKey(req);
-    if (this.deps.webAuthDisabled === false) throw new Unauthorized("login required");
-    return { type: "web", userId: WEB_USER_ID };
+
+    const user = await this.deps.currentUser(req);
+    if (user) return { type: "web", userId: user.id, role: user.role };
+
+    // 只有显式关闭登录(本地开发)时才允许匿名
+    // 关闭登录的本地开发模式:视为 admin,便于访问历史数据
+    if (!this.deps.authRequired) return { type: "web", userId: WEB_USER_ID, role: "admin" };
+    throw new Unauthorized("login required");
   }
 
   private assert(d: Decision): void {

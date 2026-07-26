@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 
 const webA: Principal = { type: "web", userId: "u1" };
 const webB: Principal = { type: "web", userId: "u2" };
+const admin: Principal = { type: "web", userId: "root", role: "admin" };
 const keyA: Principal = { type: "apiKey", keyId: "k1", ownerId: "u1" };
 const keyB: Principal = { type: "apiKey", keyId: "k2", ownerId: "u1" };
 const keyBound: Principal = { type: "apiKey", keyId: "k3", ownerId: "u1", assistantId: "a1" };
@@ -30,8 +31,15 @@ describe("canAccessSession / web 用户", () => {
     expect(d.allowed === false && d.reason).toMatch(/another user/);
   });
 
-  it("无归属的历史会话放行(兼容单用户时期的旧数据)", () => {
-    expect(canAccessSession(webA, sess()).allowed).toBe(true);
+  it("无归属的历史数据只对 admin 开放(否则开了登录就成跨用户泄露)", () => {
+    expect(canAccessSession(admin, sess()).allowed).toBe(true);
+    const d = canAccessSession(webA, sess());
+    expect(d.allowed).toBe(false);
+    expect(d.allowed === false && d.reason).toMatch(/no owner/);
+  });
+
+  it("admin 也不能越权读别人【有明确归属】的会话", () => {
+    expect(canAccessSession(admin, sess({ ownerId: "u1" })).allowed).toBe(false);
   });
 });
 

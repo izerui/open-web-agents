@@ -34,6 +34,11 @@ export interface OrchestratorDeps {
   baseEnv?: Record<string, string>;
   /** 记录事件供断线重连回放(可选)。 */
   replay?: { record(topic: string, e: AgentEvent): void; reset(topic: string): void };
+  /**
+   * 解析会话归属用户的自带凭证(三级链里的 user 层)。
+   * 返回已解密的明文;没配置则返回空对象。
+   */
+  userCredentials?: (userId: string) => Promise<{ baseUrl?: string; key?: string }>;
   /** 终态时投递 webhook(可选)。 */
   onComplete?: (info: {
     runId?: string;
@@ -62,8 +67,14 @@ export class RunOrchestrator {
     const assistant = await this.deps.assistants.get(session.assistantId);
     if (!assistant) throw new Error(`assistant not found: ${session.assistantId}`);
 
+    // 三级链的 user 层:会话归属用户自带的 base_url/key(设计文稿 §9)
+    const userCreds = session.ownerId
+      ? await this.deps.userCredentials?.(session.ownerId).catch(() => undefined)
+      : undefined;
+
     const chain: CredentialChain = {
       platform: this.deps.platformCredentials,
+      user: userCreds,
       session: { baseUrl: session.baseUrl, key: session.key, model: session.model },
       request: cmd.override,
     };

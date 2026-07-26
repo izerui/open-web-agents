@@ -105,9 +105,14 @@ export function Workbench() {
         <div className="space-y-2 border-black/10 border-b p-3 dark:border-white/15">
           <div className="flex items-center justify-between">
             <span className="font-semibold text-sm">Open Web Agents</span>
-            <Link href="/builder" className="text-xs underline opacity-60 hover:opacity-100">
-              构建器
-            </Link>
+            <span className="flex gap-2 text-xs">
+              <Link href="/builder" className="underline opacity-60 hover:opacity-100">
+                构建器
+              </Link>
+              <Link href="/settings" className="underline opacity-60 hover:opacity-100">
+                设置
+              </Link>
+            </span>
           </div>
           <select
             className="w-full rounded border border-black/15 bg-transparent px-2 py-1 text-xs dark:border-white/20"

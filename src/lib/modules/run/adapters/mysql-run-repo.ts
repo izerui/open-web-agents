@@ -195,6 +195,36 @@ export class MysqlRunRepo implements RunRepo {
     };
   }
 
+  /**
+   * 列出各会话的活动信息,供工作空间 GC 判定。
+   * finished = 该会话没有任何未完成的 run。
+   */
+  async listSessionActivity(): Promise<
+    { sessionId: string; lastActiveAt: number; finished: boolean }[]
+  > {
+    const rows = await this.db.execute(sql`
+      SELECT s.id AS sessionId,
+             GREATEST(
+               UNIX_TIMESTAMP(s.created_at) * 1000,
+               COALESCE(MAX(UNIX_TIMESTAMP(COALESCE(r.ended_at, r.created_at)) * 1000), 0)
+             ) AS lastActiveAt,
+             SUM(CASE WHEN r.status IN ('pending','running') THEN 1 ELSE 0 END) AS openRuns
+      FROM sessions s
+      LEFT JOIN runs r ON r.session_id = s.id
+      GROUP BY s.id, s.created_at
+    `);
+    const list = (Array.isArray(rows) ? rows[0] : rows) as unknown as Array<{
+      sessionId: string;
+      lastActiveAt: string | number;
+      openRuns: string | number | null;
+    }>;
+    return (list ?? []).map((r) => ({
+      sessionId: r.sessionId,
+      lastActiveAt: Number(r.lastActiveAt),
+      finished: Number(r.openRuns ?? 0) === 0,
+    }));
+  }
+
   /** 仅测试用:清空队列。 */
   async _truncate(): Promise<void> {
     await this.db.delete(runs).where(sql`1=1`);

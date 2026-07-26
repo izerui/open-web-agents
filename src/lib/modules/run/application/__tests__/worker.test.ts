@@ -163,13 +163,54 @@ describe("RunWorker 生命周期", () => {
     await repo.createWithPrompt("r1", "s1", "自动跑");
 
     worker.start();
-    // 等它把任务消费掉
-    for (let i = 0; i < 50 && (await repo.get("r1"))?.state !== "success"; i++) {
+    // 等它把任务消费掉。预算给足 —— 与构建并发时 1s 曾经不够
+    for (let i = 0; i < 250 && (await repo.get("r1"))?.state !== "success"; i++) {
       await new Promise((r) => setTimeout(r, 20));
     }
     worker.stop();
 
     expect((await repo.get("r1"))?.state).toBe("success");
     expect(engine.seenPrompts).toEqual(["自动跑"]);
+  });
+});
+
+describe("RunWorker 墙钟超时", () => {
+  it("超时后中断运行并落 failed,不让 worker 被永久占住", async () => {
+    // 模拟"卡在网络调用上"的引擎:只有被 abort 才返回
+    const stuckEngine: EnginePort = {
+      async run(_s, _c, _e, signal) {
+        return new Promise<RunResult>((resolve) => {
+          if (signal.aborted) {
+            resolve({ status: "failed", error: { kind: "aborted", message: "已中断" } });
+            return;
+          }
+          signal.addEventListener("abort", () =>
+            resolve({ status: "failed", error: { kind: "aborted", message: "已中断" } }),
+          );
+        });
+      },
+    };
+    const { repo, worker } = await setup(stuckEngine, () => Date.now());
+    // 极短超时便于测试
+    const fast = new RunWorker(repo, (await setup(stuckEngine, () => Date.now())).orchestrator, {
+      leaseMs: 10_000,
+      heartbeatMs: 10_000,
+      maxDurationMs: 30,
+    });
+    await repo.createWithPrompt("r1", "s1", "会卡住的任务");
+
+    await fast.tick();
+    expect((await repo.get("r1"))?.state).toBe("failed");
+    // 关键:租约已清,worker 不再被占
+    expect((await repo.get("r1"))?.leaseUntil).toBeNull();
+    void worker;
+  });
+
+  it("正常完成的任务不受超时影响", async () => {
+    const { repo, orchestrator } = await setup(new FakeEngine(), () => Date.now());
+    const w = new RunWorker(repo, orchestrator, { maxDurationMs: 60_000 });
+    await repo.createWithPrompt("r1", "s1", "快任务");
+    await w.tick();
+    expect((await repo.get("r1"))?.state).toBe("success");
   });
 });
