@@ -12,6 +12,12 @@ const schema = z.object({
   OWA_DATA_DIR: z.string().default("./data"),
   OWA_ANTHROPIC_BASE_URL: z.string().default("https://api.anthropic.com"),
   OWA_ANTHROPIC_API_KEY: z.string().default(""),
+  // 别名槽 → 真实 modelId。未单独配置的槽回退到 OWA_MODEL(单模型部署)
+  OWA_MODEL: z.string().default("sonnet"),
+  OWA_MODEL_FABLE: z.string().default(""),
+  OWA_MODEL_OPUS: z.string().default(""),
+  OWA_MODEL_SONNET: z.string().default(""),
+  OWA_MODEL_HAIKU: z.string().default(""),
   OWA_SANDBOX: z
     .preprocess(
       (v) =>
@@ -31,6 +37,8 @@ export interface Env {
   /** 平台默认凭证:用户/会话/请求都没配时的兜底 */
   defaultBaseUrl: string;
   defaultApiKey: string;
+  /** 别名槽的真实 modelId 配置 */
+  models: { base: string; fable: string; opus: string; sonnet: string; haiku: string };
   sandbox: boolean;
 }
 
@@ -42,6 +50,13 @@ export function parseEnv(raw: Record<string, string | undefined>): Env {
     dataDir: path.resolve(p.OWA_DATA_DIR),
     defaultBaseUrl: p.OWA_ANTHROPIC_BASE_URL,
     defaultApiKey: p.OWA_ANTHROPIC_API_KEY,
+    models: {
+      base: p.OWA_MODEL,
+      fable: p.OWA_MODEL_FABLE,
+      opus: p.OWA_MODEL_OPUS,
+      sonnet: p.OWA_MODEL_SONNET,
+      haiku: p.OWA_MODEL_HAIKU,
+    },
     sandbox: p.OWA_SANDBOX,
   };
 }

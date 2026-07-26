@@ -1,22 +1,25 @@
 // SDK 选项组装:域内 AgentSpec + RunContext → claude-agent-sdk query 的 options。
 // 属 adapter 层,但刻意写成【不 import SDK】的纯函数,便于单测。
 
-import type { AgentSpec, ModelAlias, ResolvedCredentials, RunContext } from "@/lib/shared";
+import type { ModelSlots } from "@/lib/modules/model-gateway/ports";
+import type { AgentSpec, ResolvedCredentials, RunContext } from "@/lib/shared";
 
 /**
  * agent 子进程的 ANTHROPIC_* 环境。
- * 三个别名槽当"角色槽":平台只暴露别名,真实 modelId 映射由网关(ANTHROPIC_BASE_URL 指向)负责。
+ *
+ * 别名槽当"角色槽":options.model 传别名(如 "sonnet"),SDK 通过 ANTHROPIC_DEFAULT_*_MODEL
+ * 把它换成真实 modelId 再发给网关 —— 平台只认别名,真实模型由 ModelGatewayPort 决定。
  * ANTHROPIC_AUTH_TOKEN 置空:防宿主环境残留的 token 抢占 API_KEY。
  */
-export function aliasEnv(creds: ResolvedCredentials, alias: ModelAlias): Record<string, string> {
+export function aliasEnv(creds: ResolvedCredentials, slots: ModelSlots): Record<string, string> {
   return {
     ANTHROPIC_BASE_URL: creds.baseUrl,
     ANTHROPIC_API_KEY: creds.key,
     ANTHROPIC_AUTH_TOKEN: "",
-    ANTHROPIC_DEFAULT_OPUS_MODEL: alias,
-    ANTHROPIC_DEFAULT_SONNET_MODEL: alias,
-    ANTHROPIC_DEFAULT_HAIKU_MODEL: alias,
-    ANTHROPIC_SMALL_FAST_MODEL: alias,
+    ANTHROPIC_DEFAULT_OPUS_MODEL: slots.opus,
+    ANTHROPIC_DEFAULT_SONNET_MODEL: slots.sonnet,
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: slots.haiku,
+    ANTHROPIC_SMALL_FAST_MODEL: slots.haiku,
   };
 }
 
@@ -32,6 +35,8 @@ export interface SdkOptionsDeps {
   /** agent 子进程的 HOME:固定共享目录,让工具缓存跨会话复用,且避开容器内不可写的 HOME。 */
   sharedHome: string;
   abort: AbortController;
+  /** 别名槽 → 真实 modelId。 */
+  slots: ModelSlots;
 }
 
 /**
@@ -62,7 +67,7 @@ export function buildSdkOptions(
     resume: ctx.resumeSessionId,
     env: {
       ...ctx.env,
-      ...aliasEnv(ctx.credentials, spec.model.alias),
+      ...aliasEnv(ctx.credentials, deps.slots),
       HOME: deps.sharedHome,
     },
   };

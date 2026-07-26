@@ -10,7 +10,13 @@ const ctx: RunContext = {
   env: { FOO: "bar" },
 };
 
-const deps = () => ({ sharedHome: "/data/.agent-home", abort: new AbortController() });
+const SLOTS = { fable: "m-fable", opus: "m-opus", sonnet: "m-sonnet", haiku: "m-haiku" };
+
+const deps = () => ({
+  sharedHome: "/data/.agent-home",
+  abort: new AbortController(),
+  slots: SLOTS,
+});
 
 function specOf(over: Partial<AgentSpec> = {}): AgentSpec {
   return {
@@ -22,16 +28,21 @@ function specOf(over: Partial<AgentSpec> = {}): AgentSpec {
 }
 
 describe("aliasEnv", () => {
-  it("注入 base/key 与三个别名槽", () => {
-    const env = aliasEnv({ baseUrl: "https://gw", key: "sk-x" }, "opus");
+  it("把别名槽填成网关给的真实 modelId", () => {
+    const env = aliasEnv({ baseUrl: "https://gw", key: "sk-x" }, SLOTS);
     expect(env.ANTHROPIC_BASE_URL).toBe("https://gw");
     expect(env.ANTHROPIC_API_KEY).toBe("sk-x");
-    expect(env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe("opus");
-    expect(env.ANTHROPIC_SMALL_FAST_MODEL).toBe("opus");
+    expect(env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe("m-opus");
+    expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe("m-sonnet");
+    expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("m-haiku");
+  });
+
+  it("小快模型槽复用 haiku", () => {
+    expect(aliasEnv({ baseUrl: "b", key: "k" }, SLOTS).ANTHROPIC_SMALL_FAST_MODEL).toBe("m-haiku");
   });
 
   it("清空 AUTH_TOKEN,防宿主残留抢占 API_KEY", () => {
-    expect(aliasEnv({ baseUrl: "b", key: "k" }, "sonnet").ANTHROPIC_AUTH_TOKEN).toBe("");
+    expect(aliasEnv({ baseUrl: "b", key: "k" }, SLOTS).ANTHROPIC_AUTH_TOKEN).toBe("");
   });
 });
 
@@ -52,6 +63,12 @@ describe("buildSdkOptions", () => {
     expect(env.FOO).toBe("bar");
     expect(env.ANTHROPIC_API_KEY).toBe("sk-real");
     expect(env.HOME).toBe("/data/.agent-home");
+  });
+
+  it("options.model 传别名,由 env 槽映射到真实 modelId", () => {
+    const o = buildSdkOptions(specOf(), ctx, deps());
+    expect(o.model).toBe("sonnet");
+    expect((o.env as Record<string, string>).ANTHROPIC_DEFAULT_SONNET_MODEL).toBe("m-sonnet");
   });
 
   it("无 outputSchema → 不带 outputFormat", () => {

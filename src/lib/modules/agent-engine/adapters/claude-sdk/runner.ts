@@ -9,6 +9,7 @@ import {
   normalizeSdkMessage,
 } from "@/lib/modules/agent-engine/domain/normalize";
 import type { EnginePort, RunResult } from "@/lib/modules/agent-engine/ports";
+import type { ModelGatewayPort } from "@/lib/modules/model-gateway/ports";
 import type { AgentEvent, AgentSpec, RunContext } from "@/lib/shared";
 import { buildSdkOptions } from "./options";
 
@@ -20,6 +21,8 @@ export type QueryFn = (args: {
 export interface EngineDeps {
   /** agent 子进程共享 HOME(工具缓存跨会话复用)。 */
   sharedHome: string;
+  /** 别名 → 真实 modelId 的映射来源。 */
+  gateway: ModelGatewayPort;
 }
 
 export class ClaudeSdkEngine implements EnginePort {
@@ -49,7 +52,11 @@ export class ClaudeSdkEngine implements EnginePort {
     try {
       const stream = this.queryFn({
         prompt: ctx.prompt,
-        options: buildSdkOptions(spec, ctx, { sharedHome: this.deps.sharedHome, abort }),
+        options: buildSdkOptions(spec, ctx, {
+          sharedHome: this.deps.sharedHome,
+          abort,
+          slots: this.deps.gateway.slots(),
+        }),
       });
 
       for await (const msg of stream) {
