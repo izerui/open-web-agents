@@ -77,6 +77,20 @@ export function ChatView() {
     return session.id;
   }
 
+  /**
+   * 中断 = 先告诉服务端取消,再断开本地流。
+   *
+   * 【顺序不能反,也不能只做后者】—— 运行不绑定在这个 HTTP 请求上,只 abort 本地 fetch
+   * 的话:界面显示已停止,而服务端 agent 继续调模型、继续执行工具、继续扣费,
+   * 直到墙钟上限。用户以为停了,其实没停。
+   */
+  async function cancelRun() {
+    if (sessionId) {
+      await fetch(`/api/sessions/${sessionId}/cancel`, { method: "POST" }).catch(() => {});
+    }
+    abortRef.current?.abort();
+  }
+
   async function send() {
     const prompt = input.trim();
     if (!prompt || running) return;
@@ -154,7 +168,7 @@ export function ChatView() {
           <button
             type="button"
             className="rounded bg-red-600 px-4 py-2 text-sm text-white"
-            onClick={() => abortRef.current?.abort()}
+            onClick={cancelRun}
           >
             中断
           </button>

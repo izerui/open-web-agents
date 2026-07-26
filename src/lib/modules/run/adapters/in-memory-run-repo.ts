@@ -46,6 +46,16 @@ export class InMemoryRunRepo implements RunRepo {
     return true;
   }
 
+  async cancel(id: string): Promise<boolean> {
+    const run = this.runs.get(id);
+    if (!run || (run.state !== "pending" && run.state !== "running")) return false;
+    run.state = "cancelled";
+    run.leaseUntil = null;
+    // 令牌作废 —— 正在跑的 worker 下次续租会拿到 false,据此中止本轮
+    run.fence = undefined;
+    return true;
+  }
+
   async reclaimOrphans(now: number): Promise<number> {
     let n = 0;
     for (const run of this.runs.values()) {

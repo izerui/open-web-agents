@@ -120,5 +120,67 @@ export function runRepoContract(name: string, harness: ContractHarness): void {
       const repo = await harness.makeRepo();
       expect(await repo.get("nope")).toBeNull();
     });
+
+    // 取消。状态机里 pending/running --cancel--> cancelled 两条边一直写着,
+    // 但曾经【没有任何生产者】—— 界面上的"停止"只调 fetch 的 abort,而运行不绑定在
+    // 那个 HTTP 请求上,服务端 agent 继续跑到底并落 success。cancelled 是不可达状态,
+    // 用户以为停了其实没停,费用与副作用继续产生。
+    describe("cancel", () => {
+      it("排队中的运行可以取消", async () => {
+        const repo = await harness.makeRepo();
+        await repo.create({ id: "r1", sessionId: "s1" });
+        expect(await repo.cancel("r1")).toBe(true);
+        expect((await repo.get("r1"))?.state).toBe("cancelled");
+      });
+
+      it("执行中的运行可以取消,并清掉租约", async () => {
+        const repo = await harness.makeRepo();
+        await repo.create({ id: "r1", sessionId: "s1" });
+        await repo.claimNext(30_000, 1000);
+        expect(await repo.cancel("r1")).toBe(true);
+        const r = await repo.get("r1");
+        expect(r?.state).toBe("cancelled");
+        expect(r?.leaseUntil).toBeNull();
+      });
+
+      it("【中止执行】取消后续租返回 false —— 这是 worker 中止本轮的唯一信号", async () => {
+        const repo = await harness.makeRepo();
+        await repo.create({ id: "r1", sessionId: "s1" });
+        const claimed = await repo.claimNext(30_000, 1000);
+        expect(await repo.touch("r1", 60_000, claimed?.fence)).toBe(true);
+        await repo.cancel("r1");
+        expect(await repo.touch("r1", 60_000, claimed?.fence)).toBe(false);
+      });
+
+      it("取消后 worker 写不回结果 —— 不能把 cancelled 翻成 success", async () => {
+        const repo = await harness.makeRepo();
+        await repo.create({ id: "r1", sessionId: "s1" });
+        const claimed = await repo.claimNext(30_000, 1000);
+        await repo.cancel("r1");
+        expect(await repo.complete("r1", "success", claimed?.fence)).toBe(false);
+        expect((await repo.get("r1"))?.state).toBe("cancelled");
+      });
+
+      it("已是终态的运行取消无效(返回 false,状态不变)", async () => {
+        const repo = await harness.makeRepo();
+        await repo.create({ id: "r1", sessionId: "s1" });
+        const c = await repo.claimNext(30_000, 1000);
+        await repo.complete("r1", "success", c?.fence);
+        expect(await repo.cancel("r1")).toBe(false);
+        expect((await repo.get("r1"))?.state).toBe("success");
+      });
+
+      it("取消不存在的 run 返回 false", async () => {
+        const repo = await harness.makeRepo();
+        expect(await repo.cancel("nope")).toBe(false);
+      });
+
+      it("已取消的运行不会再被认领", async () => {
+        const repo = await harness.makeRepo();
+        await repo.create({ id: "r1", sessionId: "s1" });
+        await repo.cancel("r1");
+        expect(await repo.claimNext(1000, 99999)).toBeNull();
+      });
+    });
   });
 }

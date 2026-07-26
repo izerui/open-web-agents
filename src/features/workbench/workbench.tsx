@@ -40,6 +40,20 @@ export function Workbench() {
     setTurns([]);
   }, []);
 
+  /**
+   * 中断 = 先告诉服务端取消,再断开本地流。
+   *
+   * 【只 abort 本地 fetch 是不够的】—— 运行不绑定在这个 HTTP 请求上(/run 的刻意设计)。
+   * 光断本地流:界面显示已停止,而服务端 agent 继续调模型、继续执行工具、
+   * 继续产生副作用与费用,直到 30 分钟墙钟上限。用户以为停了,其实没停。
+   */
+  const cancelRun = useCallback(async () => {
+    if (sessionId) {
+      await fetch(`/api/sessions/${sessionId}/cancel`, { method: "POST" }).catch(() => {});
+    }
+    abortRef.current?.abort();
+  }, [sessionId]);
+
   async function openSession(id: string) {
     setSessionId(id);
     setTurns([]);
@@ -241,7 +255,7 @@ export function Workbench() {
             <button
               type="button"
               className="rounded bg-red-600 px-4 py-2 text-sm text-white"
-              onClick={() => abortRef.current?.abort()}
+              onClick={cancelRun}
             >
               中断
             </button>

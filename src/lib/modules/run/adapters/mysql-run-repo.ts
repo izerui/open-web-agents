@@ -8,7 +8,7 @@ import type { Db } from "@/lib/db/client";
 import { runs } from "@/lib/db/schema";
 import type { NewRun, Run, RunRepo } from "@/lib/modules/run/ports";
 import type { RunState } from "@/lib/shared";
-import { and, eq, lt, or, sql } from "drizzle-orm";
+import { and, eq, inArray, lt, or, sql } from "drizzle-orm";
 
 interface RunRow {
   id: string;
@@ -141,6 +141,25 @@ export class MysqlRunRepo implements RunRepo {
       .update(runs)
       .set({ status: state, leaseUntil: null, leaseOwner: null, endedAt: sql`NOW()` })
       .where(and(eq(runs.id, id), eq(runs.status, "running"), ...fenceOf(fence)));
+    return affectedRows(res) > 0;
+  }
+
+  /**
+   * 取消一个尚未落终态的运行。
+   *
+   * 【为什么只是一条 UPDATE 就够了】—— 它复用了栅栏机制:worker 的续租要求
+   * `status = running` 且令牌匹配,这里把状态改成 cancelled 之后,下一次心跳
+   * 立刻返回 false,worker 据此 abort 本轮、且不写回任何结果。
+   * 不需要额外的跨进程控制通道。
+   *
+   * 代价是取消的生效延迟最多一个心跳周期(默认 15 秒)—— 这是如实的:
+   * 界面上不该在点下去的瞬间就宣称"已停止"。
+   */
+  async cancel(id: string): Promise<boolean> {
+    const res = await this.db
+      .update(runs)
+      .set({ status: "cancelled", leaseUntil: null, leaseOwner: null, endedAt: sql`NOW()` })
+      .where(and(eq(runs.id, id), inArray(runs.status, ["pending", "running"])));
     return affectedRows(res) > 0;
   }
 

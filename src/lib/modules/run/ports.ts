@@ -38,6 +38,16 @@ export interface RunRepo {
    * 真正的强制在这里 —— 写入边界不设防,规矩就只是注释。
    */
   complete(id: string, state: RunState, fence?: string): Promise<boolean>;
+  /**
+   * 取消尚未落终态的运行。返回 false = 它已经是终态了,取消无从谈起。
+   *
+   * 【这条曾经完全不存在】状态机里定义了 pending/running --cancel--> cancelled 两条边,
+   * 但全仓找不到任何生产者:界面上的"停止"只调了 fetch 的 abort,
+   * 而运行【不绑定在那个 HTTP 请求上】—— 服务端 agent 照常调模型、照常执行工具、
+   * 照常扣费,直到 30 分钟墙钟上限或自然结束,最后落 success。
+   * 用户以为停了,其实没停;cancelled 是个不可达状态。
+   */
+  cancel(id: string): Promise<boolean>;
   /** 把租约过期的 running 打回可认领,返回回收数量。 */
   reclaimOrphans(now: number): Promise<number>;
   get(id: string): Promise<Run | null>;
