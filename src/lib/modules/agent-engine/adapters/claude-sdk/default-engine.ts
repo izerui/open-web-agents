@@ -6,7 +6,7 @@
 import path from "node:path";
 import type { ModelGatewayPort } from "@/lib/modules/model-gateway/ports";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { ClaudeSdkEngine, type QueryFn } from "./runner";
+import { ClaudeSdkEngine, type EngineDeps, type QueryFn } from "./runner";
 
 const sdkQuery: QueryFn = ({ prompt, options }) =>
   // SDK 的 options 类型面很宽且随版本变化,此处是 ACL 的边界,窄化交给 buildSdkOptions 保证
@@ -22,10 +22,12 @@ export function createClaudeSdkEngine(
   dataDir: string,
   gateway: ModelGatewayPort,
   sandboxEnabled: boolean,
+  requestApproval?: EngineDeps["requestApproval"],
 ): ClaudeSdkEngine {
   return new ClaudeSdkEngine(sdkQuery, {
     sharedHome: path.join(dataDir, ".agent-home"),
     gateway,
     sandboxEnabled,
+    requestApproval,
   });
 }

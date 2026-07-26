@@ -8,6 +8,7 @@ import type { AgentEvent, AgentSpec, RunContext } from "@/lib/shared";
 import { describe, expect, it, vi } from "vitest";
 
 const ctx: RunContext = {
+  sessionId: "s1",
   workspaceDir: "/ws/s1",
   prompt: "生成一个视频",
   credentials: { baseUrl: "https://gw", key: "sk-x" },

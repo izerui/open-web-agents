@@ -2,6 +2,7 @@
 //
 // 这是全工程唯一决定"用哪个实现"的地方 —— 换 DB / 换总线 / 换引擎都只改这里。
 
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { type Db, createDb } from "@/lib/db/client";
 import { type Env, loadEnv } from "@/lib/env";
@@ -13,6 +14,8 @@ import type { GroupRepo } from "@/lib/modules/access/group-ports";
 import type { GrantRepo } from "@/lib/modules/access/ports";
 import { createClaudeSdkEngine } from "@/lib/modules/agent-engine/adapters/claude-sdk/default-engine";
 import type { EnginePort } from "@/lib/modules/agent-engine/ports";
+import { RedisApproval } from "@/lib/modules/approval/adapters/redis-approval";
+import type { ApprovalPort } from "@/lib/modules/approval/ports";
 import { LocalFsStorage } from "@/lib/modules/artifacts/adapters/local-fs-storage";
 import { WorkspaceGc } from "@/lib/modules/artifacts/application/gc";
 import type { StoragePort } from "@/lib/modules/artifacts/ports";
@@ -46,6 +49,7 @@ export interface Container {
   engine: EnginePort;
   gateway: ModelGatewayPort;
   storage: StoragePort;
+  approval: ApprovalPort;
   gc: WorkspaceGc;
   replay: ReplayBuffer;
   apiKeys: ApiKeyRepo;
@@ -60,6 +64,9 @@ export interface Container {
   orchestrator: RunOrchestrator;
   worker: RunWorker;
 }
+
+/** 人工审批的等待上限。到点自动拒绝,避免 worker 被无人值守的审批永久占住。 */
+const APPROVAL_TIMEOUT_MS = 10 * 60_000;
 
 /**
  * 内置的通用助手:未定义 outputSchema,故只回对话文本(设计文档 §3)。
@@ -130,6 +137,7 @@ function build(): Container {
   const bus = new RedisBus(env.redisUrl);
   const runs = new MysqlRunRepo(db);
   const storage = new LocalFsStorage();
+  const approval = new RedisApproval(env.redisUrl);
   const usage = new MysqlUsageRepo(db);
   const replay = new ReplayBuffer();
   const apiKeys = new MysqlApiKeyRepo(db);
@@ -149,7 +157,51 @@ function build(): Container {
     currentUser: (req) => authService.currentUser(req),
     groupIdsOf: (userId) => groupRepo.groupIdsOf(userId),
   });
-  const engine = createClaudeSdkEngine(env.dataDir, gateway, env.sandbox);
+  // 审批钩子:先把待审事件推上总线(界面才看得到),再挂起等裁决。
+  // 超时兜底在 RedisApproval 里 —— 没人审批时到点自动拒,绝不永久占住 worker。
+  const engine = createClaudeSdkEngine(env.dataDir, gateway, env.sandbox, async (r) => {
+    const id = randomUUID().replace(/-/g, "").slice(0, 24);
+    const expiresAt = Date.now() + APPROVAL_TIMEOUT_MS;
+
+    await bus
+      .publish(`session:${r.sessionId}`, {
+        kind: "status",
+        label: `待审批:${r.toolName} — ${r.summary}(${r.reason})`,
+        state: "awaiting_approval",
+      })
+      .catch(() => {});
+
+    const outcome = await approval.request({
+      id,
+      sessionId: r.sessionId,
+      runId: r.runId,
+      toolName: r.toolName,
+      summary: r.summary,
+      reason: r.reason,
+      createdAt: Date.now(),
+      expiresAt,
+    });
+
+    const label =
+      outcome.decision === "approved"
+        ? `审批通过:${r.toolName}`
+        : outcome.decision === "expired"
+          ? `审批超时自动拒绝:${r.toolName}`
+          : `审批被拒:${r.toolName}`;
+    await bus
+      .publish(`session:${r.sessionId}`, { kind: "status", label, state: outcome.decision })
+      .catch(() => {});
+
+    return {
+      approved: outcome.decision === "approved",
+      message:
+        outcome.decision === "expired"
+          ? "审批超时,已自动拒绝"
+          : outcome.decision === "denied"
+            ? (outcome.message ?? "人工审批未通过")
+            : undefined,
+    };
+  });
 
   const orchestrator = new RunOrchestrator({
     sessions,
@@ -219,6 +271,7 @@ function build(): Container {
     engine,
     gateway,
     storage,
+    approval,
     gc,
     replay,
     apiKeys,

@@ -18,6 +18,7 @@ const spec: AgentSpec = {
 
 function ctxWith(env: Record<string, string>): RunContext {
   return {
+    sessionId: "s1",
     workspaceDir: "/ws/s1",
     prompt: "go",
     credentials: { baseUrl: "https://gw", key: "sk-x" },

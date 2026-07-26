@@ -1,8 +1,9 @@
 import { aliasEnv, buildSdkOptions } from "@/lib/modules/agent-engine/adapters/claude-sdk/options";
 import type { AgentSpec, RunContext } from "@/lib/shared";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 const ctx: RunContext = {
+  sessionId: "s1",
   workspaceDir: "/ws/s1",
   prompt: "go",
   resumeSessionId: "sess_9",
@@ -140,7 +141,7 @@ describe("canUseTool 守卫接入 SDK options", () => {
   type Guard = (
     t: string,
     i: Record<string, unknown>,
-  ) => { behavior: "allow" } | { behavior: "deny"; message: string };
+  ) => Promise<{ behavior: "allow" } | { behavior: "deny"; message: string }>;
 
   const guardOf = () => buildSdkOptions(specOf(), ctx, deps()).canUseTool as unknown as Guard;
 
@@ -148,22 +149,61 @@ describe("canUseTool 守卫接入 SDK options", () => {
     expect(typeof guardOf()).toBe("function");
   });
 
-  it("工作空间内写入放行", () => {
-    expect(guardOf()("Write", { file_path: "/ws/s1/a.txt" }).behavior).toBe("allow");
+  it("工作空间内写入放行", async () => {
+    expect((await guardOf()("Write", { file_path: "/ws/s1/a.txt" })).behavior).toBe("allow");
   });
 
-  it("越界写入被拒并带出原因", () => {
-    const r = guardOf()("Write", { file_path: "/Users/someone/escape.txt" });
+  it("越界写入被拒并带出原因", async () => {
+    const r = await guardOf()("Write", { file_path: "/Users/someone/escape.txt" });
     expect(r.behavior).toBe("deny");
     expect(r.behavior === "deny" && r.message).toMatch(/工作空间之外/);
   });
 
-  it("共享 HOME 与临时目录放行(工具缓存需要)", () => {
-    expect(guardOf()("Write", { file_path: "/data/.agent-home/.cache/x" }).behavior).toBe("allow");
-    expect(guardOf()("Write", { file_path: "/tmp/scratch" }).behavior).toBe("allow");
+  it("共享 HOME 与临时目录放行(工具缓存需要)", async () => {
+    expect((await guardOf()("Write", { file_path: "/data/.agent-home/.cache/x" })).behavior).toBe(
+      "allow",
+    );
+    expect((await guardOf()("Write", { file_path: "/tmp/scratch" })).behavior).toBe("allow");
   });
 
-  it("Bash 不被守卫拦(交给内核沙箱)", () => {
-    expect(guardOf()("Bash", { command: "rm -rf /" }).behavior).toBe("allow");
+  it("Bash 不被守卫拦(交给内核沙箱)", async () => {
+    expect((await guardOf()("Bash", { command: "rm -rf /" })).behavior).toBe("allow");
+  });
+
+  it("配了审批规则但没给审批钩子时,规则被忽略而非卡住", async () => {
+    const o = buildSdkOptions(specOf({ approvalRules: { tools: ["Bash"] } }), ctx, deps());
+    const guard = o.canUseTool as unknown as Guard;
+    expect((await guard("Bash", { command: "ls" })).behavior).toBe("allow");
+  });
+
+  it("需审批时挂起等裁决:批准则放行", async () => {
+    const o = buildSdkOptions(specOf({ approvalRules: { tools: ["Bash"] } }), ctx, {
+      ...deps(),
+      requestApproval: async () => ({ approved: true }),
+    });
+    const guard = o.canUseTool as unknown as Guard;
+    expect((await guard("Bash", { command: "rm -rf x" })).behavior).toBe("allow");
+  });
+
+  it("需审批时拒绝则不执行,并带出说明", async () => {
+    const o = buildSdkOptions(specOf({ approvalRules: { tools: ["Bash"] } }), ctx, {
+      ...deps(),
+      requestApproval: async () => ({ approved: false, message: "审批超时,已自动拒绝" }),
+    });
+    const guard = o.canUseTool as unknown as Guard;
+    const r = await guard("Bash", { command: "rm -rf x" });
+    expect(r.behavior).toBe("deny");
+    expect(r.behavior === "deny" && r.message).toMatch(/超时/);
+  });
+
+  it("守卫优先于审批 —— 越界操作不浪费人的注意力去审", async () => {
+    const spy = vi.fn(async () => ({ approved: true }));
+    const o = buildSdkOptions(specOf({ approvalRules: { all: true } }), ctx, {
+      ...deps(),
+      requestApproval: spy,
+    });
+    const guard = o.canUseTool as unknown as Guard;
+    expect((await guard("Write", { file_path: "/etc/passwd" })).behavior).toBe("deny");
+    expect(spy).not.toHaveBeenCalled();
   });
 });

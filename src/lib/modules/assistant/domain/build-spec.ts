@@ -19,6 +19,7 @@ export function buildSpec(
     model: { alias: overrides?.model ?? cfg.model },
     outputSchema: cfg.outputSchema,
     verifyRules: cfg.verifyRules,
+    approvalRules: cfg.approvalRules,
     limits: { maxTurns: cfg.maxTurns, effort: cfg.effort },
     escapeHatch: cfg.escapeHatch,
   };

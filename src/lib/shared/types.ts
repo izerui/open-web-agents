@@ -63,6 +63,8 @@ export interface AgentSpec {
   /** 有则启用结构化输出 —— 决定该助手能否被企业系统当接口消费。 */
   outputSchema?: JsonSchema;
   verifyRules?: VerifyRule[];
+  /** 人工审批规则(HITL);不配则不审批。 */
+  approvalRules?: { tools?: string[]; commandPatterns?: string[]; all?: boolean };
   limits: { maxTurns?: number; effort?: Effort };
   /** 逃生舱:透传给 SDK 的原始覆盖,最后 spread。 */
   escapeHatch?: Record<string, unknown>;
@@ -70,6 +72,10 @@ export interface AgentSpec {
 
 /** 一次运行的上下文。 */
 export interface RunContext {
+  /** 所属会话。审批、事件归属都要用它定位。 */
+  sessionId: string;
+  /** 队列里的 run id(worker 执行时有;内联执行可空)。 */
+  runId?: string;
   /** 每会话独立的绝对路径工作目录(= 项目 = 工作空间)。 */
   workspaceDir: string;
   /** 本轮用户输入。人用对话与系统 invoke 共用同一字段。 */

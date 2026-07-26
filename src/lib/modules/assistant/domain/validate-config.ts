@@ -97,6 +97,23 @@ export function validateAssistantConfig(cfg: Partial<AssistantConfig>): ConfigIs
     if (!sa.prompt?.trim()) issues.push({ field: `${at}.prompt`, message: "子代理提示词不能为空" });
   }
 
+  const ar = cfg.approvalRules;
+  if (ar) {
+    for (const [i, t] of (ar.tools ?? []).entries()) {
+      if (!t?.trim())
+        issues.push({ field: `approvalRules.tools[${i}]`, message: "工具名不能为空" });
+    }
+    for (const [i, p] of (ar.commandPatterns ?? []).entries()) {
+      // 空模式会命中一切命令,等于把 all 打开却看不出来
+      if (!p?.trim()) {
+        issues.push({
+          field: `approvalRules.commandPatterns[${i}]`,
+          message: "模式不能为空(空串会命中所有命令)",
+        });
+      }
+    }
+  }
+
   if (cfg.outputSchema !== undefined) {
     const s = cfg.outputSchema as { type?: unknown };
     // 结构化输出的顶层必须是 object —— 调用方按字段取值,顶层数组/标量没法当接口契约

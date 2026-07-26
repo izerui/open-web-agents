@@ -82,6 +82,8 @@ export class RunOrchestrator {
     const model = resolveModelAlias(chain, assistant.config.model);
 
     const ctx = {
+      sessionId: cmd.sessionId,
+      runId: cmd.runId,
       workspaceDir: session.workspaceDir,
       prompt: cmd.prompt,
       resumeSessionId: session.sdkSessionId,

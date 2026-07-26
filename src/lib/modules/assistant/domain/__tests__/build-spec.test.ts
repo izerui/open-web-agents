@@ -4,6 +4,7 @@ import type { RunContext } from "@/lib/shared";
 import { describe, expect, it } from "vitest";
 
 const ctx: RunContext = {
+  sessionId: "s1",
   workspaceDir: "/ws",
   prompt: "hi",
   credentials: { baseUrl: "b", key: "k" },

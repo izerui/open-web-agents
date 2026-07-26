@@ -25,6 +25,8 @@ export interface AssistantConfig {
   maxTurns?: number;
   outputSchema?: JsonSchema;
   verifyRules?: VerifyRule[];
+  /** 人工审批规则(HITL)。不配则不审批。 */
+  approvalRules?: { tools?: string[]; commandPatterns?: string[]; all?: boolean };
   /** 逃生舱:透传给 SDK options 的原始覆盖,最后 spread。 */
   escapeHatch?: Record<string, unknown>;
 }

@@ -40,6 +40,10 @@ interface Draft {
   /** 逗号/换行分隔的技能名 */
   skillsText: string;
   mcpServers: McpDraft[];
+  /** 需审批的工具名(逗号分隔) */
+  approvalToolsText: string;
+  /** 需审批的命令模式(逗号分隔) */
+  approvalPatternsText: string;
 }
 
 const EMPTY: Draft = {
@@ -53,6 +57,8 @@ const EMPTY: Draft = {
   webhookUrl: "",
   skillsText: "",
   mcpServers: [],
+  approvalToolsText: "",
+  approvalPatternsText: "",
 };
 
 /** 技能名按逗号/换行/空格拆分,去空去重 —— 用户怎么贴都能用 */
@@ -121,6 +127,16 @@ export function Builder() {
             maxTurns: Number(draft.maxTurns) || 20,
             outputSchema: parsedSchema,
             skills: parseSkills(draft.skillsText),
+            approvalRules:
+              draft.approvalToolsText.trim() || draft.approvalPatternsText.trim()
+                ? {
+                    tools: parseSkills(draft.approvalToolsText),
+                    commandPatterns: draft.approvalPatternsText
+                      .split(/[,，\n]+/)
+                      .map((x) => x.trim())
+                      .filter(Boolean),
+                  }
+                : undefined,
             mcpServers: draft.mcpServers
               .filter((m) => m.name.trim())
               .map((m) => ({
@@ -159,6 +175,18 @@ export function Builder() {
           outputSchemaText: cfg.outputSchema ? JSON.stringify(cfg.outputSchema, null, 2) : "",
           webhookUrl: (full as { webhookUrl?: string }).webhookUrl ?? "",
           skillsText: Array.isArray(cfg.skills) ? (cfg.skills as string[]).join(", ") : "",
+          approvalToolsText: Array.isArray(
+            (cfg.approvalRules as { tools?: string[] } | undefined)?.tools,
+          )
+            ? ((cfg.approvalRules as { tools: string[] }).tools ?? []).join(", ")
+            : "",
+          approvalPatternsText: Array.isArray(
+            (cfg.approvalRules as { commandPatterns?: string[] } | undefined)?.commandPatterns,
+          )
+            ? ((cfg.approvalRules as { commandPatterns: string[] }).commandPatterns ?? []).join(
+                ", ",
+              )
+            : "",
           mcpServers: Array.isArray(cfg.mcpServers)
             ? (cfg.mcpServers as McpDraft[]).map((m) => ({
                 uid: crypto.randomUUID(),
@@ -359,6 +387,27 @@ export function Builder() {
               </button>
             </div>
           ))}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <label className="space-y-1">
+            <span className="text-xs opacity-70">需审批的工具(逗号分隔,可选)</span>
+            <input
+              className={field}
+              value={draft.approvalToolsText}
+              onChange={(e) => setDraft({ ...draft, approvalToolsText: e.target.value })}
+              placeholder="Bash, Write"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs opacity-70">需审批的命令模式(逗号分隔)</span>
+            <input
+              className={field}
+              value={draft.approvalPatternsText}
+              onChange={(e) => setDraft({ ...draft, approvalPatternsText: e.target.value })}
+              placeholder="rm -rf, sudo, curl"
+            />
+          </label>
         </div>
 
         <label className="block space-y-1">

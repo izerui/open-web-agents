@@ -117,6 +117,7 @@ export async function POST(req: Request) {
       subagents: cfg.subagents,
       outputSchema: cfg.outputSchema,
       verifyRules: cfg.verifyRules,
+      approvalRules: cfg.approvalRules,
       escapeHatch: cfg.escapeHatch,
     },
   });

@@ -4,6 +4,7 @@ import { readEventStream } from "@/features/chat/event-stream";
 import type { AgentEvent } from "@/lib/shared";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ApprovalBar } from "./approval-bar";
 import { Conversation } from "./conversation";
 import { FilePanel } from "./file-panel";
 import type { AssistantSummary, SessionSummary, Turn } from "./types";
@@ -179,6 +180,8 @@ export function Workbench() {
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
           <Conversation turns={turns} />
         </div>
+
+        <ApprovalBar sessionId={sessionId} running={running} />
 
         <div className="flex gap-2 border-black/10 border-t p-3 dark:border-white/15">
           <input

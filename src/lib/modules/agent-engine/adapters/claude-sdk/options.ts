@@ -1,6 +1,7 @@
 // SDK 选项组装:域内 AgentSpec + RunContext → claude-agent-sdk query 的 options。
 // 属 adapter 层,但刻意写成【不 import SDK】的纯函数,便于单测。
 
+import { describeToolCall, needsApproval } from "@/lib/modules/agent-engine/domain/approval-rules";
 import { materializeSandbox } from "@/lib/modules/agent-engine/domain/sandbox";
 import { guardToolUse } from "@/lib/modules/agent-engine/domain/tool-guard";
 import type { ModelSlots } from "@/lib/modules/model-gateway/ports";
@@ -41,6 +42,17 @@ export interface SdkOptionsDeps {
   slots: ModelSlots;
   /** 是否启用 OS 内核沙箱。 */
   sandboxEnabled: boolean;
+  /**
+   * 人工审批钩子(HITL)。给了才启用审批;不给则审批规则被忽略。
+   * 返回 true 放行、false 拒绝 —— 实现方负责超时兜底。
+   */
+  requestApproval?: (req: {
+    sessionId: string;
+    runId?: string;
+    toolName: string;
+    summary: string;
+    reason: string;
+  }) => Promise<{ approved: boolean; message?: string }>;
 }
 
 /**
@@ -104,11 +116,31 @@ export function buildSdkOptions(
   //
   // 语义是【默认放行 + 路径越界即拒】:服务端没有人可以交互式确认,
   // 所以这个回调既是"审批人"也是唯一的围栏。
-  options.canUseTool = (toolName: string, input: Record<string, unknown>) => {
+  options.canUseTool = async (toolName: string, input: Record<string, unknown>) => {
+    // 顺序要紧:先守卫再审批 —— 结构性越界不该浪费人的注意力去审
     const d = guardToolUse(toolName, input, guardPolicy);
-    return d.allow
-      ? { behavior: "allow" as const, updatedInput: input }
-      : { behavior: "deny" as const, message: d.reason };
+    if (!d.allow) return { behavior: "deny" as const, message: d.reason };
+
+    if (deps.requestApproval) {
+      const need = needsApproval(toolName, input, spec.approvalRules);
+      if (need.needed) {
+        const verdict = await deps.requestApproval({
+          sessionId: ctx.sessionId,
+          runId: ctx.runId,
+          toolName,
+          summary: describeToolCall(toolName, input),
+          reason: need.reason ?? "需人工确认",
+        });
+        if (!verdict.approved) {
+          return {
+            behavior: "deny" as const,
+            message: verdict.message ?? "人工审批未通过",
+          };
+        }
+      }
+    }
+
+    return { behavior: "allow" as const, updatedInput: input };
   };
 
   // ④ 逃生舱:最后 spread,覆盖以上任何默认
