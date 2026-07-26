@@ -63,6 +63,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       req.signal.addEventListener("abort", finish, { once: true });
 
       try {
+        // 等订阅在总线上真正生效再入队 —— 否则 worker 可能抢在订阅注册前就发出首批事件
+        await bus.ready?.(topicOf(id));
         await runs.create({ id: runId, sessionId: id, prompt });
         send({ kind: "status", label: "已入队", state: "pending" });
       } catch (err) {

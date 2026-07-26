@@ -29,6 +29,11 @@ const DEFAULTS = {
 export interface RunPayloadSource {
   /** 取出 run 待执行的 prompt。 */
   getPrompt(id: string): Promise<string | null>;
+  /** 落终态结果,供轮询接口读取(内存 fake 可不实现)。 */
+  saveResult?(
+    id: string,
+    data: { structured?: unknown; cost?: unknown; error?: unknown },
+  ): Promise<void>;
 }
 
 export class RunWorker {
@@ -77,8 +82,17 @@ export class RunWorker {
         "running",
         result.status === "success" ? "finishOk" : "finishErr",
       );
+      // 先落结果再落终态:轮询方看到终态时结果必定已可读,避免"成功但取不到结果"的竞态
+      await this.repo.saveResult?.(claimed.id, {
+        structured: result.structured,
+        cost: result.cost,
+        error: result.error,
+      });
       await this.repo.complete(claimed.id, finalState);
-    } catch {
+    } catch (err) {
+      await this.repo.saveResult?.(claimed.id, {
+        error: { kind: "worker_error", message: err instanceof Error ? err.message : String(err) },
+      });
       await this.repo.complete(claimed.id, nextRunState("running", "finishErr"));
     } finally {
       clearInterval(heartbeat);

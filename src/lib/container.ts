@@ -6,7 +6,7 @@ import { type Db, createDb } from "@/lib/db/client";
 import { type Env, loadEnv } from "@/lib/env";
 import { createClaudeSdkEngine } from "@/lib/modules/agent-engine/adapters/claude-sdk/default-engine";
 import type { EnginePort } from "@/lib/modules/agent-engine/ports";
-import { InMemoryAssistantRepo } from "@/lib/modules/assistant/adapters/in-memory-assistant-repo";
+import { MysqlAssistantRepo } from "@/lib/modules/assistant/adapters/mysql-assistant-repo";
 import type { AssistantRepo } from "@/lib/modules/assistant/ports";
 import { RedisBus } from "@/lib/modules/events/adapters/redis-bus";
 import type { BusPort } from "@/lib/modules/events/ports";
@@ -79,7 +79,9 @@ function build(): Container {
   });
 
   const sessions = new MysqlSessionRepo(db);
-  const assistants = new InMemoryAssistantRepo([DEFAULT_ASSISTANT]);
+  const assistants = new MysqlAssistantRepo(db);
+  // 首次启动播种内置助手,保证开箱可用;已存在则覆盖为最新定义
+  void assistants.upsert(DEFAULT_ASSISTANT).catch(() => {});
   const bus = new RedisBus(env.redisUrl);
   const runs = new MysqlRunRepo(db);
   const engine = createClaudeSdkEngine(env.dataDir, gateway);

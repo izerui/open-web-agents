@@ -7,6 +7,7 @@ import {
 } from "@/lib/modules/agent-engine/domain/resolve-credentials";
 import type { EnginePort, RunResult } from "@/lib/modules/agent-engine/ports";
 import { buildSpec } from "@/lib/modules/assistant/domain/build-spec";
+import { validateStructured } from "@/lib/modules/assistant/domain/validate-output";
 import type { AssistantRepo } from "@/lib/modules/assistant/ports";
 import type { BusPort } from "@/lib/modules/events/ports";
 import type { SessionRepo } from "@/lib/modules/session/ports";
@@ -77,10 +78,25 @@ export class RunOrchestrator {
 
     publish({ kind: "status", label: "运行中", state: "running" });
 
-    const result = await this.deps.engine.run(spec, ctx, publish, signal);
+    let result = await this.deps.engine.run(spec, ctx, publish, signal);
 
     if (result.sessionId) {
       await this.deps.sessions.setSdkSessionId(cmd.sessionId, result.sessionId);
+    }
+
+    // 接口契约守门:声明了 outputSchema 就必须真的符合它,否则调用方会拿到"半对"的结果
+    if (result.status === "success" && spec.outputSchema) {
+      const verdict = validateStructured(spec.outputSchema, result.structured);
+      if (!verdict.ok) {
+        result = {
+          ...result,
+          status: "failed",
+          error: {
+            kind: "schema_mismatch",
+            message: `结构化结果不符 outputSchema: ${verdict.errors?.join("; ")}`,
+          },
+        };
+      }
     }
 
     publish({

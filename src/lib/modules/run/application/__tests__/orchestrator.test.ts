@@ -169,3 +169,57 @@ describe("RunOrchestrator.execute", () => {
     });
   });
 });
+
+describe("outputSchema 契约守门", () => {
+  const signal = new AbortController().signal;
+  const schema = {
+    type: "object",
+    properties: { videoId: { type: "string" } },
+    required: ["videoId"],
+  };
+
+  async function setupWithSchema(result: RunResult) {
+    const sessions = new InMemorySessionRepo();
+    const assistants = new InMemoryAssistantRepo([
+      {
+        id: "a1",
+        name: "专用助手",
+        config: { systemPrompt: "p", model: "sonnet", outputSchema: schema },
+      },
+    ]);
+    const bus = new InMemoryBus();
+    await sessions.create({ id: "s1", assistantId: "a1", workspaceDir: "/ws/s1" });
+    const orch = new RunOrchestrator({
+      sessions,
+      assistants,
+      engine: new FakeEngine([], result),
+      bus,
+      platformCredentials: PLATFORM,
+    });
+    return { orch, bus };
+  }
+
+  it("结果符合 schema → 成功", async () => {
+    const { orch } = await setupWithSchema({
+      status: "success",
+      structured: { videoId: "v1" },
+    });
+    expect((await orch.execute({ sessionId: "s1", prompt: "hi" }, signal)).status).toBe("success");
+  });
+
+  it("结果缺必填字段 → 判失败,不让调用方拿到半对结果", async () => {
+    const { orch } = await setupWithSchema({ status: "success", structured: { wrong: 1 } });
+    const r = await orch.execute({ sessionId: "s1", prompt: "hi" }, signal);
+    expect(r.status).toBe("failed");
+    expect(r.error?.kind).toBe("schema_mismatch");
+    expect(r.error?.message).toMatch(/videoId/);
+  });
+
+  it("契约失败也会发 result 事件让前端看到原因", async () => {
+    const { orch, bus } = await setupWithSchema({ status: "success", structured: {} });
+    const got: AgentEvent[] = [];
+    bus.subscribe(topicOf("s1"), (e) => got.push(e));
+    await orch.execute({ sessionId: "s1", prompt: "hi" }, signal);
+    expect(got.at(-1)).toMatchObject({ kind: "result", status: "failed" });
+  });
+});

@@ -28,7 +28,7 @@ export function busContract(name: string, harness: BusHarness): void {
       const t = harness.topic("same");
       const got: AgentEvent[] = [];
       const off = bus.subscribe(t, (e) => got.push(e));
-      await waitFor(() => true);
+      await bus.ready?.(t);
 
       await bus.publish(t, { kind: "text", text: "hi" });
       await waitFor(() => got.length === 1);
@@ -44,6 +44,8 @@ export function busContract(name: string, harness: BusHarness): void {
       const off = bus.subscribe(t1, (e) => got.push(e));
       const marker: AgentEvent[] = [];
       const off2 = bus.subscribe(t2, (e) => marker.push(e));
+      await bus.ready?.(t1);
+      await bus.ready?.(t2);
 
       await bus.publish(t2, { kind: "text", text: "other" });
       await waitFor(() => marker.length === 1);
@@ -59,6 +61,7 @@ export function busContract(name: string, harness: BusHarness): void {
       const b: AgentEvent[] = [];
       const offA = bus.subscribe(t, (e) => a.push(e));
       const offB = bus.subscribe(t, (e) => b.push(e));
+      await bus.ready?.(t);
 
       await bus.publish(t, { kind: "text", text: "x" });
       await waitFor(() => a.length === 1 && b.length === 1);
@@ -79,6 +82,7 @@ export function busContract(name: string, harness: BusHarness): void {
 
       const witness: AgentEvent[] = [];
       const off2 = bus.subscribe(witnessTopic, (e) => witness.push(e));
+      await bus.ready?.(witnessTopic);
 
       await bus.publish(t, { kind: "text", text: "x" });
       await bus.publish(witnessTopic, { kind: "text", text: "w" });
@@ -92,6 +96,7 @@ export function busContract(name: string, harness: BusHarness): void {
       const t = harness.topic("shape");
       const got: AgentEvent[] = [];
       const off = bus.subscribe(t, (e) => got.push(e));
+      await bus.ready?.(t);
 
       const rich: AgentEvent = {
         kind: "tool_use",
@@ -104,6 +109,22 @@ export function busContract(name: string, harness: BusHarness): void {
       await waitFor(() => got.length === 1);
       expect(got[0]).toEqual(rich);
       off();
+    });
+
+    it("ready 之后立即发布不丢消息(守护订阅注册竞态)", async () => {
+      // Redis 的 SUBSCRIBE 是异步往返:曾经 subscribe() 一返回就 publish,
+      // 订阅还没注册到服务端,消息静默丢失。ready() 必须能挡住这一类竞态。
+      const bus = await harness.makeBus();
+      for (let i = 0; i < 5; i++) {
+        const t = harness.topic(`race-${i}`);
+        const got: AgentEvent[] = [];
+        const off = bus.subscribe(t, (e) => got.push(e));
+        await bus.ready?.(t);
+        await bus.publish(t, { kind: "text", text: `n${i}` });
+        await waitFor(() => got.length === 1);
+        expect(got).toHaveLength(1);
+        off();
+      }
     });
 
     it("无订阅者时发布不报错", async () => {

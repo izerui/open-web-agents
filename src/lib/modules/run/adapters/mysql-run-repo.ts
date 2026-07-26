@@ -163,6 +163,38 @@ export class MysqlRunRepo implements RunRepo {
       .where(eq(runs.id, id));
   }
 
+  /** 取完整运行状态与结果,供对外轮询接口使用。 */
+  async getResult(id: string): Promise<{
+    id: string;
+    status: RunState;
+    structured: unknown;
+    cost: unknown;
+    error: unknown;
+    summary: string | null;
+  } | null> {
+    const rows = await this.db
+      .select({
+        id: runs.id,
+        status: runs.status,
+        structured: runs.structuredResult,
+        cost: runs.cost,
+        error: runs.errorInfo,
+      })
+      .from(runs)
+      .where(eq(runs.id, id))
+      .limit(1);
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      id: row.id,
+      status: row.status as RunState,
+      structured: row.structured,
+      cost: row.cost,
+      error: row.error,
+      summary: null,
+    };
+  }
+
   /** 仅测试用:清空队列。 */
   async _truncate(): Promise<void> {
     await this.db.delete(runs).where(sql`1=1`);
