@@ -122,5 +122,13 @@ export function validateAssistantConfig(cfg: Partial<AssistantConfig>): ConfigIs
     }
   }
 
+  if (cfg.inputSchema !== undefined) {
+    const s = cfg.inputSchema as { type?: unknown };
+    // 入参同理:调用方按字段传值,顶层是标量的话校验就退化得没有意义
+    if (s.type !== undefined && s.type !== "object") {
+      issues.push({ field: "inputSchema.type", message: "顶层类型须是 object" });
+    }
+  }
+
   return issues;
 }

@@ -115,6 +115,10 @@ export async function POST(req: Request) {
       mcpServers: cfg.mcpServers,
       tools: cfg.tools,
       subagents: cfg.subagents,
+      // 【显式白名单的代价】这里逐字段列举而非 spread —— 好处是外部塞不进意料之外的键,
+      // 坏处是新增字段忘了加就【静默丢弃】:保存返回 201、界面显示成功,
+      // 读回来才发现字段没了,全程没有任何报错。inputSchema 就这么漏过一次。
+      inputSchema: cfg.inputSchema,
       outputSchema: cfg.outputSchema,
       verifyRules: cfg.verifyRules,
       approvalRules: cfg.approvalRules,

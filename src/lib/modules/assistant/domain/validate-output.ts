@@ -2,48 +2,30 @@
 //
 // 这是"助手能被企业系统当接口用"的守门人:调用方按 outputSchema 写死了解析逻辑,
 // 平台就必须保证——要么给出符合契约的 JSON,要么明确报失败,绝不给"半对"的结果。
+//
+// 编译与缓存下沉到 validate-schema:输入契约与输出契约是同一件事的两侧,
+// 没道理各写一套(而原来那套里藏着 $id 冲突与缓存永不命中两个坑)。
 
 import type { JsonSchema } from "@/lib/shared";
-import Ajv, { type ValidateFunction } from "ajv";
+import { type ValidationResult, validateAgainstSchema } from "./validate-schema";
 
-export interface ValidationResult {
-  ok: boolean;
-  /** 人类可读的失败原因,直接进 run 的 errorInfo 供调用方排查。 */
-  errors?: string[];
-}
-
-// 编译有成本,按 schema 缓存(同一助手每轮都用同一个 schema)
-const ajv = new Ajv({ allErrors: true, strict: false });
-const cache = new WeakMap<object, ValidateFunction>();
-
-function compile(schema: JsonSchema): ValidateFunction {
-  const cached = cache.get(schema);
-  if (cached) return cached;
-  const fn = ajv.compile(schema);
-  cache.set(schema, fn);
-  return fn;
-}
+export type { ValidationResult };
 
 export function validateStructured(schema: JsonSchema, value: unknown): ValidationResult {
   if (value === undefined) {
     return { ok: false, errors: ["未产出结构化结果"] };
   }
+  return validateAgainstSchema(schema, value, "outputSchema");
+}
 
-  let validate: ValidateFunction;
-  try {
-    validate = compile(schema);
-  } catch (err) {
-    // schema 本身写错了(助手配置问题),要能明确区分于"结果不合格"
-    return {
-      ok: false,
-      errors: [`outputSchema 非法: ${err instanceof Error ? err.message : String(err)}`],
-    };
-  }
-
-  if (validate(value)) return { ok: true };
-
-  const errors = (validate.errors ?? []).map(
-    (e) => `${e.instancePath || "/"} ${e.message ?? "校验失败"}`,
-  );
-  return { ok: false, errors: errors.length ? errors : ["不符合 outputSchema"] };
+/**
+ * 入站契约校验:助手声明了 inputSchema,调用方就必须按它传。
+ *
+ * 【为什么对外接口必须校验入参】这个平台的定位是"被 Java/Go/Python 系统当接口调"。
+ * 不校验的话,一个字段拼错的请求会被原样塞进提示词,agent 照跑不误,
+ * 最后产出一个看起来正常、实际答非所问的结果 —— 调用方拿到 200 和一份结构化 JSON,
+ * 根本意识不到自己传错了。早失败、错在哪说清楚,比事后对着结果猜便宜得多。
+ */
+export function validateInput(schema: JsonSchema, value: unknown): ValidationResult {
+  return validateAgainstSchema(schema, value, "inputSchema");
 }

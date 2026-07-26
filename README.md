@@ -49,9 +49,10 @@ curl localhost:3000/api/agents/<taskId>/result -H "X-Api-Key: <key>"
 
 | 能力 | 说明 |
 |---|---|
-| 助手构建器 | 提示词 / 模型 / 轮次 / Skills / MCP / 子代理 / outputSchema / Webhook |
+| 助手构建器 | 提示词 / 模型 / 轮次 / Skills / MCP / 子代理 / 工具白名单 / inputSchema / outputSchema / 审批规则 / Webhook |
 | 统一运行接口 | 网页对话与系统 invoke **共用同一个运行内核** |
 | 结构化输出 | 定义了 `outputSchema` 才算「接口型助手」;结果经 JSON Schema 校验,不合格判失败 |
+| 入参契约 | 定义了 `inputSchema` 则 `invoke` 的入参必须符合它,否则 400 并指出是哪个字段 |
 | 工作空间 | 每会话一个独立目录,文件树 / 预览 / 下载 |
 | 执行隔离 | OS 内核沙箱(Bash)+ 路径守卫(文件工具),见下文限制 |
 | 人工审批(HITL) | 按工具名或命令模式挂起等人确认,超时自动拒绝 |

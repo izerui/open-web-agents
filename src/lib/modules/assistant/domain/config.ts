@@ -23,6 +23,14 @@ export interface AssistantConfig {
   model: ModelAlias;
   effort?: Effort;
   maxTurns?: number;
+  /**
+   * 入站契约。声明了它,对外 invoke 就必须按它传参,不合格直接 400。
+   *
+   * 【曾经只有一个数据库列】input_schema 建了表、invoke 路由的注释也写着
+   * "符合助手 inputSchema 的输入",但配置类型里没有这个字段、没有任何校验 ——
+   * 一个只活在列名和注释里的功能,而设计文稿的 MVP 清单明确列了它。
+   */
+  inputSchema?: JsonSchema;
   outputSchema?: JsonSchema;
   verifyRules?: VerifyRule[];
   /** 人工审批规则(HITL)。不配则不审批。 */

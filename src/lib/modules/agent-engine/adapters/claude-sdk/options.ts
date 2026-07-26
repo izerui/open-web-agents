@@ -99,6 +99,20 @@ export function buildSdkOptions(
     },
   };
 
+  /**
+   * 工具白名单。
+   *
+   * 【这条链曾经断在半路】ToolDef 定义了、AssistantConfig 收了、buildSpec 也原样
+   * 传下来了,却没人把它交给 SDK —— 配了工具限制的助手照样能用全部工具。
+   * 一个"配置项存在但不生效"的安全设置,比没有这个配置项更糟:
+   * 它让人以为已经限制住了。
+   *
+   * 【必须判空】allowedTools 给空数组的语义是"一个工具都不许用",
+   * 而"没配"的语义是"不限制"。两者不能混。
+   */
+  const allowed = spec.tools?.map((t) => t.name).filter(Boolean) ?? [];
+  if (allowed.length > 0) options.allowedTools = allowed;
+
   // 有 outputSchema 才启用 SDK 原生结构化输出(约束解码)
   if (spec.outputSchema) {
     options.outputFormat = { type: "json_schema", schema: spec.outputSchema };

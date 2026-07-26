@@ -17,6 +17,16 @@ const SCHEMA_EXAMPLE = `{
   "additionalProperties": false
 }`;
 
+const INPUT_SCHEMA_EXAMPLE = `{
+  "type": "object",
+  "properties": {
+    "topic": { "type": "string", "minLength": 1 },
+    "level": { "type": "string", "enum": ["basic", "advanced"] }
+  },
+  "required": ["topic"],
+  "additionalProperties": false
+}`;
+
 interface McpDraft {
   /** 稳定行 id。用数组索引作 key 会在删除中间行时把编辑状态错位到别行。 */
   uid: string;
@@ -47,8 +57,11 @@ interface Draft {
   systemPrompt: string;
   model: string;
   maxTurns: number;
+  inputSchemaText: string;
   outputSchemaText: string;
   webhookUrl: string;
+  /** 工具白名单(逗号分隔);留空 = 不限制 */
+  toolsText: string;
   /** 逗号/换行分隔的技能名 */
   skillsText: string;
   mcpServers: McpDraft[];
@@ -66,8 +79,10 @@ const EMPTY: Draft = {
   systemPrompt: "",
   model: "sonnet",
   maxTurns: 20,
+  inputSchemaText: "",
   outputSchemaText: "",
   webhookUrl: "",
+  toolsText: "",
   skillsText: "",
   mcpServers: [],
   subagents: [],
@@ -120,7 +135,23 @@ export function Builder() {
     }
   }
 
-  const canSave = draft.name.trim() && draft.systemPrompt.trim() && !schemaError && !saving;
+  // inputSchema 同样即时反馈 —— 它是【入站】契约,写错了第三方系统会被莫名其妙地 400
+  const inputText = draft.inputSchemaText.trim();
+  let inputSchemaError: string | null = null;
+  let parsedInputSchema: Record<string, unknown> | undefined;
+  if (inputText) {
+    try {
+      const v = JSON.parse(inputText);
+      if (typeof v !== "object" || v === null || Array.isArray(v)) {
+        inputSchemaError = "顶层必须是 JSON 对象";
+      } else parsedInputSchema = v as Record<string, unknown>;
+    } catch (e) {
+      inputSchemaError = e instanceof Error ? e.message : "JSON 解析失败";
+    }
+  }
+
+  const canSave =
+    draft.name.trim() && draft.systemPrompt.trim() && !schemaError && !inputSchemaError && !saving;
 
   async function save() {
     if (!canSave) return;
@@ -139,7 +170,10 @@ export function Builder() {
             systemPrompt: draft.systemPrompt,
             model: draft.model,
             maxTurns: Number(draft.maxTurns) || 20,
+            inputSchema: parsedInputSchema,
             outputSchema: parsedSchema,
+            // 留空 = 不限制。给空数组的语义是「一个工具都不许用」,两者不能混
+            tools: parseSkills(draft.toolsText).map((name) => ({ name })),
             skills: parseSkills(draft.skillsText),
             approvalRules:
               draft.approvalToolsText.trim() || draft.approvalPatternsText.trim()
@@ -190,7 +224,14 @@ export function Builder() {
           systemPrompt: String(cfg.systemPrompt ?? ""),
           model: String(cfg.model ?? "sonnet"),
           maxTurns: Number(cfg.maxTurns ?? 20),
+          inputSchemaText: cfg.inputSchema ? JSON.stringify(cfg.inputSchema, null, 2) : "",
           outputSchemaText: cfg.outputSchema ? JSON.stringify(cfg.outputSchema, null, 2) : "",
+          toolsText: Array.isArray(cfg.tools)
+            ? (cfg.tools as { name?: string }[])
+                .map((t) => t.name ?? "")
+                .filter(Boolean)
+                .join(", ")
+            : "",
           webhookUrl: (full as { webhookUrl?: string }).webhookUrl ?? "",
           skillsText: Array.isArray(cfg.skills) ? (cfg.skills as string[]).join(", ") : "",
           approvalToolsText: Array.isArray(
@@ -494,6 +535,33 @@ export function Builder() {
             onChange={(e) => setDraft({ ...draft, webhookUrl: e.target.value })}
             placeholder="https://your-system/callback"
           />
+        </label>
+
+        <label className="block space-y-1">
+          <span className="text-xs opacity-70">
+            工具白名单(逗号分隔,可选)—— 留空 = 不限制;填了就只允许这些工具
+          </span>
+          <input
+            className={field}
+            value={draft.toolsText}
+            onChange={(e) => setDraft({ ...draft, toolsText: e.target.value })}
+            placeholder="Read, Write, Bash"
+          />
+        </label>
+
+        <label className="block space-y-1">
+          <span className="text-xs opacity-70">
+            inputSchema(JSON Schema,可选)—— 填了则 invoke 的入参必须符合它,否则 400
+          </span>
+          <textarea
+            className={`${field} h-40 resize-y font-mono text-xs`}
+            value={draft.inputSchemaText}
+            onChange={(e) => setDraft({ ...draft, inputSchemaText: e.target.value })}
+            placeholder={INPUT_SCHEMA_EXAMPLE}
+          />
+          {inputSchemaError && (
+            <span className="text-red-600 text-xs">inputSchema 非法:{inputSchemaError}</span>
+          )}
         </label>
 
         <label className="block space-y-1">

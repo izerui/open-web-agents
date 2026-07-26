@@ -12,6 +12,7 @@ interface Row {
   icon: string | null;
   description: string | null;
   config: unknown;
+  inputSchema: unknown;
   outputSchema: unknown;
   webhookUrl: string | null;
 }
@@ -23,6 +24,7 @@ const COLUMNS = {
   icon: assistants.icon,
   description: assistants.description,
   config: assistants.config,
+  inputSchema: assistants.inputSchema,
   outputSchema: assistants.outputSchema,
   webhookUrl: assistants.webhookUrl,
 };
@@ -36,8 +38,13 @@ function toAssistant(r: Row): Assistant {
     icon: r.icon ?? undefined,
     description: r.description ?? undefined,
     webhookUrl: r.webhookUrl ?? undefined,
-    // outputSchema 单列存储(要按它做接口契约查询/展示),回填进 config 供 buildSpec 使用
-    config: { ...config, outputSchema: (r.outputSchema as JsonSchema | null) ?? undefined },
+    // 两个 schema 都单列存储(要按它们做接口契约查询/展示),回填进 config 供上层使用。
+    // input_schema 这一列建表时就有,但此前【从没被读写过】—— 一个死列配一句谎话注释。
+    config: {
+      ...config,
+      inputSchema: (r.inputSchema as JsonSchema | null) ?? undefined,
+      outputSchema: (r.outputSchema as JsonSchema | null) ?? undefined,
+    },
   };
 }
 
@@ -68,7 +75,7 @@ export class MysqlAssistantRepo implements AssistantRepo {
   }
 
   async upsert(a: Assistant): Promise<Assistant> {
-    const { outputSchema, ...restConfig } = a.config;
+    const { inputSchema, outputSchema, ...restConfig } = a.config;
     const values = {
       id: a.id,
       ownerId: a.ownerId || this.defaultOwnerId,
@@ -76,6 +83,7 @@ export class MysqlAssistantRepo implements AssistantRepo {
       icon: a.icon,
       description: a.description,
       config: restConfig,
+      inputSchema: inputSchema ?? null,
       outputSchema: outputSchema ?? null,
       webhookUrl: a.webhookUrl ?? null,
       visibility: "private" as const,
@@ -89,6 +97,7 @@ export class MysqlAssistantRepo implements AssistantRepo {
           icon: values.icon,
           description: values.description,
           config: values.config,
+          inputSchema: values.inputSchema,
           outputSchema: values.outputSchema,
           webhookUrl: values.webhookUrl,
         },

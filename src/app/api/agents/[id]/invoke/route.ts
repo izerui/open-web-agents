@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
+import { validateInput } from "@/lib/modules/assistant/domain/validate-output";
 import { workspacePathFor } from "@/lib/modules/session/domain/workspace";
 import type { ModelAlias } from "@/lib/shared";
 
@@ -50,6 +51,32 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     typeof body.input === "string" ? body.input.trim() : JSON.stringify(body.input ?? {});
   if (!prompt || prompt === "{}") {
     return Response.json({ error: "input is required" }, { status: 400 });
+  }
+
+  /**
+   * 入站契约校验。助手声明了 inputSchema,调用方就必须按它传。
+   *
+   * 【为什么必须早失败】不校验的话,一个字段拼错的请求会被原样塞进提示词,
+   * agent 照跑不误,最后产出一个看起来正常、实际答非所问的结果 ——
+   * 调用方拿到 200 和一份结构合规的 JSON,根本意识不到自己传错了,还白花一次模型钱。
+   * 直接说清楚错在哪个字段,比事后对着结果猜便宜得多。
+   */
+  const inputSchema = assistant.config.inputSchema;
+  if (inputSchema) {
+    // 纯文本对上 object schema 必然不合格,提示要说人话
+    if (typeof body.input === "string") {
+      return Response.json(
+        { error: "该助手声明了 inputSchema,input 必须是符合它的对象,不能是纯文本" },
+        { status: 400 },
+      );
+    }
+    const verdict = validateInput(inputSchema, body.input);
+    if (!verdict.ok) {
+      return Response.json(
+        { error: "input 不符合该助手的 inputSchema", details: verdict.errors },
+        { status: 400 },
+      );
+    }
   }
 
   // 每次 invoke 开一个新会话(= 独立工作目录),互不干扰;归属记到发起的 key 上
