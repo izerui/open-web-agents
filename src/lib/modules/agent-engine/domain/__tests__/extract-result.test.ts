@@ -53,3 +53,47 @@ describe("extractRunResult", () => {
     expect(r.status).toBe("failed");
   });
 });
+
+describe("兼容网关降级:从文本提取结构化结果", () => {
+  it("缺 structured_output 但文本里有 JSON → 提取并标记降级", () => {
+    const r = extractRunResult(
+      { subtype: "success", result: '结论如下:\n```json\n{"verdict":"pass","score":88}\n```' },
+      { hasSchema: true },
+    );
+    expect(r.status).toBe("success");
+    expect(r.structured).toEqual({ verdict: "pass", score: 88 });
+    expect(r.salvagedFromText).toBe(true);
+  });
+
+  it("原生 structured_output 优先,不走降级", () => {
+    const r = extractRunResult(
+      { subtype: "success", result: '{"from":"text"}', structured_output: { from: "native" } },
+      { hasSchema: true },
+    );
+    expect(r.structured).toEqual({ from: "native" });
+    expect(r.salvagedFromText).toBeUndefined();
+  });
+
+  it("文本里也没有 JSON → 仍判失败,不伪造成功", () => {
+    const r = extractRunResult(
+      { subtype: "success", result: "我没法给出结构化结果" },
+      { hasSchema: true },
+    );
+    expect(r.status).toBe("failed");
+    expect(r.error?.kind).toBe("no_structured_output");
+  });
+
+  it("错误 subtype 下不尝试降级提取", () => {
+    const r = extractRunResult(
+      { subtype: "error_max_turns", result: '{"a":1}' },
+      { hasSchema: true },
+    );
+    expect(r.status).toBe("failed");
+    expect(r.structured).toBeUndefined();
+  });
+
+  it("无 schema 的通用助手不做提取(不该凭空造结构化结果)", () => {
+    const r = extractRunResult({ subtype: "success", result: '{"a":1}' }, { hasSchema: false });
+    expect(r.structured).toBeUndefined();
+  });
+});

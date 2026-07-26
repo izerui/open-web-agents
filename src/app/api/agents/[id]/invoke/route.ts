@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { getContainer } from "@/lib/container";
+import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { workspacePathFor } from "@/lib/modules/session/domain/workspace";
 import type { ModelAlias } from "@/lib/shared";
 
@@ -16,6 +17,7 @@ interface InvokeBody {
 
 /**
  * 对外触发接口:第三方系统(Java/Go/Python/C)调这里跑一次助手。
+ * 需要 `X-Api-Key`(或 `Authorization: Bearer`)。
  *
  * 与网页对话共用同一运行内核 —— 只是入站 adapter 与结果投递方式不同
  * (设计文档 §3 统一接口原则)。异步返回 taskId,结果用 GET result 轮询。
@@ -26,7 +28,17 @@ interface InvokeBody {
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id: assistantId } = await params;
-  const { assistants, sessions, runs, env } = getContainer();
+  const { assistants, sessions, runs, env, auth } = getContainer();
+
+  let principal: Awaited<ReturnType<typeof auth.requireApiKey>>;
+  try {
+    principal = await auth.requireApiKey(req);
+    auth.assertCanInvoke(principal, assistantId);
+  } catch (err) {
+    const res = authErrorResponse(err);
+    if (res) return res;
+    throw err;
+  }
 
   const assistant = await assistants.get(assistantId);
   if (!assistant) {
@@ -40,11 +52,18 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return Response.json({ error: "input is required" }, { status: 400 });
   }
 
-  // 每次 invoke 开一个新会话(= 独立工作目录),互不干扰
+  // 每次 invoke 开一个新会话(= 独立工作目录),互不干扰;归属记到发起的 key 上
   const sessionId = randomUUID().replace(/-/g, "").slice(0, 24);
   const workspaceDir = workspacePathFor(env.dataDir, sessionId);
   await fs.mkdir(workspaceDir, { recursive: true });
-  await sessions.create({ id: sessionId, assistantId, workspaceDir, title: "invoke" });
+  await sessions.create({
+    id: sessionId,
+    assistantId,
+    workspaceDir,
+    title: "invoke",
+    callerApiKeyId: principal.type === "apiKey" ? principal.keyId : undefined,
+    ownerId: principal.type === "web" ? principal.userId : undefined,
+  });
 
   const taskId = randomUUID().replace(/-/g, "").slice(0, 24);
   await runs.create({ id: taskId, sessionId, prompt });

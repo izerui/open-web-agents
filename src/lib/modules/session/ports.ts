@@ -4,6 +4,10 @@ import type { ModelAlias } from "@/lib/shared";
 export interface Session {
   id: string;
   assistantId: string;
+  /** 人用时的归属用户;归属校验靠它。 */
+  ownerId?: string;
+  /** 系统 invoke 时发起该会话的 API Key;归属校验靠它。 */
+  callerApiKeyId?: string;
   workspaceDir: string;
   /** 上一轮 SDK session id,多轮 resume 用。 */
   sdkSessionId?: string;
@@ -20,6 +24,8 @@ export interface NewSession {
   assistantId: string;
   workspaceDir: string;
   title?: string;
+  ownerId?: string;
+  callerApiKeyId?: string;
 }
 
 export interface SessionRepo {

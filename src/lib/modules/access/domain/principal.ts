@@ -1,0 +1,54 @@
+// 调用主体与归属判定。纯逻辑,零 IO —— 授权规则必须能被穷举单测。
+
+/** 谁在调用。web = 平台内人类(当前单用户);apiKey = 第三方系统。 */
+export type Principal =
+  | { type: "web"; userId: string }
+  | { type: "apiKey"; keyId: string; ownerId: string; assistantId?: string };
+
+/** 资源的归属信息(从库里读出后传入)。 */
+export interface SessionOwnership {
+  id: string;
+  assistantId: string;
+  ownerId?: string;
+  callerApiKeyId?: string;
+}
+
+export type Decision = { allowed: true } | { allowed: false; reason: string };
+
+const ALLOW: Decision = { allowed: true };
+const deny = (reason: string): Decision => ({ allowed: false, reason });
+
+/**
+ * 能否访问某会话(读事件流、看工作空间文件、取结果)。
+ *
+ * 这是 question-bank 的已知短板:那边任何人拿到 sessionId 就能读别人的工作空间。
+ * 这里的规则:
+ * - web 用户:只能访问自己创建的会话
+ * - API Key:只能访问【由它自己发起】的会话 —— 光有同一助手的 key 还不够,
+ *   否则同一助手的两个调用方能互相读到对方的输入与产物
+ */
+export function canAccessSession(p: Principal, s: SessionOwnership): Decision {
+  if (p.type === "web") {
+    // 历史会话可能没有 ownerId(单用户时期创建);此时按放行处理,避免旧数据不可读
+    if (!s.ownerId) return ALLOW;
+    return s.ownerId === p.userId ? ALLOW : deny("session belongs to another user");
+  }
+
+  if (!s.callerApiKeyId) return deny("session was not created by an API key");
+  return s.callerApiKeyId === p.keyId ? ALLOW : deny("session belongs to another caller");
+}
+
+/**
+ * 能否调用某助手。
+ * key 若绑定了具体助手(assistantId),就只能调那一个 —— 便于给每个对接方发限定 key。
+ */
+export function canInvokeAssistant(p: Principal, assistantId: string): Decision {
+  if (p.type === "web") return ALLOW;
+  if (!p.assistantId) return ALLOW; // 未绑定 = 账户级 key,可调本账户下任意助手
+  return p.assistantId === assistantId ? ALLOW : deny("api key is bound to another assistant");
+}
+
+/** 能否管理助手定义(创建/修改)。对外 key 一律不行,防止调用方改提示词。 */
+export function canManageAssistants(p: Principal): Decision {
+  return p.type === "web" ? ALLOW : deny("api keys cannot manage assistants");
+}

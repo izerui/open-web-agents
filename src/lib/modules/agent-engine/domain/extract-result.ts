@@ -1,6 +1,7 @@
 // 把 SDK 的 result 消息提取为域内 RunResult。纯逻辑,入参 unknown。
 
 import type { RunResult } from "@/lib/modules/agent-engine/ports";
+import { extractJsonObject } from "./extract-json";
 
 /**
  * 从 SDK `result` 消息提取 RunResult。
@@ -35,13 +36,19 @@ export function extractRunResult(resultMsg: unknown, opts: { hasSchema: boolean 
   }
 
   if (opts.hasSchema && m.structured_output === undefined) {
+    // 降级路径:第三方兼容网关对 output_format 支持不一致,常常拿不到 structured_output。
+    // 此时从最终文本里提取 JSON —— 提取到的结果仍要过 outputSchema 校验,不放松契约。
+    const salvaged = summary === undefined ? undefined : extractJsonObject(summary);
+    if (salvaged !== undefined) {
+      return { status: "success", structured: salvaged, summary, cost, salvagedFromText: true };
+    }
     return {
       status: "failed",
       summary,
       cost,
       error: {
         kind: "no_structured_output",
-        message: "助手声明了 outputSchema 但未产出结构化结果",
+        message: "助手声明了 outputSchema 但未产出结构化结果,且无法从文本中提取",
       },
     };
   }

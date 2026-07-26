@@ -4,6 +4,7 @@
 
 import { type Db, createDb } from "@/lib/db/client";
 import { type Env, loadEnv } from "@/lib/env";
+import { Authorizer } from "@/lib/modules/access/application/authorize";
 import { createClaudeSdkEngine } from "@/lib/modules/agent-engine/adapters/claude-sdk/default-engine";
 import type { EnginePort } from "@/lib/modules/agent-engine/ports";
 import { LocalFsStorage } from "@/lib/modules/artifacts/adapters/local-fs-storage";
@@ -12,6 +13,8 @@ import { MysqlAssistantRepo } from "@/lib/modules/assistant/adapters/mysql-assis
 import type { AssistantRepo } from "@/lib/modules/assistant/ports";
 import { RedisBus } from "@/lib/modules/events/adapters/redis-bus";
 import type { BusPort } from "@/lib/modules/events/ports";
+import { MysqlApiKeyRepo } from "@/lib/modules/identity/adapters/mysql-api-key-repo";
+import type { ApiKeyRepo } from "@/lib/modules/identity/ports";
 import { EnvModelGateway } from "@/lib/modules/model-gateway/adapters/env-gateway";
 import type { ModelGatewayPort } from "@/lib/modules/model-gateway/ports";
 import { MysqlRunRepo } from "@/lib/modules/run/adapters/mysql-run-repo";
@@ -29,6 +32,8 @@ export interface Container {
   engine: EnginePort;
   gateway: ModelGatewayPort;
   storage: StoragePort;
+  apiKeys: ApiKeyRepo;
+  auth: Authorizer;
   runs: MysqlRunRepo;
   orchestrator: RunOrchestrator;
   worker: RunWorker;
@@ -88,6 +93,8 @@ function build(): Container {
   const bus = new RedisBus(env.redisUrl);
   const runs = new MysqlRunRepo(db);
   const storage = new LocalFsStorage();
+  const apiKeys = new MysqlApiKeyRepo(db);
+  const auth = new Authorizer({ apiKeys, sessions });
   const engine = createClaudeSdkEngine(env.dataDir, gateway);
 
   const orchestrator = new RunOrchestrator({
@@ -114,6 +121,8 @@ function build(): Container {
     engine,
     gateway,
     storage,
+    apiKeys,
+    auth,
     runs,
     orchestrator,
     worker,

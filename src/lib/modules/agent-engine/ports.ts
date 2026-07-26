@@ -9,6 +9,11 @@ export interface RunResult {
   sessionId?: string;
   cost?: { usd?: number; input: number; output: number };
   error?: { kind: string; message: string };
+  /**
+   * 结构化结果是从最终文本里提取的(而非 SDK 原生 structured_output)。
+   * 兼容网关不支持 output_format 时的降级标记,便于运维识别与排查。
+   */
+  salvagedFromText?: boolean;
 }
 
 /** 唯一与 claude-agent-sdk 接触的边界。实现只允许出现在 adapters/claude-sdk/**。 */

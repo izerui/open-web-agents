@@ -1,4 +1,5 @@
 import { getContainer } from "@/lib/container";
+import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { PathEscapeError } from "@/lib/modules/artifacts/domain/safe-path";
 
 export const runtime = "nodejs";
@@ -12,10 +13,20 @@ export const dynamic = "force-dynamic";
  * - `?download=a.md`→ 下载原始字节
  *
  * 所有路径都经 resolveInWorkspace 收敛在会话工作目录内,穿越一律 400。
+ * 访问前先过会话归属校验 —— 工作空间里可能有别人的敏感产物。
  */
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { sessions, storage } = getContainer();
+  const { sessions, storage, auth } = getContainer();
+
+  try {
+    const principal = await auth.resolveWeb(req);
+    await auth.assertSessionAccess(principal, id);
+  } catch (err) {
+    const res = authErrorResponse(err);
+    if (res) return res;
+    throw err;
+  }
 
   const session = await sessions.get(id);
   if (!session) return Response.json({ error: "session not found" }, { status: 404 });

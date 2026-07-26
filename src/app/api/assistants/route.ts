@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { getContainer } from "@/lib/container";
+import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import type { AssistantConfig } from "@/lib/modules/assistant/domain/config";
 
 export const runtime = "nodejs";
@@ -19,9 +20,21 @@ interface CreateBody {
   config?: Partial<AssistantConfig>;
 }
 
-/** 创建/更新助手(助手构建器的后端)。 */
+/**
+ * 创建/更新助手(助手构建器的后端)。
+ * 对外 API Key 一律拒绝 —— 否则调用方能改掉助手的提示词与输出契约。
+ */
 export async function POST(req: Request) {
-  const { assistants } = getContainer();
+  const { assistants, auth } = getContainer();
+
+  try {
+    auth.assertCanManageAssistants(await auth.resolveWeb(req));
+  } catch (err) {
+    const res = authErrorResponse(err);
+    if (res) return res;
+    throw err;
+  }
+
   const body = (await req.json().catch(() => ({}))) as CreateBody;
 
   if (!body.name?.trim()) {

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { getContainer } from "@/lib/container";
+import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { topicOf } from "@/lib/modules/run/application/orchestrator";
 import type { AgentEvent } from "@/lib/shared";
 
@@ -17,7 +18,16 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { runs, bus, sessions } = getContainer();
+  const { runs, bus, sessions, auth } = getContainer();
+
+  try {
+    const principal = await auth.resolveWeb(req);
+    await auth.assertSessionAccess(principal, id);
+  } catch (err) {
+    const res = authErrorResponse(err);
+    if (res) return res;
+    throw err;
+  }
 
   if (!(await sessions.get(id))) {
     return Response.json({ error: "session not found" }, { status: 404 });

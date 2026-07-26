@@ -7,6 +7,8 @@ import { desc, eq } from "drizzle-orm";
 interface Row {
   id: string;
   assistantId: string;
+  ownerId: string | null;
+  callerApiKeyId: string | null;
   workspaceDir: string;
   sdkSessionId: string | null;
   title: string | null;
@@ -19,6 +21,8 @@ function toSession(r: Row): Session {
   return {
     id: r.id,
     assistantId: r.assistantId,
+    ownerId: r.ownerId ?? undefined,
+    callerApiKeyId: r.callerApiKeyId ?? undefined,
     workspaceDir: r.workspaceDir,
     sdkSessionId: r.sdkSessionId ?? undefined,
     title: r.title ?? undefined,
@@ -31,6 +35,8 @@ function toSession(r: Row): Session {
 const COLUMNS = {
   id: sessions.id,
   assistantId: sessions.assistantId,
+  ownerId: sessions.ownerId,
+  callerApiKeyId: sessions.callerApiKeyId,
   workspaceDir: sessions.workspaceDir,
   sdkSessionId: sessions.sdkSessionId,
   title: sessions.title,
@@ -46,6 +52,8 @@ export class MysqlSessionRepo implements SessionRepo {
     await this.db.insert(sessions).values({
       id: s.id,
       assistantId: s.assistantId,
+      ownerId: s.ownerId,
+      callerApiKeyId: s.callerApiKeyId,
       workspaceDir: s.workspaceDir,
       title: s.title,
       status: "active",
