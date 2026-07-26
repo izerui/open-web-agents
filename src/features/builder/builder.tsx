@@ -29,6 +29,17 @@ function newMcpRow(): McpDraft {
   return { uid: crypto.randomUUID(), name: "", type: "http", url: "" };
 }
 
+/** 子代理:让助手把一类子任务交给一个带专属提示词的下级去做。 */
+interface SubagentDraft {
+  uid: string;
+  name: string;
+  prompt: string;
+}
+
+function newSubagentRow(): SubagentDraft {
+  return { uid: crypto.randomUUID(), name: "", prompt: "" };
+}
+
 interface Draft {
   id: string;
   name: string;
@@ -41,6 +52,7 @@ interface Draft {
   /** 逗号/换行分隔的技能名 */
   skillsText: string;
   mcpServers: McpDraft[];
+  subagents: SubagentDraft[];
   /** 需审批的工具名(逗号分隔) */
   approvalToolsText: string;
   /** 需审批的命令模式(逗号分隔) */
@@ -58,6 +70,7 @@ const EMPTY: Draft = {
   webhookUrl: "",
   skillsText: "",
   mcpServers: [],
+  subagents: [],
   approvalToolsText: "",
   approvalPatternsText: "",
 };
@@ -145,6 +158,10 @@ export function Builder() {
                 type: m.type,
                 url: m.type === "http" ? m.url.trim() : undefined,
               })),
+            // 名字与提示词都填了才算数 —— 半截的子代理存进去只会在运行时报错
+            subagents: draft.subagents
+              .filter((s) => s.name.trim() && s.prompt.trim())
+              .map((s) => ({ name: s.name.trim(), prompt: s.prompt.trim(), background: false })),
           },
         }),
       });
@@ -194,6 +211,13 @@ export function Builder() {
                 name: m.name ?? "",
                 type: m.type === "stdio" ? ("stdio" as const) : ("http" as const),
                 url: m.url ?? "",
+              }))
+            : [],
+          subagents: Array.isArray(cfg.subagents)
+            ? (cfg.subagents as { name?: string; prompt?: string }[]).map((s) => ({
+                uid: crypto.randomUUID(),
+                name: s.name ?? "",
+                prompt: s.prompt ?? "",
               }))
             : [],
         });
@@ -382,6 +406,57 @@ export function Builder() {
                 className="shrink-0 text-red-600 text-xs underline opacity-70 hover:opacity-100"
                 onClick={() =>
                   setDraft({ ...draft, mcpServers: draft.mcpServers.filter((_, j) => j !== i) })
+                }
+              >
+                删除
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs opacity-70">
+              子代理(可选)—— 把一类子任务交给带专属提示词的下级去做
+            </span>
+            <button
+              type="button"
+              className="text-xs underline opacity-60 hover:opacity-100"
+              onClick={() =>
+                setDraft({ ...draft, subagents: [...draft.subagents, newSubagentRow()] })
+              }
+            >
+              + 添加
+            </button>
+          </div>
+          {draft.subagents.length === 0 && <p className="text-xs opacity-40">未配置子代理</p>}
+          {draft.subagents.map((s, i) => (
+            <div key={s.uid} className="flex gap-2">
+              <input
+                className={`${field} max-w-[12rem]`}
+                value={s.name}
+                onChange={(e) => {
+                  const next = [...draft.subagents];
+                  next[i] = { ...s, name: e.target.value };
+                  setDraft({ ...draft, subagents: next });
+                }}
+                placeholder="名称,如 reviewer"
+              />
+              <textarea
+                className={`${field} min-h-[3rem]`}
+                value={s.prompt}
+                onChange={(e) => {
+                  const next = [...draft.subagents];
+                  next[i] = { ...s, prompt: e.target.value };
+                  setDraft({ ...draft, subagents: next });
+                }}
+                placeholder="这个子代理的职责与要求"
+              />
+              <button
+                type="button"
+                className="shrink-0 text-red-600 text-xs underline opacity-70 hover:opacity-100"
+                onClick={() =>
+                  setDraft({ ...draft, subagents: draft.subagents.filter((_, j) => j !== i) })
                 }
               >
                 删除
