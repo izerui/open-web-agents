@@ -143,7 +143,7 @@ docker compose up -d --scale worker=4   # worker 无本地状态,可直接扩
 web 与 worker **用同一个镜像**,只是启动命令不同。迁移由 `migrate` 服务单独跑一次 ——
 让每个实例各自迁移会在多实例下打架。
 
-不用容器也行(两种方式均已实测):
+不用容器也行:
 
 ```bash
 # 方式一:直接跑
@@ -153,6 +153,11 @@ pnpm worker:prod                     # worker(可起多个)
 # 方式二:用 standalone 产物(约 49MB,容器镜像用的就是它)
 cd .next/standalone && OWA_EMBEDDED_WORKER=0 node server.js
 ```
+
+worker 进程会自己加载 `.env` / `.env.local`(与 web 同一套配置)。
+这一步曾经缺失,后果不是起不来而是**起得来但什么都干不成**:进程健康、日志正常,
+而每个任务都以 `no key resolved from credential chain` 失败。
+教训写在这儿:验证部署方式时,**要让它真的跑完一个任务**,不能只看进程活着。
 
 ### 健康检查
 
