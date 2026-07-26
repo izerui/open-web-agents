@@ -54,7 +54,7 @@ describe("buildSdkOptions", () => {
     expect(o.cwd).toBe("/ws/s1");
     expect(o.model).toBe("sonnet");
     expect(o.resume).toBe("sess_9");
-    expect(o.permissionMode).toBe("bypassPermissions");
+    expect(o.permissionMode).toBe("default");
     expect(o.abortController).toBe(d.abort);
   });
 
@@ -133,5 +133,37 @@ describe("执行隔离进入 SDK options", () => {
   it("逃生舱可覆盖沙箱设置(留给特殊业务)", () => {
     const o = buildSdkOptions(specOf({ escapeHatch: { sandbox: undefined } }), ctx, withSandbox());
     expect(o.sandbox).toBeUndefined();
+  });
+});
+
+describe("canUseTool 守卫接入 SDK options", () => {
+  type Guard = (
+    t: string,
+    i: Record<string, unknown>,
+  ) => { behavior: "allow" } | { behavior: "deny"; message: string };
+
+  const guardOf = () => buildSdkOptions(specOf(), ctx, deps()).canUseTool as unknown as Guard;
+
+  it("沙箱关闭时守卫依然接上 —— 本地开发也有围栏", () => {
+    expect(typeof guardOf()).toBe("function");
+  });
+
+  it("工作空间内写入放行", () => {
+    expect(guardOf()("Write", { file_path: "/ws/s1/a.txt" }).behavior).toBe("allow");
+  });
+
+  it("越界写入被拒并带出原因", () => {
+    const r = guardOf()("Write", { file_path: "/Users/someone/escape.txt" });
+    expect(r.behavior).toBe("deny");
+    expect(r.behavior === "deny" && r.message).toMatch(/工作空间之外/);
+  });
+
+  it("共享 HOME 与临时目录放行(工具缓存需要)", () => {
+    expect(guardOf()("Write", { file_path: "/data/.agent-home/.cache/x" }).behavior).toBe("allow");
+    expect(guardOf()("Write", { file_path: "/tmp/scratch" }).behavior).toBe("allow");
+  });
+
+  it("Bash 不被守卫拦(交给内核沙箱)", () => {
+    expect(guardOf()("Bash", { command: "rm -rf /" }).behavior).toBe("allow");
   });
 });

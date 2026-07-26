@@ -2,6 +2,7 @@
 // 属 adapter 层,但刻意写成【不 import SDK】的纯函数,便于单测。
 
 import { materializeSandbox } from "@/lib/modules/agent-engine/domain/sandbox";
+import { guardToolUse } from "@/lib/modules/agent-engine/domain/tool-guard";
 import type { ModelSlots } from "@/lib/modules/model-gateway/ports";
 import type { AgentSpec, ResolvedCredentials, RunContext } from "@/lib/shared";
 
@@ -53,7 +54,11 @@ export function buildSdkOptions(
 ): Record<string, unknown> {
   const options: Record<string, unknown> = {
     // ① 框架默认(安全/隔离约定)
-    permissionMode: "bypassPermissions",
+    //
+    // 用 default 而非 bypassPermissions:后者的定义是"Bypass all permission checks",
+    // 连 canUseTool 都不会被调用 —— 实测在沙箱关闭时 agent 能随意写到宿主 HOME,
+    // 即零管控。default 模式下每个权限决策都路由到下面的 canUseTool,由平台自己判。
+    permissionMode: "default",
     cwd: ctx.workspaceDir,
     abortController: deps.abort,
 
@@ -80,7 +85,7 @@ export function buildSdkOptions(
     options.outputFormat = { type: "json_schema", schema: spec.outputSchema };
   }
 
-  // 执行隔离:cwd 只是默认起点,模型可用绝对路径写到工作空间之外 —— 围栏靠这里
+  // 执行隔离第一道:内核沙箱管住 Bash(命令文本匹配不可信,必须内核级)
   const { sandbox, disallowedTools } = materializeSandbox({
     enabled: deps.sandboxEnabled,
     workspaceDir: ctx.workspaceDir,
@@ -88,6 +93,23 @@ export function buildSdkOptions(
   });
   if (sandbox) options.sandbox = sandbox;
   if (disallowedTools.length) options.disallowedTools = disallowedTools;
+
+  // 执行隔离第二道:宿主侧文件工具按路径拦截。
+  // 它【不依赖内核沙箱】,故本地开发关掉沙箱时依然生效 —— 正是之前两次
+  // "agent 用绝对路径写到宿主 HOME" 的直接补救。
+  const guardPolicy = {
+    workspaceDir: ctx.workspaceDir,
+    allowedDirs: [deps.sharedHome, "/tmp", "/private/tmp", "/var/folders", "/private/var/folders"],
+  };
+  //
+  // 语义是【默认放行 + 路径越界即拒】:服务端没有人可以交互式确认,
+  // 所以这个回调既是"审批人"也是唯一的围栏。
+  options.canUseTool = (toolName: string, input: Record<string, unknown>) => {
+    const d = guardToolUse(toolName, input, guardPolicy);
+    return d.allow
+      ? { behavior: "allow" as const, updatedInput: input }
+      : { behavior: "deny" as const, message: d.reason };
+  };
 
   // ④ 逃生舱:最后 spread,覆盖以上任何默认
   return { ...options, ...spec.escapeHatch };
