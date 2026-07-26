@@ -45,14 +45,21 @@ export interface SdkOptionsDeps {
   /**
    * 人工审批钩子(HITL)。给了才启用审批;不给则审批规则被忽略。
    * 返回 true 放行、false 拒绝 —— 实现方负责超时兜底。
+   *
+   * signal 必须透传下去:运行被取消/超时中止时,挂着的审批要立刻收场,
+   * 否则等待方、定时器与待审记录会一直留到自己的 10 分钟超时
+   * (见 approval/ports.ts 的说明)。
    */
-  requestApproval?: (req: {
-    sessionId: string;
-    runId?: string;
-    toolName: string;
-    summary: string;
-    reason: string;
-  }) => Promise<{ approved: boolean; message?: string }>;
+  requestApproval?: (
+    req: {
+      sessionId: string;
+      runId?: string;
+      toolName: string;
+      summary: string;
+      reason: string;
+    },
+    signal?: AbortSignal,
+  ) => Promise<{ approved: boolean; message?: string }>;
 }
 
 /**
@@ -130,13 +137,17 @@ export function buildSdkOptions(
         // 一个需要人确认的危险操作,不能因为审批通道挂了就变成"没人拦"。
         let verdict: Awaited<ReturnType<NonNullable<typeof deps.requestApproval>>>;
         try {
-          verdict = await deps.requestApproval({
-            sessionId: ctx.sessionId,
-            runId: ctx.runId,
-            toolName,
-            summary: describeToolCall(toolName, input),
-            reason: need.reason ?? "需人工确认",
-          });
+          verdict = await deps.requestApproval(
+            {
+              sessionId: ctx.sessionId,
+              runId: ctx.runId,
+              toolName,
+              summary: describeToolCall(toolName, input),
+              reason: need.reason ?? "需人工确认",
+            },
+            // 本轮被取消/超时中止时,挂着的审批要跟着立刻收场
+            deps.abort.signal,
+          );
         } catch (err) {
           return {
             behavior: "deny" as const,

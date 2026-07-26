@@ -25,10 +25,17 @@ export type ApprovalOutcome =
 export interface ApprovalPort {
   /**
    * 发起审批并等待裁决。
+   *
    * 【必须】在 expiresAt 到点后返回 expired —— 没人审批时若无限等待,
    * worker 会被永久占住(这个坑在 run 超时那次已经踩过一次)。
+   *
+   * 【必须】响应 signal:运行被取消或超时中止时,这条待审请求要立刻收场。
+   * 曾经没有这个参数,等待只由自己的 10 分钟定时器驱动,于是运行早已结束,而
+   * waiter、定时器、Redis 里的 pending key 全都还在 —— worker 进程内按
+   * 「被中止的运行数 × 10 分钟」持续累积;更糟的是界面上那条待审请求照常显示,
+   * 用户点批准还能拿到 200「已裁决」,等于为一个不存在的运行授权了危险操作。
    */
-  request(req: ApprovalRequest): Promise<ApprovalOutcome>;
+  request(req: ApprovalRequest, signal?: AbortSignal): Promise<ApprovalOutcome>;
   /** 裁决一条待审请求。返回是否命中(已过期/不存在则 false)。 */
   resolve(id: string, outcome: ApprovalOutcome): Promise<boolean>;
   /** 列出某会话的待审请求,供界面展示。 */

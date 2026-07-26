@@ -25,14 +25,21 @@ export interface EngineDeps {
   gateway: ModelGatewayPort;
   /** 是否启用 OS 内核沙箱(macOS 本地开发常关:seatbelt 会吞 stdout)。 */
   sandboxEnabled: boolean;
-  /** 人工审批钩子(HITL);不给则不启用审批。 */
-  requestApproval?: (req: {
-    sessionId: string;
-    runId?: string;
-    toolName: string;
-    summary: string;
-    reason: string;
-  }) => Promise<{ approved: boolean; message?: string }>;
+  /**
+   * 人工审批钩子(HITL);不给则不启用审批。
+   * signal 是本轮的中止信号 —— 运行被取消时挂着的审批必须跟着收场,
+   * 否则待审记录会一直留到自己的超时(见 approval/ports.ts)。
+   */
+  requestApproval?: (
+    req: {
+      sessionId: string;
+      runId?: string;
+      toolName: string;
+      summary: string;
+      reason: string;
+    },
+    signal?: AbortSignal,
+  ) => Promise<{ approved: boolean; message?: string }>;
 }
 
 export class ClaudeSdkEngine implements EnginePort {

@@ -126,4 +126,65 @@ if (!URL) {
       expect(await approval.listPending("no-such-session")).toEqual([]);
     });
   });
+
+  // 运行被中止时,挂着的审批必须立刻收场。
+  //
+  // 曾经 request() 根本收不到 signal,等待只由自己的 10 分钟定时器驱动。于是运行
+  // (被取消、或撞上 30 分钟墙钟上限)早已结束,而 waiter、定时器、Redis 里的
+  // pending key 全都还在 —— worker 进程内按「被中止的运行数 × 10 分钟」持续累积。
+  // 更要命的是界面上那条待审请求照常列出来,用户点批准还会拿到 200「已裁决」:
+  // 他为一个不存在的运行授权了一次危险操作,审批记录与真实行为就此相反。
+  describe("RedisApproval / 【泄漏回归】随运行中止而收场", () => {
+    it("中止信号触发时立刻返回 expired,不等 10 分钟超时", async () => {
+      const ac = new AbortController();
+      const r = req();
+      const p = approval.request(r, ac.signal);
+      await waitFor(async () => (await approval.listPending(r.sessionId)).length === 1);
+
+      const started = Date.now();
+      ac.abort();
+      expect(await p).toEqual({ decision: "expired" });
+      // 真的是被信号叫醒的,而不是碰巧撞上超时
+      expect(Date.now() - started).toBeLessThan(2000);
+    });
+
+    it("中止后待审记录被清掉 —— 界面上不该再显示它", async () => {
+      const ac = new AbortController();
+      const r = req();
+      const p = approval.request(r, ac.signal);
+      await waitFor(async () => (await approval.listPending(r.sessionId)).length === 1);
+
+      ac.abort();
+      await p;
+      await waitFor(async () => (await approval.listPending(r.sessionId)).length === 0);
+      expect(await approval.listPending(r.sessionId)).toEqual([]);
+    });
+
+    it("中止后再去裁决会明确失败 —— 不能对一个不存在的运行报告「已裁决」", async () => {
+      const ac = new AbortController();
+      const r = req();
+      const p = approval.request(r, ac.signal);
+      await waitFor(async () => (await approval.listPending(r.sessionId)).length === 1);
+
+      ac.abort();
+      await p;
+      await waitFor(async () => (await approval.listPending(r.sessionId)).length === 0);
+      expect(await approval.resolve(r.id, { decision: "approved" })).toBe(false);
+    });
+
+    it("传入的信号已经是 aborted 时直接收场,不留任何痕迹", async () => {
+      const r = req();
+      expect(await approval.request(r, AbortSignal.abort())).toEqual({ decision: "expired" });
+      expect(await approval.listPending(r.sessionId)).toEqual([]);
+    });
+
+    it("没有中止时,正常裁决路径不受影响", async () => {
+      const ac = new AbortController();
+      const r = req();
+      const p = approval.request(r, ac.signal);
+      await waitFor(async () => (await approval.listPending(r.sessionId)).length === 1);
+      expect(await approval.resolve(r.id, { decision: "approved" })).toBe(true);
+      expect(await p).toMatchObject({ decision: "approved" });
+    });
+  });
 }

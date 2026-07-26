@@ -165,7 +165,7 @@ function build(): Container {
   });
   // 审批钩子:先把待审事件推上总线(界面才看得到),再挂起等裁决。
   // 超时兜底在 RedisApproval 里 —— 没人审批时到点自动拒,绝不永久占住 worker。
-  const engine = createClaudeSdkEngine(env.dataDir, gateway, env.sandbox, async (r) => {
+  const engine = createClaudeSdkEngine(env.dataDir, gateway, env.sandbox, async (r, signal) => {
     const id = randomUUID().replace(/-/g, "").slice(0, 24);
     const expiresAt = Date.now() + APPROVAL_TIMEOUT_MS;
 
@@ -177,16 +177,21 @@ function build(): Container {
       })
       .catch(() => {});
 
-    const outcome = await approval.request({
-      id,
-      sessionId: r.sessionId,
-      runId: r.runId,
-      toolName: r.toolName,
-      summary: r.summary,
-      reason: r.reason,
-      createdAt: Date.now(),
-      expiresAt,
-    });
+    const outcome = await approval.request(
+      {
+        id,
+        sessionId: r.sessionId,
+        runId: r.runId,
+        toolName: r.toolName,
+        summary: r.summary,
+        reason: r.reason,
+        createdAt: Date.now(),
+        expiresAt,
+      },
+      // 运行被取消/超时中止时,这条待审请求要立刻收场并清掉 Redis 记录 ——
+      // 否则界面上它还挂着,用户点批准还会收到"已裁决",而运行早就没了
+      signal,
+    );
 
     const label =
       outcome.decision === "approved"

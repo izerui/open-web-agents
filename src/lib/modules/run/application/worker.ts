@@ -222,4 +222,25 @@ export class RunWorker {
   stop(): void {
     this.stopped = true;
   }
+
+  /**
+   * 等在途任务收尾。返回是否干净排空(false = 超时,仍有任务在跑)。
+   *
+   * 【stop() 本身不等任何东西】—— 它只是让轮询循环下一拍别再认领。真正在跑的
+   * tick() 可能还要几分钟。之前的关停是 stop() 之后固定 setTimeout 5 秒就
+   * process.exit(0),从不追踪在途 promise:而 maxDurationMs 默认 30 分钟,
+   * 也就是说【几乎所有真实运行】都会被中途砍掉,行留在 running 直到租约过期,
+   * 然后被别的 worker 从头重跑 —— 正是那段注释声称要避免的「重复执行副作用」。
+   */
+  async drain(timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (this.running) {
+      const left = deadline - Date.now();
+      if (left <= 0) break;
+      // 睡眠不能超过剩余时间 —— 否则固定 100ms 的轮询粒度会让短超时实际等更久,
+      // 关停时那点超出就是白白多占的部署窗口
+      await new Promise((r) => setTimeout(r, Math.min(100, left)));
+    }
+    return !this.running;
+  }
 }

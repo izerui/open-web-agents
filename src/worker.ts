@@ -35,22 +35,36 @@ async function main(): Promise<void> {
   );
   worker.start();
 
+  /**
+   * 关停宽限期。到点仍未排空就强退,避免卡住部署。
+   * 默认 60 秒:比一个租约周期(60s)略长,常见的短任务能跑完;
+   * 真正的长任务本来就不该指望在关停窗口里做完,交给栅栏与孤儿回收兜底。
+   */
+  const graceMs = Number(process.env.OWA_SHUTDOWN_GRACE_MS ?? 60_000);
+
   let shuttingDown = false;
   /**
-   * 优雅退出:先停止认领新任务,给在跑的任务留出时间。
-   * 直接 kill 会让在跑的 run 变成孤儿 —— 虽然租约过期后能被回收,
-   * 但那意味着白白等一个租约周期,还可能重复执行副作用。
+   * 优雅退出:先停止认领新任务,再【真的等】在途任务收尾。
+   *
+   * 之前这里是 stop() 之后固定 setTimeout 5 秒就 process.exit(0),从不追踪在途
+   * promise。而 maxDurationMs 默认 30 分钟 —— 也就是说几乎所有真实运行都会被
+   * 中途砍掉,行留在 running 直到租约过期,再被别的 worker 从头重跑,
+   * 正是上面那段注释声称要避免的「重复执行副作用」。
+   * 注释描述的是意图,代码做的是相反的事。
    */
   const shutdown = (signal: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
-    console.log(`[owa-worker] 收到 ${signal},停止认领新任务…`);
+    console.log(`[owa-worker] 收到 ${signal},停止认领新任务,最多等 ${graceMs}ms…`);
     worker.stop();
-    // 给在跑的任务一点收尾时间;超时则强退,避免卡住部署
-    setTimeout(() => {
-      console.log("[owa-worker] 退出");
+    void worker.drain(graceMs).then((clean) => {
+      console.log(
+        clean
+          ? "[owa-worker] 在途任务已收尾,退出"
+          : "[owa-worker] 宽限期到仍有任务在跑,强制退出 —— 它们会在租约过期后被其它 worker 接手",
+      );
       process.exit(0);
-    }, 5000).unref();
+    });
   };
 
   process.on("SIGTERM", () => shutdown("SIGTERM"));

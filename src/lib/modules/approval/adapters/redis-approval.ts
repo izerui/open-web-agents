@@ -42,8 +42,11 @@ export class RedisApproval implements ApprovalPort {
     });
   }
 
-  async request(req: ApprovalRequest): Promise<ApprovalOutcome> {
+  async request(req: ApprovalRequest, signal?: AbortSignal): Promise<ApprovalOutcome> {
     const ttlMs = Math.max(1000, req.expiresAt - Date.now());
+
+    // 运行已经中止就别再挂上去了 —— 直接收场
+    if (signal?.aborted) return { decision: "expired" };
 
     // 先落待审再等待:否则界面可能查不到这条请求(拿不到就没法批)
     await this.cmd.set(PENDING_KEY(req.id), JSON.stringify(req), "PX", ttlMs);
@@ -51,12 +54,28 @@ export class RedisApproval implements ApprovalPort {
     await this.cmd.pexpire(SESSION_SET(req.sessionId), ttlMs + 60_000);
 
     return new Promise<ApprovalOutcome>((resolve) => {
+      let settled = false;
       const finish = (outcome: ApprovalOutcome) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
         this.waiters.delete(req.id);
         void this.cleanup(req);
         resolve(outcome);
       };
+      /**
+       * 运行被取消 / 超时中止时立刻收场。
+       *
+       * 少了这一条,等待就只由下面那个 10 分钟定时器驱动:运行早已结束,而
+       * waiter、定时器、Redis 里的 pending key 全都还留着 —— 进程内按
+       * 「被中止的运行数 × 10 分钟」持续累积。更要命的是界面上那条待审请求照常
+       * 列出来,用户点批准还会收到 200「已裁决」:他为一个不存在的运行
+       * 授权了一次危险操作,而审批记录与真实行为就此脱节。
+       */
+      const onAbort = () => finish({ decision: "expired" });
+      signal?.addEventListener("abort", onAbort, { once: true });
+
       // 超时即拒 —— 绝不让 worker 无限等人
       const timer = setTimeout(() => finish({ decision: "expired" }), ttlMs);
       this.waiters.set(req.id, finish);

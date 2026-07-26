@@ -313,3 +313,73 @@ describe("故障注入 / worker 韧性", () => {
     expect((await repo.get("r1"))?.state).toBe("failed");
   });
 });
+
+// 关停。之前是 stop() 之后固定 setTimeout 5 秒就 process.exit(0),从不追踪在途
+// promise —— 而 maxDurationMs 默认 30 分钟,几乎所有真实运行都会被中途砍掉,
+// 行留在 running 直到租约过期,再被别的 worker 从头重跑,正是注释声称要避免的
+// 「重复执行副作用」。注释描述的是意图,代码做的是相反的事。
+describe("关停 / drain 真的等在途任务", () => {
+  class TestRepo extends InMemoryRunRepo {
+    private prompts = new Map<string, string>();
+    async seed(id: string, sessionId: string, prompt: string) {
+      await this.create({ id, sessionId });
+      this.prompts.set(id, prompt);
+    }
+    async getPrompt(id: string): Promise<string | null> {
+      return this.prompts.get(id) ?? null;
+    }
+  }
+
+  class SlowEngine extends OkEngine {
+    async run(
+      spec: AgentSpec,
+      ctx: RunContext,
+      onEvent: (e: AgentEvent) => void,
+      signal: AbortSignal,
+    ) {
+      await new Promise((r) => setTimeout(r, 400));
+      return super.run(spec, ctx, onEvent, signal);
+    }
+  }
+
+  it("stop() 之后 drain 会等到任务真正落终态", async () => {
+    const repo = new TestRepo();
+    const { orch } = await setup({}, new SlowEngine());
+    const worker = new RunWorker(repo, orch, { idleMs: 5, heartbeatMs: 60_000 });
+
+    await repo.seed("r1", "s1", "go");
+    worker.start();
+    // 等它认领上
+    await new Promise((r) => setTimeout(r, 30));
+
+    worker.stop();
+    expect(await worker.drain(5000)).toBe(true);
+    // 关键:排空之后任务已经是终态,不会留在 running 等租约过期后被重跑
+    expect((await repo.get("r1"))?.state).toBe("success");
+  });
+
+  it("宽限期不够时如实返回 false,而不是假装已排空", async () => {
+    const repo = new TestRepo();
+    const { orch } = await setup({}, new SlowEngine());
+    const worker = new RunWorker(repo, orch, { idleMs: 5, heartbeatMs: 60_000 });
+
+    await repo.seed("r1", "s1", "go");
+    worker.start();
+    await new Promise((r) => setTimeout(r, 30));
+
+    worker.stop();
+    // 任务还要跑 ~370ms,20ms 的宽限期必然不够 —— 必须如实返回 false
+    expect(await worker.drain(20)).toBe(false);
+    worker.stop();
+    await worker.drain(5000);
+  });
+
+  it("空闲 worker 立刻排空", async () => {
+    const repo = new TestRepo();
+    const { orch } = await setup();
+    const worker = new RunWorker(repo, orch, { idleMs: 5 });
+    worker.start();
+    worker.stop();
+    expect(await worker.drain(2000)).toBe(true);
+  });
+});
