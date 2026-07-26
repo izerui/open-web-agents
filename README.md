@@ -113,8 +113,8 @@ const bus  = new RedisBus(env.redisUrl); // 曾是 InMemoryBus
 | `OWA_DATA_DIR` | 会话工作空间根目录(**会被解析成绝对路径**) |
 | `OWA_ANTHROPIC_BASE_URL` / `_API_KEY` | 平台默认凭证(三级链兜底) |
 | `OWA_MODEL` 与 `OWA_MODEL_{OPUS,SONNET,HAIKU,FABLE}` | 别名槽 → 真实 modelId |
-| `OWA_SESSION_SECRET` | 登录会话签名。**生产必须显式设置** |
-| `OWA_SECRET_KEY` | 用户凭证加密主密钥。**生产必须显式设置** |
+| `OWA_SESSION_SECRET` | 登录会话签名。**生产未设置会拒绝启动** |
+| `OWA_SECRET_KEY` | 用户凭证加密主密钥。**生产未设置会拒绝启动** |
 | `OWA_AUTH_REQUIRED` | 是否要求登录,默认 1;仅本地开发可设 0 |
 | `OWA_SANDBOX` | OS 内核沙箱,默认 1;**macOS 本地开发需设 0**,见限制 |
 | `OWA_EMBEDDED_WORKER` | 设 0 关掉 web 进程内嵌的 worker(拆进程部署时用) |
@@ -183,6 +183,7 @@ cd .next/standalone && OWA_EMBEDDED_WORKER=0 node server.js
 | GET | `/api/sessions/{id}/files` | cookie / key | 文件树 / 预览 / 下载 |
 | GET/POST | `/api/sessions/{id}/approvals` | cookie / key | 待审列表 / 批准拒绝 |
 | GET/POST | `/api/sessions/{id}/branch` | cookie / key | 运行列表 / 重跑 |
+| POST | `/api/sessions/{id}/cancel` | cookie / key | 取消未完成的运行(见下方延迟说明) |
 | POST | `/api/agents/{id}/invoke` | **key** | 对外触发,返回 taskId |
 | GET | `/api/agents/{id}/result` | **key** | 轮询结构化结果 |
 | POST | `/api/embed/token` | **key** | 换短时效嵌入令牌(服务端调) |
@@ -234,6 +235,20 @@ macOS 的 seatbelt 沙箱会**吞掉沙箱内 Bash 的 stdout** —— agent 跑
 知识库用 BM25,不是向量检索。术语命中型查询(手册 / SOP / FAQ)效果好;
 「换个说法问同一件事」这类语义查询会漏。检索接口与实现解耦,将来换向量检索不动上层。
 
+相关性下限是**相对**的(不低于本次最高分的 25%),不是固定阈值 —— 固定阈值会随语料
+规模漂移,实测 50 篇文档时命中直接归零,也就是「知识库越完善越检索不到」。
+中文分词过滤了虚词单字,否则一个「的」就能让任意两段中文匹配上。
+
+### 取消有最多 15 秒延迟
+
+`POST /cancel` 把运行标记为 cancelled,正在执行的那个 worker 要到下一次心跳
+(默认 15 秒)才发现自己已被取消并中止。接口的响应里如实写了这一点 ——
+界面不应在点下去的瞬间就宣称「已停止」。
+
+**已知不一致**:取消时 SSE 末帧报 `status:"failed"`(摘要是 `aborted by user`),
+而数据库里是 `cancelled`。因为 result 事件由编排层发布,它区分不了这次中止来自
+取消还是故障;worker 知道但手上没有总线。数据库口径是准确的。
+
 ---
 
 ## 开发
@@ -265,6 +280,11 @@ export OWA_TEST_REDIS_URL=redis://127.0.0.1:6379
 | 端口契约 | 一套断言跑两遍:内存实现与真实 MySQL / Redis |
 | 并发 | 多 worker 抢同一队列,断言每个任务恰好执行一次、且**并发真的发生了** |
 | 故障注入 | 每个可选依赖依次打挂,验证降级而非崩溃 |
+
+测试文件**串行执行**(`fileParallelism: false`)。契约测试与并发测试打同一个测试库,
+而队列语义是全局的(`claimNext` 取全表最旧、`_truncate` 清整张表),文件级并行下
+A 的清表会删掉 B 刚入队的任务。这曾经表现为「偶发失败」,加到第三个 DB 测试文件后
+变成必现,根因才浮出来。全套约 3 秒,串行换来的确定性远比这点墙钟时间值钱。
 
 ### 数据库变更
 
