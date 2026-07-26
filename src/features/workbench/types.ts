@@ -36,4 +36,8 @@ export interface Turn {
   prompt: string;
   events: AgentEvent[];
   running: boolean;
+  /** 该轮对应的运行 id;分支重跑要用它当分叉点。 */
+  runId?: string;
+  /** 从哪一轮分叉而来,界面显示分支标记。 */
+  branchedFrom?: string;
 }

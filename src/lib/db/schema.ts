@@ -95,6 +95,15 @@ export const runs = mysqlTable(
     sessionId: varchar("session_id", { length: 36 }).notNull(),
     status: varchar("status", { length: 16 }).notNull().default("pending"),
     prompt: varchar("prompt", { length: 8192 }).notNull().default(""),
+    /** 分支来源:从哪个运行分叉而来。为空即主线首轮。 */
+    parentRunId: varchar("parent_run_id", { length: 36 }),
+    /**
+     * 这一轮开始时 resume 的 SDK 会话。
+     * 必须逐轮记录 —— 只存会话的最新锚点就回不到中间某轮,分支重跑无从谈起。
+     */
+    resumeAnchor: varchar("resume_anchor", { length: 128 }),
+    /** 这一轮跑完产生的 SDK 会话,供后续轮次/分支续接。 */
+    sdkSessionId: varchar("sdk_session_id", { length: 128 }),
     /** 租约到期时间戳(ms)。NULL = 未认领或已完成 */
     leaseUntil: bigint("lease_until", { mode: "number" }),
     /** 被认领的次数,用于识别反复崩溃的任务 */
@@ -109,6 +118,7 @@ export const runs = mysqlTable(
   (t) => ({
     byClaim: index("idx_runs_claim").on(t.status, t.leaseUntil),
     bySession: index("idx_runs_session").on(t.sessionId),
+    byParent: index("idx_runs_parent").on(t.parentRunId),
   }),
 );
 

@@ -144,7 +144,13 @@ function EventBlock({ e }: { e: AgentEvent }) {
   }
 }
 
-export function Conversation({ turns }: { turns: Turn[] }) {
+export function Conversation({
+  turns,
+  onRerun,
+}: {
+  turns: Turn[];
+  onRerun?: (runId: string, prompt: string) => void;
+}) {
   if (turns.length === 0) {
     return (
       <p className="pt-16 text-center text-sm opacity-40">
@@ -159,9 +165,25 @@ export function Conversation({ turns }: { turns: Turn[] }) {
         const usage = sumUsage(turn.events);
         return (
           <section key={`${i}-${turn.prompt.slice(0, 20)}`} className="space-y-3">
-            <p className="rounded-lg bg-black/5 px-3 py-2 text-sm dark:bg-white/10">
-              {turn.prompt}
-            </p>
+            {turn.branchedFrom && <p className="text-xs opacity-45">⑂ 从上文某轮分叉重跑</p>}
+            <div className="group flex items-start gap-2">
+              <p className="flex-1 rounded-lg bg-black/5 px-3 py-2 text-sm dark:bg-white/10">
+                {turn.prompt}
+              </p>
+              {turn.runId && onRerun && !turn.running && (
+                <button
+                  type="button"
+                  className="shrink-0 pt-2 text-xs opacity-0 underline transition-opacity group-hover:opacity-60 hover:!opacity-100"
+                  title="用干净上下文换个说法重跑,不影响已有记录"
+                  onClick={() => {
+                    const next = window.prompt("重跑这一轮(干净上下文),换个说法:", turn.prompt);
+                    if (next?.trim() && turn.runId) onRerun(turn.runId, next.trim());
+                  }}
+                >
+                  重跑
+                </button>
+              )}
+            </div>
             <div className="space-y-2 pl-1">
               {foldEvents(turn.events).map((item, j) =>
                 item.kind === "tool" ? (

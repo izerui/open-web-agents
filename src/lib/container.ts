@@ -213,6 +213,9 @@ function build(): Container {
     // 凭证与 HOME 会在 buildSdkOptions 里覆盖掉这里的同名项。
     baseEnv: inheritedEnv(),
     replay,
+    runAnchor: (runId) => runs.getResumeAnchor(runId),
+    recordRunSession: (runId, sdkSessionId) => runs.setSdkSessionId(runId, sdkSessionId),
+    recordRunAnchor: (runId, anchor) => runs.setResumeAnchor(runId, anchor),
     // 每用户自带凭证:运行时才解密,解不开(换过主密钥)就当未配置、回落平台默认
     userCredentials: async (userId) => {
       const u = await users.get(userId);

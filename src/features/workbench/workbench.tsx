@@ -82,6 +82,9 @@ export function Workbench() {
         body: JSON.stringify({ prompt }),
         signal: abort.signal,
       });
+      // 运行 id 从响应头带回,分支重跑要用它当分叉点
+      const rid = res.headers.get("X-Run-Id");
+      if (rid) patch((t) => ({ ...t, runId: rid }));
       if (!res.body) throw new Error("无响应流");
       await readEventStream(res.body, push);
     } catch (err) {
@@ -93,6 +96,48 @@ export function Workbench() {
       setRunning(false);
       abortRef.current = null;
       // 运行结束刷新文件面板,新产物立刻可见
+      setFilesKey((k) => k + 1);
+    }
+  }
+
+  /**
+   * 重跑某一轮:入队一个【不 resume 的干净运行】,再挂上事件流看它跑。
+   * 已有记录原样保留,不被覆盖。
+   */
+  async function rerun(fromRunId: string, prompt: string) {
+    if (!sessionId || running) return;
+    setRunning(true);
+
+    const idx = turns.length;
+    setTurns((t) => [...t, { prompt, events: [], running: true, branchedFrom: fromRunId }]);
+    const patch = (fn: (t: Turn) => Turn) =>
+      setTurns((all) => all.map((t, i) => (i === idx ? fn(t) : t)));
+    const push = (e: AgentEvent) => patch((t) => ({ ...t, events: [...t.events, e] }));
+
+    const abort = new AbortController();
+    abortRef.current = abort;
+
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/branch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fromRunId, mode: "fresh", prompt }),
+      });
+      const d = (await res.json()) as { runId?: string; error?: string };
+      if (!res.ok || !d.runId) throw new Error(d.error ?? `HTTP ${res.status}`);
+      patch((t) => ({ ...t, runId: d.runId }));
+
+      // 分支已入队,挂上会话事件流观察 worker 执行
+      const stream = await fetch(`/api/sessions/${sessionId}/events`, { signal: abort.signal });
+      if (stream.body) await readEventStream(stream.body, push);
+    } catch (err) {
+      if (!abort.signal.aborted) {
+        push({ kind: "result", status: "failed", summary: String(err) });
+      }
+    } finally {
+      patch((t) => ({ ...t, running: false }));
+      setRunning(false);
+      abortRef.current = null;
       setFilesKey((k) => k + 1);
     }
   }
@@ -178,7 +223,7 @@ export function Workbench() {
         </div>
 
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-          <Conversation turns={turns} />
+          <Conversation turns={turns} onRerun={rerun} />
         </div>
 
         <ApprovalBar sessionId={sessionId} running={running} />

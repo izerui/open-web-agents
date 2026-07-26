@@ -41,12 +41,16 @@ function toRun(row: RunRow): Run {
 export class MysqlRunRepo implements RunRepo {
   constructor(private readonly db: Db) {}
 
-  async create(r: NewRun & { prompt?: string }): Promise<Run> {
+  async create(
+    r: NewRun & { prompt?: string; parentRunId?: string; resumeAnchor?: string },
+  ): Promise<Run> {
     await this.db.insert(runs).values({
       id: r.id,
       sessionId: r.sessionId,
       status: "pending",
       prompt: r.prompt ?? "",
+      parentRunId: r.parentRunId,
+      resumeAnchor: r.resumeAnchor,
       leaseUntil: null,
     });
     return { id: r.id, sessionId: r.sessionId, state: "pending", leaseUntil: null };
@@ -148,6 +152,71 @@ export class MysqlRunRepo implements RunRepo {
     return rows[0]?.prompt ?? null;
   }
 
+  /**
+   * 取这一轮该用的 resume 锚点。
+   * 返回 { anchored: true } 表示该运行有自己的锚点意图(含"首轮从零开始"),
+   * 上层就不该再回退到会话的最新锚点 —— 否则分支会串回主线。
+   */
+  async getResumeAnchor(id: string): Promise<{ anchored: boolean; anchor?: string }> {
+    const rows = await this.db
+      .select({ anchor: runs.resumeAnchor, parentRunId: runs.parentRunId })
+      .from(runs)
+      .where(eq(runs.id, id))
+      .limit(1);
+    const row = rows[0];
+    if (!row) return { anchored: false };
+    // 有父运行 = 这是分支,它的锚点意图是明确的(哪怕锚点为空表示从零重开)
+    if (row.parentRunId) return { anchored: true, anchor: row.anchor ?? undefined };
+    return row.anchor ? { anchored: true, anchor: row.anchor } : { anchored: false };
+  }
+
+  /** 记录这一轮【实际使用】的起跑锚点,供审计"这轮从哪儿起跑"。 */
+  async setResumeAnchor(id: string, anchor: string | null): Promise<void> {
+    await this.db.update(runs).set({ resumeAnchor: anchor }).where(eq(runs.id, id));
+  }
+
+  /** 记录这一轮跑完产生的 SDK 会话,供后续轮次与分支续接。 */
+  async setSdkSessionId(id: string, sdkSessionId: string): Promise<void> {
+    await this.db.update(runs).set({ sdkSessionId }).where(eq(runs.id, id));
+  }
+
+  /** 列出会话内的运行,含分支信息,供界面画分支树。 */
+  async listBySession(sessionId: string): Promise<
+    {
+      id: string;
+      status: RunState;
+      prompt: string;
+      parentRunId?: string;
+      resumeAnchor?: string;
+      sdkSessionId?: string;
+      createdAt: number;
+    }[]
+  > {
+    const rows = await this.db
+      .select({
+        id: runs.id,
+        status: runs.status,
+        prompt: runs.prompt,
+        parentRunId: runs.parentRunId,
+        resumeAnchor: runs.resumeAnchor,
+        sdkSessionId: runs.sdkSessionId,
+        createdAt: runs.createdAt,
+      })
+      .from(runs)
+      .where(eq(runs.sessionId, sessionId))
+      .orderBy(runs.createdAt)
+      .limit(500);
+    return rows.map((r) => ({
+      id: r.id,
+      status: r.status as RunState,
+      prompt: r.prompt,
+      parentRunId: r.parentRunId ?? undefined,
+      resumeAnchor: r.resumeAnchor ?? undefined,
+      sdkSessionId: r.sdkSessionId ?? undefined,
+      createdAt: r.createdAt.getTime(),
+    }));
+  }
+
   /** 记录终态结果,供轮询接口读取。 */
   async saveResult(
     id: string,
@@ -225,8 +294,19 @@ export class MysqlRunRepo implements RunRepo {
     }));
   }
 
-  /** 仅测试用:清空队列。 */
-  async _truncate(): Promise<void> {
+  /**
+   * 仅测试用:清空队列。
+   *
+   * 【危险操作,必须显式确认】曾经把 OWA_TEST_DATABASE_URL 指到开发库上跑测试,
+   * 这一句直接把开发数据删了。故要求调用方传入库名并自证是测试库 ——
+   * 让"误删开发数据"从"注意点"变成"做不到"。
+   */
+  async _truncate(confirmTestDatabase: string): Promise<void> {
+    if (!/test/i.test(confirmTestDatabase)) {
+      throw new Error(
+        `拒绝清空非测试库:${confirmTestDatabase} —— 库名须含 "test"(把 OWA_TEST_DATABASE_URL 指向专用测试库)`,
+      );
+    }
     await this.db.delete(runs).where(sql`1=1`);
   }
 }

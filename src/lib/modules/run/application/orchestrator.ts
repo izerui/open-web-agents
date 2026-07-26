@@ -39,6 +39,16 @@ export interface OrchestratorDeps {
    * 返回已解密的明文;没配置则返回空对象。
    */
   userCredentials?: (userId: string) => Promise<{ baseUrl?: string; key?: string }>;
+  /**
+   * 取该运行自带的 resume 锚点(分支重跑用)。
+   * anchored=true 时【必须】用它给出的锚点 —— 包括"从零重开"的空锚点;
+   * 否则回退到会话最新锚点,分支就会串回主线。
+   */
+  runAnchor?: (runId: string) => Promise<{ anchored: boolean; anchor?: string }>;
+  /** 记录本轮产生的 SDK 会话到该运行上,供后续分支续接。 */
+  recordRunSession?: (runId: string, sdkSessionId: string) => Promise<void>;
+  /** 记录本轮实际使用的起跑锚点,供审计。 */
+  recordRunAnchor?: (runId: string, anchor: string | null) => Promise<void>;
   /** 终态时投递 webhook(可选)。 */
   onComplete?: (info: {
     runId?: string;
@@ -81,12 +91,26 @@ export class RunOrchestrator {
     const credentials = resolveCredentials(chain);
     const model = resolveModelAlias(chain, assistant.config.model);
 
+    // 分支重跑:优先用该运行自己的锚点。只有它没有明确意图时才回退到会话最新状态
+    let resumeSessionId = session.sdkSessionId;
+    if (cmd.runId && this.deps.runAnchor) {
+      const a = await this.deps
+        .runAnchor(cmd.runId)
+        .catch((): { anchored: boolean; anchor?: string } => ({ anchored: false }));
+      if (a.anchored) resumeSessionId = a.anchor;
+    }
+
+    // 如实记下这一轮到底从哪儿起跑 —— 事后排查"为什么它记得/不记得某件事"全靠它
+    if (cmd.runId) {
+      await this.deps.recordRunAnchor?.(cmd.runId, resumeSessionId ?? null).catch(() => {});
+    }
+
     const ctx = {
       sessionId: cmd.sessionId,
       runId: cmd.runId,
       workspaceDir: session.workspaceDir,
       prompt: cmd.prompt,
-      resumeSessionId: session.sdkSessionId,
+      resumeSessionId,
       credentials,
       env: this.deps.baseEnv ?? {},
     };
@@ -106,7 +130,12 @@ export class RunOrchestrator {
     let result = await this.deps.engine.run(spec, ctx, publish, signal);
 
     if (result.sessionId) {
+      // 会话的"当前位置"跟着最新一次运行走
       await this.deps.sessions.setSdkSessionId(cmd.sessionId, result.sessionId);
+      // 同时记到本次运行上 —— 将来要从这一轮分叉时需要它
+      if (cmd.runId) {
+        await this.deps.recordRunSession?.(cmd.runId, result.sessionId).catch(() => {});
+      }
     }
 
     // 接口契约守门:声明了 outputSchema 就必须真的符合它,否则调用方会拿到"半对"的结果

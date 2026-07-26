@@ -15,6 +15,13 @@
       "when": 1785080264196,
       "tag": "0001_puzzling_silver_fox",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1785081602903,
+      "tag": "0002_organic_chameleon",
+      "breakpoints": true
     }
   ]
 }
