@@ -9,6 +9,8 @@ import {
   canInvokeAssistant,
   canManageAssistants,
 } from "@/lib/modules/access/domain/principal";
+import type { GrantRepo } from "@/lib/modules/access/ports";
+import type { AssistantRepo } from "@/lib/modules/assistant/ports";
 import { extractApiKey, hashApiKey, looksLikeApiKey } from "@/lib/modules/identity/domain/api-key";
 import type { ApiKeyRepo } from "@/lib/modules/identity/ports";
 import type { SessionRepo } from "@/lib/modules/session/ports";
@@ -22,6 +24,9 @@ export const WEB_USER_ID = "local-user";
 export interface AuthDeps {
   apiKeys: ApiKeyRepo;
   sessions: SessionRepo;
+  /** 助手定义与其授权 —— 判定「能否运行某助手」要读它们。 */
+  assistants: AssistantRepo;
+  grants: GrantRepo;
   /** 是否要求网页侧登录。生产必须为 true。 */
   authRequired: boolean;
   /** 从 cookie 解析当前登录用户。 */
@@ -117,8 +122,19 @@ export class Authorizer {
     );
   }
 
-  assertCanInvoke(p: Principal, assistantId: string): void {
-    this.assert(canInvokeAssistant(p, assistantId));
+  /**
+   * 运行助手前的授权关卡:key 绑定 + 资源 read 权限。
+   *
+   * 必须是 async —— 判定需要读助手归属与授权表。曾经这里是同步的纯 key 绑定检查,
+   * 看起来"有授权",实际上任何登录用户知道 id 就能跑别人的私有助手。
+   */
+  async assertCanInvoke(p: Principal, assistantId: string): Promise<void> {
+    const a = await this.deps.assistants.get(assistantId);
+    // 不区分「不存在」与「无权」,避免把 id 存在性当成预言机泄漏出去
+    if (!a) throw new Forbidden("no access to this assistant");
+    const subject = await this.subjectOf(p);
+    const grants = await this.deps.grants.listForResource("assistant", assistantId);
+    this.assert(canInvokeAssistant(p, { id: a.id, ownerId: a.ownerId }, subject, grants));
   }
 
   assertCanManageAssistants(p: Principal): void {

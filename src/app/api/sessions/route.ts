@@ -48,7 +48,7 @@ export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as { assistantId?: string; title?: string };
   const assistantId = body.assistantId ?? "default";
   try {
-    auth.assertCanInvoke(principal, assistantId);
+    await auth.assertCanInvoke(principal, assistantId);
   } catch (err) {
     const res = authErrorResponse(err);
     if (res) return res;

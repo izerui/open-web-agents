@@ -1,3 +1,4 @@
+import type { Grant, Subject } from "@/lib/modules/access/domain/grants";
 import {
   type Principal,
   type SessionOwnership,
@@ -63,18 +64,69 @@ describe("canAccessSession / API Key", () => {
   });
 });
 
+// 运行助手的授权。
+//
+// 这一组测试曾经把【越权当成规格】断言:"web 用户可调任意助手"、"未绑定的账户级 key
+// 可调任意助手" —— 两条都是绿的,而它们描述的正是漏洞本身。真实后果:知道 assistantId
+// 就能运行别人的私有助手,把对方的 systemPrompt 和知识库正文读出来;撤销分享无效。
+//
+// 所以下面刻意保留了"撤销分享后立刻失效"这条 —— 它是当初漏掉的那个场景。
 describe("canInvokeAssistant", () => {
-  it("web 用户可调任意助手", () => {
-    expect(canInvokeAssistant(webA, "any").allowed).toBe(true);
+  const a1 = { id: "a1", ownerId: "u1" };
+  const subj = (userId: string, role?: "admin" | "user"): Subject => ({ userId, role });
+  const shareTo = (userId: string, permission: "read" | "write" = "read"): Grant[] => [
+    {
+      id: "g1",
+      resourceType: "assistant",
+      resourceId: "a1",
+      principalType: "user",
+      principalId: userId,
+      permission,
+    },
+  ];
+
+  it("owner 可以运行自己的助手", () => {
+    expect(canInvokeAssistant(webA, a1, subj("u1"), []).allowed).toBe(true);
   });
-  it("未绑定的账户级 key 可调任意助手", () => {
-    expect(canInvokeAssistant(keyA, "a9").allowed).toBe(true);
+
+  it("【越权回归】其他登录用户仅凭 id 不能运行他人私有助手", () => {
+    const d = canInvokeAssistant(webB, a1, subj("u2"), []);
+    expect(d.allowed).toBe(false);
+    expect(d.allowed === false && d.reason).toMatch(/no access/);
   });
-  it("绑定了助手的 key 只能调那一个", () => {
-    expect(canInvokeAssistant(keyBound, "a1").allowed).toBe(true);
-    const d = canInvokeAssistant(keyBound, "a2");
+
+  it("被分享后可以运行", () => {
+    expect(canInvokeAssistant(webB, a1, subj("u2"), shareTo("u2")).allowed).toBe(true);
+  });
+
+  it("【撤销分享后立刻失效】—— 而不只是从列表里隐藏", () => {
+    expect(canInvokeAssistant(webB, a1, subj("u2"), []).allowed).toBe(false);
+  });
+
+  it("admin 可以运行(助手是平台配置资产,需要能接管)", () => {
+    expect(canInvokeAssistant(admin, a1, subj("root", "admin"), []).allowed).toBe(true);
+  });
+
+  it("【提权回归】账户级 key 只继承其归属用户的权限,不能靠签发 key 越权", () => {
+    const keyOfU2: Principal = { type: "apiKey", keyId: "k9", ownerId: "u2" };
+    expect(canInvokeAssistant(keyOfU2, a1, subj("u2"), []).allowed).toBe(false);
+    expect(canInvokeAssistant(keyOfU2, a1, subj("u2"), shareTo("u2")).allowed).toBe(true);
+  });
+
+  it("未绑定的 key 在本账户内可调任意助手", () => {
+    expect(canInvokeAssistant(keyA, a1, subj("u1"), []).allowed).toBe(true);
+  });
+
+  it("绑定了助手的 key 只能调那一个 —— 绑定先于授权判定", () => {
+    expect(canInvokeAssistant(keyBound, a1, subj("u1"), []).allowed).toBe(true);
+    const d = canInvokeAssistant(keyBound, { id: "a2", ownerId: "u1" }, subj("u1"), []);
     expect(d.allowed).toBe(false);
     expect(d.allowed === false && d.reason).toMatch(/bound to another/);
+  });
+
+  it("绑定的 key 即便指向的助手已不再有权,也拒绝", () => {
+    const bound: Principal = { type: "apiKey", keyId: "k4", ownerId: "u2", assistantId: "a1" };
+    expect(canInvokeAssistant(bound, a1, subj("u2"), []).allowed).toBe(false);
   });
 });
 

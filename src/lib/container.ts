@@ -157,6 +157,8 @@ function build(): Container {
   const auth = new Authorizer({
     apiKeys,
     sessions,
+    assistants,
+    grants,
     authRequired: env.authRequired,
     currentUser: (req) => authService.currentUser(req),
     groupIdsOf: (userId) => groupRepo.groupIdsOf(userId),

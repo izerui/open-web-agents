@@ -59,6 +59,12 @@ export class MysqlApiKeyRepo implements ApiKeyRepo {
     return row ? toRecord(row) : null;
   }
 
+  async get(id: string): Promise<ApiKeyRecord | null> {
+    const rows = await this.db.select(COLUMNS).from(apiKeys).where(eq(apiKeys.id, id)).limit(1);
+    const row = rows[0];
+    return row ? toRecord(row) : null;
+  }
+
   async list(ownerId: string): Promise<ApiKeyRecord[]> {
     const rows = await this.db
       .select(COLUMNS)

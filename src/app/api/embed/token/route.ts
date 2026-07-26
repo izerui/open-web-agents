@@ -31,7 +31,7 @@ export async function POST(req: Request) {
   if (!assistantId) return Response.json({ error: "assistantId is required" }, { status: 400 });
 
   try {
-    auth.assertCanInvoke(principal, assistantId);
+    await auth.assertCanInvoke(principal, assistantId);
   } catch (err) {
     const res = authErrorResponse(err);
     if (res) return res;

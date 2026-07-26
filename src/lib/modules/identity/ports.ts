@@ -21,6 +21,8 @@ export interface ApiKeyRepo {
   create(k: NewApiKey): Promise<ApiKeyRecord>;
   /** 按哈希查找 —— 调用方传明文,上层负责哈希后再查。 */
   findByHash(hashedKey: string): Promise<ApiKeyRecord | null>;
+  /** 按 id 取 —— 吊销前必须先查归属,否则任何人都能删别人的 key。 */
+  get(id: string): Promise<ApiKeyRecord | null>;
   list(ownerId: string): Promise<ApiKeyRecord[]>;
   revoke(id: string): Promise<void>;
   touch(id: string, at: number): Promise<void>;

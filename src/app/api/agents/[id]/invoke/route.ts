@@ -33,7 +33,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   let principal: Awaited<ReturnType<typeof auth.requireApiKey>>;
   try {
     principal = await auth.requireApiKey(req);
-    auth.assertCanInvoke(principal, assistantId);
+    await auth.assertCanInvoke(principal, assistantId);
   } catch (err) {
     const res = authErrorResponse(err);
     if (res) return res;
