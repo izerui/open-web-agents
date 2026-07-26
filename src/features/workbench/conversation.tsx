@@ -1,6 +1,7 @@
 "use client";
 
 import type { AgentEvent } from "@/lib/shared";
+import { useState } from "react";
 import type { Turn } from "./types";
 
 /** 把 tool_use 与其 tool_result 配对,渲染成一条可折叠的工具调用。 */
@@ -64,6 +65,122 @@ export function sumUsage(events: AgentEvent[]): { input: number; output: number 
     output += u.output;
   }
   return { input, output };
+}
+
+type QuestionEvent = Extract<AgentEvent, { kind: "question" }>;
+
+/**
+ * agent 的提问 —— 渲染成可点的选项,而不是一坨 JSON。
+ *
+ * 【为什么点了要作为下一轮发出去】SDK 的 canUseTool / PreToolUse 都只能放行或拒绝,
+ * 给不了工具结果,没法在同一轮里把答案塞回去(见 shared/types.ts)。
+ * 所以这里把选择拼成一句话作为新一轮的输入 —— agent 侧看到的是一次正常的多轮对话。
+ *
+ * 【为什么只有最新一轮可点】历史轮次的提问早就被后续对话回答过了,
+ * 再摆着可点的按钮会让人以为还能改,点下去却是凭空多发一轮。
+ */
+function QuestionBlock({
+  e,
+  answerable,
+  onAnswer,
+}: {
+  e: QuestionEvent;
+  answerable: boolean;
+  onAnswer?: (text: string) => void;
+}) {
+  const [picked, setPicked] = useState<Record<number, Set<string>>>({});
+
+  const toggle = (qi: number, label: string, multi: boolean) => {
+    setPicked((prev) => {
+      const cur = new Set(prev[qi] ?? []);
+      if (multi) {
+        if (cur.has(label)) cur.delete(label);
+        else cur.add(label);
+      } else {
+        // 单选:点同一个再点一次可以取消,免得选错了没法回头
+        if (cur.has(label)) cur.clear();
+        else {
+          cur.clear();
+          cur.add(label);
+        }
+      }
+      return { ...prev, [qi]: cur };
+    });
+  };
+
+  const answered = e.questions.map((_, i) => [...(picked[i] ?? [])]);
+  const complete = answered.every((a) => a.length > 0);
+
+  const submit = () => {
+    if (!complete || !onAnswer) return;
+    // 多问一起答时带上标题,agent 才分得清哪个答案对哪个问题
+    const text = e.questions
+      .map((q, i) => {
+        const ans = answered[i]?.join("、") ?? "";
+        return e.questions.length > 1 ? `${q.header ?? q.question}:${ans}` : ans;
+      })
+      .join("\n");
+    onAnswer(text);
+  };
+
+  return (
+    <div className="space-y-3 rounded-lg border border-blue-500/25 bg-blue-500/[0.04] p-3">
+      <p className="text-xs opacity-55">助手在等你选择</p>
+      {e.questions.map((q, qi) => (
+        <div key={`${q.question}-${qi}`} className="space-y-2">
+          <p className="font-medium text-sm">
+            {q.question}
+            {q.multiSelect && <span className="ml-2 text-xs opacity-50">(可多选)</span>}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {q.options.map((o) => {
+              const on = (picked[qi] ?? new Set()).has(o.label);
+              return (
+                <button
+                  key={o.label}
+                  type="button"
+                  disabled={!answerable}
+                  title={o.description}
+                  onClick={() => toggle(qi, o.label, q.multiSelect === true)}
+                  className={`rounded-full border px-3 py-1 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                    on
+                      ? "border-blue-500 bg-blue-500 text-white"
+                      : "border-black/15 hover:border-black/40 dark:border-white/25 dark:hover:border-white/60"
+                  }`}
+                >
+                  {o.label}
+                </button>
+              );
+            })}
+          </div>
+          {/* 描述是 agent 写给用户的判断依据,不该只藏在 title 里 */}
+          {q.options.some((o) => o.description) && (
+            <ul className="space-y-0.5 text-xs opacity-45">
+              {q.options
+                .filter((o) => o.description)
+                .map((o) => (
+                  <li key={`d-${o.label}`}>
+                    {o.label} —— {o.description}
+                  </li>
+                ))}
+            </ul>
+          )}
+        </div>
+      ))}
+      {answerable ? (
+        <button
+          type="button"
+          onClick={submit}
+          disabled={!complete}
+          className="rounded bg-black px-3 py-1.5 text-sm text-white disabled:opacity-35 dark:bg-white dark:text-black"
+        >
+          {complete ? "发送选择" : "请先选择"}
+        </button>
+      ) : (
+        <p className="text-xs opacity-40">这是历史提问,已由后续对话回答</p>
+      )}
+    </div>
+  );
 }
 
 function ToolBlock({ call }: { call: ToolCall }) {
@@ -153,9 +270,12 @@ function EventBlock({ e }: { e: AgentEvent }) {
 export function Conversation({
   turns,
   onRerun,
+  onAnswer,
 }: {
   turns: Turn[];
   onRerun?: (runId: string, prompt: string) => void;
+  /** 用户点了 agent 提问里的选项 —— 作为新一轮发出去。 */
+  onAnswer?: (text: string) => void;
 }) {
   if (turns.length === 0) {
     return (
@@ -191,13 +311,23 @@ export function Conversation({
               )}
             </div>
             <div className="space-y-2 pl-1">
-              {foldEvents(turn.events).map((item, j) =>
-                item.kind === "tool" ? (
-                  <ToolBlock key={`t-${j}-${item.tool}`} call={item} />
-                ) : (
-                  <EventBlock key={`e-${j}-${item.event.kind}`} e={item.event} />
-                ),
-              )}
+              {foldEvents(turn.events).map((item, j) => {
+                if (item.kind === "tool") {
+                  return <ToolBlock key={`t-${j}-${item.tool}`} call={item} />;
+                }
+                if (item.event.kind === "question") {
+                  return (
+                    <QuestionBlock
+                      key={`q-${j}`}
+                      e={item.event}
+                      // 只有最新一轮、且已经跑完的提问才可点(见 QuestionBlock 注释)
+                      answerable={i === turns.length - 1 && !turn.running && !!onAnswer}
+                      onAnswer={onAnswer}
+                    />
+                  );
+                }
+                return <EventBlock key={`e-${j}-${item.event.kind}`} e={item.event} />;
+              })}
               {turn.running && <p className="text-xs opacity-40">▍运行中…</p>}
               {(usage.input > 0 || usage.output > 0) && (
                 <p className="text-xs opacity-35">

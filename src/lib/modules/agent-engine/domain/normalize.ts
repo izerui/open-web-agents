@@ -8,6 +8,49 @@ import { redactInput, redactSecrets } from "./redact";
 /** 单条文本最大保留长度,超出截断(避免撑爆 SSE 与 UI;完整产物在工作区磁盘上)。 */
 const MAX_LEN = 4000;
 
+type Asked = Extract<AgentEvent, { kind: "question" }>["questions"];
+
+/**
+ * 解析 AskUserQuestion 的入参。
+ *
+ * 【形状不合就返回 null,退回普通 tool_use】—— SDK 改了入参结构时,
+ * 宁可退化成"显示一坨 JSON"(难看但信息没丢),也不要抛异常或渲染出一个空按钮组:
+ * 那会让用户对着一个点不动的提问干等。ACL 的本分是隔离变化,不是假设变化不会发生。
+ */
+function parseQuestions(input: unknown): Asked | null {
+  const qs = (input as { questions?: unknown })?.questions;
+  if (!Array.isArray(qs) || qs.length === 0) return null;
+
+  const out: Asked = [];
+  for (const raw of qs) {
+    const q = raw as {
+      question?: unknown;
+      header?: unknown;
+      multiSelect?: unknown;
+      options?: unknown;
+    };
+    if (typeof q.question !== "string" || !Array.isArray(q.options)) return null;
+
+    const options = q.options
+      .map((o) => o as { label?: unknown; description?: unknown })
+      .filter((o) => typeof o.label === "string" && o.label.trim() !== "")
+      .map((o) => ({
+        label: clip(o.label as string),
+        description: typeof o.description === "string" ? clip(o.description) : undefined,
+      }));
+    // 一个选项都没有的提问点不了,不如退回原始形态让用户至少看得见内容
+    if (options.length === 0) return null;
+
+    out.push({
+      question: clip(q.question),
+      header: typeof q.header === "string" ? clip(q.header) : undefined,
+      multiSelect: q.multiSelect === true,
+      options,
+    });
+  }
+  return out;
+}
+
 function clip(s: string): string {
   return s.length <= MAX_LEN ? s : `${s.slice(0, MAX_LEN)}\n…(已截断,共 ${s.length} 字)`;
 }
@@ -92,13 +135,21 @@ export function normalizeSdkMessage(msg: unknown): AgentEvent[] {
       } else if (blk?.type === "thinking" && typeof blk.thinking === "string") {
         out.push({ kind: "thinking", text: redactSecrets(clip(blk.thinking)), subagent: sub });
       } else if (blk?.type === "tool_use") {
-        out.push({
-          kind: "tool_use",
-          tool: blk.name ?? "",
-          input: redactInput(blk.input),
-          toolUseId: blk.id,
-          subagent: sub,
-        });
+        // AskUserQuestion 是"问用户"而不是"做事",翻成专门的事件类型。
+        // 当成普通 tool_use 推出去的话,界面上就是一坨 JSON —— 用户根本不知道
+        // 那是在问自己,而 agent 已经把选项都列好了(见 types.ts 对 question 的说明)。
+        const asked = blk.name === "AskUserQuestion" ? parseQuestions(blk.input) : null;
+        if (asked) {
+          out.push({ kind: "question", toolUseId: blk.id, questions: asked });
+        } else {
+          out.push({
+            kind: "tool_use",
+            tool: blk.name ?? "",
+            input: redactInput(blk.input),
+            toolUseId: blk.id,
+            subagent: sub,
+          });
+        }
       }
     }
 

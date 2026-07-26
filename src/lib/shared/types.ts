@@ -97,6 +97,29 @@ export type AgentEvent =
   | { kind: "thinking"; text: string; subagent?: string }
   | { kind: "tool_use"; tool: string; input: unknown; toolUseId?: string; subagent?: string }
   | { kind: "tool_result"; toolUseId?: string; text: string; isError?: boolean; subagent?: string }
+  /**
+   * agent 向用户提问(SDK 的 AskUserQuestion)。
+   *
+   * 【为什么要单独一类事件】SDK 把它实现成一个普通工具,于是它在事件流里跟
+   * Read/Bash 长得一样 —— 界面上就是一坨 JSON,用户根本不知道那是在问自己。
+   * 而这恰恰是"网页对话"这条入口最该做好的交互:agent 已经把选项都列好了,
+   * 白白退化成让用户自己打字。
+   *
+   * 【为什么不在同一轮里作答】SDK 的 canUseTool 与 PreToolUse hook 都只能
+   * 放行/拒绝/改入参,【给不了工具结果】—— 无法替用户把答案塞回去。
+   * 所以走多轮:这一轮 SDK 记「用户未作答」,界面把选项渲染成按钮,
+   * 用户点了就作为下一轮消息发出去。agent 侧看到的就是一次正常的多轮对话。
+   */
+  | {
+      kind: "question";
+      toolUseId?: string;
+      questions: {
+        question: string;
+        header?: string;
+        multiSelect?: boolean;
+        options: { label: string; description?: string }[];
+      }[];
+    }
   | { kind: "status"; label: string; state?: string }
   | { kind: "artifact"; path: string; mime: string; url?: string }
   | { kind: "usage"; messageId?: string; input: number; output: number }
@@ -126,7 +149,9 @@ export type AgentEvent =
     };
 
 /** state 类事件在断线重连时需重放;noise 类可滚动淘汰。 */
-export const STATE_EVENT_KINDS = ["status", "artifact", "usage", "result"] as const;
+// question 归入 state 类:它是【等用户操作】的事件,断线重连后必须还在,
+// 否则刷新一下那几个选项就没了,用户只能干等一个永远不会再出现的提问。
+export const STATE_EVENT_KINDS = ["status", "artifact", "usage", "result", "question"] as const;
 
 export function isStateEvent(e: AgentEvent): boolean {
   return (STATE_EVENT_KINDS as readonly string[]).includes(e.kind);

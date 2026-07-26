@@ -73,10 +73,17 @@ export function Workbench() {
     return session.id;
   }
 
-  async function send() {
-    const prompt = input.trim();
+  /**
+   * 发起一轮。
+   *
+   * `text` 用于【非输入框来源】的发送 —— 目前是用户点了 agent 提问里的选项。
+   * 不走输入框是有意的:那些选项是 agent 给的,不该先塞进输入框再让用户按回车,
+   * 也不该把用户正在打的字冲掉。
+   */
+  async function send(text?: string) {
+    const prompt = (text ?? input).trim();
     if (!prompt || running) return;
-    setInput("");
+    if (text === undefined) setInput("");
     setRunning(true);
 
     const idx = turns.length;
@@ -237,7 +244,7 @@ export function Workbench() {
         </div>
 
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-          <Conversation turns={turns} onRerun={rerun} />
+          <Conversation turns={turns} onRerun={rerun} onAnswer={(t) => void send(t)} />
         </div>
 
         <ApprovalBar sessionId={sessionId} running={running} />
@@ -247,7 +254,7 @@ export function Workbench() {
             className="flex-1 rounded border border-black/15 bg-transparent px-3 py-2 text-sm outline-none focus:border-black/40 dark:border-white/20 dark:focus:border-white/50"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && send()}
+            onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && void send()}
             placeholder={running ? "运行中…" : "说点什么"}
             disabled={running}
           />
@@ -263,7 +270,7 @@ export function Workbench() {
             <button
               type="button"
               className="rounded bg-black px-4 py-2 text-sm text-white disabled:opacity-40 dark:bg-white dark:text-black"
-              onClick={send}
+              onClick={() => void send()}
               disabled={!input.trim()}
             >
               发送

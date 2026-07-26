@@ -6,6 +6,7 @@ import {
   normalizeSdkMessage,
   shortSubagentId,
 } from "@/lib/modules/agent-engine/domain/normalize";
+import { type AgentEvent, isStateEvent } from "@/lib/shared";
 import { describe, expect, it } from "vitest";
 
 describe("normalizeSdkMessage / assistant", () => {
@@ -257,5 +258,91 @@ describe("shortSubagentId", () => {
   });
   it("短 id 原样", () => {
     expect(shortSubagentId("sub1")).toBe("sub1");
+  });
+});
+
+// AskUserQuestion 是"问用户"而不是"做事",不能跟 Read/Bash 一样当普通工具推出去。
+//
+// 之前它就是一条 tool_use,界面上渲染成一坨 JSON —— 用户根本不知道那是在问自己,
+// 而 agent 已经把选项都列好了。SDK 随后回一句 "The user did not answer the questions.",
+// agent 只好用纯文本把同一个问题再问一遍,结构化选项白费。
+describe("normalizeSdkMessage / AskUserQuestion", () => {
+  const ask = (input: unknown) =>
+    normalizeSdkMessage({
+      type: "assistant",
+      message: {
+        content: [{ type: "tool_use", id: "tu_1", name: "AskUserQuestion", input }],
+      },
+    }) as AgentEvent[];
+
+  const VALID = {
+    questions: [
+      {
+        header: "行程类型",
+        question: "你想规划哪方面的行程?",
+        multiSelect: false,
+        options: [
+          { label: "日常工作/学习", description: "会议、任务、学习" },
+          { label: "出行/旅游", description: "出行、游玩、购物" },
+        ],
+      },
+    ],
+  };
+
+  it("翻成 question 事件,而不是 tool_use", () => {
+    const [e] = ask(VALID);
+    expect(e?.kind).toBe("question");
+    expect(e?.kind === "question" && e.questions[0]?.options.map((o) => o.label)).toEqual([
+      "日常工作/学习",
+      "出行/旅游",
+    ]);
+    expect(e?.kind === "question" && e.toolUseId).toBe("tu_1");
+  });
+
+  it("带上 header 与 multiSelect,界面要靠它们决定怎么渲染", () => {
+    const [e] = ask({
+      questions: [
+        { header: "口味", question: "选几个?", multiSelect: true, options: [{ label: "甜" }] },
+      ],
+    });
+    expect(e?.kind === "question" && e.questions[0]?.header).toBe("口味");
+    expect(e?.kind === "question" && e.questions[0]?.multiSelect).toBe(true);
+  });
+
+  it("multiSelect 缺省时按单选,不能猜成多选", () => {
+    const [e] = ask({ questions: [{ question: "q", options: [{ label: "a" }] }] });
+    expect(e?.kind === "question" && e.questions[0]?.multiSelect).toBe(false);
+  });
+
+  // 形状不合就退回普通 tool_use:难看但信息没丢,
+  // 好过渲染出一个点不动的空按钮组让用户干等
+  for (const [name, bad] of [
+    ["questions 不是数组", { questions: "x" }],
+    ["questions 为空", { questions: [] }],
+    ["缺 question 文本", { questions: [{ options: [{ label: "a" }] }] }],
+    ["缺 options", { questions: [{ question: "q" }] }],
+    ["options 里没有可用 label", { questions: [{ question: "q", options: [{ label: "" }] }] }],
+    ["入参为 null", null],
+  ] as const) {
+    it(`形状不合(${name})时退回 tool_use,不丢信息`, () => {
+      const [e] = ask(bad);
+      expect(e?.kind).toBe("tool_use");
+      expect(e?.kind === "tool_use" && e.tool).toBe("AskUserQuestion");
+    });
+  }
+
+  it("其它工具不受影响", () => {
+    const out = normalizeSdkMessage({
+      type: "assistant",
+      message: {
+        content: [{ type: "tool_use", id: "t", name: "Read", input: { file_path: "a" } }],
+      },
+    }) as AgentEvent[];
+    expect(out[0]?.kind).toBe("tool_use");
+  });
+
+  it("question 属于 state 类事件 —— 断线重连后选项必须还在", () => {
+    const [e] = ask(VALID);
+    expect(e && isStateEvent(e)).toBe(true);
   });
 });
