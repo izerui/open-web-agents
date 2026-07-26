@@ -6,6 +6,8 @@ import { type Db, createDb } from "@/lib/db/client";
 import { type Env, loadEnv } from "@/lib/env";
 import { createClaudeSdkEngine } from "@/lib/modules/agent-engine/adapters/claude-sdk/default-engine";
 import type { EnginePort } from "@/lib/modules/agent-engine/ports";
+import { LocalFsStorage } from "@/lib/modules/artifacts/adapters/local-fs-storage";
+import type { StoragePort } from "@/lib/modules/artifacts/ports";
 import { MysqlAssistantRepo } from "@/lib/modules/assistant/adapters/mysql-assistant-repo";
 import type { AssistantRepo } from "@/lib/modules/assistant/ports";
 import { RedisBus } from "@/lib/modules/events/adapters/redis-bus";
@@ -26,6 +28,7 @@ export interface Container {
   bus: BusPort;
   engine: EnginePort;
   gateway: ModelGatewayPort;
+  storage: StoragePort;
   runs: MysqlRunRepo;
   orchestrator: RunOrchestrator;
   worker: RunWorker;
@@ -84,6 +87,7 @@ function build(): Container {
   void assistants.upsert(DEFAULT_ASSISTANT).catch(() => {});
   const bus = new RedisBus(env.redisUrl);
   const runs = new MysqlRunRepo(db);
+  const storage = new LocalFsStorage();
   const engine = createClaudeSdkEngine(env.dataDir, gateway);
 
   const orchestrator = new RunOrchestrator({
@@ -101,7 +105,19 @@ function build(): Container {
   const worker = new RunWorker(runs, orchestrator);
   worker.start();
 
-  return { env, db, sessions, assistants, bus, engine, gateway, runs, orchestrator, worker };
+  return {
+    env,
+    db,
+    sessions,
+    assistants,
+    bus,
+    engine,
+    gateway,
+    storage,
+    runs,
+    orchestrator,
+    worker,
+  };
 }
 
 // dev 下 Next 会热重载模块,挂到 globalThis 上避免连接池与 worker 被重复创建

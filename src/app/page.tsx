@@ -1,5 +1,5 @@
-import { ChatView } from "@/features/chat/chat-view";
+import { Workbench } from "@/features/workbench/workbench";
 
 export default function Home() {
-  return <ChatView />;
+  return <Workbench />;
 }
