@@ -124,13 +124,25 @@ export function buildSdkOptions(
     if (deps.requestApproval) {
       const need = needsApproval(toolName, input, spec.approvalRules);
       if (need.needed) {
-        const verdict = await deps.requestApproval({
-          sessionId: ctx.sessionId,
-          runId: ctx.runId,
-          toolName,
-          summary: describeToolCall(toolName, input),
-          reason: need.reason ?? "需人工确认",
-        });
+        // 【必须 fail-closed】等待审批期间 Redis 不可达时这个 await 会 reject。
+        // 曾经没有 try:promise 被 reject,代码根本走不到下面的 deny 分支,
+        // 安全的失败闭合路径被整个跳过 —— 会抛异常的围栏不是围栏。
+        // 一个需要人确认的危险操作,不能因为审批通道挂了就变成"没人拦"。
+        let verdict: Awaited<ReturnType<NonNullable<typeof deps.requestApproval>>>;
+        try {
+          verdict = await deps.requestApproval({
+            sessionId: ctx.sessionId,
+            runId: ctx.runId,
+            toolName,
+            summary: describeToolCall(toolName, input),
+            reason: need.reason ?? "需人工确认",
+          });
+        } catch (err) {
+          return {
+            behavior: "deny" as const,
+            message: `审批通道不可用,按拒绝处理:${err instanceof Error ? err.message : String(err)}`,
+          };
+        }
         if (!verdict.approved) {
           return {
             behavior: "deny" as const,

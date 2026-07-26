@@ -196,6 +196,34 @@ describe("canUseTool 守卫接入 SDK options", () => {
     expect(r.behavior === "deny" && r.message).toMatch(/超时/);
   });
 
+  // 审批通道本身出故障时的行为,曾经完全没被覆盖。
+  // 当时 `await deps.requestApproval(...)` 没有 try:promise 被 reject,
+  // 代码根本走不到 deny 分支,fail-closed 路径被整个跳过 ——
+  // 一个需要人确认的危险操作,不能因为审批通道挂了就变成"没人拦"。
+  it("【fail-closed 回归】审批通道抛异常时必须拒绝,不能放行", async () => {
+    const o = buildSdkOptions(specOf({ approvalRules: { tools: ["Bash"] } }), ctx, {
+      ...deps(),
+      requestApproval: async () => {
+        throw new Error("redis 不可达");
+      },
+    });
+    const guard = o.canUseTool as unknown as Guard;
+    const r = await guard("Bash", { command: "rm -rf /important" });
+    expect(r.behavior).toBe("deny");
+    expect(r.behavior === "deny" && r.message).toMatch(/审批通道不可用/);
+  });
+
+  it("审批通道故障不影响无需审批的工具", async () => {
+    const o = buildSdkOptions(specOf({ approvalRules: { tools: ["Bash"] } }), ctx, {
+      ...deps(),
+      requestApproval: async () => {
+        throw new Error("redis 不可达");
+      },
+    });
+    const guard = o.canUseTool as unknown as Guard;
+    expect((await guard("Read", { file_path: "/etc/hosts" })).behavior).toBe("allow");
+  });
+
   it("守卫优先于审批 —— 越界操作不浪费人的注意力去审", async () => {
     const spy = vi.fn(async () => ({ approved: true }));
     const o = buildSdkOptions(specOf({ approvalRules: { all: true } }), ctx, {

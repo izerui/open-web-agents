@@ -79,8 +79,21 @@ export class WorkspaceGc {
         continue;
       }
 
-      // 目录不存在(已被清过)直接跳过
-      if (!(await fs.stat(dir).catch(() => null))) continue;
+      // 目录不存在(已被清过)直接跳过。
+      //
+      // 【只能吞 ENOENT】—— 曾经是无类型的 .catch(() => null),把 EACCES / EIO /
+      // ELOOP / ENOTDIR 一并吸收了。部署后 workspaces 卷只读或属主不对时,GC 会跳过
+      // 每一个工作空间、report.errors 保持为空,而外层只在 cleaned||purged 非零时才
+      // 打日志 —— 整轮 GC 静默无输出,磁盘无界增长,唯一的信号是磁盘写满。
+      try {
+        await fs.stat(dir);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT") {
+          report.errors.push(`${ws.sessionId}: 无法访问工作空间目录(${code ?? "unknown"})`);
+        }
+        continue;
+      }
 
       const action = decideGc(ws, policy, now);
       try {

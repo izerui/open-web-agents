@@ -34,13 +34,20 @@ export async function GET(req: Request) {
   const ownerId = wantAll && isAdmin ? undefined : (principal as { userId: string }).userId;
 
   const since = Date.now() - days * 24 * 60 * 60 * 1000;
-  const records = await usage.list({ ownerId, since });
+  const [records, truncated] = await Promise.all([
+    usage.list({ ownerId, since }),
+    usage.isTruncated({ ownerId, since }),
+  ]);
 
   return Response.json({
     days,
     scope: ownerId ? "self" : "all",
     canViewAll: isAdmin,
     queue: await usage.queueDepth(),
+    // 结果被截断时必须说明 —— 否则「最新 5000 条的合计」会被当成总花费,
+    // 而它只会偏小,超预算时反而没人察觉
+    truncated,
+    ...(truncated ? { truncatedNote: "记录数超过单次查询上限,以下为最近部分记录的合计" } : {}),
     ...aggregateUsage(records),
   });
 }

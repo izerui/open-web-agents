@@ -84,7 +84,11 @@ export function normalizeSdkMessage(msg: unknown): AgentEvent[] {
         id?: string;
       };
       if (blk?.type === "text" && typeof blk.text === "string") {
-        out.push({ kind: "text", text: redactSecrets(blk.text), subagent: sub });
+        // text 也要 clip。thinking 与 tool_result 都截了,唯独这一类没有 ——
+        // 而它恰恰是量最大的:agent 内联输出大文件内容时,无界字符串会被 JSON 序列化后
+        // 经总线推出(publish 只有 2 秒超时、没有尺寸上限),并进入每个重连客户端的
+        // 内存重放缓冲。文件头声明的"避免撑爆 SSE 与 UI"在最需要它的那一类上静默失效。
+        out.push({ kind: "text", text: redactSecrets(clip(blk.text)), subagent: sub });
       } else if (blk?.type === "thinking" && typeof blk.thinking === "string") {
         out.push({ kind: "thinking", text: redactSecrets(clip(blk.thinking)), subagent: sub });
       } else if (blk?.type === "tool_use") {

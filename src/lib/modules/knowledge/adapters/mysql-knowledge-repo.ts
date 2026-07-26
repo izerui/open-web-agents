@@ -86,6 +86,9 @@ export class MysqlKnowledgeRepo {
       })
       .from(knowledgeDocs)
       .where(eq(knowledgeDocs.assistantId, assistantId))
+      // 必须定序:无序截断会让"文档超过 500 篇后哪些对检索可见"变得不可预测,
+      // 同一个问题在不同请求下得到不同答案,无报错无日志
+      .orderBy(knowledgeDocs.createdAt)
       .limit(500);
 
     const out: Chunk[] = [];

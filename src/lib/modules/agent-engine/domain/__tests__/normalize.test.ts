@@ -141,6 +141,37 @@ describe("normalizeSdkMessage / user", () => {
     expect(out[0]?.text.length).toBeLessThan(long.length);
     expect(out[0]?.text).toContain("已截断");
   });
+
+  // thinking 与 tool_result 都截了,唯独 text 没有 —— 而它恰恰是量最大的那类。
+  // agent 内联输出大文件内容时,无界字符串被 JSON 序列化后经总线推出
+  // (publish 只有 2 秒超时、没有尺寸上限),并进入每个重连客户端的内存重放缓冲。
+  // 文件头声明的"避免撑爆 SSE 与 UI"在最需要它的那一类上静默失效。
+  it("【截断回归】超长 text 同样被截断", () => {
+    const long = "x".repeat(50_000);
+    const out = normalizeSdkMessage({
+      type: "assistant",
+      message: { content: [{ type: "text", text: long }] },
+    }) as Array<{ text: string }>;
+    expect(out[0]?.text.length).toBeLessThan(long.length);
+    expect(out[0]?.text).toContain("已截断");
+  });
+
+  it("超长 thinking 被截断", () => {
+    const long = "y".repeat(50_000);
+    const out = normalizeSdkMessage({
+      type: "assistant",
+      message: { content: [{ type: "thinking", thinking: long }] },
+    }) as Array<{ text: string }>;
+    expect(out[0]?.text).toContain("已截断");
+  });
+
+  it("正常长度的 text 不受影响", () => {
+    const out = normalizeSdkMessage({
+      type: "assistant",
+      message: { content: [{ type: "text", text: "简短回答" }] },
+    }) as Array<{ text: string }>;
+    expect(out[0]?.text).toBe("简短回答");
+  });
 });
 
 describe("normalizeSdkMessage / 脱敏", () => {
