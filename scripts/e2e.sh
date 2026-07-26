@@ -37,8 +37,13 @@ else
     exit 1
   fi
 
-  echo "[e2e] 构建…"
-  pnpm build >/dev/null || { echo "[e2e] 构建失败" >&2; exit 1; }
+  # CI 里前一步已经构建过,没必要再来一遍(构建是这条流水线里最慢的一环)
+  if [ "${OWA_E2E_SKIP_BUILD:-0}" = "1" ]; then
+    echo "[e2e] 跳过构建(OWA_E2E_SKIP_BUILD=1)"
+  else
+    echo "[e2e] 构建…"
+    pnpm build >/dev/null || { echo "[e2e] 构建失败" >&2; exit 1; }
+  fi
 
   echo "[e2e] 起服务(端口 $PORT,日志 $LOG)…"
   PORT="$PORT" pnpm start >"$LOG" 2>&1 &

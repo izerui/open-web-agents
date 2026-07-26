@@ -31,6 +31,12 @@ function databaseNameOf(url: string): string {
 
 if (!TEST_DB_URL) {
   console.warn("[skip] 并发压力测试未运行 —— 需设置 OWA_TEST_DATABASE_URL 指向专用测试库");
+  // 【必须留一个跳过的 suite】否则整个文件没有任何测试,vitest 会报
+  // "No test suite found" —— 一个只是缺依赖的文件显示成红色失败,
+  // 而真正的失败就淹没在里面了。跳过要长得像跳过。
+  describe.skip("多 worker 并发压力测试(未配置 OWA_TEST_DATABASE_URL,已跳过)", () => {
+    it("skipped", () => {});
+  });
 } else {
   const dbName = databaseNameOf(TEST_DB_URL);
   const { db, pool } = createDb(TEST_DB_URL);

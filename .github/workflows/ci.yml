@@ -1,0 +1,155 @@
+# CI:每次 push / PR 都跑完整验证。
+#
+# 为什么必须带真实依赖跑:这个项目最严重的几个缺陷都不是纯逻辑错误 ——
+# 队列的乐观锁认领、租约栅栏、Redis 订阅时序、跨进程审批,全都只在真 MySQL /
+# 真 Redis 上才暴露。用 mock 跑出来的绿灯,恰恰是当初漏掉那些缺陷的原因。
+#
+# 分两个 job 是刻意的:
+# - check 快(约 1 分钟),覆盖绝大多数问题,改错了立刻能看到
+# - e2e 慢(要构建 + 起服务),但它是唯一能抓到"授权体系存在却没接上路由"
+#   这类接缝缺陷的一层(见 README 里的变异验证)
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# 同一分支上只保留最新一次运行 —— 连续推送时没必要把旧的跑完
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 测试库名【必须含 test】:契约测试会清表,repo 层有硬校验,
+  # 指错库会抛错而不是默默删数据(这个坑真踩过一次)
+  OWA_TEST_DATABASE_URL: mysql://root:ci-password@127.0.0.1:3306/owa_test
+  OWA_TEST_REDIS_URL: redis://127.0.0.1:6379
+
+jobs:
+  check:
+    name: 类型 / 规范 / 单测(真实 MySQL + Redis)
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: ci-password
+          MYSQL_DATABASE: owa
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -pci-password"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: 建测试库并迁移
+        run: |
+          mysql -h 127.0.0.1 -u root -pci-password \
+            -e "CREATE DATABASE IF NOT EXISTS owa_test CHARACTER SET utf8mb4;"
+          # 两个库都要迁:owa 给 e2e 用,owa_test 给契约测试用
+          for db in owa owa_test; do
+            OWA_DATABASE_URL="mysql://root:ci-password@127.0.0.1:3306/$db" \
+            OWA_REDIS_URL="redis://127.0.0.1:6379" \
+            OWA_SESSION_SECRET=ci-session-secret \
+            OWA_SECRET_KEY=ci-secret-key \
+              pnpm db:migrate
+          done
+
+      - run: pnpm typecheck
+      - run: pnpm lint
+
+      # 只跑一遍,输出留档给下一步检查 —— 跑两遍既慢又可能因为清表互相干扰
+      - name: 单元 / 契约 / 并发 / 故障注入
+        run: pnpm test 2>&1 | tee /tmp/unit.log; exit "${PIPESTATUS[0]}"
+
+      - name: 确认需要真实依赖的测试没有被跳过
+        run: |
+          # 依赖没连上时这些套件会跳过,而 pnpm test 【仍然是绿的】——
+          # 那种绿最危险:看起来通过了,其实队列、总线、审批一条都没验。
+          # CI 的整个价值就建立在"绿灯是真的"这个前提上,所以这里必须硬失败。
+          if grep -q "\[skip\]" /tmp/unit.log; then
+            echo "::error::需要真实依赖的测试被跳过了,这次绿灯不作数"
+            grep "\[skip\]" /tmp/unit.log
+            exit 1
+          fi
+          echo "✓ 契约 / 并发 / 审批测试均对真实 MySQL 与 Redis 执行"
+
+  e2e:
+    name: 端到端(对跑着的服务打 HTTP)
+    runs-on: ubuntu-latest
+    needs: check
+
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: ci-password
+          MYSQL_DATABASE: owa
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -pci-password"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    env:
+      OWA_DATABASE_URL: mysql://root:ci-password@127.0.0.1:3306/owa
+      OWA_REDIS_URL: redis://127.0.0.1:6379
+      # 生产模式下缺这两个会【拒绝启动】(见 env.ts)—— 顺带也验证了那条路径
+      OWA_SESSION_SECRET: ci-session-secret-not-for-production
+      OWA_SECRET_KEY: ci-secret-key-not-for-production
+      OWA_AUTH_REQUIRED: "1"
+      # CI 容器里没有 bubblewrap,开了沙箱 agent 起不来;
+      # 而 e2e 这条快路径本来就不真的调模型,关掉不影响它要验的东西
+      OWA_SANDBOX: "0"
+      OWA_DATA_DIR: ./data
+      OWA_E2E_SKIP_BUILD: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:migrate
+      - run: pnpm build
+
+      - name: 端到端(自动起停服务)
+        run: pnpm test:e2e
+
+      - name: 失败时附上服务日志
+        if: failure()
+        run: cat "${TMPDIR:-/tmp}/owa-e2e-server.log" || true
