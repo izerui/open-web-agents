@@ -39,10 +39,11 @@ const DEFAULTS = {
 export interface RunPayloadSource {
   /** 取出 run 待执行的 prompt。 */
   getPrompt(id: string): Promise<string | null>;
-  /** 落终态结果,供轮询接口读取(内存 fake 可不实现)。 */
+  /** 落终态结果,供轮询接口读取(内存 fake 可不实现)。只写传进来的字段。 */
   saveResult?(
     id: string,
     data: { structured?: unknown; cost?: unknown; error?: unknown },
+    fence?: string,
   ): Promise<void>;
 }
 
@@ -78,35 +79,74 @@ export class RunWorker {
     // 认领即 pending→running,状态机校验合法性
     nextRunState("pending", "claim");
 
+    const fence = claimed.fence;
     const abort = new AbortController();
+
+    /**
+     * 失租即中止。
+     *
+     * 续租失败曾经是 `.catch(() => {})` 静默丢弃 —— worker 不知道自己已经失去租约,
+     * 照样跑到底。配合当时无守卫的 complete(),后果是同一任务被两个 worker 同时执行,
+     * 且早已被判定为孤儿的那个还能覆写接手者的结果:重复扣费、重复下单、
+     * 两个 SDK 进程并发写同一个工作目录。
+     *
+     * 现在续租返回 false(被回收或被接手)就立刻 abort 本轮,把损失止在这里。
+     */
+    let lostLease = false;
     const heartbeat = setInterval(() => {
-      void this.repo.touch(claimed.id, this.opts.now() + this.opts.leaseMs).catch(() => {});
+      void this.repo
+        .touch(claimed.id, this.opts.now() + this.opts.leaseMs, fence)
+        .then((ok) => {
+          if (!ok) {
+            lostLease = true;
+            abort.abort();
+          }
+        })
+        // 抛错只是这一次没续上,下一拍还有机会;真正失租由上面的 ok=false 判定
+        .catch(() => {});
     }, this.opts.heartbeatMs);
-    // 墙钟超时:到点强制中断,保证任务必定落终态、worker 必定被释放
-    const timeout = setTimeout(() => abort.abort(), this.opts.maxDurationMs);
+
+    // 墙钟超时:到点强制中断,保证任务必定落终态、worker 必定被释放。
+    // 上限钳到 setTimeout 能表达的范围 —— 超过 2^31-1ms 会被 Node 折成 1ms,
+    // 于是"配 30 天等于基本不限时"的意图反转成"每个运行认领后立刻中止"。
+    const timeout = setTimeout(() => abort.abort(), Math.min(this.opts.maxDurationMs, 2 ** 31 - 1));
 
     try {
-      const prompt = (await this.repo.getPrompt(claimed.id)) ?? "";
+      const prompt = await this.repo.getPrompt(claimed.id);
+      // 空提示词不能当正常输入跑:那会真的调一次模型、产出无意义回答、还标成功
+      if (!prompt) throw new Error(`run ${claimed.id} 没有可执行的 prompt`);
+
       const result = await this.orchestrator.execute(
         { sessionId: claimed.sessionId, prompt, runId: claimed.id },
         abort.signal,
       );
+      if (lostLease) return true; // 已被别人接手,本轮结果作废,不写库
+
       const finalState = nextRunState(
         "running",
         result.status === "success" ? "finishOk" : "finishErr",
       );
       // 先落结果再落终态:轮询方看到终态时结果必定已可读,避免"成功但取不到结果"的竞态
-      await this.repo.saveResult?.(claimed.id, {
-        structured: result.structured,
-        cost: result.cost,
-        error: result.error,
-      });
-      await this.repo.complete(claimed.id, finalState);
+      await this.repo.saveResult?.(
+        claimed.id,
+        { structured: result.structured, cost: result.cost, error: result.error },
+        fence,
+      );
+      await this.repo.complete(claimed.id, finalState, fence);
     } catch (err) {
-      await this.repo.saveResult?.(claimed.id, {
-        error: { kind: "worker_error", message: err instanceof Error ? err.message : String(err) },
-      });
-      await this.repo.complete(claimed.id, nextRunState("running", "finishErr"));
+      if (lostLease) return true;
+      // 【只写 error】—— 不带 structured/cost 字段,免得把上一步已落库的成功结果抹掉
+      await this.repo.saveResult?.(
+        claimed.id,
+        {
+          error: {
+            kind: "worker_error",
+            message: err instanceof Error ? err.message : String(err),
+          },
+        },
+        fence,
+      );
+      await this.repo.complete(claimed.id, nextRunState("running", "finishErr"), fence);
     } finally {
       clearInterval(heartbeat);
       clearTimeout(timeout);

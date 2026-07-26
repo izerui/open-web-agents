@@ -206,11 +206,84 @@ describe("故障注入 / worker 韧性", () => {
     expect((await repo.get("good"))?.state).toBe("success");
   });
 
-  it("续租失败不影响本轮执行(网络抖动时不该丢任务)", async () => {
+  // 续租的两种失败必须区别对待,这是曾经栽过的地方:
+  // - 抛异常 = 网络抖动,下一拍还有机会,不该丢任务
+  // - 返回 false = 【已经失去租约】,任务已被别人接手,必须立刻收手
+  //
+  // 当初两者都被 `.catch(() => {})` 吞成同一件事,而且测试还断言了"续租失败不影响
+  // 本轮执行" —— 把 bug 写成了规格。那条断言在单 worker、心跳压根不触发的条件下
+  // 永远是绿的,真实时序下则是同一任务被执行两次。
+  it("续租抛异常(网络抖动)不影响本轮执行 —— 不该因为一次抖动丢任务", async () => {
     const { repo, worker } = await workerSetup();
     vi.spyOn(repo, "touch").mockRejectedValue(new Error("db 抖动"));
     await repo.seed("r1", "s1", "go");
     await worker.tick();
     expect((await repo.get("r1"))?.state).toBe("success");
+  });
+
+  it("【双执行回归】续租返回 false = 已失租,立刻中止且不写库", async () => {
+    const repo = new TestRepo();
+    // 引擎必须真的耗时:瞬时返回的引擎会在第一次心跳之前就跑完,
+    // 于是"失租"这个分支根本进不去 —— 测试绿了却什么都没验到。
+    class SlowEngine extends OkEngine {
+      async run(
+        spec: AgentSpec,
+        ctx: RunContext,
+        onEvent: (e: AgentEvent) => void,
+        signal: AbortSignal,
+      ) {
+        await new Promise((r) => setTimeout(r, 30));
+        return super.run(spec, ctx, onEvent, signal);
+      }
+    }
+    const { orch } = await setup({}, new SlowEngine());
+    const worker = new RunWorker(repo, orch, { leaseMs: 5000, heartbeatMs: 1 });
+    vi.spyOn(repo, "touch").mockResolvedValue(false); // 租约已被回收
+    const saved = vi.spyOn(repo, "complete");
+
+    await repo.seed("r1", "s1", "go");
+    await worker.tick();
+
+    // 关键:失租的 worker 不得把自己的结果写进去 —— 那正是覆写接手者结果的路径
+    expect(saved).not.toHaveBeenCalled();
+    expect((await repo.get("r1"))?.state).toBe("running");
+  });
+
+  it("栅栏令牌:令牌作废后 complete 是空操作,写不进终态", async () => {
+    const repo = new TestRepo();
+    await repo.seed("r1", "s1", "go");
+    const first = await repo.claimNext(1000, 1000);
+    expect(first?.fence).toBeTruthy();
+
+    // 租约过期,任务被另一个 worker 接手 → 换了新令牌
+    const second = await repo.claimNext(5000, 9000);
+    expect(second?.id).toBe("r1");
+    expect(second?.fence).not.toBe(first?.fence);
+
+    // 僵尸 worker 拿着旧令牌回来写结果
+    expect(await repo.complete("r1", "failed", first?.fence)).toBe(false);
+    expect((await repo.get("r1"))?.state).toBe("running");
+    // 接手者用新令牌写得进去
+    expect(await repo.complete("r1", "success", second?.fence)).toBe(true);
+    expect((await repo.get("r1"))?.state).toBe("success");
+  });
+
+  it("终态不可被重入覆写 —— 状态机的规矩必须在写入边界上强制", async () => {
+    const repo = new TestRepo();
+    await repo.seed("r1", "s1", "go");
+    const c = await repo.claimNext(5000, 1000);
+    expect(await repo.complete("r1", "success", c?.fence)).toBe(true);
+    // 已是终态,任何后续写入都不该生效(包括把 success 翻成 failed)
+    expect(await repo.complete("r1", "failed")).toBe(false);
+    expect((await repo.get("r1"))?.state).toBe("success");
+  });
+
+  it("缺 prompt 的运行落 failed,而不是拿空提示词跑一遍再报成功", async () => {
+    const repo = new TestRepo();
+    const { orch } = await setup();
+    const worker = new RunWorker(repo, orch, { leaseMs: 5000, heartbeatMs: 60_000 });
+    await repo.create({ id: "r1", sessionId: "s1" }); // 没 seed prompt
+    await worker.tick();
+    expect((await repo.get("r1"))?.state).toBe("failed");
   });
 });

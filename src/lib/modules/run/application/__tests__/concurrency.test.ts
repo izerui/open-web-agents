@@ -170,6 +170,62 @@ if (!TEST_DB_URL) {
       expect(executions.get("crash-task")).toBe(1);
     });
 
+    // 栅栏令牌(fencing token)。
+    //
+    // 上面那条"worker 崩溃后被接手"只覆盖了崩溃进程【不再写库】的情形。真实的坏情况是
+    // 进程还活着:DB 抖动导致续租连续失败,租约悄悄过期被回收,而它自己毫不知情 ——
+    // 继续跑、跑完、然后把结果写进去,覆盖掉接手者已经写好的正确结果。
+    // 光靠租约时间挡不住,必须让写入本身带上"我是当前持有者"的凭证。
+    it("【双执行回归】僵尸 worker 拿旧令牌写不进结果,接手者的结果不被覆盖", async () => {
+      const id = randomUUID().replace(/-/g, "").slice(0, 24);
+      await repo.create({ id, sessionId: "s-fence", prompt: "fence-task" });
+
+      const now = Date.now();
+      const zombie = await repo.claimNext(1000, now); // A 认领,随后失联
+      expect(zombie?.fence).toBeTruthy();
+
+      const taker = await repo.claimNext(30_000, now + 5000); // 租约过期,B 接手
+      expect(taker?.id).toBe(id);
+      expect(taker?.fence).not.toBe(zombie?.fence);
+
+      // A 的续租此刻必须返回 false —— 这是 worker 侧中止本轮的唯一信号
+      expect(await repo.touch(id, now + 60_000, zombie?.fence)).toBe(false);
+      // B 的续租正常
+      expect(await repo.touch(id, now + 60_000, taker?.fence)).toBe(true);
+
+      // B 先写完
+      await repo.saveResult(id, { structured: { from: "taker" } }, taker?.fence);
+      expect(await repo.complete(id, "success", taker?.fence)).toBe(true);
+
+      // A 姗姗来迟,试图写自己的结果 —— 两处都必须是空操作
+      await repo.saveResult(id, { structured: { from: "zombie" } }, zombie?.fence);
+      expect(await repo.complete(id, "failed", zombie?.fence)).toBe(false);
+
+      const final = await repo.getResult(id);
+      expect(final?.status).toBe("success");
+      expect(final?.structured).toEqual({ from: "taker" });
+    });
+
+    it("终态不可被任何后续写入翻转 —— 包括不带令牌的直接调用", async () => {
+      const id = randomUUID().replace(/-/g, "").slice(0, 24);
+      await repo.create({ id, sessionId: "s-final", prompt: "t" });
+      const c = await repo.claimNext(30_000, Date.now());
+      expect(await repo.complete(id, "success", c?.fence)).toBe(true);
+      expect(await repo.complete(id, "failed")).toBe(false);
+      expect((await repo.get(id))?.state).toBe("success");
+    });
+
+    it("saveResult 只写传进来的字段 —— 补记 error 不该抹掉已落库的结果", async () => {
+      const id = randomUUID().replace(/-/g, "").slice(0, 24);
+      await repo.create({ id, sessionId: "s-patch", prompt: "t" });
+      await repo.saveResult(id, { structured: { ok: 1 }, cost: { usd: 2 } });
+      await repo.saveResult(id, { error: { kind: "worker_error" } });
+      const r = await repo.getResult(id);
+      expect(r?.structured).toEqual({ ok: 1 }); // 曾经这里会变成 null
+      expect(r?.cost).toEqual({ usd: 2 });
+      expect(r?.error).toMatchObject({ kind: "worker_error" });
+    });
+
     it("租约内的任务不会被其它 worker 抢走(执行中不被打断)", async () => {
       const SESSION = "s-lease";
       await sessions.create({ id: SESSION, assistantId: "a1", workspaceDir: "/ws" });

@@ -3,6 +3,7 @@
 // 认领的正确性关键:UPDATE 必须把"筛选条件"和"占位"放在同一条语句里,
 // 靠 MySQL 的行锁保证原子性 —— 先 SELECT 再 UPDATE 会在并发下把同一个 run 发给两个 worker。
 
+import { randomUUID } from "node:crypto";
 import type { Db } from "@/lib/db/client";
 import { runs } from "@/lib/db/schema";
 import type { NewRun, Run, RunRepo } from "@/lib/modules/run/ports";
@@ -27,6 +28,15 @@ function affectedRows(res: unknown): number {
     return (res[0] as { affectedRows?: number } | undefined)?.affectedRows ?? 0;
   }
   return (res as { affectedRows?: number } | null)?.affectedRows ?? 0;
+}
+
+/**
+ * 栅栏条件。不传令牌时退化为「不校验」—— 契约测试与内存 fake 里有大量
+ * 不关心并发的直接调用,强制传令牌会把它们全逼成噪音。
+ * 生产路径(worker)一律传,由 worker 侧的测试守住。
+ */
+function fenceOf(fence?: string) {
+  return fence ? [eq(runs.leaseOwner, fence)] : [];
 }
 
 function toRun(row: RunRow): Run {
@@ -80,11 +90,14 @@ export class MysqlRunRepo implements RunRepo {
       const candidate = candidates[0];
       if (!candidate) return null;
 
+      // 每次认领生成新的栅栏令牌:上一任 worker 手里的旧令牌就此作废
+      const fence = randomUUID();
       const res = await this.db
         .update(runs)
         .set({
           status: "running",
           leaseUntil: now + leaseMs,
+          leaseOwner: fence,
           startedAt: sql`COALESCE(${runs.startedAt}, NOW())`,
           attempts: sql`${runs.attempts} + 1`,
         })
@@ -97,6 +110,7 @@ export class MysqlRunRepo implements RunRepo {
           sessionId: candidate.sessionId,
           state: "running",
           leaseUntil: now + leaseMs,
+          fence,
         };
       }
       // 被别人抢走了,换下一个候选
@@ -104,18 +118,30 @@ export class MysqlRunRepo implements RunRepo {
     return null;
   }
 
-  async touch(id: string, leaseUntil: number): Promise<void> {
-    await this.db
+  /**
+   * 续租。affectedRows=0 意味着这一行已经不归本 worker 管了 ——
+   * 要么租约超期被回收、要么已被别人接手完成。返回 false 让调用方立刻收手。
+   */
+  async touch(id: string, leaseUntil: number, fence?: string): Promise<boolean> {
+    const res = await this.db
       .update(runs)
       .set({ leaseUntil })
-      .where(and(eq(runs.id, id), eq(runs.status, "running")));
+      .where(and(eq(runs.id, id), eq(runs.status, "running"), ...fenceOf(fence)));
+    return affectedRows(res) > 0;
   }
 
-  async complete(id: string, state: RunState): Promise<void> {
-    await this.db
+  /**
+   * 落终态。两道守卫:
+   * - `status = running` —— 终态不可再迁移。没有这条,一个被判定为孤儿的僵尸 worker
+   *   跑完后能把别人写好的 success 覆写成 failed,或把 cancelled 翻回 success。
+   * - 栅栏令牌 —— 即使状态还是 running,也只有当前持有租约的 worker 有资格写。
+   */
+  async complete(id: string, state: RunState, fence?: string): Promise<boolean> {
+    const res = await this.db
       .update(runs)
-      .set({ status: state, leaseUntil: null, endedAt: sql`NOW()` })
-      .where(eq(runs.id, id));
+      .set({ status: state, leaseUntil: null, leaseOwner: null, endedAt: sql`NOW()` })
+      .where(and(eq(runs.id, id), eq(runs.status, "running"), ...fenceOf(fence)));
+    return affectedRows(res) > 0;
   }
 
   /** 把租约过期的 running 打回 pending,让其它 worker 能接手。 */
@@ -221,15 +247,21 @@ export class MysqlRunRepo implements RunRepo {
   async saveResult(
     id: string,
     data: { structured?: unknown; cost?: unknown; error?: unknown },
+    fence?: string,
   ): Promise<void> {
+    // 【只写传进来的字段】。曾经是无条件 `?? null` 三连,于是异常路径调用
+    // saveResult({error}) 会把上一步刚落库的 structured 与 cost 一起抹成 null ——
+    // 一次真正成功、结果已在库里的运行,数据被销毁而不只是被误标。
+    const patch: Record<string, unknown> = {};
+    if ("structured" in data) patch.structuredResult = data.structured ?? null;
+    if ("cost" in data) patch.cost = data.cost ?? null;
+    if ("error" in data) patch.errorInfo = data.error ?? null;
+    if (Object.keys(patch).length === 0) return;
+
     await this.db
       .update(runs)
-      .set({
-        structuredResult: data.structured ?? null,
-        cost: data.cost ?? null,
-        errorInfo: data.error ?? null,
-      })
-      .where(eq(runs.id, id));
+      .set(patch)
+      .where(and(eq(runs.id, id), ...fenceOf(fence)));
   }
 
   /** 取完整运行状态与结果,供对外轮询接口使用。 */

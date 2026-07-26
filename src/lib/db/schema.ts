@@ -107,6 +107,14 @@ export const runs = mysqlTable(
     sdkSessionId: varchar("sdk_session_id", { length: 128 }),
     /** 租约到期时间戳(ms)。NULL = 未认领或已完成 */
     leaseUntil: bigint("lease_until", { mode: "number" }),
+    /**
+     * 栅栏令牌:本次认领的唯一标识,每次认领重新生成。
+     *
+     * 光有租约时间不够 —— 失去租约的 worker 并不知道自己失去了,它照样能写库。
+     * 后续所有写入(续租/落结果/落终态)都要带上认领时拿到的令牌,对不上就是空操作:
+     * 让「僵尸 worker 覆写接手者的结果」从小概率事件变成做不到。
+     */
+    leaseOwner: varchar("lease_owner", { length: 36 }),
     /** 被认领的次数,用于识别反复崩溃的任务 */
     attempts: int("attempts").notNull().default(0),
     structuredResult: json("structured_result"),
