@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import type { AssistantConfig } from "@/lib/modules/assistant/domain/config";
+import { validateAssistantConfig } from "@/lib/modules/assistant/domain/validate-config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,10 +43,17 @@ export async function POST(req: Request) {
   if (!body.name?.trim()) {
     return Response.json({ error: "name is required" }, { status: 400 });
   }
-  if (!body.config?.systemPrompt?.trim()) {
-    return Response.json({ error: "config.systemPrompt is required" }, { status: 400 });
+
+  // 配置错了要在保存时就拦住 —— 否则问题会推迟到运行时才暴露,排查成本高得多
+  const issues = validateAssistantConfig(body.config ?? {});
+  if (issues.length) {
+    return Response.json(
+      { error: issues.map((i) => `${i.field}: ${i.message}`).join("; "), issues },
+      { status: 400 },
+    );
   }
 
+  const cfg = body.config as Partial<AssistantConfig>;
   const saved = await assistants.upsert({
     id: body.id ?? randomUUID().replace(/-/g, "").slice(0, 24),
     name: body.name.trim(),
@@ -53,17 +61,17 @@ export async function POST(req: Request) {
     description: body.description,
     webhookUrl: body.webhookUrl,
     config: {
-      systemPrompt: body.config.systemPrompt,
-      model: body.config.model ?? "sonnet",
-      maxTurns: body.config.maxTurns ?? 20,
-      effort: body.config.effort,
-      skills: body.config.skills,
-      mcpServers: body.config.mcpServers,
-      tools: body.config.tools,
-      subagents: body.config.subagents,
-      outputSchema: body.config.outputSchema,
-      verifyRules: body.config.verifyRules,
-      escapeHatch: body.config.escapeHatch,
+      systemPrompt: cfg.systemPrompt as string,
+      model: cfg.model ?? "sonnet",
+      maxTurns: cfg.maxTurns ?? 20,
+      effort: cfg.effort,
+      skills: cfg.skills,
+      mcpServers: cfg.mcpServers,
+      tools: cfg.tools,
+      subagents: cfg.subagents,
+      outputSchema: cfg.outputSchema,
+      verifyRules: cfg.verifyRules,
+      escapeHatch: cfg.escapeHatch,
     },
   });
 

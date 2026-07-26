@@ -15,6 +15,18 @@ const SCHEMA_EXAMPLE = `{
   "additionalProperties": false
 }`;
 
+interface McpDraft {
+  /** 稳定行 id。用数组索引作 key 会在删除中间行时把编辑状态错位到别行。 */
+  uid: string;
+  name: string;
+  type: "http" | "stdio";
+  url: string;
+}
+
+function newMcpRow(): McpDraft {
+  return { uid: crypto.randomUUID(), name: "", type: "http", url: "" };
+}
+
 interface Draft {
   id: string;
   name: string;
@@ -23,6 +35,10 @@ interface Draft {
   model: string;
   maxTurns: number;
   outputSchemaText: string;
+  webhookUrl: string;
+  /** 逗号/换行分隔的技能名 */
+  skillsText: string;
+  mcpServers: McpDraft[];
 }
 
 const EMPTY: Draft = {
@@ -33,7 +49,22 @@ const EMPTY: Draft = {
   model: "sonnet",
   maxTurns: 20,
   outputSchemaText: "",
+  webhookUrl: "",
+  skillsText: "",
+  mcpServers: [],
 };
+
+/** 技能名按逗号/换行/空格拆分,去空去重 —— 用户怎么贴都能用 */
+function parseSkills(text: string): string[] {
+  return [
+    ...new Set(
+      text
+        .split(/[,，\s\n]+/)
+        .map((x) => x.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
 
 export function Builder() {
   const [list, setList] = useState<AssistantSummary[]>([]);
@@ -82,11 +113,20 @@ export function Builder() {
           id: draft.id.trim() || undefined,
           name: draft.name.trim(),
           description: draft.description.trim() || undefined,
+          webhookUrl: draft.webhookUrl.trim() || undefined,
           config: {
             systemPrompt: draft.systemPrompt,
             model: draft.model,
             maxTurns: Number(draft.maxTurns) || 20,
             outputSchema: parsedSchema,
+            skills: parseSkills(draft.skillsText),
+            mcpServers: draft.mcpServers
+              .filter((m) => m.name.trim())
+              .map((m) => ({
+                name: m.name.trim(),
+                type: m.type,
+                url: m.type === "http" ? m.url.trim() : undefined,
+              })),
           },
         }),
       });
@@ -116,6 +156,16 @@ export function Builder() {
           model: String(cfg.model ?? "sonnet"),
           maxTurns: Number(cfg.maxTurns ?? 20),
           outputSchemaText: cfg.outputSchema ? JSON.stringify(cfg.outputSchema, null, 2) : "",
+          webhookUrl: (full as { webhookUrl?: string }).webhookUrl ?? "",
+          skillsText: Array.isArray(cfg.skills) ? (cfg.skills as string[]).join(", ") : "",
+          mcpServers: Array.isArray(cfg.mcpServers)
+            ? (cfg.mcpServers as McpDraft[]).map((m) => ({
+                uid: crypto.randomUUID(),
+                name: m.name ?? "",
+                type: m.type === "stdio" ? ("stdio" as const) : ("http" as const),
+                url: m.url ?? "",
+              }))
+            : [],
         });
         setMsg(null);
       });
@@ -226,6 +276,93 @@ export function Builder() {
             />
           </label>
         </div>
+
+        <label className="block space-y-1">
+          <span className="text-xs opacity-70">
+            Skills(逗号或换行分隔,可选)—— SDK 内置技能,如 pdf、xlsx
+          </span>
+          <input
+            className={field}
+            value={draft.skillsText}
+            onChange={(e) => setDraft({ ...draft, skillsText: e.target.value })}
+            placeholder="pdf, xlsx"
+          />
+        </label>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs opacity-70">MCP 服务(可选)—— 给助手接外部工具</span>
+            <button
+              type="button"
+              className="text-xs underline opacity-60 hover:opacity-100"
+              onClick={() =>
+                setDraft({
+                  ...draft,
+                  mcpServers: [...draft.mcpServers, newMcpRow()],
+                })
+              }
+            >
+              + 添加
+            </button>
+          </div>
+          {draft.mcpServers.length === 0 && <p className="text-xs opacity-40">未配置 MCP 服务</p>}
+          {draft.mcpServers.map((m, i) => (
+            <div key={m.uid} className="flex gap-2">
+              <input
+                className={field}
+                value={m.name}
+                onChange={(e) => {
+                  const next = [...draft.mcpServers];
+                  next[i] = { ...m, name: e.target.value };
+                  setDraft({ ...draft, mcpServers: next });
+                }}
+                placeholder="名称(字母/数字/_/-)"
+              />
+              <select
+                className={field}
+                value={m.type}
+                onChange={(e) => {
+                  const next = [...draft.mcpServers];
+                  next[i] = { ...m, type: e.target.value as "http" | "stdio" };
+                  setDraft({ ...draft, mcpServers: next });
+                }}
+              >
+                <option value="http">http</option>
+                <option value="stdio">stdio</option>
+              </select>
+              <input
+                className={field}
+                value={m.url}
+                disabled={m.type !== "http"}
+                onChange={(e) => {
+                  const next = [...draft.mcpServers];
+                  next[i] = { ...m, url: e.target.value };
+                  setDraft({ ...draft, mcpServers: next });
+                }}
+                placeholder={m.type === "http" ? "https://…" : "(stdio 不需要)"}
+              />
+              <button
+                type="button"
+                className="shrink-0 text-red-600 text-xs underline opacity-70 hover:opacity-100"
+                onClick={() =>
+                  setDraft({ ...draft, mcpServers: draft.mcpServers.filter((_, j) => j !== i) })
+                }
+              >
+                删除
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <label className="block space-y-1">
+          <span className="text-xs opacity-70">Webhook 回调(可选)—— 运行终态时推结果</span>
+          <input
+            className={field}
+            value={draft.webhookUrl}
+            onChange={(e) => setDraft({ ...draft, webhookUrl: e.target.value })}
+            placeholder="https://your-system/callback"
+          />
+        </label>
 
         <label className="block space-y-1">
           <span className="text-xs opacity-70">
