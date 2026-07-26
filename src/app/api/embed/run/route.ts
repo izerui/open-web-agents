@@ -54,6 +54,9 @@ export async function POST(req: Request) {
       };
 
       const unsubscribe = bus.subscribe(topicOf(sessionId), (e) => {
+        // 只认自己的终态 —— 同会话并发时,别人的 result 不该把这条流关掉
+        // (widget 场景下会话通常独占,但队列不按 session 串行化,不能假设)
+        if (e.kind === "result" && e.runId !== undefined && e.runId !== runId) return;
         send(e);
         if (e.kind === "result") finish();
       });

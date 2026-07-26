@@ -114,6 +114,15 @@ export type AgentEvent =
       status: "success" | "failed" | "unknown";
       structured?: unknown;
       summary?: string;
+      /**
+       * 这条终态属于哪一次运行。
+       *
+       * 【没有它就会串台】事件按会话广播,而两个 SSE 路由都是"收到任意 result 就收流"。
+       * 同一会话并发两轮时(API 侧很容易触发,队列也不按 session 串行化),
+       * 先跑完的那轮的 result 会把另一轮的流提前关掉 —— 用户看到回答停在半截,
+       * 且再也收不到真正属于它的结果。有了 runId,各条流只认自己的终态。
+       */
+      runId?: string;
     };
 
 /** state 类事件在断线重连时需重放;noise 类可滚动淘汰。 */

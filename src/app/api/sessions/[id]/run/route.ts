@@ -65,8 +65,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
       // 先订阅再入队,避免 worker 抢先跑完导致漏掉开头的事件
       const unsubscribe = bus.subscribe(topicOf(id), (e) => {
+        // 【只认自己的终态】事件按会话广播,而同一会话可以并发跑多轮(API 侧很容易
+        // 触发,队列也不按 session 串行化)。曾经是"收到任意 result 就收流",于是
+        // 先跑完的那轮会把这条流提前关掉 —— 用户看到回答停在半截,
+        // 并且再也收不到真正属于本轮的结果。
+        if (e.kind === "result" && e.runId !== undefined && e.runId !== runId) return;
         send(e);
-        // 终态事件到达即收流
         if (e.kind === "result") finish();
       });
 

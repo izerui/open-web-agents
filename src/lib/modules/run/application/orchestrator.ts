@@ -63,9 +63,30 @@ export interface OrchestratorDeps {
   }) => void;
 }
 
-/** 事件总线上的 topic:按会话隔离。 */
+/**
+ * 事件总线上的 topic:按会话隔离。
+ *
+ * 广播粒度保持在会话级 —— 重连方(joinStream)只知道 sessionId,不知道此刻有哪些
+ * 运行在跑,订阅会话最省事。区分具体是哪一轮靠事件里的 runId,而不是靠拆频道。
+ */
 export function topicOf(sessionId: string): string {
   return `session:${sessionId}`;
+}
+
+/**
+ * 重放缓冲的 key:【按运行隔离】,比总线更细一级。
+ *
+ * 缓冲和广播的诉求不一样:广播是"发给所有关心这个会话的人",而缓冲是"这一轮的
+ * 过程记录"。曾经两者共用会话粒度,于是同会话并发两轮时,后开始的那轮 reset
+ * 会把前一轮的缓冲整个删掉,而先结束那轮的 result 会把整个会话标成 done。
+ */
+export function replayKeyOf(sessionId: string, runId?: string): string {
+  return `${topicOf(sessionId)}:run:${runId ?? "adhoc"}`;
+}
+
+/** 某会话下所有运行的缓冲前缀,供 joinStream 合并回放。 */
+export function replayScopeOf(sessionId: string): string {
+  return `${topicOf(sessionId)}:run:`;
 }
 
 export class RunOrchestrator {
@@ -141,21 +162,24 @@ export class RunOrchestrator {
 
     const spec = buildSpec(assistant.config, ctx, { model, knowledgeContext });
 
+    // 广播按会话(重连方只知道 sessionId),缓冲按运行(两轮并发时互不清空)
     const topic = topicOf(cmd.sessionId);
+    const replayKey = replayKeyOf(cmd.sessionId, cmd.runId);
+
     // 事件投递是【辅助能力】:发不出去只是看不到过程,绝不该让用户的这一轮运行失败。
     // 重放缓冲同理 —— 当前内存实现不会抛,但换成 Redis 支撑的实现后一定会。
     const publish = (e: AgentEvent) => {
       try {
-        this.deps.replay?.record(topic, e);
+        this.deps.replay?.record(replayKey, e);
       } catch {
         // 缓冲写入失败只影响断线重连的回放质量,不影响本次运行
       }
       void this.deps.bus.publish(topic, e).catch(() => {});
     };
 
-    // 新一轮开始清空重放缓冲,免得把上一轮的事件回放给这一轮
+    // 只清【本轮自己】的缓冲。曾经清的是整个会话,于是并发的另一轮过程记录被连坐删掉
     try {
-      this.deps.replay?.reset(topic);
+      this.deps.replay?.reset(replayKey);
     } catch {
       // 同上:缓冲故障不牵连运行
     }
@@ -213,6 +237,9 @@ export class RunOrchestrator {
       status: result.status,
       structured: result.structured,
       summary: result.summary ?? result.error?.message,
+      // 带上 runId,各条 SSE 才认得出哪条终态是自己的 —— 否则同会话并发时
+      // 先跑完的那轮会把另一轮的流提前关掉
+      runId: cmd.runId,
     });
 
     // 终态回调(webhook 等)。失败不影响 run 的最终状态 —— 结果已在库里,可轮询兜底

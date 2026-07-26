@@ -86,3 +86,64 @@ describe("ReplayBuffer", () => {
     expect(done).toBe(true);
   });
 });
+
+// 同会话并发两轮时的串台。曾经缓冲按【会话】存,于是:
+//  - 后开始的那轮 reset(会话) 把前一轮的整个过程记录删掉,刷新页面也拿不回来
+//  - 先结束那轮的 result 把整个会话标成 done,/events 回放完直接收流,
+//    即使另一轮还在跑
+// 分桶到 run 粒度之后两边互不干扰。
+describe("ReplayBuffer / 【串台回归】按运行分桶", () => {
+  const scope = "session:s1:run:";
+  const runA = `${scope}a`;
+  const runB = `${scope}b`;
+
+  it("一轮 reset 不影响另一轮的记录", () => {
+    const b = new ReplayBuffer();
+    b.record(runA, { kind: "text", text: "A 的过程" });
+    b.reset(runB); // B 开始时清自己的桶
+    b.record(runB, { kind: "text", text: "B 的过程" });
+
+    expect(b.replay(runA).events).toHaveLength(1);
+    expect(b.replay(runB).events).toHaveLength(1);
+  });
+
+  it("合并回放拿得到两轮的全部事件", () => {
+    const b = new ReplayBuffer();
+    b.record(runA, { kind: "text", text: "A" });
+    b.record(runB, { kind: "text", text: "B" });
+    const { events } = b.replayScope(scope);
+    expect(events.map((e) => (e.kind === "text" ? e.text : e.kind)).sort()).toEqual(["A", "B"]);
+  });
+
+  it("【核心】只有一轮结束时 done=false —— 另一轮还在跑就不能收流", () => {
+    const b = new ReplayBuffer();
+    b.record(runA, { kind: "text", text: "A" });
+    b.record(runB, { kind: "text", text: "B" });
+    b.record(runA, { kind: "result", status: "success", runId: "a" });
+
+    const r = b.replayScope(scope);
+    expect(r.done).toBe(false);
+    expect(r.open).toEqual(["b"]); // 未收尾的那轮被如实报出来
+  });
+
+  it("两轮都结束才算 done", () => {
+    const b = new ReplayBuffer();
+    b.record(runA, { kind: "result", status: "success", runId: "a" });
+    b.record(runB, { kind: "result", status: "failed", runId: "b" });
+    const r = b.replayScope(scope);
+    expect(r.done).toBe(true);
+    expect(r.open).toEqual([]);
+  });
+
+  it("前缀不匹配的会话不会被误合并", () => {
+    const b = new ReplayBuffer();
+    b.record("session:s1:run:a", { kind: "text", text: "属于 s1" });
+    b.record("session:s2:run:a", { kind: "text", text: "属于 s2" });
+    expect(b.replayScope("session:s1:run:").events).toHaveLength(1);
+  });
+
+  it("没有任何桶时 done=false —— 不能把「还没开始」当成「已跑完」", () => {
+    const b = new ReplayBuffer();
+    expect(b.replayScope("session:nobody:run:")).toEqual({ events: [], done: false, open: [] });
+  });
+});

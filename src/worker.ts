@@ -7,6 +7,25 @@
 // 部署时:web 侧设 OWA_EMBEDDED_WORKER=0,再按需起 N 个本进程实例。
 
 import { getContainer } from "@/lib/container";
+// CJS 包,只有 default 导出 —— 具名 import 在 ESM 下会直接抛 SyntaxError
+import nextEnv from "@next/env";
+
+/**
+ * 【必须先加载 .env】—— Next 会自动为 web 进程加载 .env / .env.local,
+ * 而这个进程是裸 node,不会。
+ *
+ * 少了这一步的后果不是"起不来",而是**起得来但什么都干不成**:
+ * 进程正常启动、日志打印正常、健康检查正常,可它认领到的每一个任务都以
+ * `no key resolved from credential chain` 失败 —— 因为 OWA_ANTHROPIC_API_KEY
+ * 只在 .env.local 里。
+ *
+ * 这个 bug 是这么漏掉的:我此前"验证"拆进程部署时,只确认了 worker 能启动,
+ * 没让它真的跑完一个任务。"进程活着"和"进程在干活"是两件事。
+ *
+ * 必须在 import getContainer 之后、调用它之前执行 —— container 是惰性构建的,
+ * loadEnv() 在第一次 getContainer() 时才读 process.env。
+ */
+nextEnv.loadEnvConfig(process.cwd(), false);
 
 async function main(): Promise<void> {
   const { worker, env } = getContainer();

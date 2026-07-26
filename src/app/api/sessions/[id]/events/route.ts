@@ -1,6 +1,6 @@
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
-import { topicOf } from "@/lib/modules/run/application/orchestrator";
+import { replayScopeOf, topicOf } from "@/lib/modules/run/application/orchestrator";
 import type { AgentEvent } from "@/lib/shared";
 
 export const runtime = "nodejs";
@@ -70,6 +70,26 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
        */
       const live: AgentEvent[] = [];
       let replayed = false;
+
+      /**
+       * joinStream 关心的是整个会话,所以要等【所有】在跑的运行都收尾才收流。
+       *
+       * 曾经是"收到任意 result 就收流":同会话并发两轮时,先跑完那轮的终态会把
+       * 这条重连流关掉,另一轮的过程就此断在半截,而且刷新也拿不回来
+       * (那时缓冲还按会话存,后开始的一轮 reset 已经把前一轮的记录删干净了)。
+       */
+      const pending = new Set<string>();
+      const onResult = (e: AgentEvent) => {
+        if (e.kind !== "result") return;
+        if (e.runId) {
+          pending.delete(e.runId);
+          if (pending.size === 0) finish();
+          return;
+        }
+        // 不带 runId 的运行(adhoc / 旧事件)按原语义:见到终态即收流
+        finish();
+      };
+
       subscription.off = bus.subscribe(topic, (e) => {
         // 快照还没发出去之前先攒着,免得实时事件插到历史事件前面
         if (!replayed) {
@@ -77,21 +97,23 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
           return;
         }
         send(e);
-        if (e.kind === "result") finish();
+        onResult(e);
       });
       await bus.ready?.(topic);
 
-      const { events, done } = replay.replay(topic);
+      // 合并该会话下所有运行的缓冲 —— 缓冲按 run 分桶,一个会话可能有多桶
+      const { events, done, open } = replay.replayScope(replayScopeOf(id));
+      for (const o of open) pending.add(o);
       for (const e of events) send(e);
       replayed = true;
 
       // 补发订阅生效后、快照取出前到达的事件
       for (const e of live) {
         send(e);
-        if (e.kind === "result") finish();
+        onResult(e);
       }
 
-      // 已跑完:回放完即收流,不吊着连接
+      // 该会话下已知的运行全部跑完:回放完即收流,不吊着连接
       if (done) finish();
     },
   });

@@ -46,6 +46,32 @@ export class ReplayBuffer {
     return { events: [...b.noise, ...b.state], done: b.done };
   }
 
+  /**
+   * 按前缀合并回放 —— 一个会话下可能有多条并发运行,各自一个桶。
+   *
+   * 【为什么要分桶】缓冲曾经按会话存,于是同会话并发两轮时:后开始的那轮
+   * `reset(会话)` 会把前一轮的整个缓冲删掉,用户刷新页面走 /events 也拿不回过程;
+   * 反过来,先结束那轮的 result 会把整个会话标成 done,/events 回放完直接收流,
+   * 即使另一轮还在跑。分桶到 run 粒度之后两边互不干扰。
+   *
+   * done 的语义相应变成"这个会话下已知的运行全部跑完"—— 只要还有一条没完,
+   * 重连方就该继续挂着流。
+   */
+  replayScope(prefix: string): { events: AgentEvent[]; done: boolean; open: string[] } {
+    const buckets = [...this.topics.entries()]
+      .filter(([k]) => k.startsWith(prefix))
+      .sort(([, a], [, b]) => a.updatedAt - b.updatedAt);
+
+    if (buckets.length === 0) return { events: [], done: false, open: [] };
+    return {
+      // 同一轮内仍是 noise 在前、state 在后;跨轮按时间先后拼接
+      events: buckets.flatMap(([, b]) => [...b.noise, ...b.state]),
+      done: buckets.every(([, b]) => b.done),
+      // 还没收到终态的运行 —— 重连方要等它们全部收尾才能收流
+      open: buckets.filter(([, b]) => !b.done).map(([k]) => k.slice(prefix.length)),
+    };
+  }
+
   /** 新一轮开始时清空,避免把上一轮的事件重放给这一轮。 */
   reset(topic: string): void {
     this.topics.delete(topic);
