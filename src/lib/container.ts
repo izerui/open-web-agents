@@ -1,32 +1,40 @@
 // Composition root:手工装配端口 → adapter。不用 DI 框架。
 //
 // 这是全工程唯一决定"用哪个实现"的地方 —— 换 DB / 换总线 / 换引擎都只改这里。
-// 当前垂直切片用内存 adapter 跑通;MySQL / Redis adapter 后续在此替换,上层零改动。
 
+import { type Db, createDb } from "@/lib/db/client";
 import { type Env, loadEnv } from "@/lib/env";
 import { createClaudeSdkEngine } from "@/lib/modules/agent-engine/adapters/claude-sdk/default-engine";
 import type { EnginePort } from "@/lib/modules/agent-engine/ports";
 import { InMemoryAssistantRepo } from "@/lib/modules/assistant/adapters/in-memory-assistant-repo";
 import type { AssistantRepo } from "@/lib/modules/assistant/ports";
-import { InMemoryBus } from "@/lib/modules/events/adapters/in-memory-bus";
+import { RedisBus } from "@/lib/modules/events/adapters/redis-bus";
 import type { BusPort } from "@/lib/modules/events/ports";
 import { EnvModelGateway } from "@/lib/modules/model-gateway/adapters/env-gateway";
 import type { ModelGatewayPort } from "@/lib/modules/model-gateway/ports";
+import { MysqlRunRepo } from "@/lib/modules/run/adapters/mysql-run-repo";
 import { RunOrchestrator } from "@/lib/modules/run/application/orchestrator";
-import { InMemorySessionRepo } from "@/lib/modules/session/adapters/in-memory-session-repo";
+import { RunWorker } from "@/lib/modules/run/application/worker";
+import { MysqlSessionRepo } from "@/lib/modules/session/adapters/mysql-session-repo";
 import type { SessionRepo } from "@/lib/modules/session/ports";
 
 export interface Container {
   env: Env;
+  db: Db;
   sessions: SessionRepo;
   assistants: AssistantRepo;
   bus: BusPort;
   engine: EnginePort;
   gateway: ModelGatewayPort;
+  runs: MysqlRunRepo;
   orchestrator: RunOrchestrator;
+  worker: RunWorker;
 }
 
-/** 内置的通用助手:未定义 outputSchema,故只回对话文本(见设计文档 §3)。 */
+/**
+ * 内置的通用助手:未定义 outputSchema,故只回对话文本(设计文档 §3)。
+ * 助手构建器接入后改为从库里读。
+ */
 const DEFAULT_ASSISTANT = {
   id: "default",
   name: "通用助手",
@@ -60,6 +68,8 @@ function inheritedEnv(): Record<string, string> {
 
 function build(): Container {
   const env = loadEnv();
+  const { db } = createDb(env.databaseUrl);
+
   const gateway = new EnvModelGateway({
     base: env.models.base,
     fable: env.models.fable,
@@ -68,9 +78,10 @@ function build(): Container {
     haiku: env.models.haiku,
   });
 
-  const sessions = new InMemorySessionRepo();
+  const sessions = new MysqlSessionRepo(db);
   const assistants = new InMemoryAssistantRepo([DEFAULT_ASSISTANT]);
-  const bus = new InMemoryBus();
+  const bus = new RedisBus(env.redisUrl);
+  const runs = new MysqlRunRepo(db);
   const engine = createClaudeSdkEngine(env.dataDir, gateway);
 
   const orchestrator = new RunOrchestrator({
@@ -84,10 +95,14 @@ function build(): Container {
     baseEnv: inheritedEnv(),
   });
 
-  return { env, sessions, assistants, bus, engine, gateway, orchestrator };
+  // 同进程内起 worker;拆成独立进程只需把这段挪到单独入口,代码不变(worker 无本地状态)。
+  const worker = new RunWorker(runs, orchestrator);
+  worker.start();
+
+  return { env, db, sessions, assistants, bus, engine, gateway, runs, orchestrator, worker };
 }
 
-// dev 下 Next 会热重载模块,挂到 globalThis 上避免会话/总线被重建后丢失
+// dev 下 Next 会热重载模块,挂到 globalThis 上避免连接池与 worker 被重复创建
 const g = globalThis as { __owaContainer?: Container };
 
 export function getContainer(): Container {

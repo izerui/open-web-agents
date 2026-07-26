@@ -16,6 +16,8 @@ import type { AgentEvent, CredentialChain, ModelAlias } from "@/lib/shared";
 export interface RunCommand {
   sessionId: string;
   prompt: string;
+  /** 队列里的 run id(worker 执行时带上;内联执行可不传)。 */
+  runId?: string;
   /** 请求级覆盖(三级链最高优先)。 */
   override?: { baseUrl?: string; key?: string; model?: ModelAlias };
 }
