@@ -118,6 +118,7 @@ const bus  = new RedisBus(env.redisUrl); // 曾是 InMemoryBus
 | `OWA_AUTH_REQUIRED` | 是否要求登录,默认 1;仅本地开发可设 0 |
 | `OWA_SANDBOX` | OS 内核沙箱,默认 1;**macOS 本地开发需设 0**,见限制 |
 | `OWA_EMBEDDED_WORKER` | 设 0 关掉 web 进程内嵌的 worker(拆进程部署时用) |
+| `OWA_SHUTDOWN_GRACE_MS` | worker 收到 SIGTERM 后等在途任务的上限,默认 60000 |
 
 ### 凭证三级覆盖
 
@@ -158,6 +159,15 @@ worker 进程会自己加载 `.env` / `.env.local`(与 web 同一套配置)。
 这一步曾经缺失,后果不是起不来而是**起得来但什么都干不成**:进程健康、日志正常,
 而每个任务都以 `no key resolved from credential chain` 失败。
 教训写在这儿:验证部署方式时,**要让它真的跑完一个任务**,不能只看进程活着。
+
+### 滚动更新
+
+worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落终态**
+(上限 `OWA_SHUTDOWN_GRACE_MS`,默认 60 秒)。超时才强退,那些任务由租约过期后的
+孤儿回收接手 —— 栅栏令牌保证它们不会被重复写入结果。
+
+编排系统的 `terminationGracePeriodSeconds` 要**大于**这个值,否则进程会被 SIGKILL
+打断,白等一场。
 
 ### 健康检查
 
