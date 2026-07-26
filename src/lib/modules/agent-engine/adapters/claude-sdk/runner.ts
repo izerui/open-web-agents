@@ -23,6 +23,8 @@ export interface EngineDeps {
   sharedHome: string;
   /** 别名 → 真实 modelId 的映射来源。 */
   gateway: ModelGatewayPort;
+  /** 是否启用 OS 内核沙箱(macOS 本地开发常关:seatbelt 会吞 stdout)。 */
+  sandboxEnabled: boolean;
 }
 
 export class ClaudeSdkEngine implements EnginePort {
@@ -56,6 +58,7 @@ export class ClaudeSdkEngine implements EnginePort {
           sharedHome: this.deps.sharedHome,
           abort,
           slots: this.deps.gateway.slots(),
+          sandboxEnabled: this.deps.sandboxEnabled,
         }),
       });
 

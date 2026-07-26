@@ -30,6 +30,7 @@ describe("agent 子进程环境", () => {
     sharedHome: "/data/.agent-home",
     abort: new AbortController(),
     slots: SLOTS,
+    sandboxEnabled: false,
   });
 
   it("PATH 等宿主变量必须透传,否则子进程连 ls 都跑不了", () => {

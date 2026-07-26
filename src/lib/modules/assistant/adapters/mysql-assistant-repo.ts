@@ -12,6 +12,7 @@ interface Row {
   description: string | null;
   config: unknown;
   outputSchema: unknown;
+  webhookUrl: string | null;
 }
 
 const COLUMNS = {
@@ -21,6 +22,7 @@ const COLUMNS = {
   description: assistants.description,
   config: assistants.config,
   outputSchema: assistants.outputSchema,
+  webhookUrl: assistants.webhookUrl,
 };
 
 function toAssistant(r: Row): Assistant {
@@ -30,6 +32,7 @@ function toAssistant(r: Row): Assistant {
     name: r.name,
     icon: r.icon ?? undefined,
     description: r.description ?? undefined,
+    webhookUrl: r.webhookUrl ?? undefined,
     // outputSchema 单列存储(要按它做接口契约查询/展示),回填进 config 供 buildSpec 使用
     config: { ...config, outputSchema: (r.outputSchema as JsonSchema | null) ?? undefined },
   };
@@ -71,6 +74,7 @@ export class MysqlAssistantRepo implements AssistantRepo {
       description: a.description,
       config: restConfig,
       outputSchema: outputSchema ?? null,
+      webhookUrl: a.webhookUrl ?? null,
       visibility: "private" as const,
     };
     await this.db
@@ -83,6 +87,7 @@ export class MysqlAssistantRepo implements AssistantRepo {
           description: values.description,
           config: values.config,
           outputSchema: values.outputSchema,
+          webhookUrl: values.webhookUrl,
         },
       });
     const saved = await this.get(a.id);

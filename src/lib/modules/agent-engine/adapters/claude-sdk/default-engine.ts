@@ -18,9 +18,14 @@ const sdkQuery: QueryFn = ({ prompt, options }) =>
  *   —— 容器运行用户 HOME 常为不可写的 /nonexistent,工具写 ~/.cache 会 EACCES;
  *      用固定共享目录既可写,又让缓存跨会话复用。
  */
-export function createClaudeSdkEngine(dataDir: string, gateway: ModelGatewayPort): ClaudeSdkEngine {
+export function createClaudeSdkEngine(
+  dataDir: string,
+  gateway: ModelGatewayPort,
+  sandboxEnabled: boolean,
+): ClaudeSdkEngine {
   return new ClaudeSdkEngine(sdkQuery, {
     sharedHome: path.join(dataDir, ".agent-home"),
     gateway,
+    sandboxEnabled,
   });
 }

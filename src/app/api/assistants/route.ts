@@ -17,6 +17,8 @@ interface CreateBody {
   name?: string;
   icon?: string;
   description?: string;
+  /** 配了就在运行终态推一次结果回调。 */
+  webhookUrl?: string;
   config?: Partial<AssistantConfig>;
 }
 
@@ -49,6 +51,7 @@ export async function POST(req: Request) {
     name: body.name.trim(),
     icon: body.icon,
     description: body.description,
+    webhookUrl: body.webhookUrl,
     config: {
       systemPrompt: body.config.systemPrompt,
       model: body.config.model ?? "sonnet",

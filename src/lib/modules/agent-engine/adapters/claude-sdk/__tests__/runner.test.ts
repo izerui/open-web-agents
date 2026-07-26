@@ -33,7 +33,8 @@ const gateway = {
   slots: () => ({ fable: "m", opus: "m", sonnet: "m-sonnet", haiku: "m" }),
 };
 
-const engine = (q: QueryFn) => new ClaudeSdkEngine(q, { sharedHome: "/data/.agent-home", gateway });
+const engine = (q: QueryFn) =>
+  new ClaudeSdkEngine(q, { sharedHome: "/data/.agent-home", gateway, sandboxEnabled: false });
 
 const RECORDED = [
   { type: "system", subtype: "init", session_id: "sdk_sess_42" },

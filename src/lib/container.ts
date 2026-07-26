@@ -12,9 +12,11 @@ import type { StoragePort } from "@/lib/modules/artifacts/ports";
 import { MysqlAssistantRepo } from "@/lib/modules/assistant/adapters/mysql-assistant-repo";
 import type { AssistantRepo } from "@/lib/modules/assistant/ports";
 import { RedisBus } from "@/lib/modules/events/adapters/redis-bus";
+import { ReplayBuffer } from "@/lib/modules/events/adapters/replay-buffer";
 import type { BusPort } from "@/lib/modules/events/ports";
 import { MysqlApiKeyRepo } from "@/lib/modules/identity/adapters/mysql-api-key-repo";
 import type { ApiKeyRepo } from "@/lib/modules/identity/ports";
+import { deliverWebhook } from "@/lib/modules/integration/application/webhook";
 import { EnvModelGateway } from "@/lib/modules/model-gateway/adapters/env-gateway";
 import type { ModelGatewayPort } from "@/lib/modules/model-gateway/ports";
 import { MysqlRunRepo } from "@/lib/modules/run/adapters/mysql-run-repo";
@@ -32,6 +34,7 @@ export interface Container {
   engine: EnginePort;
   gateway: ModelGatewayPort;
   storage: StoragePort;
+  replay: ReplayBuffer;
   apiKeys: ApiKeyRepo;
   auth: Authorizer;
   runs: MysqlRunRepo;
@@ -93,9 +96,10 @@ function build(): Container {
   const bus = new RedisBus(env.redisUrl);
   const runs = new MysqlRunRepo(db);
   const storage = new LocalFsStorage();
+  const replay = new ReplayBuffer();
   const apiKeys = new MysqlApiKeyRepo(db);
   const auth = new Authorizer({ apiKeys, sessions });
-  const engine = createClaudeSdkEngine(env.dataDir, gateway);
+  const engine = createClaudeSdkEngine(env.dataDir, gateway, env.sandbox);
 
   const orchestrator = new RunOrchestrator({
     sessions,
@@ -106,6 +110,22 @@ function build(): Container {
     // agent 子进程需要继承宿主环境(PATH 等),否则 Bash 里连 ls 都找不到。
     // 凭证与 HOME 会在 buildSdkOptions 里覆盖掉这里的同名项。
     baseEnv: inheritedEnv(),
+    replay,
+    // 助手配了 webhookUrl 就在终态推一次;失败不影响 run 状态(可轮询兜底)
+    onComplete: ({ runId, assistantId, result }) => {
+      void (async () => {
+        const a = await assistants.get(assistantId);
+        const url = a?.webhookUrl;
+        if (!url || !runId) return;
+        await deliverWebhook(url, {
+          taskId: runId,
+          status: result.status,
+          structured: result.structured,
+          summary: result.summary,
+          error: result.error,
+        }).catch(() => {});
+      })();
+    },
   });
 
   // 同进程内起 worker;拆成独立进程只需把这段挪到单独入口,代码不变(worker 无本地状态)。
@@ -121,6 +141,7 @@ function build(): Container {
     engine,
     gateway,
     storage,
+    replay,
     apiKeys,
     auth,
     runs,

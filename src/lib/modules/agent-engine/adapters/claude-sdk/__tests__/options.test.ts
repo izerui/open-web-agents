@@ -16,6 +16,7 @@ const deps = () => ({
   sharedHome: "/data/.agent-home",
   abort: new AbortController(),
   slots: SLOTS,
+  sandboxEnabled: false,
 });
 
 function specOf(over: Partial<AgentSpec> = {}): AgentSpec {
@@ -101,5 +102,36 @@ describe("buildSdkOptions", () => {
     );
     expect(o.permissionMode).toBe("default");
     expect(o.includePartialMessages).toBe(true);
+  });
+});
+
+describe("执行隔离进入 SDK options", () => {
+  const withSandbox = () => ({
+    sharedHome: "/data/.agent-home",
+    abort: new AbortController(),
+    slots: SLOTS,
+    sandboxEnabled: true,
+  });
+
+  it("启用时把工作目录写进沙箱可写白名单", () => {
+    const o = buildSdkOptions(specOf(), ctx, withSandbox());
+    const fs = (o.sandbox as { filesystem: { allowWrite: string[] } }).filesystem;
+    expect(fs.allowWrite).toContain("/ws/s1");
+  });
+
+  it("启用时沙箱起不来即硬失败", () => {
+    const o = buildSdkOptions(specOf(), ctx, withSandbox());
+    expect((o.sandbox as { failIfUnavailable: boolean }).failIfUnavailable).toBe(true);
+  });
+
+  it("关闭时不传 sandbox,但仍给宿主侧工具 deny 规则", () => {
+    const o = buildSdkOptions(specOf(), ctx, deps());
+    expect(o.sandbox).toBeUndefined();
+    expect(o.disallowedTools).toEqual(expect.arrayContaining([expect.stringContaining("Write(")]));
+  });
+
+  it("逃生舱可覆盖沙箱设置(留给特殊业务)", () => {
+    const o = buildSdkOptions(specOf({ escapeHatch: { sandbox: undefined } }), ctx, withSandbox());
+    expect(o.sandbox).toBeUndefined();
   });
 });

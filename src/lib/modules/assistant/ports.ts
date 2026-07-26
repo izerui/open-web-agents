@@ -6,6 +6,8 @@ export interface Assistant {
   icon?: string;
   description?: string;
   config: AssistantConfig;
+  /** 配了就在运行终态推一次结果回调。 */
+  webhookUrl?: string;
 }
 
 export interface AssistantRepo {

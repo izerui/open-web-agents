@@ -32,6 +32,15 @@ export interface OrchestratorDeps {
   platformCredentials: { baseUrl: string; key: string };
   /** 传给 agent 子进程的基础环境。 */
   baseEnv?: Record<string, string>;
+  /** 记录事件供断线重连回放(可选)。 */
+  replay?: { record(topic: string, e: AgentEvent): void; reset(topic: string): void };
+  /** 终态时投递 webhook(可选)。 */
+  onComplete?: (info: {
+    runId?: string;
+    sessionId: string;
+    assistantId: string;
+    result: RunResult;
+  }) => void;
 }
 
 /** 事件总线上的 topic:按会话隔离。 */
@@ -72,10 +81,13 @@ export class RunOrchestrator {
 
     const topic = topicOf(cmd.sessionId);
     const publish = (e: AgentEvent) => {
+      this.deps.replay?.record(topic, e);
       // 事件投递失败不应中断 agent 运行
       void this.deps.bus.publish(topic, e).catch(() => {});
     };
 
+    // 新一轮开始清空重放缓冲,免得把上一轮的事件回放给这一轮
+    this.deps.replay?.reset(topic);
     publish({ kind: "status", label: "运行中", state: "running" });
 
     let result = await this.deps.engine.run(spec, ctx, publish, signal);
@@ -105,6 +117,18 @@ export class RunOrchestrator {
       structured: result.structured,
       summary: result.summary ?? result.error?.message,
     });
+
+    // 终态回调(webhook 等)。失败不影响 run 的最终状态 —— 结果已在库里,可轮询兜底
+    try {
+      this.deps.onComplete?.({
+        runId: cmd.runId,
+        sessionId: cmd.sessionId,
+        assistantId: session.assistantId,
+        result,
+      });
+    } catch {
+      // 回调注册方自己的问题,不牵连运行
+    }
 
     return result;
   }

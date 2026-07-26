@@ -1,6 +1,7 @@
 // SDK 选项组装:域内 AgentSpec + RunContext → claude-agent-sdk query 的 options。
 // 属 adapter 层,但刻意写成【不 import SDK】的纯函数,便于单测。
 
+import { materializeSandbox } from "@/lib/modules/agent-engine/domain/sandbox";
 import type { ModelSlots } from "@/lib/modules/model-gateway/ports";
 import type { AgentSpec, ResolvedCredentials, RunContext } from "@/lib/shared";
 
@@ -37,6 +38,8 @@ export interface SdkOptionsDeps {
   abort: AbortController;
   /** 别名槽 → 真实 modelId。 */
   slots: ModelSlots;
+  /** 是否启用 OS 内核沙箱。 */
+  sandboxEnabled: boolean;
 }
 
 /**
@@ -76,6 +79,15 @@ export function buildSdkOptions(
   if (spec.outputSchema) {
     options.outputFormat = { type: "json_schema", schema: spec.outputSchema };
   }
+
+  // 执行隔离:cwd 只是默认起点,模型可用绝对路径写到工作空间之外 —— 围栏靠这里
+  const { sandbox, disallowedTools } = materializeSandbox({
+    enabled: deps.sandboxEnabled,
+    workspaceDir: ctx.workspaceDir,
+    sharedHome: deps.sharedHome,
+  });
+  if (sandbox) options.sandbox = sandbox;
+  if (disallowedTools.length) options.disallowedTools = disallowedTools;
 
   // ④ 逃生舱:最后 spread,覆盖以上任何默认
   return { ...options, ...spec.escapeHatch };
