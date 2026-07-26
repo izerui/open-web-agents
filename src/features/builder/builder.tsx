@@ -456,7 +456,12 @@ export function Builder() {
           {msg && <span className="text-xs opacity-70">{msg}</span>}
         </div>
 
-        {draft.id && <KnowledgePanel assistantId={draft.id} />}
+        {draft.id && (
+          <KnowledgePanel
+            assistantId={draft.id}
+            canWrite={list.find((a) => a.id === draft.id)?.canWrite !== false}
+          />
+        )}
 
         {draft.id && <SharePanel assistantId={draft.id} />}
 

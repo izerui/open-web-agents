@@ -16,7 +16,13 @@ const field =
  * 与会话工作空间的区别:工作空间每会话独立、开局为空;知识库是助手级、跨会话长存,
  * 运行时按用户问题检索相关片段注入提示词。
  */
-export function KnowledgePanel({ assistantId }: { assistantId: string }) {
+export function KnowledgePanel({
+  assistantId,
+  canWrite = true,
+}: {
+  assistantId: string;
+  canWrite?: boolean;
+}) {
   const [docs, setDocs] = useState<Doc[]>([]);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
@@ -80,41 +86,53 @@ export function KnowledgePanel({ assistantId }: { assistantId: string }) {
         </p>
       </div>
 
-      <input
-        className={field}
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        placeholder="文档标题,如「报销制度」"
-      />
-      <textarea
-        className={`${field} h-28 resize-y font-mono`}
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        placeholder="粘贴文档正文…"
-      />
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          className="rounded bg-black px-3 py-1 text-white text-xs disabled:opacity-40 dark:bg-white dark:text-black"
-          onClick={add}
-          disabled={!title.trim() || !content.trim() || busy}
-        >
-          {busy ? "添加中…" : "添加文档"}
-        </button>
-        {msg && <span className="text-red-600 text-xs">{msg}</span>}
-      </div>
+      {!canWrite && (
+        <p className="text-xs opacity-45">
+          这个助手是别人分享给你的 —— 可以看资料清单,但不能增删。
+        </p>
+      )}
+
+      {canWrite && (
+        <>
+          <input
+            className={field}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="文档标题,如「报销制度」"
+          />
+          <textarea
+            className={`${field} h-28 resize-y font-mono`}
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            placeholder="粘贴文档正文…"
+          />
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              className="rounded bg-black px-3 py-1 text-white text-xs disabled:opacity-40 dark:bg-white dark:text-black"
+              onClick={add}
+              disabled={!title.trim() || !content.trim() || busy}
+            >
+              {busy ? "添加中…" : "添加文档"}
+            </button>
+            {msg && <span className="text-red-600 text-xs">{msg}</span>}
+          </div>
+        </>
+      )}
 
       {docs.length === 0 && <p className="text-xs opacity-40">还没有知识文档</p>}
       {docs.map((d) => (
         <div key={d.id} className="flex items-center gap-2 text-xs">
           <span className="flex-1 truncate">📄 {d.title}</span>
-          <button
-            type="button"
-            className="text-red-600 underline opacity-70 hover:opacity-100"
-            onClick={() => remove(d.id)}
-          >
-            删除
-          </button>
+          {canWrite && (
+            <button
+              type="button"
+              className="text-red-600 underline opacity-70 hover:opacity-100"
+              onClick={() => remove(d.id)}
+            >
+              删除
+            </button>
+          )}
         </div>
       ))}
     </div>

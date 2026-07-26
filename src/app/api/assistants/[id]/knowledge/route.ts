@@ -6,8 +6,14 @@ import { hasResourceAccess } from "@/lib/modules/access/domain/grants";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** 知识库内容会进提示词、影响回答,所以改动它需要 write 权限(与改提示词同级)。 */
-async function requireWrite(req: Request, assistantId: string) {
+/**
+ * 按操作分级鉴权。
+ *
+ * 口径要与助手本身一致:被分享 read 的人能从助手列表看到完整 systemPrompt,
+ * 那么"这个助手挂了哪几篇资料"(仅标题)同样属于 read 范畴 —— 两条路径不该一个
+ * 能看一个 403。而增删知识文档会改变回答内容,与改提示词同级,必须 write。
+ */
+async function requirePermission(req: Request, assistantId: string, need: "read" | "write") {
   const { assistants, grants, auth } = getContainer();
   const subject = await auth.resolveSubject(req);
   const assistant = await assistants.get(assistantId);
@@ -18,7 +24,7 @@ async function requireWrite(req: Request, assistantId: string) {
   if (!hasResourceAccess(subject, assistant, "read", list)) {
     return { error: Response.json({ error: "not found" }, { status: 404 }) };
   }
-  if (!hasResourceAccess(subject, assistant, "write", list)) {
+  if (need === "write" && !hasResourceAccess(subject, assistant, "write", list)) {
     return { error: Response.json({ error: "no write permission" }, { status: 403 }) };
   }
   return { assistant };
@@ -28,7 +34,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const { id } = await params;
   const { knowledge } = getContainer();
   try {
-    const r = await requireWrite(req, id);
+    // 列表只回标题与时间(不含正文),read 权限即可
+    const r = await requirePermission(req, id, "read");
     if (r.error) return r.error;
     return Response.json({ docs: await knowledge.list(id) });
   } catch (err) {
@@ -43,7 +50,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params;
   const { knowledge } = getContainer();
   try {
-    const r = await requireWrite(req, id);
+    const r = await requirePermission(req, id, "write");
     if (r.error) return r.error;
 
     const body = (await req.json().catch(() => ({}))) as { title?: string; content?: string };
@@ -74,7 +81,7 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   const { id } = await params;
   const { knowledge } = getContainer();
   try {
-    const r = await requireWrite(req, id);
+    const r = await requirePermission(req, id, "write");
     if (r.error) return r.error;
 
     const docId = new URL(req.url).searchParams.get("docId");

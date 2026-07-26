@@ -14,6 +14,10 @@ export interface AssistantSummary {
   icon?: string;
   description?: string;
   config: { outputSchema?: Record<string, unknown> };
+  /** 是否已公开分享 */
+  isPublic?: boolean;
+  /** 当前用户能否修改 */
+  canWrite?: boolean;
 }
 
 export interface FileNode {
