@@ -7,10 +7,18 @@ import type { AssistantConfig } from "./config";
 export function buildSpec(
   cfg: AssistantConfig,
   _ctx: RunContext,
-  overrides?: { model?: ModelAlias },
+  overrides?: {
+    model?: ModelAlias;
+    /**
+     * 检索到的知识片段,追加在系统提示词之后。
+     * 由调用方(编排层)先检索好再传进来 —— 检索要碰 IO,不该混进这个纯函数。
+     */
+    knowledgeContext?: string;
+  },
 ): AgentSpec {
+  const knowledge = overrides?.knowledgeContext?.trim();
   return {
-    systemPrompt: cfg.systemPrompt,
+    systemPrompt: knowledge ? `${cfg.systemPrompt}\n\n${knowledge}` : cfg.systemPrompt,
     skills: cfg.skills,
     mcpServers: cfg.mcpServers,
     tools: cfg.tools,

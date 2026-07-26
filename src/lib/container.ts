@@ -31,6 +31,8 @@ import { SecretBox } from "@/lib/modules/identity/domain/secret-box";
 import type { ApiKeyRepo } from "@/lib/modules/identity/ports";
 import type { UserRepo } from "@/lib/modules/identity/user-ports";
 import { deliverWebhook } from "@/lib/modules/integration/application/webhook";
+import { MysqlKnowledgeRepo } from "@/lib/modules/knowledge/adapters/mysql-knowledge-repo";
+import { formatContext, retrieve } from "@/lib/modules/knowledge/domain/retrieval";
 import { EnvModelGateway } from "@/lib/modules/model-gateway/adapters/env-gateway";
 import type { ModelGatewayPort } from "@/lib/modules/model-gateway/ports";
 import { MysqlRunRepo } from "@/lib/modules/run/adapters/mysql-run-repo";
@@ -61,6 +63,7 @@ export interface Container {
   auth: Authorizer;
   runs: MysqlRunRepo;
   usage: MysqlUsageRepo;
+  knowledge: MysqlKnowledgeRepo;
   orchestrator: RunOrchestrator;
   worker: RunWorker;
 }
@@ -139,6 +142,7 @@ function build(): Container {
   const storage = new LocalFsStorage();
   const approval = new RedisApproval(env.redisUrl);
   const usage = new MysqlUsageRepo(db);
+  const knowledge = new MysqlKnowledgeRepo(db);
   const replay = new ReplayBuffer();
   const apiKeys = new MysqlApiKeyRepo(db);
   const grants = new MysqlGrantRepo(db);
@@ -216,6 +220,12 @@ function build(): Container {
     runAnchor: (runId) => runs.getResumeAnchor(runId),
     recordRunSession: (runId, sdkSessionId) => runs.setSdkSessionId(runId, sdkSessionId),
     recordRunAnchor: (runId, anchor) => runs.setResumeAnchor(runId, anchor),
+    // 知识检索:没有文档或没命中都返回空串,上层据此决定不注入
+    retrieveKnowledge: async (assistantId, query) => {
+      const chunks = await knowledge.chunksOf(assistantId);
+      if (chunks.length === 0) return "";
+      return formatContext(retrieve(query, chunks));
+    },
     // 每用户自带凭证:运行时才解密,解不开(换过主密钥)就当未配置、回落平台默认
     userCredentials: async (userId) => {
       const u = await users.get(userId);
@@ -286,6 +296,7 @@ function build(): Container {
     auth,
     runs,
     usage,
+    knowledge,
     orchestrator,
     worker,
   };

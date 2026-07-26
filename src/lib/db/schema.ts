@@ -7,6 +7,7 @@ import {
   int,
   json,
   mysqlTable,
+  text,
   timestamp,
   uniqueIndex,
   varchar,
@@ -164,6 +165,23 @@ export const accessGrants = mysqlTable(
     permission: varchar("permission", { length: 16 }).notNull(),
   },
   (t) => ({ byResource: index("idx_grants_resource").on(t.resourceType, t.resourceId) }),
+);
+
+/**
+ * 助手的知识文档。
+ * 与会话工作空间的区别:工作空间是每会话独立且开局为空,知识库是助手级、跨会话长存。
+ */
+export const knowledgeDocs = mysqlTable(
+  "knowledge_docs",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    assistantId: varchar("assistant_id", { length: 36 }).notNull(),
+    title: varchar("title", { length: 255 }).notNull(),
+    /** 原文。切块与索引在读取时算 —— 文档量级不大时省掉一层一致性维护。 */
+    content: text("content").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => ({ byAssistant: index("idx_knowledge_assistant").on(t.assistantId) }),
 );
 
 /** 用户组:让"分享给整个团队"成为可能,而不必逐个点人。 */

@@ -1,5 +1,6 @@
 "use client";
 
+import { KnowledgePanel } from "@/features/builder/knowledge-panel";
 import { SharePanel } from "@/features/builder/share-panel";
 import type { AssistantSummary } from "@/features/workbench/types";
 import Link from "next/link";
@@ -454,6 +455,8 @@ export function Builder() {
           )}
           {msg && <span className="text-xs opacity-70">{msg}</span>}
         </div>
+
+        {draft.id && <KnowledgePanel assistantId={draft.id} />}
 
         {draft.id && <SharePanel assistantId={draft.id} />}
 

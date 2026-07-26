@@ -38,7 +38,9 @@ if (!URL) {
     }
   }
 
-  describe("RedisApproval", () => {
+  // 这些用例做真实 Redis 往返 + 轮询,与构建等任务并发时会明显变慢。
+  // 曾观察到一次未能复现的失败,故给足超时预算而非让它偶发地红。
+  describe("RedisApproval", { timeout: 20_000 }, () => {
     it("批准后 request 兑现为 approved", async () => {
       const r = req();
       const pending = approval.request(r);

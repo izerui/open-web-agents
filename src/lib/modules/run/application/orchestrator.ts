@@ -49,6 +49,11 @@ export interface OrchestratorDeps {
   recordRunSession?: (runId: string, sdkSessionId: string) => Promise<void>;
   /** 记录本轮实际使用的起跑锚点,供审计。 */
   recordRunAnchor?: (runId: string, anchor: string | null) => Promise<void>;
+  /**
+   * 按本轮输入检索助手知识库,返回可直接注入提示词的文本(无命中则空串)。
+   * 检索失败不该让整轮运行失败 —— 降级成"没有知识库"继续跑。
+   */
+  retrieveKnowledge?: (assistantId: string, query: string) => Promise<string>;
   /** 终态时投递 webhook(可选)。 */
   onComplete?: (info: {
     runId?: string;
@@ -114,7 +119,12 @@ export class RunOrchestrator {
       credentials,
       env: this.deps.baseEnv ?? {},
     };
-    const spec = buildSpec(assistant.config, ctx, { model });
+    // 知识检索:命中才注入。检索挂了就当没有知识库,不牵连整轮运行
+    const knowledgeContext = this.deps.retrieveKnowledge
+      ? await this.deps.retrieveKnowledge(session.assistantId, cmd.prompt).catch(() => "")
+      : "";
+
+    const spec = buildSpec(assistant.config, ctx, { model, knowledgeContext });
 
     const topic = topicOf(cmd.sessionId);
     const publish = (e: AgentEvent) => {
@@ -126,6 +136,10 @@ export class RunOrchestrator {
     // 新一轮开始清空重放缓冲,免得把上一轮的事件回放给这一轮
     this.deps.replay?.reset(topic);
     publish({ kind: "status", label: "运行中", state: "running" });
+    // 让用户看得到"这次回答参考了知识库",而不是凭空多出一些内容
+    if (knowledgeContext) {
+      publish({ kind: "status", label: "已引用知识库资料", state: "knowledge" });
+    }
 
     let result = await this.deps.engine.run(spec, ctx, publish, signal);
 
