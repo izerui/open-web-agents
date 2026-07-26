@@ -134,6 +134,9 @@ export function SettingsView() {
           <Link href="/builder" className="underline opacity-60 hover:opacity-100">
             构建器
           </Link>
+          <Link href="/usage" className="underline opacity-60 hover:opacity-100">
+            用量
+          </Link>
           <button type="button" className="underline opacity-60 hover:opacity-100" onClick={logout}>
             登出
           </button>

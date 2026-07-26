@@ -30,6 +30,7 @@ import { RunOrchestrator } from "@/lib/modules/run/application/orchestrator";
 import { RunWorker } from "@/lib/modules/run/application/worker";
 import { MysqlSessionRepo } from "@/lib/modules/session/adapters/mysql-session-repo";
 import type { SessionRepo } from "@/lib/modules/session/ports";
+import { MysqlUsageRepo } from "@/lib/modules/usage/adapters/mysql-usage-repo";
 
 export interface Container {
   env: Env;
@@ -48,6 +49,7 @@ export interface Container {
   authService: AuthService;
   auth: Authorizer;
   runs: MysqlRunRepo;
+  usage: MysqlUsageRepo;
   orchestrator: RunOrchestrator;
   worker: RunWorker;
 }
@@ -106,6 +108,7 @@ function build(): Container {
   const bus = new RedisBus(env.redisUrl);
   const runs = new MysqlRunRepo(db);
   const storage = new LocalFsStorage();
+  const usage = new MysqlUsageRepo(db);
   const replay = new ReplayBuffer();
   const apiKeys = new MysqlApiKeyRepo(db);
   const users = new MysqlUserRepo(db);
@@ -199,6 +202,7 @@ function build(): Container {
     authService,
     auth,
     runs,
+    usage,
     orchestrator,
     worker,
   };
