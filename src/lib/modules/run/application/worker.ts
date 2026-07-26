@@ -50,6 +50,19 @@ export interface RunPayloadSource {
 export class RunWorker {
   private running = false;
   private stopped = false;
+  /** 连续轮询失败次数。健康检查据此判断 worker 是不是在空转假死。 */
+  private consecutiveFailures = 0;
+  private lastError?: string;
+
+  /** 供 /api/health 暴露 —— 光探 DB 连通性看不出 worker 已经死循环了。 */
+  health(): { running: boolean; consecutiveFailures: number; lastError?: string } {
+    return {
+      running: this.running,
+      consecutiveFailures: this.consecutiveFailures,
+      lastError: this.lastError,
+    };
+  }
+
   private readonly opts: Required<Omit<WorkerOptions, "now">> & { now: () => number };
 
   constructor(
@@ -176,9 +189,29 @@ export class RunWorker {
           }
           const did = await this.tick();
           if (!did) await new Promise((r) => setTimeout(r, this.opts.idleMs));
-        } catch {
-          // 单次失败不能杀死 worker 循环
-          await new Promise((r) => setTimeout(r, this.opts.idleMs));
+          this.consecutiveFailures = 0;
+          this.lastError = undefined;
+        } catch (err) {
+          // 单次失败不能杀死 worker 循环 —— 但也【不能一声不吭】。
+          //
+          // 这里曾经是裸 catch 无日志:DB 凭证错、runs 表缺失、连接池耗尽这些情况下
+          // claimNext 每次迭代都抛,循环就以 500ms 空转,零输出零指标,队列无界堆积,
+          // 而 /api/health 仍然报 ready(它探的是 SELECT 1,从不探 worker)。
+          // 运维侧完全没有"worker 假死"的信号。
+          this.consecutiveFailures++;
+          this.lastError = err instanceof Error ? err.message : String(err);
+          // 头几次可能只是抖动;连续失败才是真出事了,且要避免日志刷屏
+          if (this.consecutiveFailures === 3 || this.consecutiveFailures % 60 === 0) {
+            console.error(
+              `[owa][worker] 连续 ${this.consecutiveFailures} 次轮询失败,队列可能正在堆积:${this.lastError}`,
+            );
+          }
+          // 持续失败时退避,别拿满速重试去捶一个已经不健康的依赖
+          const backoff = Math.min(
+            this.opts.idleMs * 2 ** Math.min(this.consecutiveFailures, 6),
+            30_000,
+          );
+          await new Promise((r) => setTimeout(r, backoff));
         }
       }
       this.running = false;

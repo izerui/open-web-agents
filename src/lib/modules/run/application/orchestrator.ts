@@ -82,10 +82,23 @@ export class RunOrchestrator {
     const assistant = await this.deps.assistants.get(session.assistantId);
     if (!assistant) throw new Error(`assistant not found: ${session.assistantId}`);
 
-    // 三级链的 user 层:会话归属用户自带的 base_url/key(设计文稿 §9)
-    const userCreds = session.ownerId
-      ? await this.deps.userCredentials?.(session.ownerId).catch(() => undefined)
-      : undefined;
+    // 三级链的 user 层:会话归属用户自带的 base_url/key(设计文稿 §9)。
+    //
+    // 【读不到用户凭证不能静默回落】—— 这里 catch 的是一次 DB 读。吞掉它意味着
+    // 本轮改用平台共享 key 执行,计费与配额归属全错,而且无事件、无日志、无报错。
+    // (注意与"解密失败"区别:那是有意为之的降级,在实现内部返回 null;
+    //  DB 读失败不是同一回事。)
+    let userCreds: { baseUrl?: string; key?: string } | undefined;
+    if (session.ownerId && this.deps.userCredentials) {
+      try {
+        userCreds = await this.deps.userCredentials(session.ownerId);
+      } catch (err) {
+        console.warn(
+          `[owa] 读取用户凭证失败(user=${session.ownerId}),本轮回落平台默认凭证 —— 计费将记在平台账上:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
 
     const chain: CredentialChain = {
       platform: this.deps.platformCredentials,
@@ -99,9 +112,11 @@ export class RunOrchestrator {
     // 分支重跑:优先用该运行自己的锚点。只有它没有明确意图时才回退到会话最新状态
     let resumeSessionId = session.sdkSessionId;
     if (cmd.runId && this.deps.runAnchor) {
-      const a = await this.deps
-        .runAnchor(cmd.runId)
-        .catch((): { anchored: boolean; anchor?: string } => ({ anchored: false }));
+      // 【读失败不能当成"没有锚点意图"】—— 那会落回会话最新锚点,于是"从零重开"
+      // 的分支恢复了完整历史对话,悄悄串回主线(见本文件顶部对锚点语义的说明),
+      // 而且随后还会把这个错误锚点写进审计轨迹,事后无从诊断。
+      // DB 读失败在这里不是可降级条件,宁可让这一轮失败。
+      const a = await this.deps.runAnchor(cmd.runId);
       if (a.anchored) resumeSessionId = a.anchor;
     }
 
@@ -153,8 +168,20 @@ export class RunOrchestrator {
     let result = await this.deps.engine.run(spec, ctx, publish, signal);
 
     if (result.sessionId) {
-      // 会话的"当前位置"跟着最新一次运行走
-      await this.deps.sessions.setSdkSessionId(cmd.sessionId, result.sessionId);
+      // 会话的"当前位置"跟着最新一次运行走。
+      //
+      // 【这里绝不能裸 await】—— 引擎已经跑完、钱已经花了,结果就在局部变量里。
+      // 这一条 UPDATE 撞上瞬时 DB 错误就会让 execute 在发布 result 事件之前抛出:
+      // SSE 客户端永久挂起、webhook 不触发、worker 把这次成功记成 worker_error,
+      // 而真实结果不可恢复。记不住锚点只影响下一轮 resume,代价小得多。
+      try {
+        await this.deps.sessions.setSdkSessionId(cmd.sessionId, result.sessionId);
+      } catch (err) {
+        console.warn(
+          `[owa] 记录会话锚点失败(session=${cmd.sessionId}),下一轮将从零开始:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
       // 同时记到本次运行上 —— 将来要从这一轮分叉时需要它
       if (cmd.runId) {
         await this.deps.recordRunSession?.(cmd.runId, result.sessionId).catch(() => {});
@@ -168,6 +195,11 @@ export class RunOrchestrator {
         result = {
           ...result,
           status: "failed",
+          // 【必须置空】—— 展开 result 会把不合格的 structured 一起带过来,
+          // 于是 /result 接口同时返回 status:"failed" 与一份 structured。
+          // 按 ports.ts 对该字段的契约("仅当产出结构化输出时存在")去判
+          // `structured != null` 的调用方,会消费平台已经判定为非法的数据。
+          structured: undefined,
           error: {
             kind: "schema_mismatch",
             message: `结构化结果不符 outputSchema: ${verdict.errors?.join("; ")}`,

@@ -158,12 +158,38 @@ describe("故障注入 / 审计与回调", () => {
     });
   });
 
-  it("取分支锚点失败时回退到会话最新状态,不中断", async () => {
+  // 这条曾经断言"取分支锚点失败时回退到会话最新状态,不中断" —— 又一次把 bug 写成规格。
+  //
+  // 锚点决定这一轮从哪儿起跑。读失败时回落到会话最新锚点,意味着一个"从零重开"的
+  // 分支恢复了完整历史对话、悄悄串回主线;更糟的是随后还会把这个错误锚点写进审计轨迹,
+  // 事后完全无法诊断"它为什么记得本不该记得的事"。
+  // DB 读失败在这里不是可降级条件 —— 宁可让这一轮失败重试。
+  it("取分支锚点失败时【中止本轮】,而不是悄悄串回主线", async () => {
     const { orch, sessions } = await setup({ runAnchor: boom });
     await sessions.setSdkSessionId("s1", "sdk-prev");
     await expect(
       orch.execute({ sessionId: "s1", prompt: "hi", runId: "r1" }, signal()),
+    ).rejects.toThrow();
+  });
+
+  it("没有 runId 时不查锚点,正常跑(网页对话的常规路径)", async () => {
+    const { orch } = await setup({ runAnchor: boom });
+    await expect(orch.execute({ sessionId: "s1", prompt: "hi" }, signal())).resolves.toMatchObject({
+      status: "success",
+    });
+  });
+
+  it("读用户凭证失败时回落平台默认并继续 —— 但会记一条告警", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { orch, engine, sessions } = await setup({ userCredentials: boom });
+    await sessions.create({ id: "s-own", assistantId: "a1", workspaceDir: "/ws", ownerId: "u1" });
+    await expect(
+      orch.execute({ sessionId: "s-own", prompt: "hi" }, signal()),
     ).resolves.toMatchObject({ status: "success" });
+    expect(engine.lastCtx?.credentials).toEqual({ baseUrl: "platform", key: "pk" });
+    // 静默换用平台 key = 计费记错账却无人知晓,必须留下痕迹
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 });
 

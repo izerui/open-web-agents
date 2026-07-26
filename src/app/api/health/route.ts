@@ -46,7 +46,7 @@ export async function GET(req: Request) {
     return Response.json({ status: "alive", uptimeSec: Math.round(process.uptime()) });
   }
 
-  const { db, bus, env } = getContainer();
+  const { db, bus, env, worker } = getContainer();
 
   const [database, redis] = await Promise.all([
     probe(() => db.execute(sql`SELECT 1`)),
@@ -54,13 +54,28 @@ export async function GET(req: Request) {
     probe(() => bus.publish("owa:health", { kind: "status", label: "probe" })),
   ]);
 
-  const ready = database.ok && redis.ok;
+  /**
+   * worker 的健康【必须单独看】。
+   *
+   * 只探 SELECT 1 的话,worker 因为凭证错误或表缺失而每次轮询都抛异常、
+   * 以 500ms 空转的时候,这个接口照样报 ready —— 队列在无声堆积,而运维毫不知情。
+   * 连续失败到一定次数就判定它已经不干活了。
+   */
+  const w = worker.health();
+  const workerOk = !w.running || w.consecutiveFailures < 5;
+
+  const ready = database.ok && redis.ok && workerOk;
 
   return Response.json(
     {
       status: ready ? "ready" : "degraded",
       uptimeSec: Math.round(process.uptime()),
-      checks: { database, redis },
+      checks: {
+        database,
+        redis,
+        // running=false 表示本进程没内嵌 worker(拆进程部署),不是故障
+        worker: { ok: workerOk, ...w },
+      },
       // 运维排查时最想先确认的几项配置(不含任何密钥)
       config: {
         authRequired: env.authRequired,

@@ -122,15 +122,21 @@ function EventBlock({ e }: { e: AgentEvent }) {
     case "artifact":
       return <p className="font-mono text-xs">📦 {e.path}</p>;
     case "result":
+      // 三态而非二态:unknown 是【结局未知】。把它渲染成红色"失败"和渲染成绿色"完成"
+      // 一样是在骗人 —— 任务可能正跑得好好的,只是这条流看不到而已。
       return (
         <div
           className={`rounded px-2 py-1 text-sm ${
             e.status === "success"
               ? "bg-green-500/10 text-green-700 dark:text-green-400"
-              : "bg-red-500/10 text-red-700 dark:text-red-400"
+              : e.status === "unknown"
+                ? "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                : "bg-red-500/10 text-red-700 dark:text-red-400"
           }`}
         >
-          <span className="font-medium">{e.status === "success" ? "✓ 完成" : "✗ 失败"}</span>
+          <span className="font-medium">
+            {e.status === "success" ? "✓ 完成" : e.status === "unknown" ? "⋯ 结局未知" : "✗ 失败"}
+          </span>
           {e.summary && <span className="ml-2 opacity-80">{e.summary}</span>}
           {e.structured !== undefined && e.structured !== null && (
             <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded bg-black/5 p-2 font-mono text-xs dark:bg-white/10">

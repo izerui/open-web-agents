@@ -42,11 +42,18 @@ function EventLine({ e }: { e: AgentEvent }) {
         </p>
       );
     case "result":
+      // unknown = 结局未知,既不是成功也不是失败(见 types.ts)
       return (
         <p
-          className={`text-sm font-medium ${e.status === "success" ? "text-green-600" : "text-red-600"}`}
+          className={`text-sm font-medium ${
+            e.status === "success"
+              ? "text-green-600"
+              : e.status === "unknown"
+                ? "text-amber-600"
+                : "text-red-600"
+          }`}
         >
-          {e.status === "success" ? "✓ 完成" : "✗ 失败"}
+          {e.status === "success" ? "✓ 完成" : e.status === "unknown" ? "⋯ 结局未知" : "✗ 失败"}
           {e.summary ? ` — ${e.summary}` : ""}
         </p>
       );

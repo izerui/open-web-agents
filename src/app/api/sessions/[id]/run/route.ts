@@ -90,11 +90,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
         // 总线不可用时【已知不会有事件到来】,再挂着连接只是让客户端白等到超时。
         // 立即收流并告知:任务已提交,请改用轮询取结果。
+        //
+        // 【状态不能写 success】—— 这一刻任务才刚入队,结果是什么根本不知道。
+        // 曾经这里发的是 status:"success",事件形状与真正跑完的运行一模一样,
+        // 于是客户端按 kind==="result" && status==="success" 记为成功、渲染绿色对勾,
+        // 随之置 running=false 卸掉审批轮询 —— 后续的人工审批闸门再也不显示,
+        // 十分钟后被自动拒绝。若该运行随后失败,用户早已被告知它成功了。
         if (!busUsable) {
           send({
             kind: "result",
-            status: "success",
-            summary: "任务已提交,但事件通道不可用 —— 请稍后查询结果",
+            status: "unknown",
+            summary: "任务已提交,但事件通道不可用 —— 请稍后轮询结果接口查看结局",
           });
           finish();
         }

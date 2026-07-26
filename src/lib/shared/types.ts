@@ -100,7 +100,21 @@ export type AgentEvent =
   | { kind: "status"; label: string; state?: string }
   | { kind: "artifact"; path: string; mime: string; url?: string }
   | { kind: "usage"; messageId?: string; input: number; output: number }
-  | { kind: "result"; status: "success" | "failed"; structured?: unknown; summary?: string };
+  /**
+   * 终态事件。
+   *
+   * `unknown` 是【结局未知】,不是第三种结局:它只用于"这条流到此为止,但运行的
+   * 真实结局要另行查询"的场景(如事件通道不可用时的降级收流)。
+   * 必须与 success 区分开 —— 否则客户端会把"我不知道"渲染成绿色对勾:
+   * 曾经的降级路径就是发 status:"success",事件形状与真正跑完的运行完全一致,
+   * 于是 UI 记为成功、卸掉审批轮询,而运行可能随后失败。
+   */
+  | {
+      kind: "result";
+      status: "success" | "failed" | "unknown";
+      structured?: unknown;
+      summary?: string;
+    };
 
 /** state 类事件在断线重连时需重放;noise 类可滚动淘汰。 */
 export const STATE_EVENT_KINDS = ["status", "artifact", "usage", "result"] as const;

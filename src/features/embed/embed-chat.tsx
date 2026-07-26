@@ -20,9 +20,14 @@ function Line({ e }: { e: AgentEvent }) {
     case "tool_use":
       return <p className="text-xs opacity-45">正在使用 {e.tool}…</p>;
     case "result":
-      return e.status === "failed" ? (
-        <p className="text-red-600 text-sm">出错了:{e.summary ?? "请稍后再试"}</p>
-      ) : null;
+      if (e.status === "failed") {
+        return <p className="text-red-600 text-sm">出错了:{e.summary ?? "请稍后再试"}</p>;
+      }
+      // unknown 不能什么都不显示 —— 用户会以为消息发丢了。如实说明结局未知。
+      if (e.status === "unknown") {
+        return <p className="text-amber-600 text-sm">{e.summary ?? "已提交,结果稍后可查"}</p>;
+      }
+      return null;
     default:
       return null;
   }

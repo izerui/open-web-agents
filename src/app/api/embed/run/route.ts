@@ -72,12 +72,14 @@ export async function POST(req: Request) {
         await runs.create({ id: runId, sessionId, prompt });
         send({ kind: "status", label: "已入队", state: "pending" });
 
-        // 总线不可用时已知收不到事件,立即收流,别让客户端白等到超时
+        // 总线不可用时已知收不到事件,立即收流,别让客户端白等到超时。
+        // status 用 unknown 而非 success —— 此刻任务才刚入队,结局根本还不知道,
+        // 发 success 等于把「我不知道」渲染成绿色对勾(见 types.ts 对该字段的说明)。
         if (!busUsable) {
           send({
             kind: "result",
-            status: "success",
-            summary: "任务已提交,但事件通道不可用 —— 请稍后查询结果",
+            status: "unknown",
+            summary: "任务已提交,但事件通道不可用 —— 请稍后轮询结果接口查看结局",
           });
           finish();
         }
