@@ -250,9 +250,10 @@ function build(): Container {
     },
   });
 
-  // 同进程内起 worker;拆成独立进程只需把这段挪到单独入口,代码不变(worker 无本地状态)。
+  // 同进程内起 worker。拆成独立进程时,web 侧用 OWA_EMBEDDED_WORKER=0 关掉,
+  // 由 worker 入口(src/worker.ts)单独起 —— worker 无本地状态,代码完全不变。
   const worker = new RunWorker(runs, orchestrator);
-  worker.start();
+  if (process.env.OWA_EMBEDDED_WORKER !== "0") worker.start();
 
   // 工作空间 GC:定期两层回收,防磁盘无界增长。失败只记日志,绝不影响主流程。
   const gc = new WorkspaceGc({

@@ -1,15 +1,21 @@
+# 自托管单机部署(设计文稿 §13.5:单机 Docker 优先)。
+#
+# 拓扑:web(收请求、发 SSE)+ worker(跑 agent)+ MySQL(队列与数据)+ Redis(事件总线)。
+# web 与 worker 用【同一个镜像】,只是启动命令不同 —— worker 无本地状态,
+# 想扩容直接 `docker compose up -d --scale worker=4`。
 services:
   mysql:
     image: mysql:8.4
     environment:
-      MYSQL_ROOT_PASSWORD: owa
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-owa}
       MYSQL_DATABASE: owa
     ports: ["3306:3306"]
     volumes: ["owa_mysql:/var/lib/mysql"]
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-powa"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:-owa}"]
       interval: 5s
       retries: 10
+
   redis:
     image: redis:7-alpine
     ports: ["6379:6379"]
@@ -17,5 +23,51 @@ services:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       retries: 10
+
+  # 迁移单独跑一次:让 web/worker 启动时数据库结构一定是就绪的,
+  # 而不是每个实例各自尝试迁移(多实例并发迁移会打架)
+  migrate:
+    build: { context: ., dockerfile: Dockerfile }
+    image: open-web-agents:latest
+    command: ["pnpm", "db:migrate"]
+    environment: &owa_env
+      OWA_DATABASE_URL: mysql://root:${MYSQL_ROOT_PASSWORD:-owa}@mysql:3306/owa
+      OWA_REDIS_URL: redis://redis:6379
+      OWA_DATA_DIR: /app/data
+      OWA_ANTHROPIC_BASE_URL: ${OWA_ANTHROPIC_BASE_URL:-https://api.anthropic.com}
+      OWA_ANTHROPIC_API_KEY: ${OWA_ANTHROPIC_API_KEY:-}
+      OWA_MODEL: ${OWA_MODEL:-sonnet}
+      # 生产必须显式设置,否则会话可被伪造、用户密钥可被解密
+      OWA_SESSION_SECRET: ${OWA_SESSION_SECRET:?必须设置}
+      OWA_SECRET_KEY: ${OWA_SECRET_KEY:?必须设置}
+      OWA_AUTH_REQUIRED: "1"
+      # Linux 上用 bubblewrap,沙箱正常工作(macOS 的 seatbelt 会吞 stdout)
+      OWA_SANDBOX: "1"
+    depends_on:
+      mysql: { condition: service_healthy }
+
+  web:
+    image: open-web-agents:latest
+    environment:
+      <<: *owa_env
+      # 由独立 worker 服务跑任务,web 只收请求
+      OWA_EMBEDDED_WORKER: "0"
+    ports: ["3000:3000"]
+    volumes: ["owa_data:/app/data"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  worker:
+    image: open-web-agents:latest
+    command: ["pnpm", "worker:prod"]
+    environment: *owa_env
+    # 与 web 共享同一份工作空间 —— agent 写产物、web 读文件树
+    volumes: ["owa_data:/app/data"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
 volumes:
   owa_mysql:
+  owa_data:

@@ -1,0 +1,7 @@
+# worker 镜像:复用同一份构建产物,只是换个启动命令。
+# 这正是"拆进程只改部署不改码"的体现 —— 没有单独的 worker 构建。
+FROM open-web-agents:latest
+USER owa
+# worker 不监听端口,存活性由进程本身决定
+HEALTHCHECK NONE
+CMD ["pnpm", "worker:prod"]

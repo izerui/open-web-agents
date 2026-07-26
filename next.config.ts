@@ -7,6 +7,8 @@ const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 const nextConfig: NextConfig = {
   // claude-agent-sdk 会 spawn 子进程,必须留在 Node 运行时、不被打包器改写
   serverExternalPackages: ["@anthropic-ai/claude-agent-sdk"],
+  // 容器镜像用 standalone:只打包实际用到的依赖,镜像小很多
+  output: "standalone",
   // 上层目录存在其它 lockfile,显式钉住工作区根,避免 Turbopack 推断到 $HOME
   turbopack: { root: projectRoot },
 
