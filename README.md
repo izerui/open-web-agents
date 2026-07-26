@@ -240,10 +240,30 @@ macOS 的 seatbelt 沙箱会**吞掉沙箱内 Bash 的 stdout** —— agent 跑
 实测同一助手时而拿不到 `structured_output`。平台留了降级路径:从最终文本里提取 JSON,
 **提取结果仍要过 outputSchema 校验**,并打 `salvagedFromText` 标记便于运维识别。
 
-### 容器化配置未实际验证
+### 两处「写了但没跑过」
 
-`Dockerfile` 与 `docker-compose.yml` 只做了结构校验,**镜像构建与容器编排没有实际跑过**
-(开发机上没有 Docker)。首次部署请预留调试时间。
+仓库里其余每一条声明都有实测支撑,只有这两处没有 —— 单独列出来,免得它们混在
+一堆已验证的内容里被默认为也验过了。
+
+**容器化配置**:`Dockerfile` 与 `docker-compose.yml` 只做了结构校验,
+**镜像构建与容器编排从未实际执行**(开发机上没有 Docker)。首次部署请预留调试时间。
+
+**CI 工作流**:`.github/workflows/ci.yml` **从未在 GitHub Actions 上真正跑过**
+(本地没有远端仓库)。
+
+已经验证的是每一条 `run:` 里的命令本身能跑通 —— `pnpm ci:dryrun` 会按 ci.yml 的
+步骤顺序在本机实跑一遍(建库、迁移两个库、typecheck、lint、645 单测、
+**故意抽掉依赖确认跳过守卫真的会拦下**、build、e2e 53 条、服务被拆干净)。
+这个脚本在仓库里,谁都可以复现,不是一句"我验过了"。
+
+预跑过程中它挡下了两个本会让 CI 失灵的问题:
+- `mysql` 命令行:GitHub 的 ubuntu 运行器默认不带,改用 mysql2(本来就是依赖)
+- `pnpm test | tee` 少了 `pipefail`:GitHub 默认 bash 只有 `-e`,
+  **测试失败会被 tee 的成功退出码盖住,CI 照样绿**
+
+**没有验证的是 Actions 特有的那部分**:服务容器健康检查时序、容器网络连通性、
+`pnpm/action-setup` 与 `packageManager` 的配合、缓存命中。
+这些只有真推一次才知道 —— 首次 CI 变红大概率出在这几处,而不是业务代码。
 
 ### 检索是关键词而非语义
 
@@ -274,6 +294,7 @@ pnpm test:e2e      # 端到端:自动构建、起服务、跑攻击面、拆干�
 pnpm typecheck
 pnpm lint          # Biome
 pnpm build
+pnpm ci:dryrun     # 按 ci.yml 的步骤在本机实跑一遍(需 OWA_CI_DB_URL)
 ```
 
 `pnpm test:e2e` 默认用 3100 端口,不会碰你正在跑的 3000。

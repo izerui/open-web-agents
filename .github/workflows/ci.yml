@@ -65,24 +65,33 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: 建测试库并迁移
+        shell: bash
+        env:
+          OWA_DATABASE_URL: mysql://root:ci-password@127.0.0.1:3306/owa
+          OWA_REDIS_URL: redis://127.0.0.1:6379
+          OWA_SESSION_SECRET: ci-session-secret
+          OWA_SECRET_KEY: ci-secret-key
         run: |
-          mysql -h 127.0.0.1 -u root -pci-password \
-            -e "CREATE DATABASE IF NOT EXISTS owa_test CHARACTER SET utf8mb4;"
+          set -euo pipefail
+          # 用 mysql2(本来就是依赖)而不是 mysql 命令行:
+          # GitHub 的 ubuntu 运行器默认不带 mysql 客户端,靠它会直接 command not found
+          node scripts/ensure-databases.mjs owa owa_test
           # 两个库都要迁:owa 给 e2e 用,owa_test 给契约测试用
           for db in owa owa_test; do
-            OWA_DATABASE_URL="mysql://root:ci-password@127.0.0.1:3306/$db" \
-            OWA_REDIS_URL="redis://127.0.0.1:6379" \
-            OWA_SESSION_SECRET=ci-session-secret \
-            OWA_SECRET_KEY=ci-secret-key \
-              pnpm db:migrate
+            OWA_DATABASE_URL="mysql://root:ci-password@127.0.0.1:3306/$db" pnpm db:migrate
           done
 
       - run: pnpm typecheck
       - run: pnpm lint
 
-      # 只跑一遍,输出留档给下一步检查 —— 跑两遍既慢又可能因为清表互相干扰
+      # 只跑一遍,输出留档给下一步检查 —— 跑两遍既慢又可能因为清表互相干扰。
+      # pipefail 必须显式开:GitHub 默认的 bash 只有 -e,管道里前一段失败会被 tee 的
+      # 成功退出码盖住,于是测试红了 CI 却是绿的。
       - name: 单元 / 契约 / 并发 / 故障注入
-        run: pnpm test 2>&1 | tee /tmp/unit.log; exit "${PIPESTATUS[0]}"
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm test 2>&1 | tee /tmp/unit.log
 
       - name: 确认需要真实依赖的测试没有被跳过
         run: |
