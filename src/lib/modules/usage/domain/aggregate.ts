@@ -88,12 +88,20 @@ export function aggregateUsage(records: RunUsageRecord[]): UsageSummary {
   };
 }
 
-/** 微美元 → 展示用字符串。整数运算,不引入浮点误差。 */
+/**
+ * 微美元 → 展示用字符串。整数运算,不引入浮点误差。
+ *
+ * 【进位必须先做】曾经是"先取整数美元、再对余数四舍五入到分",余数进位到 100 时
+ * padStart(2) 不补位,于是 999900 显示成 `$0.100` —— 人眼读作一毛钱,实为一块钱,
+ * 差一个数量级。错的不是浮点,是进位:任何小数部分 ≥ $0.995 的金额都会中招,
+ * 而看板恰好按花费排序,最烧钱的助手反而显示得最便宜。
+ */
 export function formatUsd(microUsd: number): string {
   const sign = microUsd < 0 ? "-" : "";
-  const abs = Math.abs(microUsd);
-  const dollars = Math.floor(abs / 1_000_000);
-  const cents = Math.round((abs % 1_000_000) / 10_000);
+  // 先把整个金额四舍五入到"分"再拆分 —— 这样进位天然向上传递
+  const totalCents = Math.round(Math.abs(microUsd) / 10_000);
+  const dollars = Math.floor(totalCents / 100);
+  const cents = totalCents % 100;
   return `${sign}$${dollars}.${String(cents).padStart(2, "0")}`;
 }
 

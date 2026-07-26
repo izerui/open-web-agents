@@ -25,6 +25,33 @@ describe("redactSecrets", () => {
   });
 });
 
+// 值一律按 `[^\s"']+` 匹配,跨不过空格 —— 引号里带空格的密码【一个字符都没打码】,
+// 明文经事件流推给每个 SSE 订阅者,并进重放缓冲。
+// 这个模块存在的唯一目的就是阻止这件事,却恰好在最该防的写法上失效;
+// 而上面那组用例的值全是无空格串,所以从没暴露。
+describe("redactSecrets / 【空格回归】引号内含空格的密钥", () => {
+  const cases: [string, string][] = [
+    ['export DB_PASSWORD="p@ss w0rd" && run', 'export DB_PASSWORD="***" && run'],
+    ["API_KEY='abc def' python x.py", "API_KEY='***' python x.py"],
+    ['OSS_ACCESS_KEY_SECRET="a b c" ossutil cp', 'OSS_ACCESS_KEY_SECRET="***" ossutil cp'],
+    ['MYSQL_PASSWORD="a b" mysql -e "select 1"', 'MYSQL_PASSWORD="***" mysql -e "select 1"'],
+  ];
+  for (const [input, expected] of cases) {
+    it(input, () => expect(redactSecrets(input)).toBe(expected));
+  }
+
+  it("不带引号的值仍按空格断开 —— 命令后续参数不该被一起吞掉", () => {
+    expect(redactSecrets("API_KEY=abcdef123 python x.py")).toBe("API_KEY=*** python x.py");
+  });
+
+  it("绝不把原始密钥片段留在输出里", () => {
+    const out = redactSecrets('AWS_SECRET_ACCESS_KEY="wJalr UtnFEMI K7MDENG" aws s3 ls');
+    expect(out).not.toContain("wJalr");
+    expect(out).not.toContain("K7MDENG");
+    expect(out).toContain("aws s3 ls");
+  });
+});
+
 describe("redactInput", () => {
   it("递归掩码对象里的字符串", () => {
     expect(redactInput({ cmd: "X_TOKEN=sk-xxxxxxxx python" })).toEqual({

@@ -19,18 +19,41 @@ export class RedisBus implements BusPort {
   constructor(redisUrl: string) {
     this.pub = new Redis(redisUrl, { maxRetriesPerRequest: null });
     this.sub = new Redis(redisUrl, { maxRetriesPerRequest: null });
+    // 【必须挂】EventEmitter 没有 error 监听时会把错误 throw 成未捕获异常,
+    // 于是 Redis 重启/连接重置会直接杀掉 web 与 worker 进程 ——
+    // 那样一来 run 路由里精心写的"总线故障不阻止提交任务"降级根本执行不到,
+    // 进程在到达那段代码前就没了。
+    this.pub.on("error", () => {});
+    this.sub.on("error", () => {});
 
     this.sub.on("message", (channel, payload) => {
       const set = this.handlers.get(channel);
       if (!set?.size) return;
       let event: AgentEvent;
       try {
-        event = JSON.parse(payload) as AgentEvent;
+        const parsed = JSON.parse(payload) as unknown;
+        // 形状校验不能省:共享 Redis 上的异类 payload 或跨版本消息会让下游读 e.kind
+        // 时抛 TypeError,而这里是 ioredis 的 emit 栈 —— 抛出去就是未捕获异常。
+        if (
+          !parsed ||
+          typeof parsed !== "object" ||
+          typeof (parsed as AgentEvent).kind !== "string"
+        )
+          return;
+        event = parsed as AgentEvent;
       } catch {
         return; // 非本系统写入的脏数据,忽略
       }
-      // 快照迭代:回调里退订不打乱本次派发
-      for (const cb of [...set]) cb(event);
+      // 快照迭代:回调里退订不打乱本次派发。
+      // 单个回调抛错必须隔离 —— 否则同一会话开两个标签页时,A 的回调抛一次,
+      // 遍历中断,B 从此静默收不到任何事件。
+      for (const cb of [...set]) {
+        try {
+          cb(event);
+        } catch {
+          // 订阅者自己的问题,不牵连其它订阅者
+        }
+      }
     });
   }
 

@@ -11,8 +11,14 @@ export function redactSecrets(s: string): string {
   if (!s) return s;
   return s
     .replace(
-      /\b([A-Za-z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL)[A-Za-z0-9_]*)=(["']?)[^\s"']+\2/gi,
-      (_m, name, q) => `${name}=${q}***${q}`,
+      // 值分三种写法处理。【引号内必须允许空格】—— 曾经值一律是 `[^\s"']+`,
+      // 跨不过空格,于是 `DB_PASSWORD="p@ss w0rd"` 原样进事件流,一个字符都没打码。
+      // 这个模块存在的唯一目的就是阻止这件事,却恰好在带空格的密码上失效。
+      /\b([A-Za-z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL)[A-Za-z0-9_]*)=(?:"[^"]*"|'[^']*'|[^\s]+)/gi,
+      (m, name: string) => {
+        const q = m[name.length + 1];
+        return q === '"' || q === "'" ? `${name}=${q}***${q}` : `${name}=***`;
+      },
     )
     .replace(/\bsk-[A-Za-z0-9._-]{8,}/g, "sk-***");
 }

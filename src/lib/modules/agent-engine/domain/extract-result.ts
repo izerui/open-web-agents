@@ -35,7 +35,11 @@ export function extractRunResult(resultMsg: unknown, opts: { hasSchema: boolean 
     };
   }
 
-  if (opts.hasSchema && m.structured_output === undefined) {
+  // 【== null 而非 === undefined】:第三方兼容网关(DashScope/GLM 等)不支持
+  // output_format 时,返回的是显式的 `"structured_output": null` 而不是缺字段。
+  // 用严格相等会整个跳过下面这段降级 —— 这个分支存在的全部理由就是应对它们,
+  // 结果它对最常见的那种返回形态失效,最后以笼统的 schema_mismatch 报错。
+  if (opts.hasSchema && m.structured_output == null) {
     // 降级路径:第三方兼容网关对 output_format 支持不一致,常常拿不到 structured_output。
     // 此时从最终文本里提取 JSON —— 提取到的结果仍要过 outputSchema 校验,不放松契约。
     const salvaged = summary === undefined ? undefined : extractJsonObject(summary);

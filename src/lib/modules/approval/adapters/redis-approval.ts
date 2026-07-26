@@ -19,8 +19,19 @@ export class RedisApproval implements ApprovalPort {
   constructor(redisUrl: string) {
     this.cmd = new Redis(redisUrl, { maxRetriesPerRequest: null });
     this.sub = new Redis(redisUrl, { maxRetriesPerRequest: null });
+    // 无 error 监听 = Redis 抖动把错误 throw 成未捕获异常,直接杀进程。见 redis-bus.ts 同处。
+    this.cmd.on("error", () => {});
+    this.sub.on("error", () => {});
 
-    void this.sub.subscribe(DECISION_CHANNEL).catch(() => {});
+    // 这是裁决频道【唯一一次】订阅,失败后再也不重试:waiters 照常填充却永无消息到达,
+    // 该进程内每一次审批都阻塞到 10 分钟超时后静默返回 expired ——
+    // 用户点了批准却被拒,而 web 侧 resolve() 仍返回 true 报告成功,全链路无任何信号。
+    // 故重连后必须重新订阅。
+    const subscribe = () => {
+      void this.sub.subscribe(DECISION_CHANNEL).catch(() => {});
+    };
+    subscribe();
+    this.sub.on("ready", subscribe);
     this.sub.on("message", (_ch, payload) => {
       try {
         const { id, outcome } = JSON.parse(payload) as { id: string; outcome: ApprovalOutcome };
@@ -52,12 +63,18 @@ export class RedisApproval implements ApprovalPort {
     });
   }
 
+  /**
+   * 裁决。用 GETDEL 把「取出」与「删除」做成一次原子操作。
+   *
+   * 曾经是 get → publish → del 三步:两个审批人几乎同时提交(一个批准一个拒绝)时
+   * 都能读到非空、都广播、都收到 200「你的裁决生效了」,而实际生效的取决于
+   * Redis 消息到达顺序。对「是否放行危险操作」这种语义,审计记录会与实际行为相反。
+   * 现在只有拿到值的那一方才广播,另一方明确收到「已被裁决」。
+   */
   async resolve(id: string, outcome: ApprovalOutcome): Promise<boolean> {
-    // 请求已过期或不存在时不广播 —— 避免让等待方收到一个它已放弃的裁决
-    const raw = await this.cmd.get(PENDING_KEY(id));
+    const raw = await this.cmd.getdel(PENDING_KEY(id));
     if (!raw) return false;
     await this.cmd.publish(DECISION_CHANNEL, JSON.stringify({ id, outcome }));
-    await this.cmd.del(PENDING_KEY(id));
     return true;
   }
 

@@ -98,3 +98,41 @@ describe("LocalFsStorage.read", () => {
     await expect(storage.read(ws, "../s2/secret.txt")).rejects.toThrow(PathEscapeError);
   });
 });
+
+// 符号链接逃逸。
+//
+// safe-path 的文件头写着能挡住「符号链接式拼接」,但它是纯路径计算 ——
+// path.resolve 不跟随符号链接,判定结果永远是「在工作区内」,而随后的 fs.readFile 跟随。
+// agent 只要在自己工作目录里 `ln -s / root_link`,`?download=root_link/etc/passwd`
+// 就能读到宿主根下的任意文件:/proc/self/environ 里有 OWA_SECRET_KEY 与数据库连接串,
+// 其它租户的产物也一并暴露。全仓 grep realpath 曾经零命中 —— 注释承诺了没做到的事。
+//
+// 判定符号链接必然要碰 IO,所以守卫只能落在适配器层。
+describe("LocalFsStorage / 【符号链接回归】真实路径必须仍在工作空间内", () => {
+  let linked: string;
+
+  beforeAll(async () => {
+    linked = path.join(ws, "escape_link");
+    // 指向工作空间之外的邻居目录
+    await fs.symlink(path.join(root, "workspaces", "s2"), linked, "dir").catch(() => {});
+  });
+
+  it("顺着符号链接读别人的文件要拒", async () => {
+    await expect(storage.read(ws, "escape_link/secret.txt")).rejects.toThrow(PathEscapeError);
+  });
+
+  it("顺着符号链接预览要拒", async () => {
+    await expect(storage.preview(ws, "escape_link/secret.txt")).rejects.toThrow(PathEscapeError);
+  });
+
+  it("顺着符号链接列目录要拒", async () => {
+    await expect(storage.tree(ws, "escape_link")).rejects.toThrow(PathEscapeError);
+  });
+
+  it("指向工作空间【内部】的符号链接仍然可用 —— 不误伤正常用法", async () => {
+    const inner = path.join(ws, "inner_link");
+    await fs.symlink(path.join(ws, "sub"), inner, "dir").catch(() => {});
+    const nodes = await storage.tree(ws, "inner_link");
+    expect(nodes.map((n) => n.name)).toContain("nested.txt");
+  });
+});

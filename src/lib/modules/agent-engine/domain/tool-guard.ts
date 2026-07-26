@@ -39,9 +39,22 @@ const READ_TOOLS: Record<string, string[]> = {
   Read: ["file_path"],
 };
 
+/**
+ * 相对路径的基准【必须是 agent 的工作目录】,不是服务进程的 cwd。
+ *
+ * agent 的 cwd 就是 workspaceDir(见 options.ts),它发出的 `Write{file_path:"out.txt"}`
+ * 是再正常不过的调用。曾经这里直接 path.resolve(target),相对路径按服务进程的 cwd 解析,
+ * 于是两头都错:正常的相对写入被拒(理由文案还误导性地说"工作空间之外");
+ * 而当服务进程的 cwd 恰好落在某个 allowedDirs(/tmp、共享 HOME 都在列)时,
+ * 相对路径写入反被放行、文件落到工作空间外 —— 正是本守卫要防的那类事故。
+ */
+function resolveTarget(target: string, policy: GuardPolicy): string {
+  return path.isAbsolute(target) ? path.resolve(target) : path.resolve(policy.workspaceDir, target);
+}
+
 /** 路径是否落在某个允许目录内。用 path.relative 判定,能挡住 `/ws-evil` 这类伪前缀。 */
-function isInside(target: string, dir: string): boolean {
-  const rel = path.relative(path.resolve(dir), path.resolve(target));
+function isInside(resolvedTarget: string, dir: string): boolean {
+  const rel = path.relative(path.resolve(dir), resolvedTarget);
   return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
 
@@ -67,7 +80,8 @@ export function guardToolUse(
     for (const p of writeParams) {
       const target = input[p];
       if (typeof target !== "string" || !target) continue;
-      if (!dirs.some((d) => isInside(target, d))) {
+      const resolved = resolveTarget(target, policy);
+      if (!dirs.some((d) => isInside(resolved, d))) {
         return {
           allow: false,
           reason: `拒绝写入工作空间之外的路径:${target}(允许:${policy.workspaceDir})`,
@@ -83,7 +97,8 @@ export function guardToolUse(
       for (const p of readParams) {
         const target = input[p];
         if (typeof target !== "string" || !target) continue;
-        if (!dirs.some((d) => isInside(target, d))) {
+        const resolved = resolveTarget(target, policy);
+        if (!dirs.some((d) => isInside(resolved, d))) {
           return { allow: false, reason: `拒绝读取工作空间之外的路径:${target}` };
         }
       }

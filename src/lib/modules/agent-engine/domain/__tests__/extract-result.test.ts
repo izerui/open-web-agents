@@ -65,6 +65,30 @@ describe("兼容网关降级:从文本提取结构化结果", () => {
     expect(r.salvagedFromText).toBe(true);
   });
 
+  // 判定曾是 `=== undefined`,只覆盖「字段缺失」。而第三方兼容网关(DashScope/GLM)
+  // 不支持 output_format 时返回的是显式的 `"structured_output": null` ——
+  // 整段降级被跳过,最后以笼统的 schema_mismatch 失败。
+  // 这个分支存在的全部理由就是应对这些网关,却对它们最常见的返回形态失效;
+  // 上面那条用例用的是「字段缺失」,所以一直是绿的。
+  it("【降级回归】structured_output 为显式 null 时同样走文本提取", () => {
+    const r = extractRunResult(
+      { subtype: "success", structured_output: null, result: '结果:{"a":1}' },
+      { hasSchema: true },
+    );
+    expect(r.status).toBe("success");
+    expect(r.structured).toEqual({ a: 1 });
+    expect(r.salvagedFromText).toBe(true);
+  });
+
+  it("显式 null 且文本里也提不出 JSON 时,才以 no_structured_output 失败", () => {
+    const r = extractRunResult(
+      { subtype: "success", structured_output: null, result: "抱歉,我没法完成" },
+      { hasSchema: true },
+    );
+    expect(r.status).toBe("failed");
+    expect(r.error?.kind).toBe("no_structured_output");
+  });
+
   it("原生 structured_output 优先,不走降级", () => {
     const r = extractRunResult(
       { subtype: "success", result: '{"from":"text"}', structured_output: { from: "native" } },

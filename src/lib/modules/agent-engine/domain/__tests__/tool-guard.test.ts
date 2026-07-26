@@ -88,6 +88,45 @@ describe("guardToolUse / 读取类工具", () => {
   });
 });
 
+// 相对路径的基准必须是 agent 的工作目录,不是服务进程的 cwd。
+// 曾经直接 path.resolve(target),于是两头都错:
+//  - agent 发 Write{file_path:"out.txt"}(它的 cwd 就是工作空间,这是常态)被拒,
+//    拒绝理由还误导性地写着「工作空间之外」;
+//  - 反过来,若服务进程的 cwd 恰好落在某个 allowedDirs(/tmp、共享 HOME 都在列),
+//    相对路径写入会被【放行】并落到工作空间外 —— 正是本守卫要防的那类事故。
+// 原有用例清一色用绝对路径,所以这条路径从没被碰到。
+describe("guardToolUse / 【基准回归】相对路径按工作空间解析", () => {
+  it("工作空间内的相对写入放行", () => {
+    expect(guardToolUse("Write", { file_path: "out.txt" }, policy).allow).toBe(true);
+    expect(guardToolUse("Write", { file_path: "./sub/out.txt" }, policy).allow).toBe(true);
+  });
+
+  it("相对路径往上跳出工作空间要拒", () => {
+    expect(guardToolUse("Write", { file_path: "../../etc/passwd" }, policy).allow).toBe(false);
+    expect(guardToolUse("Write", { file_path: "../s2/steal.txt" }, policy).allow).toBe(false);
+  });
+
+  it("判定与服务进程的 cwd 无关 —— 换个 cwd 结论必须一致", () => {
+    const decide = () => guardToolUse("Write", { file_path: "out.txt" }, policy).allow;
+    const before = decide();
+    const orig = process.cwd();
+    try {
+      // /tmp 在 allowedDirs 里,正是会让旧实现误放行的场景
+      process.chdir("/tmp");
+      expect(decide()).toBe(before);
+      expect(guardToolUse("Write", { file_path: "../escape.txt" }, policy).allow).toBe(false);
+    } finally {
+      process.chdir(orig);
+    }
+  });
+
+  it("restrictReads 下相对读同样按工作空间判定", () => {
+    const strict = { ...policy, restrictReads: true };
+    expect(guardToolUse("Read", { file_path: "notes.md" }, strict).allow).toBe(true);
+    expect(guardToolUse("Read", { file_path: "../../etc/hosts" }, strict).allow).toBe(false);
+  });
+});
+
 describe("guardToolUse / 不假装能管 Bash", () => {
   it("Bash 一律放行 —— 命令文本里的路径匹配不可信,只能靠内核/容器沙箱", () => {
     expect(
