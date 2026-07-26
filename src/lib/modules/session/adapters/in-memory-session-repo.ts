@@ -15,8 +15,16 @@ export class InMemorySessionRepo implements SessionRepo {
     return s ? { ...s } : null;
   }
 
-  async list(): Promise<Session[]> {
-    return [...this.sessions.values()].sort((a, b) => b.createdAt - a.createdAt);
+  async list(filter?: { ownerId?: string; callerApiKeyId?: string }): Promise<Session[]> {
+    return [...this.sessions.values()]
+      .filter((s) => {
+        if (filter?.ownerId !== undefined && s.ownerId !== filter.ownerId) return false;
+        if (filter?.callerApiKeyId !== undefined && s.callerApiKeyId !== filter.callerApiKeyId) {
+          return false;
+        }
+        return true;
+      })
+      .sort((a, b) => b.createdAt - a.createdAt);
   }
 
   async setSdkSessionId(id: string, sdkSessionId: string): Promise<void> {

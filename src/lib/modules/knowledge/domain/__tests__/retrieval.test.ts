@@ -176,3 +176,54 @@ describe("formatContext", () => {
     expect(out).toMatch(/不要编造|如实说明/);
   });
 });
+
+// 相关性下限曾是固定的 0.1 绝对阈值。BM25 的 IDF 随词频上升而衰减,而助手知识库
+// 按定义就是主题集中的语料 —— 同一批文档,分数随语料规模整体下移,于是
+// 【知识库越完善越检索不到】,且返回空之后没有任何"未命中"信号,
+// 模型转而凭参数记忆作答,表面上一切正常。
+// 原有用例全是几条文档的小语料,压根碰不到这个拐点。
+describe("retrieve / 【规模回归】判定不随语料规模漂移", () => {
+  /** 1 篇目标 + n 篇同主题干扰件 —— 助手知识库的典型形态。 */
+  const corpus = (n: number): Chunk[] => [
+    chunk("target", 0, "开具增值税专用发票的流程:登录开票系统,录入购方信息,选择税率后确认开具。"),
+    ...Array.from({ length: n }, (_, i) =>
+      chunk(`f${i}`, 0, `差旅报销细则第 ${i} 条:住宿、交通、餐饮的限额与审批流程说明。`),
+    ),
+  ];
+
+  for (const n of [4, 19, 49, 119]) {
+    it(`语料 ${n + 1} 篇时仍命中目标(绝对阈值 0.1 在 50 篇上会归零)`, () => {
+      const hits = retrieve("开发票的流程", corpus(n));
+      expect(hits.length).toBeGreaterThan(0);
+      expect(hits[0]?.docId).toBe("target");
+    });
+  }
+
+  it("命中集合在各规模下保持一致 —— 加文档不该让已命中的内容消失", () => {
+    const ids = (n: number) =>
+      retrieve("开发票的流程", corpus(n))
+        .map((h) => h.docId)
+        .sort();
+    expect(ids(49)).toEqual(ids(4));
+  });
+
+  // 相对阈值自带一个风险:退化成「总有结果」—— 一堆毫不相干的片段里"最不差的"也过线。
+  // 光调阈值治不了,噪声得在源头去掉:单字分词让「的」这类虚词把任意两段中文都连上,
+  // 实测问「量子纠缠」能让一篇讲差旅报销的文档拿到 0.09 分,全靠一个「的」字。
+  it("不相关的查询必须返回空 —— 相对阈值不能变成「总有结果」", () => {
+    expect(retrieve("量子纠缠的实验验证", corpus(4))).toEqual([]);
+    expect(retrieve("量子纠缠的实验验证", corpus(49))).toEqual([]);
+  });
+
+  it("纯虚词查询不该命中任何东西", () => {
+    expect(retrieve("的了是在", corpus(49))).toEqual([]);
+    expect(retrieve("这个是那个的", corpus(49))).toEqual([]);
+  });
+
+  it("显式传 minScore 时仍按绝对阈值(调用方明确要求就照办)", () => {
+    const top = retrieve("开发票的流程", corpus(49))[0]?.score ?? 0;
+    expect(top).toBeGreaterThan(0);
+    expect(retrieve("开发票的流程", corpus(49), { minScore: top + 1 })).toEqual([]);
+    expect(retrieve("开发票的流程", corpus(49), { minScore: top })).toHaveLength(1);
+  });
+});

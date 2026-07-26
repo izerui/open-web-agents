@@ -14,7 +14,19 @@ export async function GET(req: Request) {
   const { sessions, auth } = getContainer();
   try {
     const principal = await auth.resolveWeb(req);
-    const all = await sessions.list();
+
+    // 归属条件下推到查询,避免「先取全局最新 100 条、再过滤」导致自己的会话被别人挤掉。
+    // admin 不加过滤 —— 它要能看到无归属的历史数据。
+    const filter =
+      principal.type === "apiKey"
+        ? { callerApiKeyId: principal.keyId }
+        : principal.role === "admin"
+          ? undefined
+          : { ownerId: principal.userId };
+
+    // 查询已经收窄,这里的 canAccessSession 是第二道闸:授权规则只有一处权威,
+    // 万一查询条件写错也由它兜住,而不是让越权数据直接流出去。
+    const all = await sessions.list(filter);
     const visible = all.filter(
       (s) =>
         canAccessSession(principal, {

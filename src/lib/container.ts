@@ -262,7 +262,19 @@ function build(): Container {
     workspacesRoot: path.join(env.dataDir, "workspaces"),
     listWorkspaces: () => runs.listSessionActivity(),
   });
+  /**
+   * 重放缓冲的过期回收。
+   *
+   * evictOlderThan 写好了、也有测试,但【生产侧从来没人调用它】—— 方法存在不等于
+   * 被接上。record 只对 noise 类事件限长,status/artifact/usage/result 这些 state
+   * 事件完全不限,于是 web 进程的堆随「历史会话总数 × state 事件数」单调增长,
+   * 终点是 OOM。这里正是它天然的调用点。
+   */
+  const REPLAY_TTL_MS = 2 * 60 * 60_000;
+
   const gcTimer = setInterval(() => {
+    const evicted = replay.evictOlderThan(REPLAY_TTL_MS);
+    if (evicted > 0) console.log(`[owa][gc] 回收 ${evicted} 个过期重放缓冲`);
     void gc
       .run()
       .then((r) => {

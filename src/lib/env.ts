@@ -86,13 +86,23 @@ export function parseEnv(raw: Record<string, string | undefined>): Env {
 
 export function loadEnv(): Env {
   const env = parseEnv(process.env);
-  // 用开发默认密钥跑生产 = 任何人都能伪造登录会话、解密用户密钥,必须显式告警
+  /**
+   * 生产环境缺密钥【直接拒绝启动】,不再只是告警。
+   *
+   * 这两个默认值就写在开源仓库里,任何人都读得到。只 warn 的后果是:部署方漏配一个
+   * 环境变量 → 服务照常起来、看起来一切正常 → 攻击者用公开常量自签嵌入令牌接管任意
+   * 会话,或用同一常量解密 users.anthropic_key_enc 列,还原所有用户的明文密钥。
+   *
+   * 一条淹没在启动日志里的 warning 换不来这个风险。不安全的默认值在生产必须是硬失败。
+   */
   if (process.env.NODE_ENV === "production") {
-    if (!process.env.OWA_SESSION_SECRET) {
-      console.warn("[owa] 警告:未设置 OWA_SESSION_SECRET,正在使用开发默认值(会话可被伪造)");
-    }
-    if (!process.env.OWA_SECRET_KEY) {
-      console.warn("[owa] 警告:未设置 OWA_SECRET_KEY,正在使用开发默认值(用户密钥可被解密)");
+    const missing: string[] = [];
+    if (!process.env.OWA_SESSION_SECRET) missing.push("OWA_SESSION_SECRET(会话可被伪造)");
+    if (!process.env.OWA_SECRET_KEY) missing.push("OWA_SECRET_KEY(用户密钥可被解密)");
+    if (missing.length > 0) {
+      throw new Error(
+        `[owa] 生产环境拒绝以开发默认密钥启动 —— 缺少:${missing.join("、")}。请用 \`openssl rand -base64 32\` 生成后配置并重启。`,
+      );
     }
   }
   return env;

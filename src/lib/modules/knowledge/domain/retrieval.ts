@@ -47,6 +47,21 @@ export function chunkText(text: string, size = CHUNK_SIZE, overlap = CHUNK_OVERL
 const CJK = /[一-鿿]/;
 
 /**
+ * 中文高频虚词,只对【单字】token 生效。
+ *
+ * 为什么必须有:单字召回高但噪声也大,而"的、了、是、在"这类字几乎出现在每一段中文里 ——
+ * 于是任意两段毫不相干的中文都能匹配上,拿到一个不为零的分数。
+ * 实测:问「量子纠缠的实验验证」,一篇讲差旅报销的文档能得 0.09 分,
+ * 靠的全是一个「的」字。这类假分数在绝对阈值下侥幸被滤掉,换成相对阈值后就会浮上来
+ * (最不相干的一批里"最不差的"照样过线)。
+ *
+ * 所以噪声要在源头去掉,而不是靠阈值去猜。二元组不受影响 —— 它本身就有区分度。
+ */
+const CJK_STOPWORDS = new Set([
+  ..."的了是在和与及对为以之等着过们这那有不也就都而或被把从向很再更即将则由于所其此该另每各种个上下中",
+]);
+
+/**
  * 混合分词:英文/数字按词切,中文出单字 + 相邻二元组。
  * 全部小写化,便于大小写不敏感匹配。
  */
@@ -59,8 +74,16 @@ export function tokenize(text: string): string[] {
   }
 
   const cjk = [...lower].filter((c) => CJK.test(c));
-  for (const c of cjk) tokens.push(c);
-  for (let i = 0; i + 1 < cjk.length; i++) tokens.push(`${cjk[i]}${cjk[i + 1]}`);
+  for (const c of cjk) {
+    if (!CJK_STOPWORDS.has(c)) tokens.push(c);
+  }
+  for (let i = 0; i + 1 < cjk.length; i++) {
+    const a = cjk[i] as string;
+    const b = cjk[i + 1] as string;
+    // 两个字都是虚词的组合(如"的是""在于")同样没有区分度
+    if (CJK_STOPWORDS.has(a) && CJK_STOPWORDS.has(b)) continue;
+    tokens.push(`${a}${b}`);
+  }
 
   return tokens;
 }
@@ -117,8 +140,10 @@ export function scoreChunks(query: string, chunks: Chunk[]): ScoredChunk[] {
 export interface RetrieveOptions {
   /** 最多返回几个片段。 */
   topK?: number;
-  /** 分数低于此值视为不相关,宁可不给也不给错的。 */
+  /** 绝对分数下限。显式传了就用它,否则走 relMinScore 的相对判定。 */
   minScore?: number;
+  /** 相对下限:不低于本次最高分的这个比例。默认 0.25。 */
+  relMinScore?: number;
   /** 注入提示词的总字数上限,防止挤爆上下文。 */
   maxChars?: number;
 }
@@ -135,12 +160,29 @@ export function retrieve(
   opts: RetrieveOptions = {},
 ): ScoredChunk[] {
   const topK = opts.topK ?? 5;
-  const minScore = opts.minScore ?? 0.1;
   const maxChars = opts.maxChars ?? 6000;
 
-  const ranked = scoreChunks(query, chunks)
-    .filter((c) => c.score >= minScore)
+  /**
+   * 相关性下限必须是【相对】的。
+   *
+   * 曾经是固定的 0.1 绝对阈值。但 BM25 的 IDF 随词频上升而衰减,而助手知识库
+   * 按定义就是主题集中的语料 —— 同一批文档,分数会随语料规模整体下移。实测:
+   *   语料 5 篇  → 最高分 0.559,命中 5
+   *   语料 20 篇 → 最高分 0.155,命中 5
+   *   语料 50 篇 → 最高分 0.064,命中 0   ← 全军覆没
+   * 也就是【知识库越完善越检索不到】。而且返回空之后没有任何"未命中"信号,
+   * 模型转而凭参数记忆作答,表面上一切正常。
+   *
+   * 改成"不低于本次最高分的若干比例":语料整体缩放时判定不变,
+   * 而"最好的也只是勉强沾边"这种情况仍会被整体过滤 —— 原来的意图保住了。
+   */
+  const scored = scoreChunks(query, chunks)
+    .filter((c) => c.score > 0)
     .sort((a, b) => b.score - a.score);
+  const top = scored[0]?.score ?? 0;
+  // 显式传 minScore = 调用方明确要绝对阈值;否则用相对判定
+  const cutoff = opts.minScore ?? top * (opts.relMinScore ?? 0.25);
+  const ranked = scored.filter((c) => c.score >= cutoff);
 
   const out: ScoredChunk[] = [];
   let used = 0;

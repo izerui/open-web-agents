@@ -31,7 +31,15 @@ export interface NewSession {
 export interface SessionRepo {
   create(s: NewSession): Promise<Session>;
   get(id: string): Promise<Session | null>;
-  list(): Promise<Session[]>;
+  /**
+   * 列出会话。
+   *
+   * 【归属过滤必须下推到查询】—— 曾经是无参 list() 取全局最新 100 条,路由拿到之后
+   * 才按归属过滤。于是只要别的租户(或一把 invoke key)新建了 100 个会话,
+   * 用户打开自己的列表就是空的:数据没丢,但界面完全不可达,能看到几条取决于
+   * 【别人】的活跃度。没有游标、没有截断提示,纯静默失效。
+   */
+  list(filter?: { ownerId?: string; callerApiKeyId?: string }): Promise<Session[]>;
   /** 每轮结束后记下 SDK session id,供下一轮 resume。 */
   setSdkSessionId(id: string, sdkSessionId: string): Promise<void>;
 }

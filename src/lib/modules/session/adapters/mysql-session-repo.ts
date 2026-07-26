@@ -2,7 +2,7 @@ import type { Db } from "@/lib/db/client";
 import { sessions } from "@/lib/db/schema";
 import type { NewSession, Session, SessionRepo } from "@/lib/modules/session/ports";
 import type { ModelAlias } from "@/lib/shared";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 
 interface Row {
   id: string;
@@ -46,6 +46,22 @@ const COLUMNS = {
 };
 
 export class MysqlSessionRepo implements SessionRepo {
+  /**
+   * 仅测试用:清空会话表。
+   *
+   * 【危险操作,必须显式确认】曾经把 OWA_TEST_DATABASE_URL 指到开发库上跑契约测试,
+   * 直接把开发数据删了。故要求调用方传库名自证是测试库 ——
+   * 让「误删开发数据」从注意事项变成做不到。参见 MysqlRunRepo._truncate。
+   */
+  async _truncate(confirmTestDatabase: string): Promise<void> {
+    if (!/test/i.test(confirmTestDatabase)) {
+      throw new Error(
+        `拒绝清空非测试库:${confirmTestDatabase} —— 库名须含 "test"(把 OWA_TEST_DATABASE_URL 指向专用测试库)`,
+      );
+    }
+    await this.db.delete(sessions).where(sql`1=1`);
+  }
+
   constructor(private readonly db: Db) {}
 
   async create(s: NewSession): Promise<Session> {
@@ -69,10 +85,18 @@ export class MysqlSessionRepo implements SessionRepo {
     return row ? toSession(row) : null;
   }
 
-  async list(): Promise<Session[]> {
-    const rows = await this.db
-      .select(COLUMNS)
-      .from(sessions)
+  async list(filter?: { ownerId?: string; callerApiKeyId?: string }): Promise<Session[]> {
+    // 过滤下推到 SQL —— 100 条上限的含义才是「这个人最近的 100 条」,
+    // 而不是「全库最近 100 条里恰好属于这个人的那几条」
+    const conds = [
+      filter?.ownerId !== undefined ? eq(sessions.ownerId, filter.ownerId) : undefined,
+      filter?.callerApiKeyId !== undefined
+        ? eq(sessions.callerApiKeyId, filter.callerApiKeyId)
+        : undefined,
+    ].filter((c) => c !== undefined);
+
+    const q = this.db.select(COLUMNS).from(sessions);
+    const rows = await (conds.length > 0 ? q.where(and(...conds)) : q)
       .orderBy(desc(sessions.createdAt))
       .limit(100);
     return rows.map(toSession);
