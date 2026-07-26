@@ -9,6 +9,21 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["@anthropic-ai/claude-agent-sdk"],
   // 上层目录存在其它 lockfile,显式钉住工作区根,避免 Turbopack 推断到 $HOME
   turbopack: { root: projectRoot },
+
+  async headers() {
+    return [
+      {
+        // /embed 就是给第三方站点 iframe 用的,必须允许跨站嵌入。
+        // 其余页面不放开 —— 避免平台工作台被套进钓鱼页面(clickjacking)。
+        source: "/embed",
+        headers: [{ key: "Content-Security-Policy", value: "frame-ancestors *" }],
+      },
+      {
+        source: "/((?!embed).*)",
+        headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
+      },
+    ];
+  },
 };
 
 export default nextConfig;
