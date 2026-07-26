@@ -44,7 +44,7 @@ async function setup(engine: EnginePort, now: () => number = () => 1000) {
   const repo = new TestRepo();
   const sessions = new InMemorySessionRepo();
   const assistants = new InMemoryAssistantRepo([
-    { id: "a1", name: "助手", config: { systemPrompt: "p", model: "sonnet" } },
+    { id: "a1", ownerId: "u1", name: "助手", config: { systemPrompt: "p", model: "sonnet" } },
   ]);
   await sessions.create({ id: "s1", assistantId: "a1", workspaceDir: "/ws/s1" });
 

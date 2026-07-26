@@ -37,6 +37,7 @@ async function setup(engine: EnginePort) {
   const assistants = new InMemoryAssistantRepo([
     {
       id: "a1",
+      ownerId: "u1",
       name: "通用助手",
       config: { systemPrompt: "你是助手", model: "sonnet" },
     },
@@ -183,6 +184,7 @@ describe("outputSchema 契约守门", () => {
     const assistants = new InMemoryAssistantRepo([
       {
         id: "a1",
+        ownerId: "u1",
         name: "专用助手",
         config: { systemPrompt: "p", model: "sonnet", outputSchema: schema },
       },

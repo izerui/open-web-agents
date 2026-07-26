@@ -7,6 +7,7 @@ import { desc, eq } from "drizzle-orm";
 
 interface Row {
   id: string;
+  ownerId: string;
   name: string;
   icon: string | null;
   description: string | null;
@@ -17,6 +18,7 @@ interface Row {
 
 const COLUMNS = {
   id: assistants.id,
+  ownerId: assistants.ownerId,
   name: assistants.name,
   icon: assistants.icon,
   description: assistants.description,
@@ -29,6 +31,7 @@ function toAssistant(r: Row): Assistant {
   const config = r.config as AssistantConfig;
   return {
     id: r.id,
+    ownerId: r.ownerId,
     name: r.name,
     icon: r.icon ?? undefined,
     description: r.description ?? undefined,
@@ -68,7 +71,7 @@ export class MysqlAssistantRepo implements AssistantRepo {
     const { outputSchema, ...restConfig } = a.config;
     const values = {
       id: a.id,
-      ownerId: this.defaultOwnerId,
+      ownerId: a.ownerId || this.defaultOwnerId,
       name: a.name,
       icon: a.icon,
       description: a.description,

@@ -1,5 +1,6 @@
 "use client";
 
+import { SharePanel } from "@/features/builder/share-panel";
 import type { AssistantSummary } from "@/features/workbench/types";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
@@ -199,6 +200,12 @@ export function Builder() {
           >
             {a.name}
             {a.config.outputSchema && <span className="ml-1 opacity-50">·接口型</span>}
+            {(a as { isPublic?: boolean }).isPublic && (
+              <span className="ml-1 opacity-50">·公开</span>
+            )}
+            {(a as { canWrite?: boolean }).canWrite === false && (
+              <span className="ml-1 opacity-50">·只读</span>
+            )}
           </button>
         ))}
       </aside>
@@ -398,6 +405,8 @@ export function Builder() {
           )}
           {msg && <span className="text-xs opacity-70">{msg}</span>}
         </div>
+
+        {draft.id && <SharePanel assistantId={draft.id} />}
 
         {draft.id && parsedSchema && (
           <div className="rounded border border-black/10 p-3 text-xs dark:border-white/15">

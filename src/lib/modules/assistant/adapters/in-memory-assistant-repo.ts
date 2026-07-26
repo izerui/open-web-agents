@@ -21,4 +21,8 @@ export class InMemoryAssistantRepo implements AssistantRepo {
     this.items.set(a.id, structuredClone(a));
     return structuredClone(a);
   }
+
+  async delete(id: string): Promise<void> {
+    this.items.delete(id);
+  }
 }

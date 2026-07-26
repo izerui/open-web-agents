@@ -5,7 +5,10 @@
 import path from "node:path";
 import { type Db, createDb } from "@/lib/db/client";
 import { type Env, loadEnv } from "@/lib/env";
+import { MysqlGrantRepo } from "@/lib/modules/access/adapters/mysql-grant-repo";
 import { Authorizer } from "@/lib/modules/access/application/authorize";
+import { PUBLIC_PRINCIPAL } from "@/lib/modules/access/domain/grants";
+import type { GrantRepo } from "@/lib/modules/access/ports";
 import { createClaudeSdkEngine } from "@/lib/modules/agent-engine/adapters/claude-sdk/default-engine";
 import type { EnginePort } from "@/lib/modules/agent-engine/ports";
 import { LocalFsStorage } from "@/lib/modules/artifacts/adapters/local-fs-storage";
@@ -44,6 +47,7 @@ export interface Container {
   gc: WorkspaceGc;
   replay: ReplayBuffer;
   apiKeys: ApiKeyRepo;
+  grants: GrantRepo;
   users: UserRepo;
   secrets: SecretBox;
   authService: AuthService;
@@ -60,6 +64,8 @@ export interface Container {
  */
 const DEFAULT_ASSISTANT = {
   id: "default",
+  // 平台内置,归 system 所有;通过公开授权让所有人可用(见 build())
+  ownerId: "system",
   name: "通用助手",
   description: "可对话、可用工具在会话工作目录里干活的通用助手",
   config: {
@@ -103,14 +109,28 @@ function build(): Container {
 
   const sessions = new MysqlSessionRepo(db);
   const assistants = new MysqlAssistantRepo(db);
-  // 首次启动播种内置助手,保证开箱可用;已存在则覆盖为最新定义
-  void assistants.upsert(DEFAULT_ASSISTANT).catch(() => {});
+  // 首次启动播种内置助手,保证开箱可用;已存在则覆盖为最新定义。
+  // 它归 system 所有,故必须同时授予公开 read —— 否则新注册用户在列表里看不到它。
+  void assistants
+    .upsert(DEFAULT_ASSISTANT)
+    .then(() =>
+      grants.grant({
+        id: "grant-default-public",
+        resourceType: "assistant",
+        resourceId: DEFAULT_ASSISTANT.id,
+        principalType: "*",
+        principalId: PUBLIC_PRINCIPAL,
+        permission: "read",
+      }),
+    )
+    .catch(() => {});
   const bus = new RedisBus(env.redisUrl);
   const runs = new MysqlRunRepo(db);
   const storage = new LocalFsStorage();
   const usage = new MysqlUsageRepo(db);
   const replay = new ReplayBuffer();
   const apiKeys = new MysqlApiKeyRepo(db);
+  const grants = new MysqlGrantRepo(db);
   const users = new MysqlUserRepo(db);
   const secrets = new SecretBox(env.secretKey);
   const authService = new AuthService({
@@ -197,6 +217,7 @@ function build(): Container {
     gc,
     replay,
     apiKeys,
+    grants,
     users,
     secrets,
     authService,

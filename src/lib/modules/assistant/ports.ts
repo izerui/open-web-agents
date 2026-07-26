@@ -2,6 +2,8 @@ import type { AssistantConfig } from "@/lib/modules/assistant/domain/config";
 
 export interface Assistant {
   id: string;
+  /** 创建者。授权判定的基准 —— owner 恒有全权。 */
+  ownerId: string;
   name: string;
   icon?: string;
   description?: string;
@@ -14,4 +16,5 @@ export interface AssistantRepo {
   get(id: string): Promise<Assistant | null>;
   list(): Promise<Assistant[]>;
   upsert(a: Assistant): Promise<Assistant>;
+  delete?(id: string): Promise<void>;
 }
