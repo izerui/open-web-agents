@@ -318,7 +318,11 @@ export function Conversation({
                 if (item.event.kind === "question") {
                   return (
                     <QuestionBlock
-                      key={`q-${j}`}
+                      // 【必须用稳定 key】QuestionBlock 自己持有选中状态,
+                      // 纯下标作 key 时事件流一变动,React 会把 A 问题的选中态
+                      // 复用到 B 问题上 —— 用户看着自己没点过的选项亮着。
+                      // toolUseId 由 SDK 给,同一次提问全程不变。
+                      key={item.event.toolUseId ?? `q-${item.event.questions[0]?.question}`}
                       e={item.event}
                       // 只有最新一轮、且已经跑完的提问才可点(见 QuestionBlock 注释)
                       answerable={i === turns.length - 1 && !turn.running && !!onAnswer}
