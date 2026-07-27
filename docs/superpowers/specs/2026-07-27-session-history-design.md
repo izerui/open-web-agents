@@ -56,7 +56,37 @@ via parentUuid links, and returns user/assistant messages in chronological order
 
 - **SDK 私有格式**。缓解:转换层隔离 + 契约测试(见测试章节)。
 - **依赖共享卷**。当前 compose 拓扑成立;将来 worker 扩到多台机器且卷不共享时失效。
-  届时的升级路径是把转换结果物化到 DB,上层接口不变。**本次不做**(YAGNI)。
+  官方解法是 `SessionStore` 适配器(见下),**本次不做**(YAGNI)。
+
+### 长会话会看到残缺的历史 —— 这条无法回避
+
+`session-storage.md:240` 原文:
+
+> `getSessionMessages` 返回代理在恢复时会看到的链接消息链。自动压缩后,早期的轮次被
+> 摘要替换,因此存储中包含 **503 个原始条目**的会话可能从 `getSessionMessages`
+> 返回 **18 条消息**。对于完整的原始历史记录……直接调用 `store.load(key)`。
+
+也就是说,一旦会话长到触发自动压缩,打开历史看到的**不是完整对话**。
+而 `store.load()` 需要配 `SessionStore`,本地文件系统模式下没有这个入口。
+
+**这比"读不到历史"更糟**:用户看到的不是错误提示,而是一段**看起来完整的短历史** ——
+没有任何迹象表明前面还有内容。
+
+对策不是假装完整,而是**把压缩这件事显式说出来**:
+
+- SDK 在压缩时会发 `system` / `compact_boundary` 消息(`agent-loop.md:55-67`),
+  当前被 `normalize.ts` 静默丢弃。改为转成一条 `status` 事件并落到 `runs`。
+- 历史里在对应位置渲染"此处上下文已被压缩,早期内容仅存摘要"。
+
+要拿到未压缩的原始历史,唯一的路是上 `SessionStore`(Redis/Postgres 参考实现现成,
+本项目两者都有)。那是独立议题,不在本次范围。
+
+### transcript 保留期(已解决)
+
+原设计漏了一条:`cleanupPeriodDays` 默认 **30 天**,到期 SDK 自己删掉 jsonl。
+除了历史消失,`resume` 找不到文件时会**静默开新会话而不报错**,表现成"助手突然失忆"。
+
+已在 `options.ts` 显式设为一年。不设永久是因为磁盘无上限增长会把队列和数据库一起拖垮。
 
 ## 三个实测得出的硬约束
 
@@ -161,7 +191,8 @@ GET /api/sessions/[id]/history
 | 情况 | 表现 |
 |---|---|
 | run 无 `sdkSessionId`(失败/取消) | 显示 prompt + 状态,无 agent 内容 |
-| transcript 文件不存在(卷丢失、被清理) | 该轮显示 prompt,附一行"历史记录不可用" |
+| transcript 文件不存在(卷丢失、超期清理) | 该轮显示 prompt,附一行"历史记录不可用" |
+| **会话被自动压缩** | 在压缩点渲染"早期内容仅存摘要",**不假装完整** |
 | SDK 抛异常 | 同上,并记录日志;不向上冒泡 |
 | 整个会话都读不到 | 仍显示所有轮次的 prompt 列表 |
 
