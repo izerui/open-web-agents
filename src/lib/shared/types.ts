@@ -38,6 +38,14 @@ export interface ToolDef {
 /** 子代理定义。background 恒为 false:平台强制子代理同步执行,保证过程可监控。 */
 export interface SubagentDef {
   name: string;
+  /**
+   * 【何时】该用这个子代理 —— 不是它是谁。
+   *
+   * 主 agent 就是靠这句话决定要不要把子任务交出去的,写得含糊等于配了不用。
+   * SDK 侧是必需字段;这里留可选是为了兼容此前存下的、没有该字段的配置,
+   * 转换时用名字兜底(见 options.ts 的 toAgents)。
+   */
+  description?: string;
   prompt: string;
   background: false;
 }

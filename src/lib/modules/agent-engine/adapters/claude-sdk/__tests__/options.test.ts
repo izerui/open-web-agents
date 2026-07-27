@@ -142,6 +142,47 @@ describe("执行隔离进入 SDK options", () => {
 });
 
 /**
+ * 子代理的形状。
+ *
+ * SDK 要的是 Record<string, AgentDefinition>,而此前传的是数组 —— 且 SDK 源码里
+ * 这个字段是【原样透传不校验】的(`agents: this.initConfig?.agents`,
+ * 对照隔壁 skills 还做了 Array.isArray 检查)。所以传错形状不会报错,
+ * 只是子代理静默不生效:构建器里配了、存下来了、界面也显示着。
+ */
+describe("子代理传给 SDK 的形状", () => {
+  const agentsOf = (subagents: AgentSpec["subagents"]) =>
+    buildSdkOptions(specOf({ subagents }), ctx, deps()).agents as
+      | Record<string, { description?: string; prompt?: string; background?: boolean }>
+      | undefined;
+
+  it("是对象而非数组 —— 数组会让 agent 名变成下标", () => {
+    const a = agentsOf([
+      { name: "reviewer", description: "需要审阅代码时", prompt: "你是审阅者", background: false },
+    ]);
+    expect(Array.isArray(a)).toBe(false);
+    expect(Object.keys(a ?? {})).toEqual(["reviewer"]);
+    expect(a?.reviewer?.prompt).toBe("你是审阅者");
+    expect(a?.reviewer?.description).toBe("需要审阅代码时");
+  });
+
+  // description 在 SDK 侧是必需字段。老配置里没有它,不能因此整个子代理失效。
+  it("老配置缺 description 时用名字兜底,而不是漏掉必需字段", () => {
+    const a = agentsOf([{ name: "reviewer", prompt: "p", background: false }]);
+    expect(a?.reviewer?.description).toBeTruthy();
+  });
+
+  it("平台强制同步执行 —— background 恒为 false", () => {
+    const a = agentsOf([{ name: "r", prompt: "p", background: false }]);
+    expect(a?.r?.background).toBe(false);
+  });
+
+  it("没配子代理时不传该字段", () => {
+    expect(agentsOf(undefined)).toBeUndefined();
+    expect(agentsOf([])).toBeUndefined();
+  });
+});
+
+/**
  * 多租户隔离:一个租户的东西不能漏进另一个租户的会话。
  * 四条建议里 cwd 早就按会话隔离了,这里是其余三条。
  */

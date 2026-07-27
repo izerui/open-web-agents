@@ -44,11 +44,13 @@ function newMcpRow(): McpDraft {
 interface SubagentDraft {
   uid: string;
   name: string;
+  /** 【何时】用它 —— 主 agent 靠这句话决定要不要把子任务交出去 */
+  description: string;
   prompt: string;
 }
 
 function newSubagentRow(): SubagentDraft {
-  return { uid: crypto.randomUUID(), name: "", prompt: "" };
+  return { uid: crypto.randomUUID(), name: "", description: "", prompt: "" };
 }
 
 interface Draft {
@@ -225,7 +227,12 @@ export function Builder() {
             // 名字与提示词都填了才算数 —— 半截的子代理存进去只会在运行时报错
             subagents: draft.subagents
               .filter((s) => s.name.trim() && s.prompt.trim())
-              .map((s) => ({ name: s.name.trim(), prompt: s.prompt.trim(), background: false })),
+              .map((s) => ({
+                name: s.name.trim(),
+                description: s.description.trim() || undefined,
+                prompt: s.prompt.trim(),
+                background: false,
+              })),
           },
         }),
       });
@@ -289,11 +296,14 @@ export function Builder() {
               }))
             : [],
           subagents: Array.isArray(cfg.subagents)
-            ? (cfg.subagents as { name?: string; prompt?: string }[]).map((s) => ({
-                uid: crypto.randomUUID(),
-                name: s.name ?? "",
-                prompt: s.prompt ?? "",
-              }))
+            ? (cfg.subagents as { name?: string; description?: string; prompt?: string }[]).map(
+                (s) => ({
+                  uid: crypto.randomUUID(),
+                  name: s.name ?? "",
+                  description: s.description ?? "",
+                  prompt: s.prompt ?? "",
+                }),
+              )
             : [],
         });
         setMsg(null);
@@ -507,26 +517,42 @@ export function Builder() {
           {draft.subagents.length === 0 && <p className="text-xs opacity-40">未配置子代理</p>}
           {draft.subagents.map((s, i) => (
             <div key={s.uid} className="flex gap-2">
-              <input
-                className={`${field} max-w-[12rem]`}
-                value={s.name}
-                onChange={(e) => {
-                  const next = [...draft.subagents];
-                  next[i] = { ...s, name: e.target.value };
-                  setDraft({ ...draft, subagents: next });
-                }}
-                placeholder="名称,如 reviewer"
-              />
-              <textarea
-                className={`${field} min-h-[3rem]`}
-                value={s.prompt}
-                onChange={(e) => {
-                  const next = [...draft.subagents];
-                  next[i] = { ...s, prompt: e.target.value };
-                  setDraft({ ...draft, subagents: next });
-                }}
-                placeholder="这个子代理的职责与要求"
-              />
+              <div className="flex-1 space-y-1">
+                <div className="flex gap-2">
+                  <input
+                    className={`${field} max-w-[12rem]`}
+                    value={s.name}
+                    onChange={(e) => {
+                      const next = [...draft.subagents];
+                      next[i] = { ...s, name: e.target.value };
+                      setDraft({ ...draft, subagents: next });
+                    }}
+                    placeholder="名称,如 reviewer"
+                  />
+                  {/* 主 agent 靠这句话决定要不要把子任务交出去 —— 缺了它,
+                      子代理配了也没人调用。SDK 侧这是必需字段。 */}
+                  <input
+                    className={field}
+                    value={s.description}
+                    onChange={(e) => {
+                      const next = [...draft.subagents];
+                      next[i] = { ...s, description: e.target.value };
+                      setDraft({ ...draft, subagents: next });
+                    }}
+                    placeholder="【何时】用它,如:需要审阅代码质量时"
+                  />
+                </div>
+                <textarea
+                  className={`${field} min-h-[3rem]`}
+                  value={s.prompt}
+                  onChange={(e) => {
+                    const next = [...draft.subagents];
+                    next[i] = { ...s, prompt: e.target.value };
+                    setDraft({ ...draft, subagents: next });
+                  }}
+                  placeholder="这个子代理的职责与要求(它的系统提示词)"
+                />
+              </div>
               <button
                 type="button"
                 className="shrink-0 text-red-600 text-xs underline opacity-70 hover:opacity-100"

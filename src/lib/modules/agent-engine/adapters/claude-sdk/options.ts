@@ -61,6 +61,33 @@ export function claudeConfigDir(sharedHome: string): string {
   return path.join(sharedHome, ".claude");
 }
 
+/**
+ * SubagentDef[] → SDK 的 `Record<string, AgentDefinition>`。
+ *
+ * 【为什么必须转】SDK 要的是以代理名为键的对象,而域内存的是数组。
+ * 直接把数组传过去不会报错 —— SDK 源码里这个字段是原样透传、不做任何校验的
+ * (`agents: this.initConfig?.agents`,对照隔壁 skills 还判了 Array.isArray)。
+ * 于是子代理静默不生效:构建器配了、库里存了、界面也显示着,就是不干活。
+ *
+ * `description` 在 SDK 侧是必需字段,含义是【何时】该用这个子代理 ——
+ * 主 agent 就是靠它决定要不要把子任务交出去。缺了就用名字兜底,
+ * 至少让字段合法;写得好不好是配置质量问题,不该让整个子代理失效。
+ */
+function toAgents(spec: AgentSpec): Record<string, unknown> | undefined {
+  if (!spec.subagents?.length) return undefined;
+  const out: Record<string, unknown> = {};
+  for (const s of spec.subagents) {
+    if (!s.name) continue;
+    out[s.name] = {
+      description: s.description?.trim() || `处理与「${s.name}」相关的子任务`,
+      prompt: s.prompt,
+      // 平台强制同步执行:后台跑的子代理没法纳入过程监控
+      background: false,
+    };
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 /** McpDef[] → SDK mcpServers 形状 `{ [name]: { type, url } }`。 */
 function toMcpServers(spec: AgentSpec): Record<string, unknown> | undefined {
   if (!spec.mcpServers?.length) return undefined;
@@ -128,7 +155,7 @@ export function buildSdkOptions(
     systemPrompt: spec.systemPrompt,
     skills: spec.skills,
     mcpServers: toMcpServers(spec),
-    agents: spec.subagents,
+    agents: toAgents(spec),
     maxTurns: spec.limits.maxTurns,
     effort: spec.limits.effort,
 
