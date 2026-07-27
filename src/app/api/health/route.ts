@@ -80,6 +80,7 @@ export async function GET(req: Request) {
       config: {
         authRequired: env.authRequired,
         sandbox: env.sandbox,
+        allowStdioMcp: env.allowStdioMcp,
         model: env.models.base,
       },
     },

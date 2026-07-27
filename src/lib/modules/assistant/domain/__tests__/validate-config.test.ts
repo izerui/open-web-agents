@@ -86,10 +86,72 @@ describe("validateAssistantConfig / MCP", () => {
     );
   });
 
-  it("stdio 类型不要求 url", () => {
+  it("stdio 默认被平台禁用", () => {
     expect(
-      validateAssistantConfig({ ...ok, mcpServers: [{ name: "local", type: "stdio" }] }),
+      fields({
+        ...ok,
+        mcpServers: [{ name: "local", type: "stdio", command: "npx" }],
+      }),
+    ).toContain("mcpServers[0].type");
+  });
+
+  it("平台开启后 stdio 要求 command,不要求 url", () => {
+    expect(
+      validateAssistantConfig(
+        {
+          ...ok,
+          mcpServers: [
+            {
+              name: "local",
+              type: "stdio",
+              command: "npx",
+              args: ["-y", "@modelcontextprotocol/server-filesystem"],
+              env: { ROOT: "/workspace" },
+            },
+          ],
+        },
+        { allowStdioMcp: true },
+      ),
     ).toEqual([]);
+    expect(
+      validateAssistantConfig(
+        { ...ok, mcpServers: [{ name: "local", type: "stdio" }] },
+        { allowStdioMcp: true },
+      ).map((i) => i.field),
+    ).toContain("mcpServers[0].command");
+  });
+
+  it("stdio args 只能是字符串数组,env 只能含字符串值", () => {
+    const issues = validateAssistantConfig(
+      {
+        ...ok,
+        mcpServers: [
+          {
+            name: "local",
+            type: "stdio",
+            command: "node",
+            args: ["server.mjs", 1 as never],
+            env: { TOKEN: 1 as never },
+          },
+        ],
+      },
+      { allowStdioMcp: true },
+    );
+    expect(issues.map((i) => i.field)).toEqual(
+      expect.arrayContaining(["mcpServers[0].args", "mcpServers[0].env"]),
+    );
+  });
+
+  it("stdio command 不能为空白", () => {
+    expect(
+      validateAssistantConfig(
+        {
+          ...ok,
+          mcpServers: [{ name: "local", type: "stdio", command: "   " }],
+        },
+        { allowStdioMcp: true },
+      ).map((i) => i.field),
+    ).toContain("mcpServers[0].command");
   });
 });
 

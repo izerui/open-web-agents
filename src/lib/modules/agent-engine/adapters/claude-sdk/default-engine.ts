@@ -22,12 +22,14 @@ export function createClaudeSdkEngine(
   dataDir: string,
   gateway: ModelGatewayPort,
   sandboxEnabled: boolean,
+  allowStdioMcp: boolean,
   requestApproval?: EngineDeps["requestApproval"],
 ): ClaudeSdkEngine {
   return new ClaudeSdkEngine(sdkQuery, {
     sharedHome: path.join(dataDir, ".agent-home"),
     gateway,
     sandboxEnabled,
+    allowStdioMcp,
     requestApproval,
   });
 }

@@ -13,6 +13,7 @@ import { PUBLIC_PRINCIPAL } from "@/lib/modules/access/domain/grants";
 import type { GroupRepo } from "@/lib/modules/access/group-ports";
 import type { GrantRepo } from "@/lib/modules/access/ports";
 import { createClaudeSdkEngine } from "@/lib/modules/agent-engine/adapters/claude-sdk/default-engine";
+import type { EngineDeps } from "@/lib/modules/agent-engine/adapters/claude-sdk/runner";
 import type { EnginePort } from "@/lib/modules/agent-engine/ports";
 import { RedisApproval } from "@/lib/modules/approval/adapters/redis-approval";
 import type { ApprovalPort } from "@/lib/modules/approval/ports";
@@ -165,7 +166,7 @@ function build(): Container {
   });
   // 审批钩子:先把待审事件推上总线(界面才看得到),再挂起等裁决。
   // 超时兜底在 RedisApproval 里 —— 没人审批时到点自动拒,绝不永久占住 worker。
-  const engine = createClaudeSdkEngine(env.dataDir, gateway, env.sandbox, async (r, signal) => {
+  const requestApproval: NonNullable<EngineDeps["requestApproval"]> = async (r, signal) => {
     const id = randomUUID().replace(/-/g, "").slice(0, 24);
     const expiresAt = Date.now() + APPROVAL_TIMEOUT_MS;
 
@@ -212,7 +213,14 @@ function build(): Container {
             ? (outcome.message ?? "人工审批未通过")
             : undefined,
     };
-  });
+  };
+  const engine = createClaudeSdkEngine(
+    env.dataDir,
+    gateway,
+    env.sandbox,
+    env.allowStdioMcp,
+    requestApproval,
+  );
 
   const orchestrator = new RunOrchestrator({
     sessions,

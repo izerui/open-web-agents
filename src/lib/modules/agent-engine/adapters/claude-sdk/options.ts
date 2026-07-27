@@ -105,11 +105,59 @@ function matchesTool(pattern: string, toolName: string): boolean {
   return pattern === toolName;
 }
 
-/** McpDef[] → SDK mcpServers 形状 `{ [name]: { type, url } }`。 */
-function toMcpServers(spec: AgentSpec): Record<string, unknown> | undefined {
+function stdioDisabledError(name?: string): Error {
+  return new Error(
+    `stdio MCP${name ? `「${name}」` : ""}未启用；部署方需显式设置 OWA_ALLOW_STDIO_MCP=1`,
+  );
+}
+
+function assertStdioMcpAllowed(mcpServers: unknown, allowed: boolean): void {
+  if (allowed || !mcpServers || typeof mcpServers !== "object") return;
+  for (const [name, raw] of Object.entries(mcpServers as Record<string, unknown>)) {
+    if (!raw || typeof raw !== "object") continue;
+    const server = raw as Record<string, unknown>;
+    if (server.type === "stdio" || typeof server.command === "string") {
+      throw stdioDisabledError(name);
+    }
+  }
+}
+
+/** McpDef[] → SDK mcpServers 形状。 */
+function toMcpServers(
+  spec: AgentSpec,
+  allowStdioMcp: boolean,
+): Record<string, unknown> | undefined {
   if (!spec.mcpServers?.length) return undefined;
   const out: Record<string, unknown> = {};
-  for (const s of spec.mcpServers) out[s.name] = { type: s.type, url: s.url };
+  for (const s of spec.mcpServers) {
+    if (s.type === "http") {
+      out[s.name] = { type: "http", url: s.url };
+      continue;
+    }
+    if (!allowStdioMcp) throw stdioDisabledError(s.name);
+    if (!s.command?.trim()) throw new Error(`stdio MCP「${s.name}」缺少 command`);
+    if (
+      s.args !== undefined &&
+      (!Array.isArray(s.args) || s.args.some((x) => typeof x !== "string"))
+    ) {
+      throw new Error(`stdio MCP「${s.name}」的 args 必须是字符串数组`);
+    }
+    if (
+      s.env !== undefined &&
+      (typeof s.env !== "object" ||
+        s.env === null ||
+        Array.isArray(s.env) ||
+        Object.values(s.env).some((x) => typeof x !== "string"))
+    ) {
+      throw new Error(`stdio MCP「${s.name}」的 env 必须是字符串键值对象`);
+    }
+    out[s.name] = {
+      type: "stdio",
+      command: s.command,
+      args: s.args,
+      env: s.env,
+    };
+  }
   return out;
 }
 
@@ -121,6 +169,8 @@ export interface SdkOptionsDeps {
   slots: ModelSlots;
   /** 是否启用 OS 内核沙箱。 */
   sandboxEnabled: boolean;
+  /** 是否允许在宿主机启动 stdio MCP 进程。 */
+  allowStdioMcp: boolean;
   /**
    * 人工审批钩子(HITL)。给了才启用审批;不给则审批规则被忽略。
    * 返回 true 放行、false 拒绝 —— 实现方负责超时兜底。
@@ -171,7 +221,7 @@ export function buildSdkOptions(
     model: spec.model.alias,
     systemPrompt: spec.systemPrompt,
     skills: spec.skills,
-    mcpServers: toMcpServers(spec),
+    mcpServers: toMcpServers(spec, deps.allowStdioMcp),
     agents: toAgents(spec),
     maxTurns: spec.limits.maxTurns,
     effort: spec.limits.effort,
@@ -372,6 +422,9 @@ export function buildSdkOptions(
     updatedInput: input,
   });
 
-  // ④ 逃生舱:最后 spread,覆盖以上任何默认
-  return { ...options, ...spec.escapeHatch };
+  // ④ 逃生舱:最后 spread,覆盖以上普通默认。
+  // stdio MCP 是宿主 RCE 边界,必须在 spread 后再验一次,不能被逃生舱绕过。
+  const merged = { ...options, ...spec.escapeHatch };
+  assertStdioMcpAllowed(merged.mcpServers, deps.allowStdioMcp);
+  return merged;
 }

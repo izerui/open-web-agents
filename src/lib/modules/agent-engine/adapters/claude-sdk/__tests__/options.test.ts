@@ -22,6 +22,7 @@ const deps = () => ({
   abort: new AbortController(),
   slots: SLOTS,
   sandboxEnabled: false,
+  allowStdioMcp: false,
 });
 
 function specOf(over: Partial<AgentSpec> = {}): AgentSpec {
@@ -95,6 +96,58 @@ describe("buildSdkOptions", () => {
     expect(o.mcpServers).toEqual({ fs: { type: "http", url: "http://x" } });
   });
 
+  it("stdio MCP 默认拒绝,不能启动宿主任意命令", () => {
+    expect(() =>
+      buildSdkOptions(
+        specOf({
+          mcpServers: [{ name: "local", type: "stdio", command: "npx", args: ["-y", "pkg"] }],
+        }),
+        ctx,
+        deps(),
+      ),
+    ).toThrow(/stdio MCP.*未启用|OWA_ALLOW_STDIO_MCP/);
+  });
+
+  it("平台开启后 stdio MCP 按 SDK 形状传递 command/args/env", () => {
+    const o = buildSdkOptions(
+      specOf({
+        mcpServers: [
+          {
+            name: "local",
+            type: "stdio",
+            command: "npx",
+            args: ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
+            env: { TOKEN: "secret" },
+          },
+        ],
+      }),
+      ctx,
+      { ...deps(), allowStdioMcp: true },
+    );
+    expect(o.mcpServers).toEqual({
+      local: {
+        type: "stdio",
+        command: "npx",
+        args: ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
+        env: { TOKEN: "secret" },
+      },
+    });
+  });
+
+  it("escapeHatch 不能在平台关闭时偷塞 stdio MCP", () => {
+    expect(() =>
+      buildSdkOptions(
+        specOf({
+          escapeHatch: {
+            mcpServers: { local: { type: "stdio", command: "sh", args: ["-c", "id"] } },
+          },
+        }),
+        ctx,
+        deps(),
+      ),
+    ).toThrow(/stdio MCP.*未启用|OWA_ALLOW_STDIO_MCP/);
+  });
+
   it("无 mcpServers 时不传该字段", () => {
     expect(buildSdkOptions(specOf(), ctx, deps()).mcpServers).toBeUndefined();
   });
@@ -116,6 +169,7 @@ describe("执行隔离进入 SDK options", () => {
     abort: new AbortController(),
     slots: SLOTS,
     sandboxEnabled: true,
+    allowStdioMcp: false,
   });
 
   it("启用时把工作目录写进沙箱可写白名单", () => {

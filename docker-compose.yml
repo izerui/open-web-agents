@@ -43,6 +43,7 @@ services:
       OWA_AUTH_REQUIRED: "1"
       # Linux 上用 bubblewrap,沙箱正常工作(macOS 的 seatbelt 会吞 stdout)
       OWA_SANDBOX: "1"
+      OWA_ALLOW_STDIO_MCP: ${OWA_ALLOW_STDIO_MCP:-0}
     depends_on:
       mysql: { condition: service_healthy }
 

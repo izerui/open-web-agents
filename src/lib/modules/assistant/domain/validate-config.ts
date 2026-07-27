@@ -11,6 +11,11 @@ export interface ConfigIssue {
   message: string;
 }
 
+export interface ConfigValidationPolicy {
+  /** stdio MCP 会在宿主机启动进程,默认禁止。 */
+  allowStdioMcp?: boolean;
+}
+
 const MODEL_ALIASES = new Set(["fable", "opus", "sonnet", "haiku"]);
 const EFFORTS = new Set(["low", "medium", "high"]);
 
@@ -31,7 +36,10 @@ function checkUrl(raw: string): string | null {
 }
 
 /** 返回所有问题(而非遇到第一个就停)—— 一次性把配置问题都告诉用户。 */
-export function validateAssistantConfig(cfg: Partial<AssistantConfig>): ConfigIssue[] {
+export function validateAssistantConfig(
+  cfg: Partial<AssistantConfig>,
+  policy: ConfigValidationPolicy = {},
+): ConfigIssue[] {
   const issues: ConfigIssue[] = [];
 
   if (!cfg.systemPrompt?.trim()) {
@@ -72,6 +80,32 @@ export function validateAssistantConfig(cfg: Partial<AssistantConfig>): ConfigIs
       else {
         const err = checkUrl(m.url);
         if (err) issues.push({ field: `${at}.url`, message: err });
+      }
+    } else if (m.type === "stdio") {
+      if (!policy.allowStdioMcp) {
+        issues.push({
+          field: `${at}.type`,
+          message: "平台未启用 stdio MCP（需部署方设置 OWA_ALLOW_STDIO_MCP=1）",
+        });
+        continue;
+      }
+      if (!m.command?.trim()) {
+        issues.push({ field: `${at}.command`, message: "stdio 类型必须给 command" });
+      }
+      if (
+        m.args !== undefined &&
+        (!Array.isArray(m.args) || m.args.some((x) => typeof x !== "string"))
+      ) {
+        issues.push({ field: `${at}.args`, message: "args 必须是字符串数组" });
+      }
+      if (
+        m.env !== undefined &&
+        (typeof m.env !== "object" ||
+          m.env === null ||
+          Array.isArray(m.env) ||
+          Object.values(m.env).some((x) => typeof x !== "string"))
+      ) {
+        issues.push({ field: `${at}.env`, message: "env 必须是字符串键值对象" });
       }
     }
   }

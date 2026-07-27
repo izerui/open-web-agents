@@ -34,6 +34,13 @@ describe("parseEnv", () => {
     expect(parseEnv({ ...base, OWA_SANDBOX: "false" }).sandbox).toBe(false);
   });
 
+  it("stdio MCP 默认关闭;只有显式真值才开启", () => {
+    expect(parseEnv(base).allowStdioMcp).toBe(false);
+    expect(parseEnv({ ...base, OWA_ALLOW_STDIO_MCP: "1" }).allowStdioMcp).toBe(true);
+    expect(parseEnv({ ...base, OWA_ALLOW_STDIO_MCP: "true" }).allowStdioMcp).toBe(true);
+    expect(parseEnv({ ...base, OWA_ALLOW_STDIO_MCP: "0" }).allowStdioMcp).toBe(false);
+  });
+
   it("平台默认凭证有兜底", () => {
     expect(parseEnv(base).defaultBaseUrl).toBe("https://api.anthropic.com");
     expect(parseEnv({ ...base, OWA_ANTHROPIC_API_KEY: "sk-x" }).defaultApiKey).toBe("sk-x");

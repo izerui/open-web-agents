@@ -25,6 +25,8 @@ export interface EngineDeps {
   gateway: ModelGatewayPort;
   /** 是否启用 OS 内核沙箱(macOS 本地开发常关:seatbelt 会吞 stdout)。 */
   sandboxEnabled: boolean;
+  /** 是否允许在宿主机启动 stdio MCP 进程。 */
+  allowStdioMcp: boolean;
   /**
    * 人工审批钩子(HITL);不给则不启用审批。
    * signal 是本轮的中止信号 —— 运行被取消时挂着的审批必须跟着收场,
@@ -74,6 +76,7 @@ export class ClaudeSdkEngine implements EnginePort {
           abort,
           slots: this.deps.gateway.slots(),
           sandboxEnabled: this.deps.sandboxEnabled,
+          allowStdioMcp: this.deps.allowStdioMcp,
           requestApproval: this.deps.requestApproval,
         }),
       });

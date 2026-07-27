@@ -118,6 +118,7 @@ const bus  = new RedisBus(env.redisUrl); // 曾是 InMemoryBus
 | `OWA_SECRET_KEY` | 用户凭证加密主密钥。**生产未设置会拒绝启动** |
 | `OWA_AUTH_REQUIRED` | 是否要求登录,默认 1;仅本地开发可设 0 |
 | `OWA_SANDBOX` | OS 内核沙箱,默认 1;**macOS 本地开发需设 0**,见限制 |
+| `OWA_ALLOW_STDIO_MCP` | 是否允许 stdio MCP,默认 0;开启后助手可在宿主机启动程序,仅可信部署使用 |
 | `OWA_EMBEDDED_WORKER` | 设 0 关掉 web 进程内嵌的 worker(拆进程部署时用) |
 | `OWA_SHUTDOWN_GRACE_MS` | worker 收到 SIGTERM 后等在途任务的上限,默认 60000 |
 

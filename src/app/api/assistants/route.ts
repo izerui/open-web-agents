@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 
 /** 列出调用方可见的助手:自己的 + 被分享的 + 公开的(admin 看全部)。 */
 export async function GET(req: Request) {
-  const { assistants, grants, auth } = getContainer();
+  const { assistants, grants, auth, env } = getContainer();
   try {
     const subject = await auth.resolveSubject(req);
     const all = await assistants.list();
@@ -28,6 +28,7 @@ export async function GET(req: Request) {
         isPublic: isPublic(a.id, allGrants),
         canWrite: hasResourceAccess(subject, a, "write", allGrants),
       })),
+      capabilities: { stdioMcp: env.allowStdioMcp },
     });
   } catch (err) {
     const res = authErrorResponse(err);
@@ -52,7 +53,7 @@ interface CreateBody {
  * 改已有助手需 write 权限:只被分享了 read 的人能用、不能改。
  */
 export async function POST(req: Request) {
-  const { assistants, grants, auth } = getContainer();
+  const { assistants, grants, auth, env } = getContainer();
 
   let subject: Subject;
   try {
@@ -71,7 +72,9 @@ export async function POST(req: Request) {
   }
 
   // 配置错了要在保存时就拦住 —— 否则问题会推迟到运行时才暴露,排查成本高得多
-  const issues = validateAssistantConfig(body.config ?? {});
+  const issues = validateAssistantConfig(body.config ?? {}, {
+    allowStdioMcp: env.allowStdioMcp,
+  });
   if (issues.length) {
     return Response.json(
       { error: issues.map((i) => `${i.field}: ${i.message}`).join("; "), issues },

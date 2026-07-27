@@ -29,6 +29,10 @@ export interface McpDef {
   name: string;
   type: "http" | "stdio";
   url?: string;
+  /** stdio MCP 在宿主机启动的程序。仅平台显式开启时允许。 */
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
 }
 
 export interface ToolDef {

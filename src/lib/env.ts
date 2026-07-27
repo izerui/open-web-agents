@@ -40,6 +40,13 @@ const schema = z.object({
       z.boolean(),
     )
     .default(true),
+  // stdio MCP 会在平台宿主机直接启动进程,不受 agent 沙箱约束,必须显式开启。
+  OWA_ALLOW_STDIO_MCP: z
+    .preprocess(
+      (v) => ["1", "true", "on", "yes"].includes(String(v ?? "").toLowerCase()),
+      z.boolean(),
+    )
+    .default(false),
 });
 
 export interface Env {
@@ -59,6 +66,8 @@ export interface Env {
   /** 是否要求登录 */
   authRequired: boolean;
   sandbox: boolean;
+  /** 是否允许助手配置在宿主机启动 stdio MCP 进程。 */
+  allowStdioMcp: boolean;
 }
 
 export function parseEnv(raw: Record<string, string | undefined>): Env {
@@ -81,6 +90,7 @@ export function parseEnv(raw: Record<string, string | undefined>): Env {
     secretKey: p.OWA_SECRET_KEY || "dev-insecure-secret-key",
     authRequired: p.OWA_AUTH_REQUIRED,
     sandbox: p.OWA_SANDBOX,
+    allowStdioMcp: p.OWA_ALLOW_STDIO_MCP,
   };
 }
 

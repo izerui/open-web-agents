@@ -34,10 +34,23 @@ interface McpDraft {
   name: string;
   type: "http" | "stdio";
   url: string;
+  command: string;
+  /** 每行一个参数,避免用空格拆分时破坏带空格的单个参数。 */
+  argsText: string;
+  /** JSON 字符串对象。env 常含 URL、token 等不能可靠按分隔符拆。 */
+  envText: string;
 }
 
 function newMcpRow(): McpDraft {
-  return { uid: crypto.randomUUID(), name: "", type: "http", url: "" };
+  return {
+    uid: crypto.randomUUID(),
+    name: "",
+    type: "http",
+    url: "",
+    command: "",
+    argsText: "",
+    envText: "",
+  };
 }
 
 /** 子代理:让助手把一类子任务交给一个带专属提示词的下级去做。 */
@@ -75,6 +88,13 @@ interface Draft {
   approvalPatternsText: string;
   /** 权限模式;按场景选,不是安全等级 */
   permissionMode: PermissionMode;
+}
+
+type BuilderAssistant = AssistantSummary & { config: Record<string, unknown> };
+
+interface AssistantsResponse {
+  assistants?: BuilderAssistant[];
+  capabilities?: { stdioMcp?: boolean };
 }
 
 const EMPTY: Draft = {
@@ -135,6 +155,7 @@ function parseSkills(text: string): string[] {
 
 export function Builder() {
   const [list, setList] = useState<AssistantSummary[]>([]);
+  const [allowStdioMcp, setAllowStdioMcp] = useState(false);
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [msg, setMsg] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -143,7 +164,10 @@ export function Builder() {
     () =>
       fetch("/api/assistants")
         .then((r) => r.json())
-        .then((d: { assistants?: AssistantSummary[] }) => setList(d.assistants ?? [])),
+        .then((d: AssistantsResponse) => {
+          setList(d.assistants ?? []);
+          setAllowStdioMcp(d.capabilities?.stdioMcp === true);
+        }),
     [],
   );
 
@@ -189,6 +213,39 @@ export function Builder() {
     setSaving(true);
     setMsg(null);
     try {
+      const mcpServers = draft.mcpServers
+        .filter((m) => m.name.trim())
+        .map((m) => {
+          if (m.type === "http") {
+            return { name: m.name.trim(), type: "http" as const, url: m.url.trim() };
+          }
+
+          let env: Record<string, string> | undefined;
+          if (m.envText.trim()) {
+            const parsed = JSON.parse(m.envText) as unknown;
+            if (
+              typeof parsed !== "object" ||
+              parsed === null ||
+              Array.isArray(parsed) ||
+              Object.values(parsed).some((v) => typeof v !== "string")
+            ) {
+              throw new Error(`MCP「${m.name || "未命名"}」的 env 必须是字符串键值 JSON 对象`);
+            }
+            env = parsed as Record<string, string>;
+          }
+
+          return {
+            name: m.name.trim(),
+            type: "stdio" as const,
+            command: m.command.trim(),
+            args: m.argsText
+              .split("\n")
+              .map((x) => x.trim())
+              .filter(Boolean),
+            env,
+          };
+        });
+
       const res = await fetch("/api/assistants", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -217,13 +274,7 @@ export function Builder() {
                       .filter(Boolean),
                   }
                 : undefined,
-            mcpServers: draft.mcpServers
-              .filter((m) => m.name.trim())
-              .map((m) => ({
-                name: m.name.trim(),
-                type: m.type,
-                url: m.type === "http" ? m.url.trim() : undefined,
-              })),
+            mcpServers,
             // 名字与提示词都填了才算数 —— 半截的子代理存进去只会在运行时报错
             subagents: draft.subagents
               .filter((s) => s.name.trim() && s.prompt.trim())
@@ -250,7 +301,8 @@ export function Builder() {
   function edit(a: AssistantSummary) {
     void fetch("/api/assistants")
       .then((r) => r.json())
-      .then((d: { assistants?: (AssistantSummary & { config: Record<string, unknown> })[] }) => {
+      .then((d: AssistantsResponse) => {
+        setAllowStdioMcp(d.capabilities?.stdioMcp === true);
         const full = d.assistants?.find((x) => x.id === a.id);
         if (!full) return;
         const cfg = full.config as Record<string, unknown>;
@@ -288,11 +340,26 @@ export function Builder() {
             ? (cfg.permissionMode as PermissionMode)
             : "default",
           mcpServers: Array.isArray(cfg.mcpServers)
-            ? (cfg.mcpServers as McpDraft[]).map((m) => ({
+            ? (
+                cfg.mcpServers as {
+                  name?: string;
+                  type?: string;
+                  url?: string;
+                  command?: string;
+                  args?: unknown;
+                  env?: unknown;
+                }[]
+              ).map((m) => ({
                 uid: crypto.randomUUID(),
                 name: m.name ?? "",
                 type: m.type === "stdio" ? ("stdio" as const) : ("http" as const),
                 url: m.url ?? "",
+                command: m.command ?? "",
+                argsText: Array.isArray(m.args) ? m.args.join("\n") : "",
+                envText:
+                  m.env && typeof m.env === "object" && !Array.isArray(m.env)
+                    ? JSON.stringify(m.env, null, 2)
+                    : "",
               }))
             : [],
           subagents: Array.isArray(cfg.subagents)
@@ -452,49 +519,90 @@ export function Builder() {
           </div>
           {draft.mcpServers.length === 0 && <p className="text-xs opacity-40">未配置 MCP 服务</p>}
           {draft.mcpServers.map((m, i) => (
-            <div key={m.uid} className="flex gap-2">
-              <input
-                className={field}
-                value={m.name}
-                onChange={(e) => {
-                  const next = [...draft.mcpServers];
-                  next[i] = { ...m, name: e.target.value };
-                  setDraft({ ...draft, mcpServers: next });
-                }}
-                placeholder="名称(字母/数字/_/-)"
-              />
-              <select
-                className={field}
-                value={m.type}
-                onChange={(e) => {
-                  const next = [...draft.mcpServers];
-                  next[i] = { ...m, type: e.target.value as "http" | "stdio" };
-                  setDraft({ ...draft, mcpServers: next });
-                }}
-              >
-                <option value="http">http</option>
-                <option value="stdio">stdio</option>
-              </select>
-              <input
-                className={field}
-                value={m.url}
-                disabled={m.type !== "http"}
-                onChange={(e) => {
-                  const next = [...draft.mcpServers];
-                  next[i] = { ...m, url: e.target.value };
-                  setDraft({ ...draft, mcpServers: next });
-                }}
-                placeholder={m.type === "http" ? "https://…" : "(stdio 不需要)"}
-              />
-              <button
-                type="button"
-                className="shrink-0 text-red-600 text-xs underline opacity-70 hover:opacity-100"
-                onClick={() =>
-                  setDraft({ ...draft, mcpServers: draft.mcpServers.filter((_, j) => j !== i) })
-                }
-              >
-                删除
-              </button>
+            <div
+              key={m.uid}
+              className="space-y-2 border-black/10 border-b pb-3 dark:border-white/10"
+            >
+              <div className="flex gap-2">
+                <input
+                  className={field}
+                  value={m.name}
+                  onChange={(e) => {
+                    const next = [...draft.mcpServers];
+                    next[i] = { ...m, name: e.target.value };
+                    setDraft({ ...draft, mcpServers: next });
+                  }}
+                  placeholder="名称(字母/数字/_/-)"
+                />
+                <select
+                  className={field}
+                  value={m.type}
+                  onChange={(e) => {
+                    const next = [...draft.mcpServers];
+                    next[i] = { ...m, type: e.target.value as "http" | "stdio" };
+                    setDraft({ ...draft, mcpServers: next });
+                  }}
+                >
+                  <option value="http">http</option>
+                  <option value="stdio" disabled={!allowStdioMcp}>
+                    {allowStdioMcp ? "stdio" : "stdio（平台未启用）"}
+                  </option>
+                </select>
+                <button
+                  type="button"
+                  className="shrink-0 text-red-600 text-xs underline opacity-70 hover:opacity-100"
+                  onClick={() =>
+                    setDraft({ ...draft, mcpServers: draft.mcpServers.filter((_, j) => j !== i) })
+                  }
+                >
+                  删除
+                </button>
+              </div>
+              {m.type === "http" ? (
+                <input
+                  className={field}
+                  value={m.url}
+                  onChange={(e) => {
+                    const next = [...draft.mcpServers];
+                    next[i] = { ...m, url: e.target.value };
+                    setDraft({ ...draft, mcpServers: next });
+                  }}
+                  placeholder="https://mcp.example.com"
+                />
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    className={`${field} col-span-2`}
+                    value={m.command}
+                    onChange={(e) => {
+                      const next = [...draft.mcpServers];
+                      next[i] = { ...m, command: e.target.value };
+                      setDraft({ ...draft, mcpServers: next });
+                    }}
+                    placeholder="command，例如 npx"
+                  />
+                  <textarea
+                    className={`${field} min-h-24 resize-y font-mono`}
+                    value={m.argsText}
+                    onChange={(e) => {
+                      const next = [...draft.mcpServers];
+                      next[i] = { ...m, argsText: e.target.value };
+                      setDraft({ ...draft, mcpServers: next });
+                    }}
+                    placeholder={"args，每行一个\n-y\n@modelcontextprotocol/server-filesystem"}
+                  />
+                  <textarea
+                    className={`${field} min-h-24 resize-y font-mono`}
+                    value={m.envText}
+                    onChange={(e) => {
+                      const next = [...draft.mcpServers];
+                      next[i] = { ...m, envText: e.target.value };
+                      setDraft({ ...draft, mcpServers: next });
+                    }}
+                    placeholder={'env JSON，例如\n{"GITHUB_TOKEN":"..."}'}
+                  />
+                </div>
+              )}
             </div>
           ))}
         </div>
