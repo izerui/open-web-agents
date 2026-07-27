@@ -3,6 +3,7 @@
 // 为什么要单独校验:MCP/skills 配错了不会在保存时报错,而是在【运行时】让 agent
 // 起不来或静默少能力 —— 那时候排查成本高得多。宁可在构建器里当场拦住。
 
+import { PERMISSION_MODES } from "@/lib/shared";
 import type { AssistantConfig } from "./config";
 
 export interface ConfigIssue {
@@ -112,6 +113,15 @@ export function validateAssistantConfig(cfg: Partial<AssistantConfig>): ConfigIs
         });
       }
     }
+  }
+
+  // 权限模式必须是 SDK 认识的值。写错了(比如 "bypass")SDK 那边不一定报错,
+  // 而是悄悄回落到默认行为 —— 用户以为配了免审批,实际每次都在等审批。
+  if (cfg.permissionMode !== undefined && !PERMISSION_MODES.includes(cfg.permissionMode)) {
+    issues.push({
+      field: "permissionMode",
+      message: `未知的权限模式,可选:${PERMISSION_MODES.join(" / ")}`,
+    });
   }
 
   if (cfg.outputSchema !== undefined) {

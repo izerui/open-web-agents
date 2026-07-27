@@ -1,4 +1,5 @@
 import { validateAssistantConfig } from "@/lib/modules/assistant/domain/validate-config";
+import { PERMISSION_MODES } from "@/lib/shared";
 import { describe, expect, it } from "vitest";
 
 const ok = { systemPrompt: "你是助手", model: "sonnet" as const };
@@ -121,6 +122,26 @@ describe("validateAssistantConfig / skills 与子代理", () => {
         ],
       }),
     ).toContain("subagents[1].name");
+  });
+});
+
+describe("validateAssistantConfig / permissionMode", () => {
+  it("六种合法模式都放行", () => {
+    for (const m of PERMISSION_MODES) {
+      expect(validateAssistantConfig({ ...ok, permissionMode: m })).toEqual([]);
+    }
+  });
+
+  // 拼错的模式 SDK 那边未必报错,而是悄悄回落到默认行为 ——
+  // 用户以为配了免审批,实际每次调用都在等一个没人去点的确认。
+  it("拼错的模式被拦住,而不是留到运行时", () => {
+    expect(
+      fields({ ...ok, permissionMode: "bypass" as unknown as (typeof PERMISSION_MODES)[number] }),
+    ).toContain("permissionMode");
+  });
+
+  it("不配不算错(等同 default)", () => {
+    expect(validateAssistantConfig(ok)).toEqual([]);
   });
 });
 

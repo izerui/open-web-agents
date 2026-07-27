@@ -52,6 +52,30 @@ export interface VerifyRule {
 
 export type Effort = "low" | "medium" | "high";
 
+/**
+ * 权限模式 —— 按使用场景选,不是安全等级排序。
+ *
+ * 最常用的两个是光谱的两端:
+ * - `default`:有人盯着的 web 对话。配合审批规则,危险操作弹给人确认。
+ * - `bypassPermissions`:接口调用。无人值守,等确认只会挂到超时,所以全放行。
+ *
+ * 【重要】无论选哪个模式,路径围栏与审批都仍然生效 —— 它们挂在 PreToolUse hook 上,
+ * 而 hook 跑在所有权限关卡【之前】,连 bypassPermissions 都绕不过去
+ * (见 sdk-docs/permissions.md:81)。所以这里选的是"要不要问人",
+ * 不是"要不要有围栏"。
+ */
+export const PERMISSION_MODES = [
+  "default",
+  "dontAsk",
+  "acceptEdits",
+  "bypassPermissions",
+  "plan",
+  "auto",
+] as const;
+
+/** 类型从常量派生 —— 两处各写一遍必然有一天对不上。 */
+export type PermissionMode = (typeof PERMISSION_MODES)[number];
+
 /** 运行契约:域内的 agent 规格,不含任何 SDK 类型。 */
 export interface AgentSpec {
   systemPrompt: string;
@@ -65,6 +89,8 @@ export interface AgentSpec {
   verifyRules?: VerifyRule[];
   /** 人工审批规则(HITL);不配则不审批。 */
   approvalRules?: { tools?: string[]; commandPatterns?: string[]; all?: boolean };
+  /** 权限模式;不配等同 "default"。 */
+  permissionMode?: PermissionMode;
   limits: { maxTurns?: number; effort?: Effort };
   /** 逃生舱:透传给 SDK 的原始覆盖,最后 spread。 */
   escapeHatch?: Record<string, unknown>;

@@ -3,6 +3,7 @@
 import { KnowledgePanel } from "@/features/builder/knowledge-panel";
 import { SharePanel } from "@/features/builder/share-panel";
 import type { AssistantSummary } from "@/features/workbench/types";
+import { PERMISSION_MODES, type PermissionMode } from "@/lib/shared";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
@@ -70,6 +71,8 @@ interface Draft {
   approvalToolsText: string;
   /** 需审批的命令模式(逗号分隔) */
   approvalPatternsText: string;
+  /** 权限模式;按场景选,不是安全等级 */
+  permissionMode: PermissionMode;
 }
 
 const EMPTY: Draft = {
@@ -88,6 +91,17 @@ const EMPTY: Draft = {
   subagents: [],
   approvalToolsText: "",
   approvalPatternsText: "",
+  permissionMode: "default",
+};
+
+/** 每种权限模式在什么场景下用 —— 下拉里只写模式名,没人知道该选哪个。 */
+const PERMISSION_MODE_HINT: Record<PermissionMode, string> = {
+  default: "标准:有人盯着的 web 对话,配合下面的审批规则弹确认",
+  bypassPermissions: "全放行:接口调用等无人值守场景(路径围栏仍然生效)",
+  acceptEdits: "自动接受文件改动,其余照常",
+  dontAsk: "白名单之外一律拒绝,从不询问",
+  plan: "只探索和规划,不动源文件",
+  auto: "由模型分类器逐个判定(需要特定配置支持)",
 };
 
 /** 技能名按逗号/换行/空格拆分,去空去重 —— 用户怎么贴都能用 */
@@ -175,6 +189,7 @@ export function Builder() {
             // 留空 = 不限制。给空数组的语义是「一个工具都不许用」,两者不能混
             tools: parseSkills(draft.toolsText).map((name) => ({ name })),
             skills: parseSkills(draft.skillsText),
+            permissionMode: draft.permissionMode,
             approvalRules:
               draft.approvalToolsText.trim() || draft.approvalPatternsText.trim()
                 ? {
@@ -246,6 +261,10 @@ export function Builder() {
                 ", ",
               )
             : "",
+          // 存的是历史值时可能是个已废弃/写错的模式,回落到 default 而不是把界面搞崩
+          permissionMode: PERMISSION_MODES.includes(cfg.permissionMode as PermissionMode)
+            ? (cfg.permissionMode as PermissionMode)
+            : "default",
           mcpServers: Array.isArray(cfg.mcpServers)
             ? (cfg.mcpServers as McpDraft[]).map((m) => ({
                 uid: crypto.randomUUID(),
@@ -505,6 +524,38 @@ export function Builder() {
             </div>
           ))}
         </div>
+
+        <label className="block space-y-1">
+          <span className="text-xs opacity-70">权限模式 —— 按【使用场景】选,不是安全等级</span>
+          <select
+            className={field}
+            value={draft.permissionMode}
+            onChange={(e) =>
+              setDraft({ ...draft, permissionMode: e.target.value as PermissionMode })
+            }
+          >
+            {PERMISSION_MODES.map((m) => (
+              <option key={m} value={m}>
+                {m} —— {PERMISSION_MODE_HINT[m]}
+              </option>
+            ))}
+          </select>
+          <span className="block text-xs opacity-45">
+            {PERMISSION_MODE_HINT[draft.permissionMode]}
+            {draft.permissionMode === "bypassPermissions" &&
+              " 子代理会一并继承该模式,无法单独收紧。"}
+          </span>
+        </label>
+
+        {/* 无人值守却配了审批 = 这一轮会一直挂到审批超时。放在这里提醒,
+            因为两个设置离得远时没人会把它们联系起来。 */}
+        {draft.permissionMode === "bypassPermissions" &&
+          (draft.approvalToolsText.trim() || draft.approvalPatternsText.trim()) && (
+            <p className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-xs">
+              这个模式通常用于无人值守的接口调用,而你配了审批规则 ——
+              没人去点确认的话,那一轮会一直挂到审批超时。
+            </p>
+          )}
 
         <div className="grid grid-cols-2 gap-3">
           <label className="space-y-1">

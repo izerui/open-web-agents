@@ -20,6 +20,17 @@ describe("buildSpec", () => {
     expect(spec.outputSchema).toBeUndefined();
   });
 
+  // 【这条链断过一次】ToolDef 定义了、配置收了、buildSpec 也传了,却没人交给 SDK,
+  // 于是"配了工具限制的助手照样能用全部工具"。permissionMode 是同一形状的字段,
+  // 断在哪一环都表现为"界面选了但运行时没效果",所以每一环都要有断言。
+  it("permissionMode 透传;不配则不带该字段", () => {
+    expect(
+      buildSpec({ systemPrompt: "p", model: "sonnet", permissionMode: "bypassPermissions" }, ctx)
+        .permissionMode,
+    ).toBe("bypassPermissions");
+    expect(buildSpec({ systemPrompt: "p", model: "sonnet" }, ctx).permissionMode).toBeUndefined();
+  });
+
   it("effort/maxTurns 映射进 limits", () => {
     const spec = buildSpec({ systemPrompt: "p", model: "opus", effort: "high", maxTurns: 20 }, ctx);
     expect(spec.limits).toEqual({ maxTurns: 20, effort: "high" });

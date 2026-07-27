@@ -5,6 +5,7 @@ import type {
   JsonSchema,
   McpDef,
   ModelAlias,
+  PermissionMode,
   SubagentDef,
   ToolDef,
   VerifyRule,
@@ -35,6 +36,14 @@ export interface AssistantConfig {
   verifyRules?: VerifyRule[];
   /** 人工审批规则(HITL)。不配则不审批。 */
   approvalRules?: { tools?: string[]; commandPatterns?: string[]; all?: boolean };
+  /**
+   * 权限模式。不配等同 "default"。
+   *
+   * 按场景选:web 对话有人盯着 → default 配审批;接口调用无人值守 →
+   * bypassPermissions(等一个不会来的确认只会挂到超时)。
+   * 无论选哪个,路径围栏与审批都仍生效 —— 它们在 PreToolUse hook 上。
+   */
+  permissionMode?: PermissionMode;
   /** 逃生舱:透传给 SDK options 的原始覆盖,最后 spread。 */
   escapeHatch?: Record<string, unknown>;
 }

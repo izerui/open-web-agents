@@ -96,10 +96,17 @@ export function buildSdkOptions(
   const options: Record<string, unknown> = {
     // ① 框架默认(安全/隔离约定)
     //
-    // 用 default 而非 bypassPermissions:后者的定义是"Bypass all permission checks",
-    // 连 canUseTool 都不会被调用 —— 实测在沙箱关闭时 agent 能随意写到宿主 HOME,
-    // 即零管控。default 模式下每个权限决策都路由到下面的 canUseTool,由平台自己判。
-    permissionMode: "default",
+    // 权限模式由助手按【场景】选,不是安全等级:
+    //   default            有人盯着的 web 对话,危险操作弹给人确认
+    //   bypassPermissions  接口调用,无人值守 —— 等确认只会挂到超时,所以全放行
+    //
+    // 【为什么现在敢把它开放出去】以前写死 default,是因为 bypassPermissions
+    // 会连 canUseTool 一起绕过,而当时路径围栏就住在 canUseTool 里 ——
+    // 选了它等于零管控(实测 agent 能随意写宿主 HOME)。
+    // 现在围栏搬到了 PreToolUse hook,而 hook 跑在所有权限关卡【之前】,
+    // 连 bypassPermissions 都绕不过(sdk-docs/permissions.md:81)。
+    // 于是这个选项只决定"要不要问人",不再决定"有没有围栏"。
+    permissionMode: spec.permissionMode ?? "default",
     cwd: ctx.workspaceDir,
     abortController: deps.abort,
 
@@ -133,11 +140,20 @@ export function buildSdkOptions(
    * 一个"配置项存在但不生效"的安全设置,比没有这个配置项更糟:
    * 它让人以为已经限制住了。
    *
+   * 【allowedTools 本身不足以当白名单】文档原话:"allowed_tools 不约束
+   * bypassPermissions。设置 allowed_tools=["Read"] 与 bypassPermissions 一起
+   * 仍然批准每个工具,包括 Bash、Write 和 Edit。" 也就是说界面上那句
+   * "填了就只允许这些工具"在该模式下是【假的】。
+   * 真正的兜底在下面的 hook 里做正向白名单 —— 那一层不受权限模式影响。
+   *
+   * 这里仍然传 allowedTools:名单内的工具被预批准,少走几道关卡,是纯优化。
+   *
    * 【必须判空】allowedTools 给空数组的语义是"一个工具都不许用",
    * 而"没配"的语义是"不限制"。两者不能混。
    */
   const allowed = spec.tools?.map((t) => t.name).filter(Boolean) ?? [];
   if (allowed.length > 0) options.allowedTools = allowed;
+  const allowSet = allowed.length > 0 ? new Set(allowed) : undefined;
 
   // 有 outputSchema 才启用 SDK 原生结构化输出(约束解码)
   if (spec.outputSchema) {
@@ -166,6 +182,13 @@ export function buildSdkOptions(
     toolName: string,
     input: Record<string, unknown>,
   ): Promise<{ allow: true } | { allow: false; reason: string }> => {
+    // 白名单最先判:名单外的工具连守卫和审批都不必走。
+    // 【正向白名单而非反向黑名单】不认识的工具一律拒 —— SDK 将来新增工具时,
+    // 黑名单会静默放行(fail-open),白名单则自动拒绝(fail-closed)。
+    if (allowSet && !allowSet.has(toolName)) {
+      return { allow: false, reason: `工具 ${toolName} 不在该助手的白名单内` };
+    }
+
     // 顺序要紧:先守卫再审批 —— 结构性越界不该浪费人的注意力去审
     const d = guardToolUse(toolName, input, guardPolicy);
     if (!d.allow) return { allow: false, reason: d.reason ?? "越界操作" };

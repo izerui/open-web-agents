@@ -28,6 +28,7 @@ export function buildSpec(
     outputSchema: cfg.outputSchema,
     verifyRules: cfg.verifyRules,
     approvalRules: cfg.approvalRules,
+    permissionMode: cfg.permissionMode,
     limits: { maxTurns: cfg.maxTurns, effort: cfg.effort },
     escapeHatch: cfg.escapeHatch,
   };

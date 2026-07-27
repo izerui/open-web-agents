@@ -138,6 +138,31 @@ describe("执行隔离进入 SDK options", () => {
 });
 
 /**
+ * 权限模式:按场景选,不是安全等级。
+ * web 对话有人盯着 → default + 审批;接口调用无人值守 → bypassPermissions。
+ */
+describe("权限模式", () => {
+  it("不配时默认 default", () => {
+    expect(buildSdkOptions(specOf(), ctx, deps()).permissionMode).toBe("default");
+  });
+
+  it("六种模式都能传下去", () => {
+    for (const mode of [
+      "default",
+      "dontAsk",
+      "acceptEdits",
+      "bypassPermissions",
+      "plan",
+      "auto",
+    ] as const) {
+      expect(buildSdkOptions(specOf({ permissionMode: mode }), ctx, deps()).permissionMode).toBe(
+        mode,
+      );
+    }
+  });
+});
+
+/**
  * transcript 的保留期。
  *
  * SDK 默认 30 天就把 ~/.claude/projects 下的 jsonl 删掉(subagents.md:582)。
@@ -262,6 +287,47 @@ describe("PreToolUse 围栏接入 SDK options", () => {
     const r = await gateOf(o)("Bash", { command: "rm -rf x" });
     expect(r.denied).toBe(true);
     expect(r.reason).toMatch(/超时/);
+  });
+
+  /**
+   * 工具白名单也必须由 hook 兜住,不能只靠 allowedTools。
+   *
+   * 文档原文:"allowed_tools 不约束 bypassPermissions。设置 allowed_tools=["Read"]
+   * 与 permission_mode="bypassPermissions" 一起【仍然批准每个工具,包括 Bash、
+   * Write 和 Edit】。" —— 也就是说界面上那句"填了就只允许这些工具"在该模式下是假的。
+   *
+   * 文档建议改用 disallowedTools,但那要穷举全部工具名,而且是 fail-open:
+   * SDK 以后新增一个工具,它不在黑名单里就被放行,白名单静默漏了一个口子。
+   * 放在 hook 里做正向白名单则是 fail-closed —— 不认识的工具一律拒。
+   */
+  it("配了白名单 → 名单外的工具被拒(不依赖 allowedTools)", async () => {
+    const o = buildSdkOptions(specOf({ tools: [{ name: "Read" }] }), ctx, deps());
+    expect((await gateOf(o)("Read", { file_path: "/ws/s1/a.txt" })).denied).toBe(false);
+    const r = await gateOf(o)("Bash", { command: "ls" });
+    expect(r.denied).toBe(true);
+    expect(r.reason).toMatch(/不在.*白名单|未授权/);
+  });
+
+  it("【关键】bypassPermissions 下白名单依然生效 —— 这正是 allowedTools 失效的模式", async () => {
+    const o = buildSdkOptions(
+      specOf({ tools: [{ name: "Read" }], permissionMode: "bypassPermissions" }),
+      ctx,
+      deps(),
+    );
+    expect(o.permissionMode).toBe("bypassPermissions");
+    expect((await gateOf(o)("Bash", { command: "rm -rf /" })).denied).toBe(true);
+  });
+
+  it("不配白名单 = 不限制,任何工具都过", async () => {
+    const o = buildSdkOptions(specOf(), ctx, deps());
+    expect((await gateOf(o)("Bash", { command: "ls" })).denied).toBe(false);
+    expect((await gateOf(o)("WebFetch", { url: "https://x" })).denied).toBe(false);
+  });
+
+  // 白名单是 fail-closed 的直接体现:没见过的工具名一律拒,而不是放行。
+  it("白名单里没有的新工具 —— 拒绝而非放行", async () => {
+    const o = buildSdkOptions(specOf({ tools: [{ name: "Read" }] }), ctx, deps());
+    expect((await gateOf(o)("SomeFutureToolFromNewerSdk", {})).denied).toBe(true);
   });
 
   // 【不能问两遍】决策只在 hook 里做一次。若 canUseTool 也跑一遍审批逻辑,
