@@ -132,6 +132,43 @@ describe("ClaudeSdkEngine 回放", () => {
     expect(r.error?.message).toContain("sdk exploded");
   });
 
+  // 官方文档(cost-tracking.md)原话:"A single-shot query() throws after yielding an
+  // error result. If the failure was an error result, it still carried total_cost_usd"
+  // —— 也就是说【超轮次/超预算这类失败,是先给 result 再抛异常】。
+  // catch 里如果只看异常不看已到手的 result,这些运行花掉的钱就永久统计不到了,
+  // 而且真实的失败原因(error_max_turns)会退化成笼统的 engine_error。
+  it("先产出 error result 再抛异常 → 保留 result 里的成本与真实错因", async () => {
+    const q: QueryFn = () =>
+      (async function* () {
+        yield { type: "system", subtype: "init", session_id: "s1" };
+        yield {
+          type: "result",
+          subtype: "error_max_turns",
+          result: "达到最大轮次",
+          total_cost_usd: 0.42,
+          usage: { input_tokens: 900, output_tokens: 120 },
+        };
+        throw new Error("stream closed after error result");
+      })();
+    const r = await engine(q).run(spec(), ctx, () => {}, new AbortController().signal);
+
+    expect(r.status).toBe("failed");
+    expect(r.error?.kind).toBe("error_max_turns"); // 不是 engine_error
+    expect(r.cost).toEqual({ usd: 0.42, input: 900, output: 120 }); // 钱不能丢
+    expect(r.sessionId).toBe("s1");
+  });
+
+  it("没拿到 result 就抛异常 → 仍按引擎错误处理", async () => {
+    const q: QueryFn = () =>
+      (async function* () {
+        yield { type: "system", subtype: "init", session_id: "s1" };
+        throw new Error("connection reset");
+      })();
+    const r = await engine(q).run(spec(), ctx, () => {}, new AbortController().signal);
+    expect(r.error?.kind).toBe("engine_error");
+    expect(r.error?.message).toContain("connection reset");
+  });
+
   it("声明了 schema 却没结构化输出 → 失败(契约缺失)", async () => {
     const r = await engine(
       replay([{ type: "result", subtype: "success", result: "文本而已" }]),

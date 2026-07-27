@@ -26,6 +26,28 @@ export function aliasEnv(creds: ResolvedCredentials, slots: ModelSlots): Record<
   };
 }
 
+/**
+ * PreToolUse hook 的超时(秒)。
+ *
+ * 必须大于人工审批的超时上限(container.ts 的 APPROVAL_TIMEOUT_MS,10 分钟),
+ * 否则 hook 会先于审批超时而中止 —— 用户还没来得及点,这次调用就已经失败了。
+ * 多给 1 分钟余量,让"审批自己超时"成为唯一的收场方式,行为才可预期。
+ */
+const APPROVAL_HOOK_TIMEOUT_SEC = 11 * 60;
+
+/**
+ * transcript 保留天数。
+ *
+ * 【为什么必须显式设】SDK 默认 30 天就清掉 projects 下的 jsonl。后果有两层:
+ * 一是会话历史整体消失;二是更隐蔽的 —— resume 找不到文件时【静默开一个新会话
+ * 而不报错】,表现成"助手突然失忆",日志里什么异常都没有。
+ *
+ * 【为什么是一年,不是永久】永久保留等于让磁盘无上限增长,而这是个自托管单机产品,
+ * 磁盘满了会连带把队列和数据库一起拖垮 —— 那比丢历史严重得多。
+ * 一年足够覆盖审计与回溯需求,量级也可控(实测单份 transcript 最大 388KB)。
+ */
+const TRANSCRIPT_RETENTION_DAYS = 365;
+
 /** McpDef[] → SDK mcpServers 形状 `{ [name]: { type, url } }`。 */
 function toMcpServers(spec: AgentSpec): Record<string, unknown> | undefined {
   if (!spec.mcpServers?.length) return undefined;
@@ -90,6 +112,10 @@ export function buildSdkOptions(
     maxTurns: spec.limits.maxTurns,
     effort: spec.limits.effort,
 
+    // 内联 settings。SDK 会把它与 sandbox 合并成同一个 --settings 参数
+    // (已实测:合并后 cleanupPeriodDays 仍在,见 options.test.ts 的并存用例)
+    settings: { cleanupPeriodDays: TRANSCRIPT_RETENTION_DAYS },
+
     // ③ 续跑 + 环境
     resume: ctx.resumeSessionId,
     env: {
@@ -135,12 +161,14 @@ export function buildSdkOptions(
     allowedDirs: [deps.sharedHome, "/tmp", "/private/tmp", "/var/folders", "/private/var/folders"],
   };
   //
-  // 语义是【默认放行 + 路径越界即拒】:服务端没有人可以交互式确认,
-  // 所以这个回调既是"审批人"也是唯一的围栏。
-  options.canUseTool = async (toolName: string, input: Record<string, unknown>) => {
+  // 语义是【默认放行 + 路径越界即拒】。
+  const decide = async (
+    toolName: string,
+    input: Record<string, unknown>,
+  ): Promise<{ allow: true } | { allow: false; reason: string }> => {
     // 顺序要紧:先守卫再审批 —— 结构性越界不该浪费人的注意力去审
     const d = guardToolUse(toolName, input, guardPolicy);
-    if (!d.allow) return { behavior: "deny" as const, message: d.reason };
+    if (!d.allow) return { allow: false, reason: d.reason ?? "越界操作" };
 
     if (deps.requestApproval) {
       const need = needsApproval(toolName, input, spec.approvalRules);
@@ -164,21 +192,73 @@ export function buildSdkOptions(
           );
         } catch (err) {
           return {
-            behavior: "deny" as const,
-            message: `审批通道不可用,按拒绝处理:${err instanceof Error ? err.message : String(err)}`,
+            allow: false,
+            reason: `审批通道不可用,按拒绝处理:${err instanceof Error ? err.message : String(err)}`,
           };
         }
         if (!verdict.approved) {
-          return {
-            behavior: "deny" as const,
-            message: verdict.message ?? "人工审批未通过",
-          };
+          return { allow: false, reason: verdict.message ?? "人工审批未通过" };
         }
       }
     }
 
-    return { behavior: "allow" as const, updatedInput: input };
+    return { allow: true };
   };
+
+  /**
+   * 围栏挂在 PreToolUse hook 上,【不是】 canUseTool。
+   *
+   * 【为什么不能用 canUseTool 当围栏】SDK 自己会发这条告警:
+   *   CLAUDE_SDK_CAN_USE_TOOL_SHADOWED —— "canUseTool will not be invoked for: Bash.
+   *   Bare allowedTools entries auto-approve the whole tool before the callback is consulted."
+   * 也就是说,只要助手配了工具白名单(上面那段传的正是裸工具名),路径守卫和人工审批
+   * 就【双双静默失效】。一个本意是收紧权限的配置,反而把围栏拆了 —— 而且不报错。
+   * 官方给的正解是 PreToolUse hook:它在所有权限步骤之前跑,连 bypassPermissions 都拦得住。
+   *
+   * 【不设 matcher】语义是"匹配该事件的每次出现"。围栏漏掉任何一个工具都等于没有。
+   *
+   * 【timeout 必须显式设】默认只有 60 秒,而人工审批要等真人,上限是 10 分钟。
+   * 不放宽的话,等人的审批会先被 hook 超时打断,表现成"还没点就失败了"。
+   */
+  options.hooks = {
+    PreToolUse: [
+      {
+        timeout: APPROVAL_HOOK_TIMEOUT_SEC,
+        hooks: [
+          async (hookInput: unknown) => {
+            const h = (hookInput ?? {}) as {
+              hook_event_name?: string;
+              tool_name?: string;
+              tool_input?: unknown;
+            };
+            const toolName = h.tool_name ?? "";
+            const input = (h.tool_input ?? {}) as Record<string, unknown>;
+            const d = await decide(toolName, input);
+            if (d.allow) return {}; // 空对象 = 不表态,继续后续权限评估
+            return {
+              hookSpecificOutput: {
+                hookEventName: h.hook_event_name ?? "PreToolUse",
+                permissionDecision: "deny",
+                permissionDecisionReason: d.reason,
+              },
+            };
+          },
+        ],
+      },
+    ],
+  };
+
+  /**
+   * canUseTool 保留,但【只做默认放行,不再重复决策】。
+   *
+   * 服务端没有人能交互式确认,不给这个回调的话,走到"询问用户"那一步会挂住。
+   * 但决策必须只做一次:如果这里再跑一遍审批逻辑,同一次工具调用会弹出两条待审 ——
+   * 用户点完一条,还要再点一条一模一样的。
+   */
+  options.canUseTool = async (_toolName: string, input: Record<string, unknown>) => ({
+    behavior: "allow" as const,
+    updatedInput: input,
+  });
 
   // ④ 逃生舱:最后 spread,覆盖以上任何默认
   return { ...options, ...spec.escapeHatch };

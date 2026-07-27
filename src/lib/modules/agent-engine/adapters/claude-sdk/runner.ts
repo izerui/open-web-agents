@@ -90,6 +90,13 @@ export class ClaudeSdkEngine implements EnginePort {
         }
       }
     } catch (err) {
+      // 【异常不代表没结果】官方文档(cost-tracking)明说:单次 query() 在产出
+      // error result 之后【还会再抛一次异常】。若此时只看异常、丢掉已到手的 result,
+      // 这一轮真实花掉的钱就永远统计不到,失败原因也从 error_max_turns 这类
+      // 具体子类型退化成笼统的 engine_error —— 排查时看到的是"引擎炸了",
+      // 而实际上是"轮次用完了",两者的处置完全不同。
+      if (result) return { ...result, sessionId };
+
       const message = err instanceof Error ? err.message : String(err);
       return {
         status: "failed",
