@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p ${PORT:-5678}",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p ${PORT:-5678}",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",

@@ -52,7 +52,7 @@ services:
       <<: *owa_env
       # 由独立 worker 服务跑任务,web 只收请求
       OWA_EMBEDDED_WORKER: "0"
-    ports: ["3000:3000"]
+    ports: ["5678:5678"]
     volumes: ["owa_data:/app/data"]
     depends_on:
       migrate: { condition: service_completed_successfully }

@@ -23,7 +23,7 @@
 pnpm install
 cp .env.example .env.local        # 填 OWA_ANTHROPIC_API_KEY 等
 pnpm db:migrate                   # 建表
-pnpm dev                          # http://localhost:3000
+pnpm dev                          # http://localhost:5678
 ```
 
 首次打开会引导注册 —— **第一个注册的用户自动成为 admin**,自托管无需额外的初始化脚本。
@@ -35,11 +35,11 @@ pnpm dev                          # http://localhost:3000
 3. `/settings` 签发 API Key,然后:
 
 ```bash
-curl -X POST localhost:3000/api/agents/<助手id>/invoke \
+curl -X POST localhost:5678/api/agents/<助手id>/invoke \
   -H "X-Api-Key: <key>" -H 'Content-Type: application/json' \
   -d '{"input":"……"}'
 # → { "taskId": "..." }
-curl localhost:3000/api/agents/<taskId>/result -H "X-Api-Key: <key>"
+curl localhost:5678/api/agents/<taskId>/result -H "X-Api-Key: <key>"
 # → { "status": "success", "structured": { ... } }
 ```
 
@@ -298,7 +298,7 @@ pnpm build
 pnpm ci:dryrun     # 按 ci.yml 的步骤在本机实跑一遍(需 OWA_CI_DB_URL)
 ```
 
-`pnpm test:e2e` 默认用 3100 端口,不会碰你正在跑的 3000。
+`pnpm test:e2e` 默认用 3100 端口,不会碰你正在跑的 5678。
 想打到一个已经起好的服务上:`OWA_E2E_BASE_URL=http://... pnpm test:e2e:run`。
 
 ### CI

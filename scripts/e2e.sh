@@ -7,7 +7,7 @@
 # 换句话说,下次谁把它们改坏了,不会有任何人知道。
 #
 # 用法:
-#   pnpm test:e2e                     # 自己起停(默认端口 3100,不碰你正在跑的 3000)
+#   pnpm test:e2e                     # 自己起停(默认端口 3100,不碰你正在跑的 5678)
 #   OWA_E2E_BASE_URL=... pnpm test:e2e:run   # 打到一个已经起好的服务上
 set -uo pipefail
 

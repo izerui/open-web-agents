@@ -3,7 +3,7 @@
 // 为什么要自己写:node 的 fetch 不管 cookie,而这里大半断言都是【登录态下的越权】——
 // 没有会话隔离就测不出"B 能不能碰 A 的东西"。第三方 cookie 库对这点需求是杀鸡用牛刀。
 
-const BASE = process.env.OWA_E2E_BASE_URL ?? "http://localhost:3000";
+const BASE = process.env.OWA_E2E_BASE_URL ?? "http://localhost:5678";
 
 export interface Res<T = unknown> {
   status: number;

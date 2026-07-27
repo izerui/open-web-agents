@@ -48,11 +48,11 @@ RUN mkdir -p /app/data && chown -R owa:owa /app/data
 VOLUME ["/app/data"]
 
 USER owa
-EXPOSE 3000
-ENV PORT=3000 HOSTNAME=0.0.0.0 OWA_DATA_DIR=/app/data
+EXPOSE 5678
+ENV PORT=5678 HOSTNAME=0.0.0.0 OWA_DATA_DIR=/app/data
 
 # 存活探针用极轻的 ?probe=live —— 依赖挂了不该导致进程被反复重启
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD curl -fsS "http://127.0.0.1:3000/api/health?probe=live" || exit 1
+  CMD curl -fsS "http://127.0.0.1:5678/api/health?probe=live" || exit 1
 
 CMD ["node", "server.js"]
