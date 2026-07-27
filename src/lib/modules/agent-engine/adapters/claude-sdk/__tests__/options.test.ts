@@ -1,4 +1,8 @@
-import { aliasEnv, buildSdkOptions } from "@/lib/modules/agent-engine/adapters/claude-sdk/options";
+import {
+  aliasEnv,
+  buildSdkOptions,
+  claudeConfigDir,
+} from "@/lib/modules/agent-engine/adapters/claude-sdk/options";
 import type { AgentSpec, RunContext } from "@/lib/shared";
 import { describe, expect, it, vi } from "vitest";
 
@@ -134,6 +138,40 @@ describe("执行隔离进入 SDK options", () => {
   it("逃生舱可覆盖沙箱设置(留给特殊业务)", () => {
     const o = buildSdkOptions(specOf({ escapeHatch: { sandbox: undefined } }), ctx, withSandbox());
     expect(o.sandbox).toBeUndefined();
+  });
+});
+
+/**
+ * 多租户隔离:一个租户的东西不能漏进另一个租户的会话。
+ * 四条建议里 cwd 早就按会话隔离了,这里是其余三条。
+ */
+describe("多租户隔离", () => {
+  const envOf = () =>
+    buildSdkOptions(specOf(), ctx, deps()).env as Record<string, string | undefined>;
+
+  // 【显式而非搭便车】以前只改 HOME,靠 SDK 自己推 $HOME/.claude。
+  // 能用,但读历史的一方得再推一遍同样的规则,推错了是静默读不到 ——
+  // 实测主进程不设它时 getSessionMessages 返回 0 条,还不报错。
+  it("显式指定 CLAUDE_CONFIG_DIR,与 claudeConfigDir() 同源", () => {
+    expect(envOf().CLAUDE_CONFIG_DIR).toBe(claudeConfigDir("/data/.agent-home"));
+    expect(envOf().CLAUDE_CONFIG_DIR).toBe("/data/.agent-home/.claude");
+  });
+
+  // HOME 仍然要给:pip/npm/matplotlib 都往 ~/.cache 写,
+  // 容器里运行用户的 HOME 常是不可写的 /nonexistent。
+  it("HOME 照常给,和 CLAUDE_CONFIG_DIR 各司其职", () => {
+    expect(envOf().HOME).toBe("/data/.agent-home");
+  });
+
+  // 宿主机上任何一份 CLAUDE.md / settings.json 都会无差别混进每个租户的会话。
+  // 本仓库根目录就有 CLAUDE.md —— 开发机上这条尤其明显。
+  it("不加载宿主的文件系统设置", () => {
+    expect(buildSdkOptions(specOf(), ctx, deps()).settingSources).toEqual([]);
+  });
+
+  // 文档明说自动记忆"无论 settingSources 如何"都会加载 —— 上一条关不掉它。
+  it("关掉自动记忆(settingSources 关不掉的那条通道)", () => {
+    expect(envOf().CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBe("1");
   });
 });
 

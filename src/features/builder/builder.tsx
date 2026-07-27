@@ -94,14 +94,29 @@ const EMPTY: Draft = {
   permissionMode: "default",
 };
 
-/** 每种权限模式在什么场景下用 —— 下拉里只写模式名,没人知道该选哪个。 */
-const PERMISSION_MODE_HINT: Record<PermissionMode, string> = {
-  default: "标准:有人盯着的 web 对话,配合下面的审批规则弹确认",
-  bypassPermissions: "全放行:接口调用等无人值守场景(路径围栏仍然生效)",
-  acceptEdits: "自动接受文件改动,其余照常",
-  dontAsk: "白名单之外一律拒绝,从不询问",
-  plan: "只探索和规划,不动源文件",
-  auto: "由模型分类器逐个判定(需要特定配置支持)",
+/**
+ * 权限模式的中文名与用法。
+ *
+ * 名字对齐 Claude 官方客户端的菜单(Ask permissions / Accept edits / Plan mode /
+ * Auto mode / Bypass permissions)—— 直接把 `default`、`dontAsk` 这种 SDK 内部值
+ * 摆给用户看,没人知道该选哪个。
+ */
+const PERMISSION_MODE_META: Record<PermissionMode, { label: string; hint: string }> = {
+  default: {
+    label: "询问权限",
+    hint: "有人盯着的 web 对话:命中下面的审批规则时弹确认",
+  },
+  acceptEdits: { label: "自动接受编辑", hint: "文件改动自动放行,其余照常" },
+  plan: { label: "规划模式", hint: "只探索和出方案,不动源文件" },
+  auto: { label: "自动判定", hint: "由模型分类器逐个判定(需要特定配置支持)" },
+  bypassPermissions: {
+    label: "跳过权限检查",
+    hint: "接口调用等无人值守场景:不问人。路径围栏与工具白名单仍然生效",
+  },
+  dontAsk: {
+    label: "从不询问",
+    hint: "白名单之外一律拒绝,不弹任何确认(官方客户端未暴露此模式)",
+  },
 };
 
 /** 技能名按逗号/换行/空格拆分,去空去重 —— 用户怎么贴都能用 */
@@ -536,12 +551,12 @@ export function Builder() {
           >
             {PERMISSION_MODES.map((m) => (
               <option key={m} value={m}>
-                {m} —— {PERMISSION_MODE_HINT[m]}
+                {PERMISSION_MODE_META[m].label}
               </option>
             ))}
           </select>
           <span className="block text-xs opacity-45">
-            {PERMISSION_MODE_HINT[draft.permissionMode]}
+            {PERMISSION_MODE_META[draft.permissionMode].hint}
             {draft.permissionMode === "bypassPermissions" &&
               " 子代理会一并继承该模式,无法单独收紧。"}
           </span>

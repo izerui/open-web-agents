@@ -1,6 +1,7 @@
 // SDK 选项组装:域内 AgentSpec + RunContext → claude-agent-sdk query 的 options。
 // 属 adapter 层,但刻意写成【不 import SDK】的纯函数,便于单测。
 
+import path from "node:path";
 import { describeToolCall, needsApproval } from "@/lib/modules/agent-engine/domain/approval-rules";
 import { materializeSandbox } from "@/lib/modules/agent-engine/domain/sandbox";
 import { guardToolUse } from "@/lib/modules/agent-engine/domain/tool-guard";
@@ -47,6 +48,18 @@ const APPROVAL_HOOK_TIMEOUT_SEC = 11 * 60;
  * 一年足够覆盖审计与回溯需求,量级也可控(实测单份 transcript 最大 388KB)。
  */
 const TRANSCRIPT_RETENTION_DAYS = 365;
+
+/**
+ * SDK 配置目录(transcript、全局配置的落点)。
+ *
+ * 【单独导出的理由】写入方(跑 agent)和读取方(读会话历史)必须指向同一个目录,
+ * 而这个约定一旦在两处各推一遍,推错了不会报错 —— 只是历史静默读不到
+ * (实测:主进程不设 CLAUDE_CONFIG_DIR 时 getSessionMessages 返回 0 条,无异常)。
+ * 所以它只能有一个来源。
+ */
+export function claudeConfigDir(sharedHome: string): string {
+  return path.join(sharedHome, ".claude");
+}
 
 /** McpDef[] → SDK mcpServers 形状 `{ [name]: { type, url } }`。 */
 function toMcpServers(spec: AgentSpec): Record<string, unknown> | undefined {
@@ -123,12 +136,44 @@ export function buildSdkOptions(
     // (已实测:合并后 cleanupPeriodDays 仍在,见 options.test.ts 的并存用例)
     settings: { cleanupPeriodDays: TRANSCRIPT_RETENTION_DAYS },
 
+    /**
+     * 不加载宿主上的文件系统设置(用户级 settings.json、项目 CLAUDE.md 等)。
+     *
+     * 这是个多租户平台:宿主机上任何一份 CLAUDE.md 或 settings.json,都会无差别地
+     * 混进【每一个租户】的会话。开发机上更明显 —— 本仓库根目录就有 CLAUDE.md。
+     * 平台要的是"助手的行为完全由它自己的配置决定",不是"取决于服务器上碰巧有什么文件"。
+     */
+    settingSources: [],
+
     // ③ 续跑 + 环境
     resume: ctx.resumeSessionId,
     env: {
       ...ctx.env,
       ...aliasEnv(ctx.credentials, deps.slots),
+
+      /**
+       * HOME 与 CLAUDE_CONFIG_DIR 是两件事,分开设。
+       *
+       * HOME:给工具缓存一个可写的家(pip/npm/matplotlib 都要写 ~/.cache)。
+       *   容器里运行用户的 HOME 常是不可写的 /nonexistent,不改会 EACCES。
+       *
+       * CLAUDE_CONFIG_DIR:SDK 存 transcript 与全局配置的地方。
+       *   以前靠"改了 HOME,SDK 自己去推 $HOME/.claude"搭便车 —— 能用,但是隐式的:
+       *   读历史的一方得自己再推一遍同样的规则,推错了就是静默读不到
+       *   (实测:主进程不设它时 getSessionMessages 返回 0 条,不报错)。
+       *   显式写出来,写入方与读取方引用同一个值。
+       */
       HOME: deps.sharedHome,
+      CLAUDE_CONFIG_DIR: claudeConfigDir(deps.sharedHome),
+
+      /**
+       * 关掉自动记忆。
+       *
+       * 文档明说它"在 ~/.claude/projects/<project>/memory/ 加载到系统提示中,
+       * 【无论 settingSources 如何】" —— 也就是上面那行关不掉它。
+       * 对多租户平台,这是一条会把上一个租户的内容带进下一个会话的隐式通道。
+       */
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
     },
   };
 

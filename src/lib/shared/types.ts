@@ -64,13 +64,18 @@ export type Effort = "low" | "medium" | "high";
  * (见 sdk-docs/permissions.md:81)。所以这里选的是"要不要问人",
  * 不是"要不要有围栏"。
  */
+/**
+ * 顺序对齐 Claude 官方客户端的模式菜单(Ask / Accept edits / Plan / Auto / Bypass),
+ * 这样用过官方客户端的人不用重新认一遍。
+ * `dontAsk` 排在最后 —— SDK 支持,但官方客户端没暴露它。
+ */
 export const PERMISSION_MODES = [
   "default",
-  "dontAsk",
   "acceptEdits",
-  "bypassPermissions",
   "plan",
   "auto",
+  "bypassPermissions",
+  "dontAsk",
 ] as const;
 
 /** 类型从常量派生 —— 两处各写一遍必然有一天对不上。 */
