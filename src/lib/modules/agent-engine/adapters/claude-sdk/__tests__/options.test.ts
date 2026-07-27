@@ -409,6 +409,34 @@ describe("PreToolUse 围栏接入 SDK options", () => {
     expect((await gateOf(o)("SomeFutureToolFromNewerSdk", {})).denied).toBe(true);
   });
 
+  /**
+   * MCP 工具必须能用通配符授权。
+   *
+   * 一个 MCP 服务器动辄几十个工具(mcp__github__get_issue、mcp__github__create_pr…),
+   * 让用户逐个列出来不现实 —— 文档里每个 MCP 示例给的也都是
+   * `allowedTools: ["mcp__filesystem__*"]` 这种带星号的写法。
+   * 白名单若只做精确匹配,「工具白名单 + MCP」这个组合就完全不可用。
+   */
+  it("mcp__server__* 授权该服务器的全部工具", async () => {
+    const o = buildSdkOptions(specOf({ tools: [{ name: "mcp__github__*" }] }), ctx, deps());
+    expect((await gateOf(o)("mcp__github__get_issue", {})).denied).toBe(false);
+    expect((await gateOf(o)("mcp__github__create_pr", {})).denied).toBe(false);
+    // 别的服务器不在授权范围内
+    expect((await gateOf(o)("mcp__gitlab__get_issue", {})).denied).toBe(true);
+  });
+
+  it("前缀通配只匹配前缀,不是「含有即可」", async () => {
+    const o = buildSdkOptions(specOf({ tools: [{ name: "mcp__fs__read*" }] }), ctx, deps());
+    expect((await gateOf(o)("mcp__fs__read_file", {})).denied).toBe(false);
+    expect((await gateOf(o)("mcp__fs__write_file", {})).denied).toBe(true);
+  });
+
+  it("裸名仍是精确匹配 —— Read 不会顺带放行 ReadMcpResourceTool", async () => {
+    const o = buildSdkOptions(specOf({ tools: [{ name: "Read" }] }), ctx, deps());
+    expect((await gateOf(o)("Read", { file_path: "/ws/s1/a" })).denied).toBe(false);
+    expect((await gateOf(o)("ReadMcpResourceTool", {})).denied).toBe(true);
+  });
+
   // 【不能问两遍】决策只在 hook 里做一次。若 canUseTool 也跑一遍审批逻辑,
   // 同一次工具调用会弹出两条待审 —— 用户点完第一条,还要再点一条一模一样的。
   it("canUseTool 不再重复决策,只做无人可问时的默认放行", async () => {

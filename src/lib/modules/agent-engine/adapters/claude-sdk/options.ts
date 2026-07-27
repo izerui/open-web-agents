@@ -88,6 +88,23 @@ function toAgents(spec: AgentSpec): Record<string, unknown> | undefined {
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+/**
+ * 工具名是否命中白名单条目。
+ *
+ * 【为什么必须支持通配】一个 MCP 服务器动辄几十个工具
+ * (mcp__github__get_issue、mcp__github__create_pr…),让用户逐个列出来不现实。
+ * 文档里每个 MCP 示例给的也都是 `allowedTools: ["mcp__filesystem__*"]`。
+ * 只做精确匹配的话,「工具白名单 + MCP」这个组合直接不可用。
+ *
+ * 【只支持后缀 `*`,不做正则】白名单是安全边界,匹配规则越简单越不容易误判。
+ * 正则里一个没转义的 `.` 就能把 `mcp__a_b` 意外放行给 `mcp__axb`。
+ */
+function matchesTool(pattern: string, toolName: string): boolean {
+  if (pattern === "*") return true;
+  if (pattern.endsWith("*")) return toolName.startsWith(pattern.slice(0, -1));
+  return pattern === toolName;
+}
+
 /** McpDef[] → SDK mcpServers 形状 `{ [name]: { type, url } }`。 */
 function toMcpServers(spec: AgentSpec): Record<string, unknown> | undefined {
   if (!spec.mcpServers?.length) return undefined;
@@ -225,7 +242,7 @@ export function buildSdkOptions(
    */
   const allowed = spec.tools?.map((t) => t.name).filter(Boolean) ?? [];
   if (allowed.length > 0) options.allowedTools = allowed;
-  const allowSet = allowed.length > 0 ? new Set(allowed) : undefined;
+  const allowPatterns = allowed.length > 0 ? allowed : undefined;
 
   // 有 outputSchema 才启用 SDK 原生结构化输出(约束解码)
   if (spec.outputSchema) {
@@ -257,7 +274,7 @@ export function buildSdkOptions(
     // 白名单最先判:名单外的工具连守卫和审批都不必走。
     // 【正向白名单而非反向黑名单】不认识的工具一律拒 —— SDK 将来新增工具时,
     // 黑名单会静默放行(fail-open),白名单则自动拒绝(fail-closed)。
-    if (allowSet && !allowSet.has(toolName)) {
+    if (allowPatterns && !allowPatterns.some((p) => matchesTool(p, toolName))) {
       return { allow: false, reason: `工具 ${toolName} 不在该助手的白名单内` };
     }
 
