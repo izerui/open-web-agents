@@ -8,6 +8,7 @@ data/
 .DS_Store
 next-env.d.ts
 tsconfig.tsbuildinfo
+.superpowers/
 
 # Redis 在项目目录里跑时写的快照。是运行时垃圾,不该进仓库 ——
 # 它可能含会话/审批负载,而且每次跑测试都变动,污染 diff。
