@@ -4,6 +4,7 @@
 import {
   createSubagentLabeler,
   normalizeSdkMessage,
+  normalizeStreamEvent,
   shortSubagentId,
 } from "@/lib/modules/agent-engine/domain/normalize";
 import { type AgentEvent, isStateEvent } from "@/lib/shared";
@@ -344,5 +345,171 @@ describe("normalizeSdkMessage / AskUserQuestion", () => {
   it("question 属于 state 类事件 —— 断线重连后选项必须还在", () => {
     const [e] = ask(VALID);
     expect(e && isStateEvent(e)).toBe(true);
+  });
+});
+
+// ─────────────────────────── normalizeStreamEvent ───────────────────────────
+
+describe("normalizeStreamEvent", () => {
+  it("text_delta → text 事件(增量文本)", () => {
+    expect(
+      normalizeStreamEvent({
+        type: "stream_event",
+        parent_tool_use_id: null,
+        event: {
+          type: "content_block_delta",
+          delta: { type: "text_delta", text: "你好" },
+        },
+      }),
+    ).toEqual([{ kind: "text", text: "你好", subagent: undefined }]);
+  });
+
+  it("thinking_delta → thinking 事件(增量思考)", () => {
+    expect(
+      normalizeStreamEvent({
+        type: "stream_event",
+        parent_tool_use_id: null,
+        event: {
+          type: "content_block_delta",
+          delta: { type: "thinking_delta", thinking: "让我想想" },
+        },
+      }),
+    ).toEqual([{ kind: "thinking", text: "让我想想", subagent: undefined }]);
+  });
+
+  it("input_json_delta → [](工具入参增量不在此处理)", () => {
+    expect(
+      normalizeStreamEvent({
+        type: "stream_event",
+        parent_tool_use_id: null,
+        event: {
+          type: "content_block_delta",
+          delta: { type: "input_json_delta", partial_json: '{"com' },
+        },
+      }),
+    ).toEqual([]);
+  });
+
+  it("子代理的 stream_event 带 subagent 归属", () => {
+    expect(
+      normalizeStreamEvent({
+        type: "stream_event",
+        parent_tool_use_id: "sub_abc",
+        event: {
+          type: "content_block_delta",
+          delta: { type: "text_delta", text: "子代理输出" },
+        },
+      }),
+    ).toEqual([{ kind: "text", text: "子代理输出", subagent: "sub_abc" }]);
+  });
+
+  it("content_block_start / stop / message_start 等不产出事件", () => {
+    expect(
+      normalizeStreamEvent({
+        type: "stream_event",
+        event: { type: "content_block_start", content_block: { type: "text" } },
+      }),
+    ).toEqual([]);
+    expect(
+      normalizeStreamEvent({
+        type: "stream_event",
+        event: { type: "content_block_stop", index: 0 },
+      }),
+    ).toEqual([]);
+    expect(
+      normalizeStreamEvent({
+        type: "stream_event",
+        event: { type: "message_start", message: {} },
+      }),
+    ).toEqual([]);
+    expect(
+      normalizeStreamEvent({
+        type: "stream_event",
+        event: { type: "message_delta", delta: {} },
+      }),
+    ).toEqual([]);
+  });
+
+  it("非 stream_event 类型返回 []", () => {
+    expect(normalizeStreamEvent({ type: "assistant", message: {} })).toEqual([]);
+    expect(normalizeStreamEvent(null)).toEqual([]);
+    expect(normalizeStreamEvent("string")).toEqual([]);
+  });
+
+  it("event 为空或非对象时安全返回 []", () => {
+    expect(normalizeStreamEvent({ type: "stream_event", event: null })).toEqual([]);
+    expect(normalizeStreamEvent({ type: "stream_event" })).toEqual([]);
+  });
+});
+
+// ─────────────────────────── skipStreamed ───────────────────────────
+
+describe("normalizeSdkMessage / skipStreamed", () => {
+  const MSG_WITH_ALL = {
+    type: "assistant",
+    parent_tool_use_id: null,
+    message: {
+      id: "msg_1",
+      content: [
+        { type: "text", text: "解释一下" },
+        { type: "thinking", thinking: "先分析" },
+        { type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } },
+      ],
+      usage: { input_tokens: 100, output_tokens: 50 },
+    },
+  };
+
+  it("skipStreamed=false(默认):所有块都产出事件", () => {
+    const out = normalizeSdkMessage(MSG_WITH_ALL);
+    const kinds = out.map((e) => e.kind);
+    expect(kinds).toEqual(["text", "thinking", "tool_use", "usage"]);
+  });
+
+  it("skipStreamed=true:跳过 text 和 thinking,保留 tool_use 和 usage", () => {
+    const out = normalizeSdkMessage(MSG_WITH_ALL, { skipStreamed: true });
+    const kinds = out.map((e) => e.kind);
+    expect(kinds).toEqual(["tool_use", "usage"]);
+  });
+
+  it("skipStreamed=true 时 AskUserQuestion 仍正常翻成 question 事件", () => {
+    const out = normalizeSdkMessage(
+      {
+        type: "assistant",
+        message: {
+          content: [
+            { type: "text", text: "让我问你" },
+            {
+              type: "tool_use",
+              id: "tu_q",
+              name: "AskUserQuestion",
+              input: {
+                questions: [
+                  { question: "选哪个?", options: [{ label: "A" }, { label: "B" }] },
+                ],
+              },
+            },
+          ],
+        },
+      },
+      { skipStreamed: true },
+    ) as AgentEvent[];
+    // text 被跳过,只剩 question
+    expect(out.length).toBe(1);
+    expect(out[0]?.kind).toBe("question");
+  });
+
+  it("skipStreamed 不影响 user 消息(tool_result 照常输出)", () => {
+    const out = normalizeSdkMessage(
+      {
+        type: "user",
+        message: {
+          content: [{ type: "tool_result", tool_use_id: "tu_1", content: "ok" }],
+        },
+      },
+      { skipStreamed: true },
+    );
+    expect(out).toEqual([
+      { kind: "tool_result", toolUseId: "tu_1", text: "ok", isError: false, subagent: undefined },
+    ]);
   });
 });

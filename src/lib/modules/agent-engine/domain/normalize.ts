@@ -99,19 +99,72 @@ export function createSubagentLabeler(): (event: AgentEvent) => AgentEvent {
   };
 }
 
+// ─────────────────────────── 流式增量事件 ───────────────────────────
+
+/**
+ * 把一条 SDK stream_event 翻译成域事件(增量 delta)。
+ *
+ * SDK 的 `stream_event` 包裹的是 Anthropic API 的 `BetaRawMessageStreamEvent`,
+ * 典型子类型:
+ * - `content_block_start`  → 文本/thinking/tool_use 块开始
+ * - `content_block_delta`  → 增量文本 / 增量 JSON delta
+ * - `content_block_stop`   → 块结束
+ * - `message_start/stop/delta` → 消息级(含 usage)
+ *
+ * 我们只取有增量内容的 text / thinking delta。
+ * tool_use 和 usage 留给完整 assistant 消息处理 —— 那里入参是完整的、
+ * AskUserQuestion 也能正确解析成 question 事件。
+ */
+export function normalizeStreamEvent(msg: unknown): AgentEvent[] {
+  if (!msg || typeof msg !== "object") return [];
+  const m = msg as Record<string, unknown>;
+  if (m.type !== "stream_event") return [];
+
+  const sub = (m.parent_tool_use_id as string | undefined) ?? undefined;
+  const event = m.event as Record<string, unknown> | undefined;
+  if (!event || typeof event !== "object") return [];
+
+  const eventType = event.type as string | undefined;
+
+  // content_block_delta: 逐 token 文本增量
+  if (eventType === "content_block_delta") {
+    const delta = event.delta as Record<string, unknown> | undefined;
+    if (!delta) return [];
+
+    // text_delta → 文本流
+    if (delta.type === "text_delta" && typeof delta.text === "string") {
+      return [{ kind: "text", text: delta.text, subagent: sub }];
+    }
+    // thinking_delta → 思考流
+    if (delta.type === "thinking_delta" && typeof delta.thinking === "string") {
+      return [{ kind: "thinking", text: delta.thinking, subagent: sub }];
+    }
+    return [];
+  }
+
+  return [];
+}
+
 /**
  * 把一条 SDK 消息挑成【零个或多个】域事件。
  * - assistant → 遍历所有块:text / thinking / tool_use;带 usage 则追加 usage 事件
  * - user      → tool_result(工具输出/报错,截断 + 脱敏)
  * - system / result / stream_event / 未知 → [](由 runner 单独处理)
+ *
+ * `skipStreamed`:流式模式下,text 和 thinking 已经通过 normalizeStreamEvent 增量推送过了,
+ * 完整 assistant 消息到来时只需提取 tool_use / question / usage,避免重复。
  */
-export function normalizeSdkMessage(msg: unknown): AgentEvent[] {
+export function normalizeSdkMessage(
+  msg: unknown,
+  opts?: { skipStreamed?: boolean },
+): AgentEvent[] {
   const out: AgentEvent[] = [];
   if (!msg || typeof msg !== "object") return out;
 
   const m = msg as Record<string, unknown>;
   const sub = (m.parent_tool_use_id as string | undefined) ?? undefined;
   const message = m.message as Record<string, unknown> | undefined;
+  const skip = opts?.skipStreamed === true;
 
   if (m.type === "assistant") {
     const blocks = message?.content;
@@ -127,13 +180,16 @@ export function normalizeSdkMessage(msg: unknown): AgentEvent[] {
         id?: string;
       };
       if (blk?.type === "text" && typeof blk.text === "string") {
-        // text 也要 clip。thinking 与 tool_result 都截了,唯独这一类没有 ——
-        // 而它恰恰是量最大的:agent 内联输出大文件内容时,无界字符串会被 JSON 序列化后
-        // 经总线推出(publish 只有 2 秒超时、没有尺寸上限),并进入每个重连客户端的
-        // 内存重放缓冲。文件头声明的"避免撑爆 SSE 与 UI"在最需要它的那一类上静默失效。
-        out.push({ kind: "text", text: redactSecrets(clip(blk.text)), subagent: sub });
+        // 流式模式下 text 已经通过 normalizeStreamEvent 逐 token 推送过了,
+        // 完整消息到来时跳过以避免重复。
+        if (!skip) {
+          out.push({ kind: "text", text: redactSecrets(clip(blk.text)), subagent: sub });
+        }
       } else if (blk?.type === "thinking" && typeof blk.thinking === "string") {
-        out.push({ kind: "thinking", text: redactSecrets(clip(blk.thinking)), subagent: sub });
+        // 同上:流式模式下 thinking 已经增量推送过了。
+        if (!skip) {
+          out.push({ kind: "thinking", text: redactSecrets(clip(blk.thinking)), subagent: sub });
+        }
       } else if (blk?.type === "tool_use") {
         // AskUserQuestion 是"问用户"而不是"做事",翻成专门的事件类型。
         // 当成普通 tool_use 推出去的话,界面上就是一坨 JSON —— 用户根本不知道

@@ -7,6 +7,7 @@ import { extractRunResult } from "@/lib/modules/agent-engine/domain/extract-resu
 import {
   createSubagentLabeler,
   normalizeSdkMessage,
+  normalizeStreamEvent,
 } from "@/lib/modules/agent-engine/domain/normalize";
 import type { EnginePort, RunResult } from "@/lib/modules/agent-engine/ports";
 import type { ModelGatewayPort } from "@/lib/modules/model-gateway/ports";
@@ -81,6 +82,10 @@ export class ClaudeSdkEngine implements EnginePort {
         }),
       });
 
+      // 跟踪是否已经通过 stream_event 推送过增量文本/思考 ——
+      // 如果推过,完整 assistant 消息到来时要跳过 text/thinking 块,避免重复。
+      let hasStreamed = false;
+
       for await (const msg of stream) {
         const m = msg as { type?: string; subtype?: string; session_id?: string } | null;
 
@@ -88,8 +93,17 @@ export class ClaudeSdkEngine implements EnginePort {
           sessionId = m.session_id ?? sessionId;
         } else if (m?.type === "result") {
           result = extractRunResult(msg, { hasSchema });
+        } else if (m?.type === "stream_event") {
+          // 流式增量:逐 token 推送文本 / 思考
+          const events = normalizeStreamEvent(msg);
+          if (events.length > 0) hasStreamed = true;
+          for (const e of events) onEvent(label(e));
         } else {
-          for (const e of normalizeSdkMessage(msg)) onEvent(label(e));
+          // 完整消息(assistant / user)。
+          // 流式模式下:text / thinking 已经增量推过,只提取 tool_use / question / usage。
+          for (const e of normalizeSdkMessage(msg, { skipStreamed: hasStreamed })) onEvent(label(e));
+          // assistant 消息处理完毕,重置标记 —— 下一条 assistant 消息重新计数
+          if (m?.type === "assistant") hasStreamed = false;
         }
       }
     } catch (err) {
