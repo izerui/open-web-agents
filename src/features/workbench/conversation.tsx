@@ -16,7 +16,10 @@ type Rendered = ToolCall | { kind: "event"; event: AgentEvent };
 
 /**
  * 事件流 → 渲染项。
- * 工具调用与结果在流里是分开的两条事件,按 toolUseId 合并后 UI 才读得懂。
+ * - 工具调用与结果在流里是分开的两条事件,按 toolUseId 合并后 UI 才读得懂。
+ * - 流式输出下同一段文本/思考会拆成大量小增量事件(逐 token),
+ *   连续的同类(text/thinking)且同 subagent 的事件合并成一条,
+ *   否则每个 token 变成一个独立的 <p> 标签。
  */
 export function foldEvents(events: AgentEvent[]): Rendered[] {
   const out: Rendered[] = [];
@@ -38,6 +41,22 @@ export function foldEvents(events: AgentEvent[]): Rendered[] {
       else out.push({ kind: "event", event: e });
     } else if (e.kind === "usage") {
       // 用量在页脚汇总,不逐条打断阅读
+    } else if (e.kind === "text" || e.kind === "thinking") {
+      // 流式合并:连续的同类 + 同 subagent 事件拼成一条,而不是每个 token 一个 <p>
+      const prev = out[out.length - 1];
+      if (
+        prev &&
+        prev.kind === "event" &&
+        prev.event.kind === e.kind &&
+        "subagent" in prev.event &&
+        prev.event.subagent === e.subagent
+      ) {
+        // 就地合并文本(prev.event 是引用,直接修改即可)
+        (prev.event as { text: string }).text += e.text;
+      } else {
+        // 新起一段:浅拷贝一份,后续合并修改拷贝而不是原始事件
+        out.push({ kind: "event", event: { ...e } });
+      }
     } else {
       out.push({ kind: "event", event: e });
     }
