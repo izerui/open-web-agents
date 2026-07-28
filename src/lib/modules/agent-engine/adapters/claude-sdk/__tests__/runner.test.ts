@@ -190,6 +190,84 @@ describe("ClaudeSdkEngine 回放", () => {
     expect(r.summary).toBe("文本而已");
   });
 
+  // ─────────────────────────── 流式增量(stream_event) ───────────────────────────
+  //
+  // SDK 的 query() 在产出完整 assistant 消息之前,会先 yield 一系列 stream_event,
+  // 每条包含一个 content_block_delta(text_delta / thinking_delta)。
+  // runner 应该:
+  //   1. 把 text_delta / thinking_delta 实时翻成 kind:"text" / kind:"thinking" 推出去
+  //   2. 完整 assistant 消息到来时跳过 text/thinking(避免重复),但保留 tool_use / usage
+
+  /** 模拟 SDK 的真实流式消息序列:先 stream_event 逐 token,再完整 assistant。 */
+  const STREAMING_SEQ = [
+    { type: "system", subtype: "init", session_id: "s_stream" },
+    // 逐 token 的 text delta
+    {
+      type: "stream_event",
+      parent_tool_use_id: null,
+      event: { type: "content_block_delta", delta: { type: "text_delta", text: "你" } },
+    },
+    {
+      type: "stream_event",
+      parent_tool_use_id: null,
+      event: { type: "content_block_delta", delta: { type: "text_delta", text: "好" } },
+    },
+    {
+      type: "stream_event",
+      parent_tool_use_id: null,
+      event: { type: "content_block_delta", delta: { type: "text_delta", text: "世界" } },
+    },
+    // 完整 assistant 消息(text 应被跳过,tool_use 和 usage 要保留)
+    {
+      type: "assistant",
+      message: {
+        id: "msg_1",
+        content: [
+          { type: "text", text: "你好世界" },
+          { type: "tool_use", id: "tu_1", name: "Bash", input: { command: "echo hi" } },
+        ],
+        usage: { input_tokens: 50, output_tokens: 10 },
+      },
+    },
+    {
+      type: "user",
+      message: { content: [{ type: "tool_result", tool_use_id: "tu_1", content: "hi" }] },
+    },
+    { type: "result", subtype: "success", result: "done" },
+  ];
+
+  it("流式:text_delta 逐 token 产出,完整 assistant 不重复 text", async () => {
+    const events: AgentEvent[] = [];
+    await engine(replay(STREAMING_SEQ)).run(
+      spec(),
+      ctx,
+      (e) => events.push(e),
+      new AbortController().signal,
+    );
+
+    const kinds = events.map((e) => e.kind);
+    // 3 个流式 text + tool_use + usage + tool_result,完整 assistant 的 text 被跳过
+    expect(kinds).toEqual(["text", "text", "text", "tool_use", "usage", "tool_result"]);
+
+    // 文本内容是增量的
+    const texts = events.filter((e) => e.kind === "text").map((e) => (e as { text: string }).text);
+    expect(texts).toEqual(["你", "好", "世界"]);
+    expect(texts.join("")).toBe("你好世界");
+  });
+
+  it("无 stream_event 时退化为原有行为(不跳过 text)", async () => {
+    const events: AgentEvent[] = [];
+    await engine(replay(RECORDED)).run(
+      spec(),
+      ctx,
+      (e) => events.push(e),
+      new AbortController().signal,
+    );
+    // 没有 stream_event → hasStreamed=false → text 从完整 assistant 消息正常产出
+    expect(events.map((e) => e.kind)).toEqual(["text", "tool_use", "tool_result"]);
+    expect((events[0] as { text: string }).text).toBe("我先看下目录");
+  });
+
   it("子代理事件被贴上可读名", async () => {
     const events: AgentEvent[] = [];
     await engine(

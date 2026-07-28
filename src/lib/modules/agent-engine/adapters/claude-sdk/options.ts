@@ -214,6 +214,9 @@ export function buildSdkOptions(
     // 连 bypassPermissions 都绕不过(sdk-docs/permissions.md:81)。
     // 于是这个选项只决定"要不要问人",不再决定"有没有围栏"。
     permissionMode: spec.permissionMode ?? "default",
+    // 让 SDK 吐出逐 token 的 stream_event,前端才能实现打字机效果。
+    // 不开的话 query() 只 yield 完整的 assistant 消息,文字一次性出现。
+    includePartialMessages: true,
     cwd: ctx.workspaceDir,
     abortController: deps.abort,
 

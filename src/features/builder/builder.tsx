@@ -1,11 +1,21 @@
 "use client";
 
+import { AppHeader } from "@/components/app-header";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { NativeSelect as Select } from "@/components/ui/native-select";
+import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
 import { KnowledgePanel } from "@/features/builder/knowledge-panel";
 import { SharePanel } from "@/features/builder/share-panel";
 import type { AssistantSummary } from "@/features/workbench/types";
 import { PERMISSION_MODES, type PermissionMode } from "@/lib/shared";
-import Link from "next/link";
+import { cn } from "@/lib/utils";
+import { FileCode, Plus, Save, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 
 const SCHEMA_EXAMPLE = `{
   "type": "object",
@@ -157,7 +167,6 @@ export function Builder() {
   const [list, setList] = useState<AssistantSummary[]>([]);
   const [allowStdioMcp, setAllowStdioMcp] = useState(false);
   const [draft, setDraft] = useState<Draft>(EMPTY);
-  const [msg, setMsg] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const reload = useCallback(
@@ -211,7 +220,6 @@ export function Builder() {
   async function save() {
     if (!canSave) return;
     setSaving(true);
-    setMsg(null);
     try {
       const mcpServers = draft.mcpServers
         .filter((m) => m.name.trim())
@@ -289,10 +297,10 @@ export function Builder() {
       });
       const data = (await res.json()) as { assistant?: AssistantSummary; error?: string };
       if (!res.ok || data.error) throw new Error(data.error ?? `HTTP ${res.status}`);
-      setMsg(`已保存:${data.assistant?.id}`);
+      toast.success(`已保存:${data.assistant?.id}`);
       await reload();
     } catch (e) {
-      setMsg(`保存失败:${e instanceof Error ? e.message : String(e)}`);
+      toast.error(`保存失败:${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setSaving(false);
     }
@@ -373,70 +381,65 @@ export function Builder() {
               )
             : [],
         });
-        setMsg(null);
       });
   }
-
-  const field =
-    "w-full rounded border border-black/15 bg-transparent px-3 py-2 text-sm outline-none focus:border-black/40 dark:border-white/20 dark:focus:border-white/50";
 
   return (
     <div className="mx-auto flex h-screen max-w-6xl gap-6 p-6">
       <aside className="w-56 shrink-0 space-y-2">
         <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-sm">助手</h2>
-          <Link href="/" className="text-xs underline opacity-60 hover:opacity-100">
-            工作台
-          </Link>
+          <h2 className="text-sm font-semibold">助手</h2>
         </div>
-        <button
-          type="button"
-          className="w-full rounded bg-black/5 py-1 text-xs hover:bg-black/10 dark:bg-white/10"
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full"
           onClick={() => setDraft(EMPTY)}
         >
-          + 新建助手
-        </button>
+          <Plus /> 新建助手
+        </Button>
         {list.map((a) => (
-          <button
+          <Button
             key={a.id}
-            type="button"
-            className="block w-full truncate rounded px-2 py-1.5 text-left text-xs hover:bg-black/5 dark:hover:bg-white/10"
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start truncate text-xs"
             onClick={() => edit(a)}
           >
             {a.name}
-            {a.config.outputSchema && <span className="ml-1 opacity-50">·接口型</span>}
+            {a.config.outputSchema && (
+              <Badge variant="secondary" className="ml-1.5 text-[10px]">接口型</Badge>
+            )}
             {(a as { isPublic?: boolean }).isPublic && (
-              <span className="ml-1 opacity-50">·公开</span>
+              <Badge variant="secondary" className="ml-1 text-[10px]">公开</Badge>
             )}
             {(a as { canWrite?: boolean }).canWrite === false && (
-              <span className="ml-1 opacity-50">·只读</span>
+              <Badge variant="outline" className="ml-1 text-[10px]">只读</Badge>
             )}
-          </button>
+          </Button>
         ))}
       </aside>
 
       <main className="min-w-0 flex-1 space-y-4 overflow-y-auto">
-        <div>
-          <h1 className="font-semibold text-lg">助手构建器</h1>
-          <p className="text-xs opacity-55">
-            定义一个只干特定某件事的"员工"。填了 outputSchema,它就能被企业系统当接口调用。
-          </p>
-        </div>
+        <AppHeader
+          title="助手构建器"
+          subtitle="定义一个只干特定某件事的&quot;员工&quot;。填了 outputSchema,它就能被企业系统当接口调用。"
+        />
+
+        <Separator />
 
         <div className="grid grid-cols-2 gap-3">
           <label className="space-y-1">
-            <span className="text-xs opacity-70">名称 *</span>
-            <input
-              className={field}
+            <span className="text-xs text-muted-foreground">名称 *</span>
+            <Input
               value={draft.name}
               onChange={(e) => setDraft({ ...draft, name: e.target.value })}
               placeholder="代码评审助手"
             />
           </label>
           <label className="space-y-1">
-            <span className="text-xs opacity-70">ID(留空自动生成;填已有 ID 即覆盖)</span>
-            <input
-              className={field}
+            <span className="text-xs text-muted-foreground">ID(留空自动生成;填已有 ID 即覆盖)</span>
+            <Input
               value={draft.id}
               onChange={(e) => setDraft({ ...draft, id: e.target.value })}
               placeholder="code-reviewer"
@@ -445,18 +448,17 @@ export function Builder() {
         </div>
 
         <label className="block space-y-1">
-          <span className="text-xs opacity-70">描述</span>
-          <input
-            className={field}
+          <span className="text-xs text-muted-foreground">描述</span>
+          <Input
             value={draft.description}
             onChange={(e) => setDraft({ ...draft, description: e.target.value })}
           />
         </label>
 
         <label className="block space-y-1">
-          <span className="text-xs opacity-70">系统提示词 *</span>
-          <textarea
-            className={`${field} h-32 resize-y font-mono`}
+          <span className="text-xs text-muted-foreground">系统提示词 *</span>
+          <Textarea
+            className="h-32 resize-y font-mono"
             value={draft.systemPrompt}
             onChange={(e) => setDraft({ ...draft, systemPrompt: e.target.value })}
             placeholder="你是代码评审专家……"
@@ -465,9 +467,8 @@ export function Builder() {
 
         <div className="grid grid-cols-2 gap-3">
           <label className="space-y-1">
-            <span className="text-xs opacity-70">模型别名</span>
-            <select
-              className={field}
+            <span className="text-xs text-muted-foreground">模型别名</span>
+            <Select
               value={draft.model}
               onChange={(e) => setDraft({ ...draft, model: e.target.value })}
             >
@@ -476,13 +477,12 @@ export function Builder() {
                   {m}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           <label className="space-y-1">
-            <span className="text-xs opacity-70">最大轮次</span>
-            <input
+            <span className="text-xs text-muted-foreground">最大轮次</span>
+            <Input
               type="number"
-              className={field}
               value={draft.maxTurns}
               onChange={(e) => setDraft({ ...draft, maxTurns: Number(e.target.value) })}
             />
@@ -490,194 +490,208 @@ export function Builder() {
         </div>
 
         <label className="block space-y-1">
-          <span className="text-xs opacity-70">
+          <span className="text-xs text-muted-foreground">
             Skills(逗号或换行分隔,可选)—— SDK 内置技能,如 pdf、xlsx
           </span>
-          <input
-            className={field}
+          <Input
             value={draft.skillsText}
             onChange={(e) => setDraft({ ...draft, skillsText: e.target.value })}
             placeholder="pdf, xlsx"
           />
         </label>
 
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs opacity-70">MCP 服务(可选)—— 给助手接外部工具</span>
-            <button
-              type="button"
-              className="text-xs underline opacity-60 hover:opacity-100"
-              onClick={() =>
-                setDraft({
-                  ...draft,
-                  mcpServers: [...draft.mcpServers, newMcpRow()],
-                })
-              }
-            >
-              + 添加
-            </button>
-          </div>
-          {draft.mcpServers.length === 0 && <p className="text-xs opacity-40">未配置 MCP 服务</p>}
-          {draft.mcpServers.map((m, i) => (
-            <div
-              key={m.uid}
-              className="space-y-2 border-black/10 border-b pb-3 dark:border-white/10"
-            >
-              <div className="flex gap-2">
-                <input
-                  className={field}
-                  value={m.name}
-                  onChange={(e) => {
-                    const next = [...draft.mcpServers];
-                    next[i] = { ...m, name: e.target.value };
-                    setDraft({ ...draft, mcpServers: next });
-                  }}
-                  placeholder="名称(字母/数字/_/-)"
-                />
-                <select
-                  className={field}
-                  value={m.type}
-                  onChange={(e) => {
-                    const next = [...draft.mcpServers];
-                    next[i] = { ...m, type: e.target.value as "http" | "stdio" };
-                    setDraft({ ...draft, mcpServers: next });
-                  }}
-                >
-                  <option value="http">http</option>
-                  <option value="stdio" disabled={!allowStdioMcp}>
-                    {allowStdioMcp ? "stdio" : "stdio（平台未启用）"}
-                  </option>
-                </select>
-                <button
-                  type="button"
-                  className="shrink-0 text-red-600 text-xs underline opacity-70 hover:opacity-100"
-                  onClick={() =>
-                    setDraft({ ...draft, mcpServers: draft.mcpServers.filter((_, j) => j !== i) })
-                  }
-                >
-                  删除
-                </button>
+        {/* ── MCP 服务 ── */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-sm">MCP 服务</CardTitle>
+                <CardDescription>给助手接外部工具(可选)</CardDescription>
               </div>
-              {m.type === "http" ? (
-                <input
-                  className={field}
-                  value={m.url}
-                  onChange={(e) => {
-                    const next = [...draft.mcpServers];
-                    next[i] = { ...m, url: e.target.value };
-                    setDraft({ ...draft, mcpServers: next });
-                  }}
-                  placeholder="https://mcp.example.com"
-                />
-              ) : (
-                <div className="grid grid-cols-2 gap-2">
-                  <input
-                    className={`${field} col-span-2`}
-                    value={m.command}
-                    onChange={(e) => {
-                      const next = [...draft.mcpServers];
-                      next[i] = { ...m, command: e.target.value };
-                      setDraft({ ...draft, mcpServers: next });
-                    }}
-                    placeholder="command，例如 npx"
-                  />
-                  <textarea
-                    className={`${field} min-h-24 resize-y font-mono`}
-                    value={m.argsText}
-                    onChange={(e) => {
-                      const next = [...draft.mcpServers];
-                      next[i] = { ...m, argsText: e.target.value };
-                      setDraft({ ...draft, mcpServers: next });
-                    }}
-                    placeholder={"args，每行一个\n-y\n@modelcontextprotocol/server-filesystem"}
-                  />
-                  <textarea
-                    className={`${field} min-h-24 resize-y font-mono`}
-                    value={m.envText}
-                    onChange={(e) => {
-                      const next = [...draft.mcpServers];
-                      next[i] = { ...m, envText: e.target.value };
-                      setDraft({ ...draft, mcpServers: next });
-                    }}
-                    placeholder={'env JSON，例如\n{"GITHUB_TOKEN":"..."}'}
-                  />
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs opacity-70">
-              子代理(可选)—— 把一类子任务交给带专属提示词的下级去做
-            </span>
-            <button
-              type="button"
-              className="text-xs underline opacity-60 hover:opacity-100"
-              onClick={() =>
-                setDraft({ ...draft, subagents: [...draft.subagents, newSubagentRow()] })
-              }
-            >
-              + 添加
-            </button>
-          </div>
-          {draft.subagents.length === 0 && <p className="text-xs opacity-40">未配置子代理</p>}
-          {draft.subagents.map((s, i) => (
-            <div key={s.uid} className="flex gap-2">
-              <div className="flex-1 space-y-1">
-                <div className="flex gap-2">
-                  <input
-                    className={`${field} max-w-[12rem]`}
-                    value={s.name}
-                    onChange={(e) => {
-                      const next = [...draft.subagents];
-                      next[i] = { ...s, name: e.target.value };
-                      setDraft({ ...draft, subagents: next });
-                    }}
-                    placeholder="名称,如 reviewer"
-                  />
-                  {/* 主 agent 靠这句话决定要不要把子任务交出去 —— 缺了它,
-                      子代理配了也没人调用。SDK 侧这是必需字段。 */}
-                  <input
-                    className={field}
-                    value={s.description}
-                    onChange={(e) => {
-                      const next = [...draft.subagents];
-                      next[i] = { ...s, description: e.target.value };
-                      setDraft({ ...draft, subagents: next });
-                    }}
-                    placeholder="【何时】用它,如:需要审阅代码质量时"
-                  />
-                </div>
-                <textarea
-                  className={`${field} min-h-[3rem]`}
-                  value={s.prompt}
-                  onChange={(e) => {
-                    const next = [...draft.subagents];
-                    next[i] = { ...s, prompt: e.target.value };
-                    setDraft({ ...draft, subagents: next });
-                  }}
-                  placeholder="这个子代理的职责与要求(它的系统提示词)"
-                />
-              </div>
-              <button
-                type="button"
-                className="shrink-0 text-red-600 text-xs underline opacity-70 hover:opacity-100"
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() =>
-                  setDraft({ ...draft, subagents: draft.subagents.filter((_, j) => j !== i) })
+                  setDraft({
+                    ...draft,
+                    mcpServers: [...draft.mcpServers, newMcpRow()],
+                  })
                 }
               >
-                删除
-              </button>
+                <Plus /> 添加
+              </Button>
             </div>
-          ))}
-        </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {draft.mcpServers.length === 0 && (
+              <p className="text-xs text-muted-foreground">未配置 MCP 服务</p>
+            )}
+            {draft.mcpServers.map((m, i) => (
+              <div
+                key={m.uid}
+                className="space-y-2 border-b border-border pb-3 last:border-b-0"
+              >
+                <div className="flex gap-2">
+                  <Input
+                    value={m.name}
+                    onChange={(e) => {
+                      const next = [...draft.mcpServers];
+                      next[i] = { ...m, name: e.target.value };
+                      setDraft({ ...draft, mcpServers: next });
+                    }}
+                    placeholder="名称(字母/数字/_/-)"
+                  />
+                  <Select
+                    value={m.type}
+                    onChange={(e) => {
+                      const next = [...draft.mcpServers];
+                      next[i] = { ...m, type: e.target.value as "http" | "stdio" };
+                      setDraft({ ...draft, mcpServers: next });
+                    }}
+                  >
+                    <option value="http">http</option>
+                    <option value="stdio" disabled={!allowStdioMcp}>
+                      {allowStdioMcp ? "stdio" : "stdio（平台未启用）"}
+                    </option>
+                  </Select>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="shrink-0 text-destructive hover:text-destructive"
+                    onClick={() =>
+                      setDraft({ ...draft, mcpServers: draft.mcpServers.filter((_, j) => j !== i) })
+                    }
+                  >
+                    <Trash2 />
+                  </Button>
+                </div>
+                {m.type === "http" ? (
+                  <Input
+                    value={m.url}
+                    onChange={(e) => {
+                      const next = [...draft.mcpServers];
+                      next[i] = { ...m, url: e.target.value };
+                      setDraft({ ...draft, mcpServers: next });
+                    }}
+                    placeholder="https://mcp.example.com"
+                  />
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input
+                      className="col-span-2"
+                      value={m.command}
+                      onChange={(e) => {
+                        const next = [...draft.mcpServers];
+                        next[i] = { ...m, command: e.target.value };
+                        setDraft({ ...draft, mcpServers: next });
+                      }}
+                      placeholder="command，例如 npx"
+                    />
+                    <Textarea
+                      className="min-h-24 resize-y font-mono"
+                      value={m.argsText}
+                      onChange={(e) => {
+                        const next = [...draft.mcpServers];
+                        next[i] = { ...m, argsText: e.target.value };
+                        setDraft({ ...draft, mcpServers: next });
+                      }}
+                      placeholder={"args，每行一个\n-y\n@modelcontextprotocol/server-filesystem"}
+                    />
+                    <Textarea
+                      className="min-h-24 resize-y font-mono"
+                      value={m.envText}
+                      onChange={(e) => {
+                        const next = [...draft.mcpServers];
+                        next[i] = { ...m, envText: e.target.value };
+                        setDraft({ ...draft, mcpServers: next });
+                      }}
+                      placeholder={'env JSON，例如\n{"GITHUB_TOKEN":"..."}'}
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        {/* ── 子代理 ── */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-sm">子代理</CardTitle>
+                <CardDescription>把一类子任务交给带专属提示词的下级去做(可选)</CardDescription>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() =>
+                  setDraft({ ...draft, subagents: [...draft.subagents, newSubagentRow()] })
+                }
+              >
+                <Plus /> 添加
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {draft.subagents.length === 0 && (
+              <p className="text-xs text-muted-foreground">未配置子代理</p>
+            )}
+            {draft.subagents.map((s, i) => (
+              <div key={s.uid} className="flex gap-2">
+                <div className="flex-1 space-y-1">
+                  <div className="flex gap-2">
+                    <Input
+                      className="max-w-[12rem]"
+                      value={s.name}
+                      onChange={(e) => {
+                        const next = [...draft.subagents];
+                        next[i] = { ...s, name: e.target.value };
+                        setDraft({ ...draft, subagents: next });
+                      }}
+                      placeholder="名称,如 reviewer"
+                    />
+                    {/* 主 agent 靠这句话决定要不要把子任务交出去 —— 缺了它,
+                        子代理配了也没人调用。SDK 侧这是必需字段。 */}
+                    <Input
+                      value={s.description}
+                      onChange={(e) => {
+                        const next = [...draft.subagents];
+                        next[i] = { ...s, description: e.target.value };
+                        setDraft({ ...draft, subagents: next });
+                      }}
+                      placeholder="【何时】用它,如:需要审阅代码质量时"
+                    />
+                  </div>
+                  <Textarea
+                    className="min-h-[3rem]"
+                    value={s.prompt}
+                    onChange={(e) => {
+                      const next = [...draft.subagents];
+                      next[i] = { ...s, prompt: e.target.value };
+                      setDraft({ ...draft, subagents: next });
+                    }}
+                    placeholder="这个子代理的职责与要求(它的系统提示词)"
+                  />
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="shrink-0 text-destructive hover:text-destructive"
+                  onClick={() =>
+                    setDraft({ ...draft, subagents: draft.subagents.filter((_, j) => j !== i) })
+                  }
+                >
+                  <Trash2 />
+                </Button>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
 
         <label className="block space-y-1">
-          <span className="text-xs opacity-70">权限模式 —— 按【使用场景】选,不是安全等级</span>
-          <select
-            className={field}
+          <span className="text-xs text-muted-foreground">权限模式 —— 按【使用场景】选,不是安全等级</span>
+          <Select
             value={draft.permissionMode}
             onChange={(e) =>
               setDraft({ ...draft, permissionMode: e.target.value as PermissionMode })
@@ -688,8 +702,8 @@ export function Builder() {
                 {PERMISSION_MODE_META[m].label}
               </option>
             ))}
-          </select>
-          <span className="block text-xs opacity-45">
+          </Select>
+          <span className="block text-xs text-muted-foreground">
             {PERMISSION_MODE_META[draft.permissionMode].hint}
             {draft.permissionMode === "bypassPermissions" &&
               " 子代理会一并继承该模式,无法单独收紧。"}
@@ -700,7 +714,7 @@ export function Builder() {
             因为两个设置离得远时没人会把它们联系起来。 */}
         {draft.permissionMode === "bypassPermissions" &&
           (draft.approvalToolsText.trim() || draft.approvalPatternsText.trim()) && (
-            <p className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-xs">
+            <p className="rounded-md border border-[var(--warning)]/40 bg-[var(--warning)]/10 px-2 py-1.5 text-xs">
               这个模式通常用于无人值守的接口调用,而你配了审批规则 ——
               没人去点确认的话,那一轮会一直挂到审批超时。
             </p>
@@ -708,18 +722,16 @@ export function Builder() {
 
         <div className="grid grid-cols-2 gap-3">
           <label className="space-y-1">
-            <span className="text-xs opacity-70">需审批的工具(逗号分隔,可选)</span>
-            <input
-              className={field}
+            <span className="text-xs text-muted-foreground">需审批的工具(逗号分隔,可选)</span>
+            <Input
               value={draft.approvalToolsText}
               onChange={(e) => setDraft({ ...draft, approvalToolsText: e.target.value })}
               placeholder="Bash, Write"
             />
           </label>
           <label className="space-y-1">
-            <span className="text-xs opacity-70">需审批的命令模式(逗号分隔)</span>
-            <input
-              className={field}
+            <span className="text-xs text-muted-foreground">需审批的命令模式(逗号分隔)</span>
+            <Input
               value={draft.approvalPatternsText}
               onChange={(e) => setDraft({ ...draft, approvalPatternsText: e.target.value })}
               placeholder="rm -rf, sudo, curl"
@@ -728,9 +740,8 @@ export function Builder() {
         </div>
 
         <label className="block space-y-1">
-          <span className="text-xs opacity-70">Webhook 回调(可选)—— 运行终态时推结果</span>
-          <input
-            className={field}
+          <span className="text-xs text-muted-foreground">Webhook 回调(可选)—— 运行终态时推结果</span>
+          <Input
             value={draft.webhookUrl}
             onChange={(e) => setDraft({ ...draft, webhookUrl: e.target.value })}
             placeholder="https://your-system/callback"
@@ -738,11 +749,10 @@ export function Builder() {
         </label>
 
         <label className="block space-y-1">
-          <span className="text-xs opacity-70">
+          <span className="text-xs text-muted-foreground">
             工具白名单(逗号分隔,可选)—— 留空 = 不限制;填了就只允许这些工具
           </span>
-          <input
-            className={field}
+          <Input
             value={draft.toolsText}
             onChange={(e) => setDraft({ ...draft, toolsText: e.target.value })}
             placeholder="Read, Write, Bash"
@@ -750,26 +760,26 @@ export function Builder() {
         </label>
 
         <label className="block space-y-1">
-          <span className="text-xs opacity-70">
+          <span className="text-xs text-muted-foreground">
             inputSchema(JSON Schema,可选)—— 填了则 invoke 的入参必须符合它,否则 400
           </span>
-          <textarea
-            className={`${field} h-40 resize-y font-mono text-xs`}
+          <Textarea
+            className="h-40 resize-y font-mono text-xs"
             value={draft.inputSchemaText}
             onChange={(e) => setDraft({ ...draft, inputSchemaText: e.target.value })}
             placeholder={INPUT_SCHEMA_EXAMPLE}
           />
           {inputSchemaError && (
-            <span className="text-red-600 text-xs">inputSchema 非法:{inputSchemaError}</span>
+            <span className="text-xs text-destructive">inputSchema 非法:{inputSchemaError}</span>
           )}
         </label>
 
         <label className="block space-y-1">
-          <span className="text-xs opacity-70">
+          <span className="text-xs text-muted-foreground">
             outputSchema(JSON Schema,可选)—— 填了才能被系统当接口调用
           </span>
-          <textarea
-            className={`${field} h-56 resize-y font-mono text-xs`}
+          <Textarea
+            className="h-56 resize-y font-mono text-xs"
             value={draft.outputSchemaText}
             onChange={(e) => setDraft({ ...draft, outputSchemaText: e.target.value })}
             placeholder={SCHEMA_EXAMPLE}
@@ -777,26 +787,20 @@ export function Builder() {
         </label>
 
         <div className="flex items-center gap-3">
-          <button
-            type="button"
-            className="rounded bg-black px-4 py-2 text-sm text-white disabled:opacity-40 dark:bg-white dark:text-black"
-            onClick={save}
-            disabled={!canSave}
-          >
-            {saving ? "保存中…" : "保存助手"}
-          </button>
-          <button
-            type="button"
-            className="text-xs underline opacity-60 hover:opacity-100"
+          <Button onClick={save} disabled={!canSave}>
+            <Save /> {saving ? "保存中…" : "保存助手"}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setDraft({ ...draft, outputSchemaText: SCHEMA_EXAMPLE })}
           >
-            填入示例 schema
-          </button>
-          {schemaError && <span className="text-red-600 text-xs">schema 非法:{schemaError}</span>}
+            <FileCode /> 填入示例 schema
+          </Button>
+          {schemaError && <span className="text-xs text-destructive">schema 非法:{schemaError}</span>}
           {!schemaError && schemaText && (
-            <span className="text-green-600 text-xs">schema 合法 · 接口型助手</span>
+            <Badge variant="success">schema 合法 · 接口型助手</Badge>
           )}
-          {msg && <span className="text-xs opacity-70">{msg}</span>}
         </div>
 
         {draft.id && (
@@ -809,17 +813,21 @@ export function Builder() {
         {draft.id && <SharePanel assistantId={draft.id} />}
 
         {draft.id && parsedSchema && (
-          <div className="rounded border border-black/10 p-3 text-xs dark:border-white/15">
-            <p className="mb-1 font-medium">第三方系统这样调用它:</p>
-            <pre className="overflow-x-auto whitespace-pre-wrap font-mono opacity-70">
-              {`curl -X POST /api/agents/${draft.id}/invoke \\
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">第三方系统这样调用它:</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-xs text-muted-foreground">
+                {`curl -X POST /api/agents/${draft.id}/invoke \\
   -H 'Content-Type: application/json' \\
   -d '{"input":"……"}'
 # → { "taskId": "…" }
 curl /api/agents/{taskId}/result
 # → { "status":"success", "structured": { … } }`}
-            </pre>
-          </div>
+              </pre>
+            </CardContent>
+          </Card>
         )}
       </main>
     </div>

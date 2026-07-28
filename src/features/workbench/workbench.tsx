@@ -2,12 +2,72 @@
 
 import { readEventStream } from "@/features/chat/event-stream";
 import type { AgentEvent } from "@/lib/shared";
-import Link from "next/link";
+import { cn } from "@/lib/utils";
+import { MessageSquare, Plus } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApprovalBar } from "./approval-bar";
-import { Conversation } from "./conversation";
+import { ChatThread } from "./conversation";
 import { FilePanel } from "./file-panel";
 import type { AssistantSummary, SessionSummary, Turn } from "./types";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { NativeSelect as Select } from "@/components/ui/native-select";
+import { Separator } from "@/components/ui/separator";
+
+import {
+  Conversation,
+  ConversationContent,
+  ConversationEmptyState,
+  ConversationScrollButton,
+} from "@/components/ai-elements/conversation";
+import {
+  PromptInput,
+  PromptInputActionAddAttachments,
+  PromptInputActionMenu,
+  PromptInputActionMenuContent,
+  PromptInputActionMenuTrigger,
+  PromptInputBody,
+  PromptInputFooter,
+  PromptInputHeader,
+  type PromptInputMessage,
+  PromptInputSubmit,
+  PromptInputTextarea,
+  PromptInputTools,
+  usePromptInputAttachments,
+} from "@/components/ai-elements/prompt-input";
+import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion";
+import {
+  Attachment,
+  AttachmentPreview,
+  AttachmentRemove,
+  Attachments,
+} from "@/components/ai-elements/attachments";
+
+/* ------------------------------------------------------------------ */
+/*  附件展示子组件 — 在 PromptInput 内部使用 usePromptInputAttachments   */
+/* ------------------------------------------------------------------ */
+function AttachmentsDisplay() {
+  const { files, remove } = usePromptInputAttachments();
+
+  if (files.length === 0) return null;
+
+  return (
+    <Attachments>
+      {files.map((file) => (
+        <Attachment key={file.id} data={file} onRemove={() => remove(file.id)}>
+          <AttachmentPreview />
+          <AttachmentRemove />
+        </Attachment>
+      ))}
+    </Attachments>
+  );
+}
+
+/* ================================================================== */
+/*  Workbench                                                         */
+/* ================================================================== */
 
 export function Workbench() {
   const [assistants, setAssistants] = useState<AssistantSummary[]>([]);
@@ -19,7 +79,6 @@ export function Workbench() {
   const [running, setRunning] = useState(false);
   const [filesKey, setFilesKey] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     void fetch("/api/assistants")
@@ -28,11 +87,6 @@ export function Workbench() {
     void fetch("/api/sessions")
       .then((r) => r.json())
       .then((d: { sessions?: SessionSummary[] }) => setSessions(d.sessions ?? []));
-  }, []);
-
-  // 新事件到达时贴底
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, []);
 
   const newSession = useCallback(() => {
@@ -165,30 +219,48 @@ export function Workbench() {
 
   const current = assistants.find((a) => a.id === assistantId);
 
+  const handlePromptSubmit = useCallback(
+    (message: PromptInputMessage) => {
+      const text = message.text.trim();
+      if (!text) return;
+      void send(text);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [running, cancelRun, input],
+  );
+
+  const handleSuggestionClick = useCallback(
+    (suggestion: string) => {
+      void send(suggestion);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [running, input],
+  );
+
   return (
     <div className="flex h-screen">
       {/* 侧边栏:助手选择 + 会话列表 */}
-      <aside className="flex w-60 shrink-0 flex-col border-black/10 border-r dark:border-white/15">
-        <div className="space-y-2 border-black/10 border-b p-3 dark:border-white/15">
+      <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-sidebar">
+        <div className="space-y-2 border-b border-border p-3">
           <div className="flex items-center justify-between">
-            <span className="font-semibold text-sm">Open Web Agents</span>
-            <span className="flex gap-2 text-xs">
-              <Link href="/builder" className="underline opacity-60 hover:opacity-100">
+            <span className="text-sm font-semibold">Open Web Agents</span>
+            <nav className="flex gap-1.5 text-xs">
+              <a href="/builder" className="text-muted-foreground transition-colors hover:text-foreground">
                 构建器
-              </Link>
-              <Link href="/groups" className="underline opacity-60 hover:opacity-100">
+              </a>
+              <a href="/groups" className="text-muted-foreground transition-colors hover:text-foreground">
                 组
-              </Link>
-              <Link href="/usage" className="underline opacity-60 hover:opacity-100">
+              </a>
+              <a href="/usage" className="text-muted-foreground transition-colors hover:text-foreground">
                 用量
-              </Link>
-              <Link href="/settings" className="underline opacity-60 hover:opacity-100">
+              </a>
+              <a href="/settings" className="text-muted-foreground transition-colors hover:text-foreground">
                 设置
-              </Link>
-            </span>
+              </a>
+            </nav>
           </div>
-          <select
-            className="w-full rounded border border-black/15 bg-transparent px-2 py-1 text-xs dark:border-white/20"
+          <Select
+            className="w-full text-xs"
             value={assistantId}
             onChange={(e) => {
               setAssistantId(e.target.value);
@@ -202,85 +274,124 @@ export function Workbench() {
                 {a.config.outputSchema ? " ·接口型" : ""}
               </option>
             ))}
-          </select>
-          <button
-            type="button"
-            className="w-full rounded bg-black/5 py-1 text-xs hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/20"
+          </Select>
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full"
             onClick={newSession}
           >
-            + 新会话
-          </button>
+            <Plus className="size-3.5" />
+            新会话
+          </Button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <ScrollArea className="min-h-0 flex-1">
           {sessions.map((s) => (
             <button
               key={s.id}
               type="button"
-              className={`block w-full truncate px-3 py-2 text-left font-mono text-xs hover:bg-black/5 dark:hover:bg-white/10 ${
-                s.id === sessionId ? "bg-black/5 dark:bg-white/10" : ""
-              }`}
+              className={cn(
+                "block w-full truncate px-3 py-2 text-left font-mono text-xs transition-colors hover:bg-accent",
+                s.id === sessionId && "bg-accent text-accent-foreground",
+              )}
               onClick={() => void openSession(s.id)}
             >
               {s.title || s.id.slice(0, 12)}
             </button>
           ))}
-          {sessions.length === 0 && <p className="p-3 text-xs opacity-40">暂无会话</p>}
-        </div>
+          {sessions.length === 0 && (
+            <p className="p-3 text-xs text-muted-foreground">暂无会话</p>
+          )}
+        </ScrollArea>
       </aside>
 
       {/* 主区:对话 */}
       <main className="flex min-w-0 flex-1 flex-col">
-        <div className="border-black/10 border-b px-4 py-2 text-xs opacity-60 dark:border-white/15">
-          {current?.name ?? assistantId}
+        <div className="flex items-center gap-2 border-b border-border px-4 py-2 text-xs text-muted-foreground">
+          <span>{current?.name ?? assistantId}</span>
           {current?.config.outputSchema && (
-            <span className="ml-2 rounded bg-blue-500/15 px-1.5 py-0.5 text-blue-700 dark:text-blue-300">
-              结构化输出
-            </span>
+            <Badge variant="secondary">结构化输出</Badge>
           )}
-          <span className="ml-2 opacity-70">
+          <Separator orientation="vertical" className="h-3" />
+          <span>
             {sessionId ? `会话 ${sessionId.slice(0, 8)}…` : "(发送后创建会话)"}
           </span>
         </div>
 
-        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-          <Conversation turns={turns} onRerun={rerun} onAnswer={(t) => void send(t)} />
-        </div>
+        <div className="relative flex min-h-0 flex-1 flex-col divide-y overflow-hidden">
+          <Conversation className="min-h-0 flex-1">
+            <ConversationContent className="px-4 py-4">
+              {turns.length === 0 ? (
+                <ConversationEmptyState
+                  title="开始对话"
+                  description="发一句话试试..."
+                  icon={<MessageSquare className="size-12" />}
+                />
+              ) : (
+                <ChatThread turns={turns} onRerun={rerun} onAnswer={(t: string) => void send(t)} />
+              )}
+            </ConversationContent>
+            <ConversationScrollButton />
+          </Conversation>
 
-        <ApprovalBar sessionId={sessionId} running={running} />
+          <ApprovalBar sessionId={sessionId} running={running} />
 
-        <div className="flex gap-2 border-black/10 border-t p-3 dark:border-white/15">
-          <input
-            className="flex-1 rounded border border-black/15 bg-transparent px-3 py-2 text-sm outline-none focus:border-black/40 dark:border-white/20 dark:focus:border-white/50"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && void send()}
-            placeholder={running ? "运行中…" : "说点什么"}
-            disabled={running}
-          />
-          {running ? (
-            <button
-              type="button"
-              className="rounded bg-red-600 px-4 py-2 text-sm text-white"
-              onClick={cancelRun}
-            >
-              中断
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="rounded bg-black px-4 py-2 text-sm text-white disabled:opacity-40 dark:bg-white dark:text-black"
-              onClick={() => void send()}
-              disabled={!input.trim()}
-            >
-              发送
-            </button>
-          )}
+          <div className="grid shrink-0 gap-4 pt-4">
+            {turns.length === 0 && (
+              <Suggestions className="px-4">
+                <Suggestion
+                  suggestion="在工作目录写一个 hello.py"
+                  onClick={handleSuggestionClick}
+                />
+                <Suggestion
+                  suggestion="帮我分析这个项目的架构"
+                  onClick={handleSuggestionClick}
+                />
+                <Suggestion
+                  suggestion="创建一个简单的 REST API"
+                  onClick={handleSuggestionClick}
+                />
+              </Suggestions>
+            )}
+            <div className="w-full px-4 pb-4">
+              <PromptInput
+                globalDrop
+                multiple
+                onSubmit={handlePromptSubmit}
+              >
+                <PromptInputHeader>
+                  <AttachmentsDisplay />
+                </PromptInputHeader>
+                <PromptInputBody>
+                  <PromptInputTextarea
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder={running ? "运行中…" : "说点什么"}
+                  />
+                </PromptInputBody>
+                <PromptInputFooter>
+                  <PromptInputTools>
+                    <PromptInputActionMenu>
+                      <PromptInputActionMenuTrigger tooltip="添加附件" />
+                      <PromptInputActionMenuContent>
+                        <PromptInputActionAddAttachments label="添加图片或文件" />
+                      </PromptInputActionMenuContent>
+                    </PromptInputActionMenu>
+                  </PromptInputTools>
+                  <PromptInputSubmit
+                    status={running ? "streaming" : "ready"}
+                    onStop={cancelRun}
+                  />
+                </PromptInputFooter>
+              </PromptInput>
+            </div>
+          </div>
         </div>
       </main>
 
       {/* 右栏:工作空间文件 */}
-      <aside className="w-80 shrink-0 border-black/10 border-l dark:border-white/15">
+      <aside className="w-80 shrink-0 border-l border-border">
         <FilePanel sessionId={sessionId} refreshKey={filesKey} />
       </aside>
     </div>

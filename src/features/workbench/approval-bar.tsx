@@ -1,6 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
+import { ShieldAlert, CheckCircle2, XCircle, Clock, Terminal } from "lucide-react";
 
 interface Pending {
   id: string;
@@ -66,41 +72,74 @@ export function ApprovalBar({
   if (pending.length === 0) return null;
 
   return (
-    <div className="space-y-2 border-amber-500/40 border-t bg-amber-500/10 p-3">
-      {pending.map((p) => {
-        const secsLeft = Math.max(0, Math.round((p.expiresAt - Date.now()) / 1000));
-        return (
-          <div key={p.id} className="space-y-1">
-            <p className="font-medium text-xs">
-              ⏸ agent 在等你确认 —— {p.reason}
-              <span className="ml-2 font-normal opacity-60">
-                {secsLeft > 0 ? `${secsLeft}s 后自动拒绝` : "即将超时"}
-              </span>
-            </p>
-            <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-black/5 p-2 font-mono text-xs dark:bg-white/10">
-              {p.toolName}: {p.summary}
-            </pre>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                className="rounded bg-black px-3 py-1 text-white text-xs disabled:opacity-40 dark:bg-white dark:text-black"
-                onClick={() => decide(p.id, "approved")}
-                disabled={busy === p.id}
-              >
-                批准
-              </button>
-              <button
-                type="button"
-                className="rounded bg-red-600 px-3 py-1 text-white text-xs disabled:opacity-40"
-                onClick={() => decide(p.id, "denied")}
-                disabled={busy === p.id}
-              >
-                拒绝
-              </button>
+    <Card className="mx-3 mb-2 border-[var(--warning)]/40 bg-[var(--warning)]/5">
+      <CardContent className="space-y-3 p-3">
+        {pending.map((p, idx) => {
+          const secsLeft = Math.max(0, Math.round((p.expiresAt - Date.now()) / 1000));
+          const isUrgent = secsLeft <= 10;
+
+          return (
+            <div key={p.id}>
+              {idx > 0 && <Separator className="mb-3" />}
+
+              {/* 标题行:图标 + 待确认标签 + 原因 + 倒计时 */}
+              <div className="flex items-center gap-2 text-xs">
+                <ShieldAlert
+                  className={cn(
+                    "size-4 shrink-0",
+                    isUrgent ? "text-destructive" : "text-[var(--warning)]",
+                  )}
+                />
+                <Badge variant="warning">待确认</Badge>
+                <span className="font-medium">agent 在等你确认 —— {p.reason}</span>
+                <span
+                  className={cn(
+                    "ml-auto flex shrink-0 items-center gap-1 font-mono text-muted-foreground",
+                    isUrgent && "text-destructive",
+                  )}
+                >
+                  <Clock className="size-3" />
+                  {secsLeft > 0 ? `${secsLeft}s 后自动拒绝` : "即将超时"}
+                </span>
+              </div>
+
+              {/* 工具调用摘要 */}
+              <div className="mt-1.5 flex items-start gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-2">
+                <Terminal className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                <code className="flex-1 whitespace-pre-wrap break-all font-mono text-xs">
+                  <Badge variant="secondary" className="mr-1.5 align-middle">
+                    {p.toolName}
+                  </Badge>
+                  {p.summary}
+                </code>
+              </div>
+
+              {/* 操作按钮 */}
+              <div className="mt-2 flex gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => decide(p.id, "approved")}
+                  disabled={busy === p.id}
+                  className="gap-1.5"
+                >
+                  <CheckCircle2 className="size-3.5" />
+                  批准
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => decide(p.id, "denied")}
+                  disabled={busy === p.id}
+                  className="gap-1.5"
+                >
+                  <XCircle className="size-3.5" />
+                  拒绝
+                </Button>
+              </div>
             </div>
-          </div>
-        );
-      })}
-    </div>
+          );
+        })}
+      </CardContent>
+    </Card>
   );
 }

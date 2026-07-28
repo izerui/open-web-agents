@@ -4,6 +4,41 @@ import type { AgentEvent } from "@/lib/shared";
 import { useState } from "react";
 import type { Turn } from "./types";
 
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
+import {
+  RotateCcw,
+  Check,
+  X,
+  AlertTriangle,
+  HelpCircle,
+  CopyIcon,
+} from "lucide-react";
+
+import {
+  Message,
+  MessageBranch,
+  MessageBranchContent,
+  MessageContent,
+  MessageActions,
+  MessageAction,
+  MessageResponse,
+} from "@/components/ai-elements/message";
+import {
+  Tool,
+  ToolHeader,
+  ToolContent,
+  ToolInput,
+  ToolOutput,
+} from "@/components/ai-elements/tool";
+import {
+  Reasoning,
+  ReasoningTrigger,
+  ReasoningContent,
+} from "@/components/ai-elements/reasoning";
+
 /** 把 tool_use 与其 tool_result 配对,渲染成一条可折叠的工具调用。 */
 interface ToolCall {
   kind: "tool";
@@ -61,6 +96,7 @@ export function foldEvents(events: AgentEvent[]): Rendered[] {
       out.push({ kind: "event", event: e });
     }
   }
+  if (typeof window !== "undefined") { const tc = out.filter(x => x.kind === "event" && x.event.kind === "text").length; if (tc > 1) console.warn("[fold] text items:", tc, "events:", events.length); }
   return out;
 }
 
@@ -143,150 +179,227 @@ function QuestionBlock({
   };
 
   return (
-    <div className="space-y-3 rounded-lg border border-blue-500/25 bg-blue-500/[0.04] p-3">
-      <p className="text-xs opacity-55">助手在等你选择</p>
-      {e.questions.map((q, qi) => (
-        <div key={`${q.question}-${qi}`} className="space-y-2">
-          <p className="font-medium text-sm">
-            {q.question}
-            {q.multiSelect && <span className="ml-2 text-xs opacity-50">(可多选)</span>}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {q.options.map((o) => {
-              const on = (picked[qi] ?? new Set()).has(o.label);
-              return (
-                <button
-                  key={o.label}
-                  type="button"
-                  disabled={!answerable}
-                  title={o.description}
-                  onClick={() => toggle(qi, o.label, q.multiSelect === true)}
-                  className={`rounded-full border px-3 py-1 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                    on
-                      ? "border-blue-500 bg-blue-500 text-white"
-                      : "border-black/15 hover:border-black/40 dark:border-white/25 dark:hover:border-white/60"
-                  }`}
-                >
-                  {o.label}
-                </button>
-              );
-            })}
+    <Card className="border-blue-500/25 bg-blue-500/[0.04]">
+      <CardContent className="space-y-3 p-3">
+        <p className="text-xs text-muted-foreground">
+          <HelpCircle className="mr-1 inline-block h-3 w-3" />
+          助手在等你选择
+        </p>
+        {e.questions.map((q, qi) => (
+          <div key={`${q.question}-${qi}`} className="space-y-2">
+            <p className="font-medium text-sm">
+              {q.question}
+              {q.multiSelect && (
+                <span className="ml-2 text-xs text-muted-foreground">(可多选)</span>
+              )}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {q.options.map((o) => {
+                const on = (picked[qi] ?? new Set()).has(o.label);
+                return (
+                  <Button
+                    key={o.label}
+                    type="button"
+                    variant={on ? "default" : "outline"}
+                    size="sm"
+                    disabled={!answerable}
+                    title={o.description}
+                    onClick={() => toggle(qi, o.label, q.multiSelect === true)}
+                    className="rounded-full"
+                  >
+                    {o.label}
+                  </Button>
+                );
+              })}
+            </div>
+            {/* 描述是 agent 写给用户的判断依据,不该只藏在 title 里 */}
+            {q.options.some((o) => o.description) && (
+              <ul className="space-y-0.5 text-xs text-muted-foreground">
+                {q.options
+                  .filter((o) => o.description)
+                  .map((o) => (
+                    <li key={`d-${o.label}`}>
+                      {o.label} —— {o.description}
+                    </li>
+                  ))}
+              </ul>
+            )}
           </div>
-          {/* 描述是 agent 写给用户的判断依据,不该只藏在 title 里 */}
-          {q.options.some((o) => o.description) && (
-            <ul className="space-y-0.5 text-xs opacity-45">
-              {q.options
-                .filter((o) => o.description)
-                .map((o) => (
-                  <li key={`d-${o.label}`}>
-                    {o.label} —— {o.description}
-                  </li>
-                ))}
-            </ul>
-          )}
-        </div>
-      ))}
-      {answerable ? (
-        <button
-          type="button"
-          onClick={submit}
-          disabled={!complete}
-          className="rounded bg-black px-3 py-1.5 text-sm text-white disabled:opacity-35 dark:bg-white dark:text-black"
-        >
-          {complete ? "发送选择" : "请先选择"}
-        </button>
-      ) : (
-        <p className="text-xs opacity-40">这是历史提问,已由后续对话回答</p>
-      )}
-    </div>
-  );
-}
-
-function ToolBlock({ call }: { call: ToolCall }) {
-  const arg = JSON.stringify(call.input);
-  return (
-    <details className="rounded border border-black/10 bg-black/[0.02] dark:border-white/15 dark:bg-white/5">
-      <summary className="cursor-pointer px-2 py-1 font-mono text-xs">
-        {call.subagent && <span className="mr-1 opacity-50">[{call.subagent}]</span>}
-        <span className="font-medium">{call.tool}</span>
-        <span className="ml-2 opacity-50">{arg.length > 90 ? `${arg.slice(0, 90)}…` : arg}</span>
-        {call.result?.isError && <span className="ml-2 text-red-600">失败</span>}
-      </summary>
-      <div className="space-y-2 border-black/10 border-t px-2 py-2 dark:border-white/15">
-        <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-xs opacity-70">
-          {JSON.stringify(call.input, null, 2)}
-        </pre>
-        {call.result && (
-          <pre
-            className={`overflow-x-auto whitespace-pre-wrap font-mono text-xs ${
-              call.result.isError ? "text-red-600" : "opacity-70"
-            }`}
-          >
-            {call.result.text.slice(0, 2000)}
-          </pre>
+        ))}
+        {answerable ? (
+          <Button type="button" onClick={submit} disabled={!complete} size="sm">
+            {complete ? "发送选择" : "请先选择"}
+          </Button>
+        ) : (
+          <p className="text-xs text-muted-foreground">这是历史提问,已由后续对话回答</p>
         )}
-      </div>
-    </details>
+      </CardContent>
+    </Card>
   );
 }
 
-function EventBlock({ e }: { e: AgentEvent }) {
+// ─────────────────────────── 工具状态映射 ───────────────────────────
+
+/** 把我们的 ToolCall 映射到 ai-elements ToolHeader 的 state */
+function getToolState(call: ToolCall): "input-available" | "output-available" | "output-error" {
+  if (!call.result) return "input-available";
+  if (call.result.isError) return "output-error";
+  return "output-available";
+}
+
+// ─────────────────────────── 辅助:收集思考文本 ───────────────────────────
+
+/** 从渲染项中提取所有 thinking 事件的文本,合并为一段。 */
+function collectThinkingText(items: Rendered[]): string {
+  const parts: string[] = [];
+  for (const item of items) {
+    if (item.kind === "event" && item.event.kind === "thinking") {
+      const tag =
+        "subagent" in item.event && item.event.subagent
+          ? `[${item.event.subagent}] `
+          : "";
+      parts.push(`${tag}${item.event.text}`);
+    }
+  }
+  return parts.join("");
+}
+
+/** 从渲染项中提取所有助手文本内容(用于复制)。 */
+function collectAllTextContent(items: Rendered[]): string {
+  const parts: string[] = [];
+  for (const item of items) {
+    if (item.kind === "event" && item.event.kind === "text") {
+      parts.push(item.event.text);
+    }
+  }
+  return parts.join("");
+}
+
+// ─────────────────────────── 单条渲染项(不含 thinking) ───────────────────────────
+
+function renderItem(item: Rendered, turn: Turn, itemIndex: number): React.ReactNode {
+  if (item.kind === "tool") {
+    const state = getToolState(item);
+    const title = item.subagent ? `[${item.subagent}] ${item.tool}` : undefined;
+    return (
+      <Tool key={`t-${itemIndex}-${item.tool}`}>
+        <ToolHeader
+          type={`tool-${item.tool}` as any}
+          state={state}
+          title={title}
+        />
+        <ToolContent>
+          <ToolInput input={item.input} />
+          {item.result && (
+            <ToolOutput
+              output={
+                <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-xs">
+                  {item.result.text.slice(0, 2000)}
+                </pre>
+              }
+              errorText={item.result.isError ? item.result.text : undefined}
+            />
+          )}
+        </ToolContent>
+      </Tool>
+    );
+  }
+
+  const e = item.event;
   const tag = "subagent" in e && e.subagent ? `[${e.subagent}] ` : "";
+
   switch (e.kind) {
     case "text":
-      return (
-        <p className="whitespace-pre-wrap text-sm leading-relaxed">
-          {tag}
-          {e.text}
-        </p>
-      );
+      // text 已在上层合并为单个 MessageResponse 渲染,跳过单条
+      return null;
+
     case "thinking":
-      return (
-        <p className="whitespace-pre-wrap text-sm italic leading-relaxed opacity-45">
-          {tag}
-          {e.text}
-        </p>
-      );
+      // thinking 已经在上层合并渲染,跳过单条
+      return null;
+
     case "tool_result":
+      // 未配对的孤儿 tool_result(极少出现)
       return (
-        <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-xs opacity-60">
+        <pre
+          key={`e-${itemIndex}-tool_result`}
+          className="overflow-x-auto whitespace-pre-wrap font-mono text-xs text-muted-foreground"
+        >
           {e.text.slice(0, 800)}
         </pre>
       );
+
     case "status":
-      return <p className="text-xs opacity-45">● {e.label}</p>;
-    case "artifact":
-      return <p className="font-mono text-xs">📦 {e.path}</p>;
-    case "result":
-      // 三态而非二态:unknown 是【结局未知】。把它渲染成红色"失败"和渲染成绿色"完成"
-      // 一样是在骗人 —— 任务可能正跑得好好的,只是这条流看不到而已。
       return (
-        <div
-          className={`rounded px-2 py-1 text-sm ${
-            e.status === "success"
-              ? "bg-green-500/10 text-green-700 dark:text-green-400"
-              : e.status === "unknown"
-                ? "bg-amber-500/10 text-amber-700 dark:text-amber-400"
-                : "bg-red-500/10 text-red-700 dark:text-red-400"
-          }`}
-        >
-          <span className="font-medium">
-            {e.status === "success" ? "✓ 完成" : e.status === "unknown" ? "⋯ 结局未知" : "✗ 失败"}
-          </span>
-          {e.summary && <span className="ml-2 opacity-80">{e.summary}</span>}
-          {e.structured !== undefined && e.structured !== null && (
-            <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded bg-black/5 p-2 font-mono text-xs dark:bg-white/10">
-              {JSON.stringify(e.structured, null, 2)}
-            </pre>
-          )}
-        </div>
+        <p key={`e-${itemIndex}-status`} className="text-xs text-muted-foreground">
+          ● {e.label}
+        </p>
       );
+
+    case "artifact":
+      return (
+        <p key={`e-${itemIndex}-artifact`} className="font-mono text-xs">
+          📦 {e.path}
+        </p>
+      );
+
+    case "result":
+      // 成功且无结构化输出 → 不渲染任何东西。
+      // chatbot 场景下文字流完就完了,不需要显式的"完成"标记;
+      // 只有失败/未知/带结构化输出时才需要卡片。
+      if (e.status === "success" && (e.structured === undefined || e.structured === null)) {
+        return null;
+      }
+      return (
+        <Card key={`e-${itemIndex}-result`} className="overflow-hidden">
+          <CardContent className="flex items-start gap-2 p-2 text-sm">
+            <Badge
+              variant={
+                e.status === "success"
+                  ? "success"
+                  : e.status === "unknown"
+                    ? "warning"
+                    : "destructive"
+              }
+            >
+              {e.status === "success" ? (
+                <>
+                  <Check className="mr-1 inline-block h-3 w-3" /> 完成
+                </>
+              ) : e.status === "unknown" ? (
+                <>
+                  <AlertTriangle className="mr-1 inline-block h-3 w-3" /> 结局未知
+                </>
+              ) : (
+                <>
+                  <X className="mr-1 inline-block h-3 w-3" /> 失败
+                </>
+              )}
+            </Badge>
+            {e.summary && e.status !== "success" && <span className="opacity-80">{e.summary}</span>}
+          </CardContent>
+          {e.structured !== undefined && e.structured !== null && (
+            <CardContent className="p-2 pt-0">
+              <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-muted p-2 font-mono text-xs">
+                {JSON.stringify(e.structured, null, 2)}
+              </pre>
+            </CardContent>
+          )}
+        </Card>
+      );
+
+    case "question":
+      // question 由外层单独处理(需要 answerable / onAnswer)
+      // 这条路径不应被走到,但兜底返回 null
+      return null;
+
     default:
       return null;
   }
 }
 
-export function Conversation({
+// ─────────────────────────── 主组件 ───────────────────────────
+
+export function ChatThread({
   turns,
   onRerun,
   onAnswer,
@@ -297,68 +410,120 @@ export function Conversation({
   onAnswer?: (text: string) => void;
 }) {
   if (turns.length === 0) {
-    return (
-      <p className="pt-16 text-center text-sm opacity-40">
-        发一句话试试,比如「在工作目录写一个 hello.py 并运行它」
-      </p>
-    );
+    return null; // empty state handled by parent (ConversationEmptyState)
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       {turns.map((turn, i) => {
+        const items = foldEvents(turn.events);
         const usage = sumUsage(turn.events);
+        const thinkingText = collectThinkingText(items);
+        const allTextContent = collectAllTextContent(items);
+
         return (
-          <section key={`${i}-${turn.prompt.slice(0, 20)}`} className="space-y-3">
-            {turn.branchedFrom && <p className="text-xs opacity-45">⑂ 从上文某轮分叉重跑</p>}
-            <div className="group flex items-start gap-2">
-              <p className="flex-1 rounded-lg bg-black/5 px-3 py-2 text-sm dark:bg-white/10">
-                {turn.prompt}
-              </p>
-              {turn.runId && onRerun && !turn.running && (
-                <button
-                  type="button"
-                  className="shrink-0 pt-2 text-xs opacity-0 underline transition-opacity group-hover:opacity-60 hover:!opacity-100"
-                  title="用干净上下文换个说法重跑,不影响已有记录"
-                  onClick={() => {
-                    const next = window.prompt("重跑这一轮(干净上下文),换个说法:", turn.prompt);
-                    if (next?.trim() && turn.runId) onRerun(turn.runId, next.trim());
-                  }}
-                >
-                  重跑
-                </button>
-              )}
-            </div>
-            <div className="space-y-2 pl-1">
-              {foldEvents(turn.events).map((item, j) => {
-                if (item.kind === "tool") {
-                  return <ToolBlock key={`t-${j}-${item.tool}`} call={item} />;
-                }
-                if (item.event.kind === "question") {
-                  return (
-                    <QuestionBlock
-                      // 【必须用稳定 key】QuestionBlock 自己持有选中状态,
-                      // 纯下标作 key 时事件流一变动,React 会把 A 问题的选中态
-                      // 复用到 B 问题上 —— 用户看着自己没点过的选项亮着。
-                      // toolUseId 由 SDK 给,同一次提问全程不变。
-                      key={item.event.toolUseId ?? `q-${item.event.questions[0]?.question}`}
-                      e={item.event}
-                      // 只有最新一轮、且已经跑完的提问才可点(见 QuestionBlock 注释)
-                      answerable={i === turns.length - 1 && !turn.running && !!onAnswer}
-                      onAnswer={onAnswer}
-                    />
-                  );
-                }
-                return <EventBlock key={`e-${j}-${item.event.kind}`} e={item.event} />;
-              })}
-              {turn.running && <p className="text-xs opacity-40">▍运行中…</p>}
-              {(usage.input > 0 || usage.output > 0) && (
-                <p className="text-xs opacity-35">
-                  tokens ↑{usage.input} ↓{usage.output}
-                </p>
-              )}
-            </div>
-          </section>
+          <div key={`${i}-${turn.prompt.slice(0, 20)}`} className="space-y-4">
+            {/* 分叉标记 */}
+            {turn.branchedFrom && (
+              <p className="text-xs text-muted-foreground">⑂ 从上文某轮分叉重跑</p>
+            )}
+
+            {/* ── 用户消息 ── */}
+            <MessageBranch defaultBranch={0}>
+              <MessageBranchContent>
+                <Message from="user">
+                  <MessageContent>
+                    <div className="text-sm">{turn.prompt}</div>
+                  </MessageContent>
+                </Message>
+              </MessageBranchContent>
+            </MessageBranch>
+
+            {/* ── 助手消息 ── */}
+            <MessageBranch defaultBranch={0}>
+              <MessageBranchContent>
+                <Message from="assistant">
+                  <MessageContent>
+                    {/* 合并后的思考块 —— 放在助手消息最前面 */}
+                    {thinkingText && (
+                      <Reasoning isStreaming={turn.running}>
+                        <ReasoningTrigger />
+                        <ReasoningContent>{thinkingText}</ReasoningContent>
+                      </Reasoning>
+                    )}
+
+                    {/* 合并后的文本 —— 所有 text 事件拼成一个 MessageResponse */}
+                    {allTextContent && (
+                      <MessageResponse isAnimating={turn.running}>
+                        {allTextContent}
+                      </MessageResponse>
+                    )}
+
+                    {/* 其余渲染项(thinking 和 text 已在上方合并渲染,renderItem 中跳过) */}
+                    {items.map((item, j) => {
+                      // question 需要特殊处理(answerable / onAnswer)
+                      if (item.kind === "event" && item.event.kind === "question") {
+                        return (
+                          <QuestionBlock
+                            key={item.event.toolUseId ?? `q-${item.event.questions[0]?.question}`}
+                            e={item.event}
+                            answerable={i === turns.length - 1 && !turn.running && !!onAnswer}
+                            onAnswer={onAnswer}
+                          />
+                        );
+                      }
+                      return renderItem(item, turn, j);
+                    })}
+                    {turn.running && (
+                      <p className="text-xs text-muted-foreground">
+                        <span className="mr-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
+                        运行中…
+                      </p>
+                    )}
+                  </MessageContent>
+
+                  {/* 操作按钮 */}
+                  {!turn.running && (
+                    <MessageActions>
+                      {/* 复制回复内容 */}
+                      {allTextContent && (
+                        <MessageAction
+                          label="复制"
+                          tooltip="复制回复内容"
+                          onClick={() => navigator.clipboard.writeText(allTextContent)}
+                        >
+                          <CopyIcon className="size-3" />
+                        </MessageAction>
+                      )}
+                      {/* 重跑操作 */}
+                      {turn.runId && onRerun && (
+                        <MessageAction
+                          label="重跑"
+                          tooltip="用干净上下文换个说法重跑,不影响已有记录"
+                          onClick={() => {
+                            const next = window.prompt(
+                              "重跑这一轮(干净上下文),换个说法:",
+                              turn.prompt,
+                            );
+                            if (next?.trim() && turn.runId) onRerun(turn.runId, next.trim());
+                          }}
+                        >
+                          <RotateCcw className="size-3" />
+                        </MessageAction>
+                      )}
+                    </MessageActions>
+                  )}
+                </Message>
+              </MessageBranchContent>
+            </MessageBranch>
+
+            {/* ── 用量页脚 ── */}
+            {(usage.input > 0 || usage.output > 0) && (
+              <Badge variant="secondary" className="font-normal">
+                tokens ↑{usage.input} ↓{usage.output}
+              </Badge>
+            )}
+          </div>
         );
       })}
     </div>
