@@ -14,3 +14,4 @@ tsconfig.tsbuildinfo
 # 它可能含会话/审批负载,而且每次跑测试都变动,污染 diff。
 dump.rdb
 *.rdb
+.idea/

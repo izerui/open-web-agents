@@ -47,20 +47,20 @@ curl localhost:5678/api/agents/<taskId>/result -H "X-Api-Key: <key>"
 
 ## 能力一览
 
-| 能力 | 说明 |
-|---|---|
-| 助手构建器 | 提示词 / 模型 / 轮次 / Skills / MCP / 子代理 / 工具白名单 / inputSchema / outputSchema / 审批规则 / Webhook |
-| 统一运行接口 | 网页对话与系统 invoke **共用同一个运行内核** |
-| 结构化输出 | 定义了 `outputSchema` 才算「接口型助手」;结果经 JSON Schema 校验,不合格判失败 |
-| 入参契约 | 定义了 `inputSchema` 则 `invoke` 的入参必须符合它,否则 400 并指出是哪个字段 |
-| 工作空间 | 每会话一个独立目录,文件树 / 预览 / 下载 |
-| 执行隔离 | OS 内核沙箱(Bash)+ 路径守卫(文件工具),见下文限制 |
-| 人工审批(HITL) | 按工具名或命令模式挂起等人确认,超时自动拒绝 |
-| 知识库 | 助手级文档,运行时按问题检索片段注入提示词(BM25) |
-| 权限 | 登录 / 每用户凭证 / API Key / 助手分享 / 用户组 |
-| 可嵌入 widget | 一行 `<script>` 挂到企业页面;**API Key 不下发浏览器** |
-| 用量监控 | 按助手 / 按天的花费与 token,队列积压提示 |
-| 队列与扩容 | MySQL 租约队列 + Redis 事件总线 + 可独立扩容的 worker |
+| 能力         | 说明                                                                                       |
+|------------|------------------------------------------------------------------------------------------|
+| 助手构建器      | 提示词 / 模型 / 轮次 / Skills / MCP / 子代理 / 工具白名单 / inputSchema / outputSchema / 审批规则 / Webhook |
+| 统一运行接口     | 网页对话与系统 invoke **共用同一个运行内核**                                                             |
+| 结构化输出      | 定义了 `outputSchema` 才算「接口型助手」;结果经 JSON Schema 校验,不合格判失败                                   |
+| 入参契约       | 定义了 `inputSchema` 则 `invoke` 的入参必须符合它,否则 400 并指出是哪个字段                                    |
+| 工作空间       | 每会话一个独立目录,文件树 / 预览 / 下载                                                                  |
+| 执行隔离       | OS 内核沙箱(Bash)+ 路径守卫(文件工具),见下文限制                                                          |
+| 人工审批(HITL) | 按工具名或命令模式挂起等人确认,超时自动拒绝                                                                   |
+| 知识库        | 助手级文档,运行时按问题检索片段注入提示词(BM25)                                                              |
+| 权限         | 登录 / 每用户凭证 / API Key / 助手分享 / 用户组                                                        |
+| 可嵌入 widget | 一行 `<script>` 挂到企业页面;**API Key 不下发浏览器**                                                  |
+| 用量监控       | 按助手 / 按天的花费与 token,队列积压提示                                                                |
+| 队列与扩容      | MySQL 租约队列 + Redis 事件总线 + 可独立扩容的 worker                                                  |
 
 ---
 
@@ -96,7 +96,7 @@ SDK 升级只需改归一层,业务零改动;归一层由录制回放测试守�
 ```ts
 // 内存 → MySQL / Redis,只改这一处,上层无感
 const runs = new MysqlRunRepo(db);      // 曾是 InMemoryRunRepo
-const bus  = new RedisBus(env.redisUrl); // 曾是 InMemoryBus
+const bus = new RedisBus(env.redisUrl); // 曾是 InMemoryBus
 ```
 
 端口都有**契约测试**:内存实现与真实实现跑同一套断言,保证可替换性不是口号。
@@ -107,20 +107,20 @@ const bus  = new RedisBus(env.redisUrl); // 曾是 InMemoryBus
 
 全部环境变量以 `OWA_` 前缀。完整列表见 `.env.example`,以下是要点:
 
-| 变量 | 说明 |
-|---|---|
-| `OWA_DATABASE_URL` | MySQL 连接串 |
-| `OWA_REDIS_URL` | Redis 连接串 |
-| `OWA_DATA_DIR` | 会话工作空间根目录(**会被解析成绝对路径**) |
-| `OWA_ANTHROPIC_BASE_URL` / `_API_KEY` | 平台默认凭证(三级链兜底) |
-| `OWA_MODEL` 与 `OWA_MODEL_{OPUS,SONNET,HAIKU,FABLE}` | 别名槽 → 真实 modelId |
-| `OWA_SESSION_SECRET` | 登录会话签名。**生产未设置会拒绝启动** |
-| `OWA_SECRET_KEY` | 用户凭证加密主密钥。**生产未设置会拒绝启动** |
-| `OWA_AUTH_REQUIRED` | 是否要求登录,默认 1;仅本地开发可设 0 |
-| `OWA_SANDBOX` | OS 内核沙箱,默认 1;**macOS 本地开发需设 0**,见限制 |
-| `OWA_ALLOW_STDIO_MCP` | 是否允许 stdio MCP,默认 0;开启后助手可在宿主机启动程序,仅可信部署使用 |
-| `OWA_EMBEDDED_WORKER` | 设 0 关掉 web 进程内嵌的 worker(拆进程部署时用) |
-| `OWA_SHUTDOWN_GRACE_MS` | worker 收到 SIGTERM 后等在途任务的上限,默认 60000 |
+| 变量                                                  | 说明                                         |
+|-----------------------------------------------------|--------------------------------------------|
+| `OWA_DATABASE_URL`                                  | MySQL 连接串                                  |
+| `OWA_REDIS_URL`                                     | Redis 连接串                                  |
+| `OWA_DATA_DIR`                                      | 会话工作空间根目录(**会被解析成绝对路径**)                   |
+| `OWA_ANTHROPIC_BASE_URL` / `_API_KEY`               | 平台默认凭证(三级链兜底)                              |
+| `OWA_MODEL` 与 `OWA_MODEL_{OPUS,SONNET,HAIKU,FABLE}` | 别名槽 → 真实 modelId                           |
+| `OWA_SESSION_SECRET`                                | 登录会话签名。**生产未设置会拒绝启动**                      |
+| `OWA_SECRET_KEY`                                    | 用户凭证加密主密钥。**生产未设置会拒绝启动**                   |
+| `OWA_AUTH_REQUIRED`                                 | 是否要求登录,默认 1;仅本地开发可设 0                      |
+| `OWA_SANDBOX`                                       | OS 内核沙箱,默认 1;**macOS 本地开发需设 0**,见限制        |
+| `OWA_ALLOW_STDIO_MCP`                               | 是否允许 stdio MCP,默认 0;开启后助手可在宿主机启动程序,仅可信部署使用 |
+| `OWA_EMBEDDED_WORKER`                               | 设 0 关掉 web 进程内嵌的 worker(拆进程部署时用)           |
+| `OWA_SHUTDOWN_GRACE_MS`                             | worker 收到 SIGTERM 后等在途任务的上限,默认 60000       |
 
 ### 凭证三级覆盖
 
@@ -184,30 +184,30 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 鉴权分三种,严格分开:**登录 cookie**(网页)、**`X-Api-Key`**(第三方系统)、
 **`X-Embed-Token`**(浏览器 widget,权限被限死在单个会话)。
 
-| 方法 | 路径 | 鉴权 | 说明 |
-|---|---|---|---|
-| POST | `/api/auth` | — | 登录 / 注册 / 登出 |
-| GET | `/api/auth` | cookie | 当前登录态(key 只回掩码) |
-| PUT | `/api/me/credentials` | cookie | 设置自带 base_url / key |
-| GET/POST | `/api/assistants` | cookie | 列出可见助手 / 创建更新 |
-| GET/POST/DELETE | `/api/assistants/{id}/share` | cookie(write) | 分享给用户 / 组 / 公开 |
-| GET/POST/DELETE | `/api/assistants/{id}/knowledge` | cookie(读 read、写 write) | 知识文档 |
-| GET/POST | `/api/groups` · `/api/groups/{id}/members` | cookie | 用户组与成员 |
-| GET/POST/DELETE | `/api/keys` | cookie | API Key(明文仅签发时返回一次) |
-| GET/POST | `/api/sessions` | cookie / key | 会话列表与创建 |
-| POST | `/api/sessions/{id}/run` | cookie / key | 发起一轮,SSE 流式返回 |
-| GET | `/api/sessions/{id}/events` | cookie / key | joinStream 断线重连 |
-| GET | `/api/sessions/{id}/files` | cookie / key | 文件树 / 预览 / 下载 |
-| GET/POST | `/api/sessions/{id}/approvals` | cookie / key | 待审列表 / 批准拒绝 |
-| GET/POST | `/api/sessions/{id}/branch` | cookie / key | 运行列表 / 重跑 |
-| POST | `/api/sessions/{id}/cancel` | cookie / key | 取消未完成的运行(见下方延迟说明) |
-| POST | `/api/agents/{id}/invoke` | **key** | 对外触发,返回 taskId |
-| GET | `/api/agents/{id}/result` | **key** | 轮询结构化结果 |
-| POST | `/api/embed/token` | **key** | 换短时效嵌入令牌(服务端调) |
-| POST | `/api/embed/run` | **embed token** | widget 发起运行 |
-| GET | `/api/embed/script` | — | 嵌入脚本 |
-| GET | `/api/usage` | cookie | 用量与成本 |
-| GET | `/api/health` | — | 就绪 / 存活探针 |
+| 方法              | 路径                                         | 鉴权                     | 说明                  |
+|-----------------|--------------------------------------------|------------------------|---------------------|
+| POST            | `/api/auth`                                | —                      | 登录 / 注册 / 登出        |
+| GET             | `/api/auth`                                | cookie                 | 当前登录态(key 只回掩码)     |
+| PUT             | `/api/me/credentials`                      | cookie                 | 设置自带 base_url / key |
+| GET/POST        | `/api/assistants`                          | cookie                 | 列出可见助手 / 创建更新       |
+| GET/POST/DELETE | `/api/assistants/{id}/share`               | cookie(write)          | 分享给用户 / 组 / 公开      |
+| GET/POST/DELETE | `/api/assistants/{id}/knowledge`           | cookie(读 read、写 write) | 知识文档                |
+| GET/POST        | `/api/groups` · `/api/groups/{id}/members` | cookie                 | 用户组与成员              |
+| GET/POST/DELETE | `/api/keys`                                | cookie                 | API Key(明文仅签发时返回一次) |
+| GET/POST        | `/api/sessions`                            | cookie / key           | 会话列表与创建             |
+| POST            | `/api/sessions/{id}/run`                   | cookie / key           | 发起一轮,SSE 流式返回       |
+| GET             | `/api/sessions/{id}/events`                | cookie / key           | joinStream 断线重连     |
+| GET             | `/api/sessions/{id}/files`                 | cookie / key           | 文件树 / 预览 / 下载       |
+| GET/POST        | `/api/sessions/{id}/approvals`             | cookie / key           | 待审列表 / 批准拒绝         |
+| GET/POST        | `/api/sessions/{id}/branch`                | cookie / key           | 运行列表 / 重跑           |
+| POST            | `/api/sessions/{id}/cancel`                | cookie / key           | 取消未完成的运行(见下方延迟说明)   |
+| POST            | `/api/agents/{id}/invoke`                  | **key**                | 对外触发,返回 taskId      |
+| GET             | `/api/agents/{id}/result`                  | **key**                | 轮询结构化结果             |
+| POST            | `/api/embed/token`                         | **key**                | 换短时效嵌入令牌(服务端调)      |
+| POST            | `/api/embed/run`                           | **embed token**        | widget 发起运行         |
+| GET             | `/api/embed/script`                        | —                      | 嵌入脚本                |
+| GET             | `/api/usage`                               | cookie                 | 用量与成本               |
+| GET             | `/api/health`                              | —                      | 就绪 / 存活探针           |
 
 SSE 传输是裸 `data: <AgentEvent JSON>\n\n`。前端用 `fetch + getReader` 手工拆帧,
 不能用原生 `EventSource` —— 后者带不了鉴权头。
@@ -259,6 +259,7 @@ macOS 的 seatbelt 沙箱会**吞掉沙箱内 Bash 的 stdout** —— agent 跑
 这个脚本在仓库里,谁都可以复现,不是一句"我验过了"。
 
 预跑过程中它挡下了两个本会让 CI 失灵的问题:
+
 - `mysql` 命令行:GitHub 的 ubuntu 运行器默认不带,改用 mysql2(本来就是依赖)
 - `pnpm test | tee` 少了 `pipefail`:GitHub 默认 bash 只有 `-e`,
   **测试失败会被 tee 的成功退出码盖住,CI 照样绿**
@@ -307,10 +308,10 @@ pnpm ci:dryrun     # 按 ci.yml 的步骤在本机实跑一遍(需 OWA_CI_DB_URL
 `.github/workflows/ci.yml` 每次 push / PR 跑两个 job,都起真实的 MySQL 与 Redis
 服务容器:
 
-| job | 内容 |
-|---|---|
+| job     | 内容                                    |
+|---------|---------------------------------------|
 | `check` | 迁移 → typecheck → lint → 单元/契约/并发/故障注入 |
-| `e2e` | 迁移 → build → 起服务 → 攻击面断言 → 拆干净 |
+| `e2e`   | 迁移 → build → 起服务 → 攻击面断言 → 拆干净        |
 
 **为什么不用 mock 跑 CI**:队列的乐观锁认领、租约栅栏、Redis 订阅时序、跨进程审批,
 全都只在真依赖上才暴露。用 mock 换来的绿灯,恰恰是当初漏掉那些缺陷的原因。
@@ -334,13 +335,13 @@ export OWA_TEST_REDIS_URL=redis://127.0.0.1:6379
 
 ### 测试分层
 
-| 层 | 覆盖 |
-|---|---|
-| 域逻辑 | 纯函数穷举:状态机、凭证解析、归一 ACL、检索评分、授权判定、路径安全 |
-| 端口契约 | 一套断言跑两遍:内存实现与真实 MySQL / Redis |
-| 并发 | 多 worker 抢同一队列,断言每个任务恰好执行一次、且**并发真的发生了** |
-| 故障注入 | 每个可选依赖依次打挂,验证降级而非崩溃 |
-| 端到端 | 对真正跑着的服务从 HTTP 打进去:越权攻击面、归属隔离、路径穿越、取消、健康探针 |
+| 层    | 覆盖                                              |
+|------|-------------------------------------------------|
+| 域逻辑  | 纯函数穷举:状态机、凭证解析、归一 ACL、检索评分、授权判定、路径安全            |
+| 端口契约 | 一套断言跑两遍:内存实现与真实 MySQL / Redis                   |
+| 并发   | 多 worker 抢同一队列,断言每个任务恰好执行一次、且**并发真的发生了**        |
+| 故障注入 | 每个可选依赖依次打挂,验证降级而非崩溃                             |
+| 端到端  | 对真正跑着的服务从 HTTP 打进去:越权攻击面、归属隔离、路径穿越、取消、健康探针      |
 | 架构边界 | 机械检查依赖铁律:domain 零框架依赖、模块间只经公开面、SDK 只在一个文件、装配点唯一 |
 
 **为什么端到端这一层不能省。** 最严重的那几个缺陷(任意用户能跑他人私有助手、
@@ -374,6 +375,7 @@ pnpm db:migrate
 
 - `docs/superpowers/specs/2026-07-26-open-web-agents-design.md` — 需求与产品蓝图
 - `docs/superpowers/specs/2026-07-26-open-web-agents-architecture.md` — 分层、模块、端口、设计模式
+- `docs/superpowers/specs/2026-07-28-open-web-agents-current-design.md` — **按当前代码收敛后的详细设计基线**
 - `docs/architecture-deviations.md` — **代码与文稿不一致的地方,以及每一处的理由**
 
 两份 specs 是动工前写的,**原样保留、不回填修改** —— 它记录的是当时的判断,
