@@ -131,6 +131,7 @@ function toMcpServers(
   const out: Record<string, unknown> = {};
   for (const s of spec.mcpServers) {
     if (s.type === "http") {
+      if (!s.url?.trim()) throw new Error(`http MCP「${s.name}」缺少 url`);
       out[s.name] = { type: "http", url: s.url };
       continue;
     }

@@ -96,6 +96,27 @@ describe("buildSdkOptions", () => {
     expect(o.mcpServers).toEqual({ fs: { type: "http", url: "http://x" } });
   });
 
+  /**
+   * SDK 的 McpHttpServerConfig.url 是必填 string,而 McpDef.url 可选。
+   * 不在这里挡住,就会把 url: undefined 透传进 SDK —— 报错点被推迟到运行时连接阶段,
+   * 错误信息里也看不出是哪个服务器配漏了。
+   */
+  it("http MCP 缺 url 时立即报错,不把 undefined 透传给 SDK", () => {
+    expect(() =>
+      buildSdkOptions(specOf({ mcpServers: [{ name: "remote", type: "http" }] }), ctx, deps()),
+    ).toThrow(/http MCP.*remote.*url/);
+  });
+
+  it("http MCP 的 url 是空白串也算缺失", () => {
+    expect(() =>
+      buildSdkOptions(
+        specOf({ mcpServers: [{ name: "remote", type: "http", url: "   " }] }),
+        ctx,
+        deps(),
+      ),
+    ).toThrow(/http MCP.*remote.*url/);
+  });
+
   it("stdio MCP 默认拒绝,不能启动宿主任意命令", () => {
     expect(() =>
       buildSdkOptions(
