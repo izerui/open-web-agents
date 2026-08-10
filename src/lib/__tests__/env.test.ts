@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { loadEnv, parseEnv } from "@/lib/env";
 import { afterEach, describe, expect, it } from "vitest";
@@ -99,5 +101,70 @@ describe("loadEnv / 【生产硬失败】不安全默认值不得静默生效", 
       OWA_SECRET_KEY: undefined,
     } as NodeJS.ProcessEnv;
     expect(() => loadEnv()).not.toThrow();
+  });
+});
+
+// dataDir 里只要有一段是符号链接,历史回放就会整个读不到 —— 而且不报错,是空白页。
+//
+// 【为什么 path.resolve 不够】SDK 拿到 cwd 后【先解析真实路径】再编码成 projects 子目录名,
+// 而 resolve 只规范化 `..`/相对段,不解析符号链接。于是写入方按真实路径编码、
+// 读取方按符号链接路径编码,两个目录名对不上:
+//   SDK 写  -Users-x-real-workspaces-s1
+//   我们读  -Users-x-link-workspaces-s1
+// 实测(claude-agent-sdk 0.3.226)确认了这个解析行为。
+//
+// 【不是假想的部署形态】macOS 上 /tmp、/var、/etc 本身就是符号链接,运维把数据盘软链
+// 出去(/app/data -> /mnt/volume/data)更是常规操作。而本地开发几乎永远复现不了。
+describe("loadEnv / dataDir 必须解析符号链接", () => {
+  const snapshot = { ...process.env };
+  let tmp = "";
+
+  afterEach(() => {
+    process.env = { ...snapshot };
+    if (tmp) fs.rmSync(tmp, { recursive: true, force: true });
+    tmp = "";
+  });
+
+  /** 造一对 real/link,返回经由 link 的 dataDir 路径与它的真实路径。 */
+  const linkedDataDir = (createDataDir: boolean) => {
+    // mkdtemp 的父目录本身可能是符号链接(macOS /var),先解析掉,免得干扰断言。
+    tmp = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "owa-env-"));
+    const real = path.join(tmp, "real");
+    fs.mkdirSync(real, { recursive: true });
+    if (createDataDir) fs.mkdirSync(path.join(real, "data"));
+    fs.symlinkSync(real, path.join(tmp, "link"));
+    return {
+      viaLink: path.join(tmp, "link", "data"),
+      expected: path.join(real, "data"),
+    };
+  };
+
+  const withDataDir = (dir: string) => {
+    process.env = {
+      ...snapshot,
+      OWA_DATABASE_URL: "mysql://u:p@h:3306/d",
+      OWA_REDIS_URL: "redis://h:6379",
+      OWA_DATA_DIR: dir,
+    } as NodeJS.ProcessEnv;
+  };
+
+  it("dataDir 经由符号链接时解析为真实路径", () => {
+    const { viaLink, expected } = linkedDataDir(true);
+    withDataDir(viaLink);
+    expect(loadEnv().dataDir).toBe(expected);
+  });
+
+  // 首次启动时 data 目录还不存在,但符号链接在【祖先】上 —— 一样要解析,
+  // 否则第一次跑完的历史就已经读不到了。
+  it("dataDir 尚不存在时仍解析祖先上的符号链接", () => {
+    const { viaLink, expected } = linkedDataDir(false);
+    withDataDir(viaLink);
+    expect(loadEnv().dataDir).toBe(expected);
+  });
+
+  it("路径中没有符号链接时行为不变", () => {
+    const { expected } = linkedDataDir(true);
+    withDataDir(expected);
+    expect(loadEnv().dataDir).toBe(expected);
   });
 });

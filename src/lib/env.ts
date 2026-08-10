@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 
@@ -94,8 +95,36 @@ export function parseEnv(raw: Record<string, string | undefined>): Env {
   };
 }
 
+/**
+ * 解析掉路径里的符号链接。
+ *
+ * 【为什么 path.resolve 不够】SDK 拿到 cwd 后【先解析真实路径】,再把它编码成
+ * transcript 的 projects 子目录名;而 resolve 只处理 `..` 与相对段,不碰符号链接。
+ * dataDir 里只要有一段是软链,写入方按真实路径编码、读取方按软链路径编码,
+ * 两个目录名就对不上 —— 历史回放整个读不到,且表现是空白页不是报错。
+ *
+ * 【目录可能还不存在】首次启动时 data/ 尚未创建,realpath 会 ENOENT。但符号链接
+ * 只可能在【已存在的祖先】上,所以逐级回退到最长的已存在前缀去解析,再把剩余段拼回来。
+ * 一路退到根都不存在(理论上不会发生)就原样返回,不让路径解析拖垮启动。
+ */
+function realpathBestEffort(dir: string): string {
+  let head = dir;
+  const tail: string[] = [];
+  for (;;) {
+    try {
+      return path.join(fs.realpathSync(head), ...tail);
+    } catch {
+      const parent = path.dirname(head);
+      if (parent === head) return dir;
+      tail.unshift(path.basename(head));
+      head = parent;
+    }
+  }
+}
+
 export function loadEnv(): Env {
   const env = parseEnv(process.env);
+  env.dataDir = realpathBestEffort(env.dataDir);
   /**
    * 生产环境缺密钥【直接拒绝启动】,不再只是告警。
    *
