@@ -1,4 +1,4 @@
-import { isTextMime, mimeOf } from "@/lib/modules/artifacts/domain/mime";
+import { canRenderInline, isTextMime, mimeOf } from "@/lib/modules/artifacts/domain/mime";
 import { describe, expect, it } from "vitest";
 
 describe("mimeOf", () => {
@@ -31,5 +31,34 @@ describe("isTextMime", () => {
   it("二进制不做文本预览", () => {
     expect(isTextMime("image/png")).toBe(false);
     expect(isTextMime("application/octet-stream")).toBe(false);
+  });
+});
+
+describe("canRenderInline —— 内联渲染的安全边界", () => {
+  it("图片放行", () => {
+    for (const m of ["image/png", "image/jpeg", "image/gif", "image/webp"]) {
+      expect(canRenderInline(m)).toBe(true);
+    }
+  });
+
+  it("HTML 绝不放行 —— 同源内联渲染 agent 产物等于 XSS", () => {
+    expect(canRenderInline("text/html")).toBe(false);
+  });
+
+  it("其余文本与二进制一律不放行", () => {
+    for (const m of [
+      "text/plain",
+      "application/json",
+      "application/pdf",
+      "application/zip",
+      "application/octet-stream",
+      "video/mp4",
+    ]) {
+      expect(canRenderInline(m)).toBe(false);
+    }
+  });
+
+  it("SVG 放行,但依赖响应头兜底(CSP sandbox + nosniff)", () => {
+    expect(canRenderInline("image/svg+xml")).toBe(true);
   });
 });

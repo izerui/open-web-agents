@@ -51,3 +51,19 @@ export function mimeOf(filePath: string): string {
 export function isTextMime(mime: string): boolean {
   return mime.startsWith("text/") || mime === "application/json";
 }
+
+/**
+ * 能否让浏览器【内联】渲染这个文件(Content-Disposition: inline)。
+ *
+ * 【为什么只放行图片】内联意味着浏览器会在【本站源】下解析这份内容。
+ * 对 text/html 放行等于把 agent 写出来的任意 HTML 挂到自己域名下执行 ——
+ * 那是一个可以读 cookie、发同源请求的 XSS,而 agent 的产物完全可能来自
+ * 被注入的提示词。HTML 预览走 iframe 的 srcdoc + sandbox,不经过这条路径。
+ *
+ * SVG 也是图片,但它能带脚本;放行它的前提是响应同时带上
+ * `Content-Security-Policy: sandbox` 与 `X-Content-Type-Options: nosniff`
+ * (见 files 路由),让它即使被直接访问也跑不了脚本。
+ */
+export function canRenderInline(mime: string): boolean {
+  return mime.startsWith("image/");
+}

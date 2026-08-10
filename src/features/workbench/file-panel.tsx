@@ -19,6 +19,8 @@ import { Spinner } from "@/components/ui/spinner";
 import {
   Copy,
   Download,
+  Eye,
+  FileCode,
   FileText,
   FileWarning,
   Folder,
@@ -110,6 +112,8 @@ export function FilePanel({
   const [selected, setSelected] = useState<string | undefined>();
   const [preview, setPreview] = useState<FilePreview | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** HTML 产物默认渲染出来看效果,可切回源码。非 HTML 文件用不到这个开关。 */
+  const [showRendered, setShowRendered] = useState(true);
 
   // 刷新时要遍历"当前已拉过的目录",但那个 effect 不该因为 dirs 变化就重跑
   const dirsRef = useRef(dirs);
@@ -189,6 +193,7 @@ export function FilePanel({
     async (path: string) => {
       if (!sessionId) return;
       setSelected(path);
+      setShowRendered(true);
       try {
         const res = await fetch(
           `/api/sessions/${sessionId}/files?file=${encodeURIComponent(path)}`,
@@ -256,6 +261,8 @@ export function FilePanel({
   }
 
   const rootNodes = dirs.get(ROOT);
+  // 只有 HTML 才提供"渲染 / 源码"切换 —— 其余文件没有可渲染的形态
+  const isHtml = preview?.mime === "text/html";
 
   return (
     <div className="flex h-full flex-col text-sm">
@@ -328,6 +335,18 @@ export function FilePanel({
             <FileText className="size-4 shrink-0 text-muted-foreground" />
             <span className="truncate font-mono text-xs">{preview.path}</span>
             <div className="ml-auto flex items-center gap-1">
+              {isHtml && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1.5 text-xs"
+                  title={showRendered ? "查看源码" : "在沙箱中渲染"}
+                  onClick={() => setShowRendered((v) => !v)}
+                >
+                  {showRendered ? <FileCode className="size-3.5" /> : <Eye className="size-3.5" />}
+                  {showRendered ? "源码" : "预览"}
+                </Button>
+              )}
               {/* 复制按钮放头部而不是浮在代码上 —— 侧栏太窄,浮动按钮会直接压住第一行 */}
               {preview.text !== null && (
                 <Button
@@ -353,7 +372,33 @@ export function FilePanel({
           </div>
           <Separator />
           <div className="min-h-0 flex-1 overflow-auto px-3 pb-3 pt-2">
-            {preview.text === null ? (
+            {preview.mime.startsWith("image/") ? (
+              /* 图片走内联端点(服务端只对 image/* 放行,并带 nosniff + CSP sandbox) */
+              // biome-ignore lint/performance/noImgElement: 会话产物是运行时文件,没有构建期尺寸信息
+              <img
+                src={`/api/sessions/${sessionId}/files?download=${encodeURIComponent(preview.path)}&inline=1`}
+                alt={preview.path}
+                className="mx-auto max-w-full rounded-md border border-border"
+              />
+            ) : showRendered && preview.text !== null ? (
+              /**
+               * HTML 产物在隔离沙箱里渲染。
+               *
+               * 【为什么用 srcdoc 而不是指向文件的 URL】URL 会让这份 HTML 从本站源加载,
+               * 那就是同源执行 —— 能读 cookie、能打同源接口。srcdoc 配合 sandbox
+               * 让它落在一个不透明源里,跟本站没有任何关系。
+               *
+               * 【为什么 sandbox 里绝不能加 allow-same-origin】allow-scripts 与
+               * allow-same-origin 同时给,等于没有沙箱:里面的脚本可以拿到父文档、
+               * 甚至把 iframe 的 sandbox 属性摘掉。要么不给脚本,要么不给同源。
+               */
+              <iframe
+                title={`预览 ${preview.path}`}
+                srcDoc={preview.text}
+                sandbox="allow-scripts"
+                className="h-[60vh] w-full rounded-md border border-border bg-white"
+              />
+            ) : preview.text === null ? (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <FileWarning className="size-4 shrink-0" />
                 <span>
