@@ -51,4 +51,20 @@ export interface RunRepo {
   /** 把租约过期的 running 打回可认领,返回回收数量。 */
   reclaimOrphans(now: number): Promise<number>;
   get(id: string): Promise<Run | null>;
+  /**
+   * 按会话聚合运行情况,供会话列表展示。
+   *
+   * 【为什么必须是批量】会话列表一次几十上百条,逐个会话查一次就是 N+1 ——
+   * 列表页会随会话数线性变慢,这类查询正是拖垮列表接口的典型原因。
+   *
+   * 未出现在结果里的 sessionId = 该会话一轮都没跑过,调用方按 0 处理。
+   */
+  statsBySessions(sessionIds: string[]): Promise<Map<string, RunStats>>;
+}
+
+export interface RunStats {
+  /** 该会话跑过的轮次总数(含失败与取消)。 */
+  runs: number;
+  /** 最后一次发起运行的时间戳(ms)。比会话创建时间更能反映"最近在用哪个"。 */
+  lastRunAt: number;
 }

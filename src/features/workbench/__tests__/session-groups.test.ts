@@ -1,4 +1,9 @@
-import { bucketOf, groupSessions, relativeTime } from "@/features/workbench/session-groups";
+import {
+  activityOf,
+  bucketOf,
+  groupSessions,
+  relativeTime,
+} from "@/features/workbench/session-groups";
 import type { SessionSummary } from "@/features/workbench/types";
 import { describe, expect, it } from "vitest";
 
@@ -91,5 +96,35 @@ describe("groupSessions", () => {
     ];
     const total = groupSessions(input, NOW).reduce((n, g) => n + g.sessions.length, 0);
     expect(total).toBe(input.length);
+  });
+});
+
+describe("activityOf 与按活动时间分档", () => {
+  it("有 lastActiveAt 时优先用它", () => {
+    const s = { ...session("s1", NOW - 20 * DAY), lastActiveAt: NOW - 5 * MINUTE };
+    expect(activityOf(s)).toBe(NOW - 5 * MINUTE);
+    expect(bucketOf(activityOf(s), NOW)).toBe("今天");
+  });
+
+  it("没有 lastActiveAt 时回退到创建时间", () => {
+    const s = session("s1", NOW - 3 * DAY);
+    expect(activityOf(s)).toBe(NOW - 3 * DAY);
+  });
+
+  it("上周建、今天还在用的会话应归今天,而不是被埋进更早", () => {
+    const stale = session("stale", NOW - 20 * DAY);
+    const revived = { ...session("revived", NOW - 20 * DAY), lastActiveAt: NOW - 10 * MINUTE };
+
+    const groups = groupSessions([stale, revived], NOW);
+    expect(groups.map((g) => g.bucket)).toEqual(["今天", "更早"]);
+    expect(groups[0]?.sessions.map((s) => s.id)).toEqual(["revived"]);
+  });
+
+  it("组内按活动时间倒序,不是创建时间", () => {
+    const a = { ...session("a", NOW - 1 * HOUR), lastActiveAt: NOW - 30 * MINUTE };
+    const b = { ...session("b", NOW - 5 * HOUR), lastActiveAt: NOW - 2 * MINUTE };
+
+    const groups = groupSessions([a, b], NOW);
+    expect(groups[0]?.sessions.map((s) => s.id)).toEqual(["b", "a"]);
   });
 });

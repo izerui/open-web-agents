@@ -1,5 +1,9 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { FileText, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 interface Doc {
@@ -7,9 +11,6 @@ interface Doc {
   title: string;
   createdAt: number;
 }
-
-const field =
-  "w-full rounded border border-black/15 bg-transparent px-2 py-1 text-xs outline-none focus:border-black/40 dark:border-white/20";
 
 /**
  * 助手知识库面板。
@@ -78,7 +79,7 @@ export function KnowledgePanel({
   if (denied) return null;
 
   return (
-    <div className="space-y-2 rounded border border-black/10 p-3 dark:border-white/15">
+    <div className="space-y-2 rounded-md border border-border p-3">
       <div>
         <span className="font-medium text-xs">知识库</span>
         <p className="text-xs opacity-55">
@@ -94,44 +95,51 @@ export function KnowledgePanel({
 
       {canWrite && (
         <>
-          <input
-            className={field}
+          <Input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="文档标题,如「报销制度」"
           />
-          <textarea
-            className={`${field} h-28 resize-y font-mono`}
+          <Textarea
+            className="h-28 resize-y font-mono text-xs"
             value={content}
             onChange={(e) => setContent(e.target.value)}
             placeholder="粘贴文档正文…"
           />
           <div className="flex items-center gap-3">
-            <button
+            <Button
               type="button"
-              className="rounded bg-black px-3 py-1 text-white text-xs disabled:opacity-40 dark:bg-white dark:text-black"
+              size="sm"
               onClick={add}
               disabled={!title.trim() || !content.trim() || busy}
             >
+              <Plus className="size-3.5" />
               {busy ? "添加中…" : "添加文档"}
-            </button>
-            {msg && <span className="text-red-600 text-xs">{msg}</span>}
+            </Button>
+            {msg && <span className="text-xs text-destructive">{msg}</span>}
           </div>
         </>
       )}
 
       {docs.length === 0 && <p className="text-xs opacity-40">还没有知识文档</p>}
       {docs.map((d) => (
-        <div key={d.id} className="flex items-center gap-2 text-xs">
-          <span className="flex-1 truncate">📄 {d.title}</span>
+        <div
+          key={d.id}
+          className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-xs"
+        >
+          <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="flex-1 truncate">{d.title}</span>
           {canWrite && (
-            <button
+            <Button
               type="button"
-              className="text-red-600 underline opacity-70 hover:opacity-100"
+              variant="ghost"
+              size="icon-sm"
+              title="删除"
+              className="text-muted-foreground hover:text-destructive"
               onClick={() => remove(d.id)}
             >
-              删除
-            </button>
+              <Trash2 />
+            </Button>
           )}
         </div>
       ))}

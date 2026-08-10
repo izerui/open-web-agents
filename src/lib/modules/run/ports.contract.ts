@@ -182,5 +182,73 @@ export function runRepoContract(name: string, harness: ContractHarness): void {
         expect(await repo.claimNext(1000, 99999)).toBeNull();
       });
     });
+
+    describe("会话维度聚合", () => {
+      it("按会话分别计数,不串味", async () => {
+        const repo = await harness.makeRepo();
+        await repo.create({ id: "a1", sessionId: "s1" });
+        await repo.create({ id: "a2", sessionId: "s1" });
+        await repo.create({ id: "b1", sessionId: "s2" });
+
+        const stats = await repo.statsBySessions(["s1", "s2"]);
+        expect(stats.get("s1")?.runs).toBe(2);
+        expect(stats.get("s2")?.runs).toBe(1);
+      });
+
+      it("一轮都没跑过的会话不出现在结果里(调用方按 0 处理)", async () => {
+        const repo = await harness.makeRepo();
+        await repo.create({ id: "a1", sessionId: "s1" });
+
+        const stats = await repo.statsBySessions(["s1", "empty"]);
+        expect(stats.has("empty")).toBe(false);
+      });
+
+      it("只统计问到的会话", async () => {
+        const repo = await harness.makeRepo();
+        await repo.create({ id: "a1", sessionId: "s1" });
+        await repo.create({ id: "b1", sessionId: "s2" });
+
+        const stats = await repo.statsBySessions(["s1"]);
+        expect([...stats.keys()]).toEqual(["s1"]);
+      });
+
+      it("空数组返回空结果,不打库", async () => {
+        const repo = await harness.makeRepo();
+        await repo.create({ id: "a1", sessionId: "s1" });
+        expect((await repo.statsBySessions([])).size).toBe(0);
+      });
+
+      it("重复 sessionId 不会把计数翻倍", async () => {
+        const repo = await harness.makeRepo();
+        await repo.create({ id: "a1", sessionId: "s1" });
+        await repo.create({ id: "a2", sessionId: "s1" });
+
+        const stats = await repo.statsBySessions(["s1", "s1", "s1"]);
+        expect(stats.get("s1")?.runs).toBe(2);
+      });
+
+      it("终态运行照样计入 —— 会话跑过多少轮与结局无关", async () => {
+        const repo = await harness.makeRepo();
+        await repo.create({ id: "a1", sessionId: "s1" });
+        const c = await repo.claimNext(30_000, 1000);
+        await repo.complete("a1", "failed", c?.fence);
+        await repo.create({ id: "a2", sessionId: "s1" });
+        await repo.cancel("a2");
+
+        expect((await repo.statsBySessions(["s1"])).get("s1")?.runs).toBe(2);
+      });
+
+      it("lastRunAt 落在合理的时间区间内", async () => {
+        const repo = await harness.makeRepo();
+        const before = Date.now();
+        await repo.create({ id: "a1", sessionId: "s1" });
+        const after = Date.now();
+
+        const at = (await repo.statsBySessions(["s1"])).get("s1")?.lastRunAt ?? 0;
+        // MySQL 的 timestamp 只到秒,向下取整后可能略早于 before,故留 1 秒余量
+        expect(at).toBeGreaterThanOrEqual(before - 1000);
+        expect(at).toBeLessThanOrEqual(after + 1000);
+      });
+    });
   });
 }

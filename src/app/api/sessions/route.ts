@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 
 /** 列出调用方有权访问的会话。 */
 export async function GET(req: Request) {
-  const { sessions, auth } = getContainer();
+  const { sessions, auth, runs } = getContainer();
   try {
     const principal = await auth.resolveWeb(req);
 
@@ -36,7 +36,30 @@ export async function GET(req: Request) {
           callerApiKeyId: s.callerApiKeyId,
         }).allowed,
     );
-    return NextResponse.json({ sessions: visible });
+    /**
+     * 附上运行统计。
+     *
+     * 【为什么在过滤之后才聚合】只对用户看得见的会话查,既少查一批,
+     * 也不会因为聚合把无权访问的会话 id 带进查询条件。
+     *
+     * 【为什么聚合失败不整体报错】这只是列表上的两个附加数字,
+     * 拿不到就不显示;让它把整个会话列表一起拖垮是不划算的。
+     */
+    const stats = await runs
+      .statsBySessions(visible.map((s) => s.id))
+      .catch(() => new Map<string, { runs: number; lastRunAt: number }>());
+
+    return NextResponse.json({
+      sessions: visible.map((s) => {
+        const st = stats.get(s.id);
+        return {
+          ...s,
+          runCount: st?.runs ?? 0,
+          // 没跑过就退回创建时间 —— 列表要按"最近动过"排序,不能有空洞
+          lastActiveAt: st?.lastRunAt ?? s.createdAt,
+        };
+      }),
+    });
   } catch (err) {
     const res = authErrorResponse(err);
     if (res) return res;

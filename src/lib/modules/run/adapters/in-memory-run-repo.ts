@@ -1,14 +1,20 @@
-import type { NewRun, Run, RunRepo } from "@/lib/modules/run/ports";
+import type { NewRun, Run, RunRepo, RunStats } from "@/lib/modules/run/ports";
 import type { RunState } from "@/lib/shared";
 
 /** 内存队列 fake。application 层测试用,不碰真 IO。 */
 export class InMemoryRunRepo implements RunRepo {
   private runs = new Map<string, Run>();
+  /**
+   * 创建时刻。Run 领域对象本身不带时间戳(队列只关心租约),
+   * 但会话列表要按"最近活动"排序,所以 fake 也得记一份,与 MySQL 的 created_at 对齐。
+   */
+  private createdAt = new Map<string, number>();
   private fenceSeq = 0;
 
   async create(r: NewRun): Promise<Run> {
     const run: Run = { id: r.id, sessionId: r.sessionId, state: "pending", leaseUntil: null };
     this.runs.set(r.id, run);
+    this.createdAt.set(r.id, Date.now());
     return run;
   }
 
@@ -71,5 +77,24 @@ export class InMemoryRunRepo implements RunRepo {
   async get(id: string): Promise<Run | null> {
     const run = this.runs.get(id);
     return run ? { ...run } : null;
+  }
+
+  async statsBySessions(sessionIds: string[]): Promise<Map<string, RunStats>> {
+    const want = new Set(sessionIds);
+    const out = new Map<string, RunStats>();
+    if (want.size === 0) return out;
+
+    for (const run of this.runs.values()) {
+      if (!want.has(run.sessionId)) continue;
+      const at = this.createdAt.get(run.id) ?? 0;
+      const cur = out.get(run.sessionId);
+      if (cur) {
+        cur.runs += 1;
+        if (at > cur.lastRunAt) cur.lastRunAt = at;
+      } else {
+        out.set(run.sessionId, { runs: 1, lastRunAt: at });
+      }
+    }
+    return out;
   }
 }

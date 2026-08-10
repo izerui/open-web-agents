@@ -5,22 +5,21 @@ import { readEventStream } from "@/features/chat/event-stream";
 import type { AgentEvent } from "@/lib/shared";
 import { cn } from "@/lib/utils";
 import {
-  BarChart3,
+  AlertTriangle,
   Check,
   ChevronsUpDown,
   MessageSquare,
   Plus,
+  RefreshCw,
   Search,
-  Settings,
-  Users,
-  Wrench,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { ApprovalBar } from "./approval-bar";
 import { CommandPalette } from "./command-palette";
 import { ChatThread } from "./conversation";
 import { FilePanel } from "./file-panel";
-import { groupSessions, relativeTime } from "./session-groups";
+import { activityOf, groupSessions, relativeTime } from "./session-groups";
 import type { AssistantSummary, SessionSummary, Turn } from "./types";
 
 import {
@@ -118,19 +117,53 @@ export function Workbench() {
   const [running, setRunning] = useState(false);
   const [filesKey, setFilesKey] = useState(0);
   const [pickerOpen, setPickerOpen] = useState(false);
+  /**
+   * 会话列表【加载失败】。
+   *
+   * 【为什么必须和"空列表"分开】两者在界面上长得一模一样,但含义相反:
+   * 一个是"你还没建过会话",一个是"你的会话还在,只是这次没读到"。
+   * 光靠 toast 不够 —— 它几秒就消失,用户回头看到的还是"还没有会话"。
+   */
+  const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   /** 打开会话的序号:用来丢弃"切走之后才回来"的过期响应。 */
   const openSeqRef = useRef(0);
 
+  /**
+   * 拉助手与会话列表。
+   *
+   * 【为什么不能直接 r.json()】接口 500 时响应体是空的,json() 会抛 SyntaxError,
+   * 而这两条链原本既不看 res.ok 也没有 catch —— 于是变成 unhandledRejection,
+   * 助手和会话【双双设不进去】,界面静默变成"一条历史都没有"的空白。
+   * 用户看到的是"数据没了",实际只是一个接口挂了,而且屏幕上没有任何线索。
+   */
+  const loadSessions = useCallback(async () => {
+    setSessionsError(null);
+    try {
+      const res = await fetch("/api/sessions");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = (await res.json()) as { sessions?: SessionSummary[] };
+      setSessions(d.sessions ?? []);
+    } catch (e) {
+      setSessionsError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
   useEffect(() => {
     void fetch("/api/assistants")
-      .then((r) => r.json())
-      .then((d: { assistants?: AssistantSummary[] }) => setAssistants(d.assistants ?? []));
-    void fetch("/api/sessions")
-      .then((r) => r.json())
-      .then((d: { sessions?: SessionSummary[] }) => setSessions(d.sessions ?? []));
-  }, []);
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return (await r.json()) as { assistants?: AssistantSummary[] };
+      })
+      .then((d) => setAssistants(d.assistants ?? []))
+      .catch((e: unknown) => {
+        // 助手拉不到不该连累会话列表 —— 原来两条链共用一个 effect 且都没 catch,
+        // 任一失败都变成 unhandledRejection,两边一起空掉
+        toast.error(`助手列表加载失败:${e instanceof Error ? e.message : String(e)}`);
+      });
+    void loadSessions();
+  }, [loadSessions]);
 
   const newSession = useCallback(() => {
     setSessionId(null);
@@ -427,7 +460,22 @@ export function Workbench() {
       >
         {/* 以下作为 AppSidebar 的 children,挂在统一导航下面 */}
         <>
-          {sessions.length === 0 && (
+          {/* 【加载失败】与【一条都没有】必须分开:界面长得一样,含义完全相反 */}
+          {sessionsError !== null && (
+            <div className="flex flex-col items-center gap-2 px-3 py-8 text-center group-data-[collapsible=icon]:hidden">
+              <AlertTriangle className="size-5 text-destructive" />
+              <p className="text-xs text-destructive">会话列表没读到</p>
+              <p className="text-[11px] text-muted-foreground">
+                历史还在,是这次请求失败了({sessionsError})
+              </p>
+              <Button variant="outline" size="sm" onClick={() => void loadSessions()}>
+                <RefreshCw className="size-3.5" />
+                重试
+              </Button>
+            </div>
+          )}
+
+          {sessionsError === null && sessions.length === 0 && (
             <div className="flex flex-col items-center gap-1.5 px-3 py-10 text-center group-data-[collapsible=icon]:hidden">
               <MessageSquare className="size-5 text-muted-foreground/30" />
               <p className="text-xs text-muted-foreground">还没有会话</p>
@@ -443,9 +491,15 @@ export function Workbench() {
                 {group.map((s) => {
                   const active = s.id === sessionId;
                   const label = s.title || s.id.slice(0, 12);
-                  // 【为什么时间旁边还要挂 id】批量 invoke 建出来的会话标题会完全一样
-                  // (清一色 "invoke"),连创建时间都落在同一天 —— 只有 id 能区分是哪一条
-                  const when = `${relativeTime(s.createdAt)} · ${s.id.slice(0, 6)}`;
+                  // 【为什么还要挂 id】批量 invoke 建出来的会话标题会完全一样(清一色 "invoke"),
+                  // 时间也挤在同一天 —— 只有 id 能区分是哪一条
+                  const when = [
+                    relativeTime(activityOf(s)),
+                    s.runCount ? `${s.runCount} 轮` : null,
+                    s.id.slice(0, 6),
+                  ]
+                    .filter(Boolean)
+                    .join(" · ");
                   return (
                     <SidebarMenuItem key={s.id}>
                       <SidebarMenuButton

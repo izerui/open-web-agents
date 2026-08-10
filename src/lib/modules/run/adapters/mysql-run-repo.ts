@@ -6,9 +6,9 @@
 import { randomUUID } from "node:crypto";
 import type { Db } from "@/lib/db/client";
 import { runs } from "@/lib/db/schema";
-import type { NewRun, Run, RunRepo } from "@/lib/modules/run/ports";
+import type { NewRun, Run, RunRepo, RunStats } from "@/lib/modules/run/ports";
 import type { RunState } from "@/lib/shared";
-import { and, eq, inArray, lt, or, sql } from "drizzle-orm";
+import { and, count, eq, inArray, lt, max, or, sql } from "drizzle-orm";
 
 interface RunRow {
   id: string;
@@ -343,6 +343,30 @@ export class MysqlRunRepo implements RunRepo {
       lastActiveAt: Number(r.lastActiveAt),
       finished: Number(r.openRuns ?? 0) === 0,
     }));
+  }
+
+  async statsBySessions(sessionIds: string[]): Promise<Map<string, RunStats>> {
+    const out = new Map<string, RunStats>();
+    // inArray 传空数组会生成 `in ()` —— MySQL 语法错误,直接短路
+    if (sessionIds.length === 0) return out;
+
+    // 一条 GROUP BY 顶掉 N 次查询;runs 表上有 idx_runs_session,按会话分组走索引
+    const rows = await this.db
+      .select({
+        sessionId: runs.sessionId,
+        total: count(),
+        lastRunAt: max(runs.createdAt),
+      })
+      .from(runs)
+      .where(inArray(runs.sessionId, [...new Set(sessionIds)]))
+      .groupBy(runs.sessionId);
+
+    for (const r of rows) {
+      // created_at 是 timestamp 列,driver 给回 Date;历史行可能为 NULL,兜成 0
+      const at = r.lastRunAt instanceof Date ? r.lastRunAt.getTime() : Number(r.lastRunAt ?? 0);
+      out.set(r.sessionId, { runs: Number(r.total), lastRunAt: Number.isFinite(at) ? at : 0 });
+    }
+    return out;
   }
 
   /**

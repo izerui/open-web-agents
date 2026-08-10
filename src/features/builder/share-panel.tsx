@@ -1,6 +1,11 @@
 "use client";
 
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { NativeSelect as Select } from "@/components/ui/native-select";
 import { PUBLIC_PRINCIPAL } from "@/lib/modules/access/domain/grants";
+import { Globe, Trash2, Users } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 interface Grant {
@@ -84,62 +89,53 @@ export function SharePanel({ assistantId }: { assistantId: string }) {
   const userGrants = grants.filter((g) => g.principalType === "user");
   const groupGrants = grants.filter((g) => g.principalType === "group");
   const groupName = (id: string) => groupOptions.find((g) => g.id === id)?.name ?? id;
-  const field =
-    "rounded border border-black/15 bg-transparent px-2 py-1 text-xs outline-none focus:border-black/40 dark:border-white/20";
-
   return (
-    <div className="space-y-2 rounded border border-black/10 p-3 dark:border-white/15">
+    <div className="space-y-2 rounded-md border border-border p-3">
       <div className="flex items-center justify-between">
         <span className="font-medium text-xs">分享</span>
         {publicGrant ? (
-          <button
-            type="button"
-            className="text-xs underline opacity-70 hover:opacity-100"
-            onClick={() => revoke(publicGrant.id)}
-          >
+          <Button type="button" variant="outline" size="sm" onClick={() => revoke(publicGrant.id)}>
+            <Globe className="size-3.5" />
             取消公开(当前:所有登录用户可{publicGrant.permission === "write" ? "改" : "用"})
-          </button>
+          </Button>
         ) : (
-          <button
-            type="button"
-            className="text-xs underline opacity-60 hover:opacity-100"
-            onClick={() => share("public")}
-          >
+          <Button type="button" variant="ghost" size="sm" onClick={() => share("public")}>
+            <Globe className="size-3.5" />
             公开给所有登录用户
-          </button>
+          </Button>
         )}
       </div>
 
       <div className="flex gap-2">
-        <input
-          className={`${field} flex-1`}
+        <Input
+          className="h-8 flex-1 text-xs"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && email.trim() && share(email.trim())}
           placeholder="同事的邮箱"
         />
-        <select
-          className={field}
+        <Select
+          className="h-8 w-auto text-xs"
           value={permission}
           onChange={(e) => setPermission(e.target.value as "read" | "write")}
         >
           <option value="read">可使用</option>
           <option value="write">可修改</option>
-        </select>
-        <button
+        </Select>
+        <Button
           type="button"
-          className="rounded bg-black px-3 py-1 text-white text-xs disabled:opacity-40 dark:bg-white dark:text-black"
+          size="sm"
           onClick={() => share(email.trim())}
           disabled={!email.trim()}
         >
           分享
-        </button>
+        </Button>
       </div>
 
       {groupOptions.length > 0 && (
         <div className="flex gap-2">
-          <select
-            className={`${field} flex-1`}
+          <Select
+            className="h-8 flex-1 text-xs"
             value={groupId}
             onChange={(e) => setGroupId(e.target.value)}
           >
@@ -149,47 +145,64 @@ export function SharePanel({ assistantId }: { assistantId: string }) {
                 {g.name}
               </option>
             ))}
-          </select>
-          <button
+          </Select>
+          <Button
             type="button"
-            className="rounded bg-black px-3 py-1 text-white text-xs disabled:opacity-40 dark:bg-white dark:text-black"
+            size="sm"
             onClick={() => groupId && share(`group:${groupId}`)}
             disabled={!groupId}
           >
             分享给全组
-          </button>
+          </Button>
         </div>
       )}
 
-      {msg && <p className="text-red-600 text-xs">{msg}</p>}
+      {msg && <p className="text-xs text-destructive">{msg}</p>}
 
       {userGrants.length === 0 && groupGrants.length === 0 && !publicGrant && (
-        <p className="text-xs opacity-40">尚未分享给任何人</p>
+        <p className="text-xs text-muted-foreground">尚未分享给任何人</p>
       )}
       {groupGrants.map((g) => (
-        <div key={g.id} className="flex items-center gap-2 text-xs">
-          <span className="flex-1 truncate">👥 {groupName(g.principalId)}</span>
-          <span className="opacity-55">{g.permission === "write" ? "可修改" : "可使用"}</span>
-          <button
+        <div
+          key={g.id}
+          className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-xs"
+        >
+          <Users className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="flex-1 truncate">{groupName(g.principalId)}</span>
+          <Badge variant="secondary" className="shrink-0 text-[10px]">
+            {g.permission === "write" ? "可修改" : "可使用"}
+          </Badge>
+          <Button
             type="button"
-            className="text-red-600 underline opacity-70 hover:opacity-100"
+            variant="ghost"
+            size="icon-sm"
+            title="撤销"
+            className="text-muted-foreground hover:text-destructive"
             onClick={() => revoke(g.id)}
           >
-            撤销
-          </button>
+            <Trash2 />
+          </Button>
         </div>
       ))}
       {userGrants.map((g) => (
-        <div key={g.id} className="flex items-center gap-2 text-xs">
-          <span className="flex-1 truncate font-mono opacity-70">{g.principalId}</span>
-          <span className="opacity-55">{g.permission === "write" ? "可修改" : "可使用"}</span>
-          <button
+        <div
+          key={g.id}
+          className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-xs"
+        >
+          <span className="flex-1 truncate font-mono text-muted-foreground">{g.principalId}</span>
+          <Badge variant="secondary" className="shrink-0 text-[10px]">
+            {g.permission === "write" ? "可修改" : "可使用"}
+          </Badge>
+          <Button
             type="button"
-            className="text-red-600 underline opacity-70 hover:opacity-100"
+            variant="ghost"
+            size="icon-sm"
+            title="撤销"
+            className="text-muted-foreground hover:text-destructive"
             onClick={() => revoke(g.id)}
           >
-            撤销
-          </button>
+            <Trash2 />
+          </Button>
         </div>
       ))}
     </div>

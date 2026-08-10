@@ -336,6 +336,11 @@ function build(): Container {
 }
 
 // dev 下 Next 会热重载模块,挂到 globalThis 上避免连接池与 worker 被重复创建
+//
+// 【代价:给 adapter 加方法后 dev 必须重启】容器只 build 一次就一直挂在 globalThis 上,
+// 热重载换掉的是模块代码,换不掉已经实例化的对象 —— 于是新方法在旧实例上不存在,
+// 路由里调用会抛 "xxx is not a function",接口 500、前端拿到空响应体,
+// 看起来就像"数据全没了"。生产是一次性构建启动,不会遇到。
 const g = globalThis as { __owaContainer?: Container };
 
 export function getContainer(): Container {

@@ -214,7 +214,7 @@ export function SettingsView() {
           </div>
 
           {issued && (
-            <div className="space-y-1 rounded border border-amber-500/40 bg-amber-500/10 p-3">
+            <div className="space-y-1 rounded-md border border-[var(--warning)]/40 bg-[var(--warning)]/10 p-3">
               <p className="font-medium text-xs">请立刻保存 —— 关闭后无法再次显示:</p>
               <code className="block break-all font-mono text-xs">{issued}</code>
               <Button

@@ -13,7 +13,7 @@ import {
 import { cn } from "@/lib/utils";
 import { BarChart3, Bot, MessageSquare, Plus, Settings, Users, Wrench } from "lucide-react";
 import { useEffect } from "react";
-import { relativeTime } from "./session-groups";
+import { activityOf, relativeTime } from "./session-groups";
 import type { AssistantSummary, SessionSummary } from "./types";
 
 const PAGES = [
@@ -99,7 +99,8 @@ export function CommandPalette({
                   <span className="flex-1 truncate">{s.title || s.id.slice(0, 12)}</span>
                   {/* 标题可能整批重复,id 是唯一能区分的东西,别只留时间 */}
                   <CommandShortcut>
-                    {relativeTime(s.createdAt)}
+                    {relativeTime(activityOf(s))}
+                    {s.runCount ? <span className="ml-1.5">{s.runCount} 轮</span> : null}
                     <span className="ml-1.5 font-mono opacity-60">{s.id.slice(0, 6)}</span>
                   </CommandShortcut>
                 </CommandItem>

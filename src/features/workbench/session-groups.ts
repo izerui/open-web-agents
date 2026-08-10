@@ -56,6 +56,16 @@ const BUCKET_ORDER: SessionBucket[] = ["今天", "昨天", "最近 7 天", "更�
 /**
  * 按时间分组,组内新的在前。空组不返回 —— 只有一条会话时不该出现四个标题。
  */
+/**
+ * 排序与分档的依据:最后活动时间优先,回退到创建时间。
+ *
+ * 【为什么不用创建时间】一个上周建、今天还在用的会话,按创建时间会被埋在"更早"里,
+ * 而用户找的正是"我刚才在弄的那个"。接口拿不到聚合时才退回创建时间。
+ */
+export function activityOf(s: SessionSummary): number {
+  return s.lastActiveAt ?? s.createdAt;
+}
+
 export function groupSessions(
   sessions: SessionSummary[],
   now: number = Date.now(),
@@ -63,7 +73,7 @@ export function groupSessions(
   const byBucket = new Map<SessionBucket, SessionSummary[]>();
 
   for (const s of sessions) {
-    const bucket = bucketOf(s.createdAt, now);
+    const bucket = bucketOf(activityOf(s), now);
     const list = byBucket.get(bucket);
     if (list) list.push(s);
     else byBucket.set(bucket, [s]);
@@ -71,6 +81,6 @@ export function groupSessions(
 
   return BUCKET_ORDER.filter((b) => byBucket.has(b)).map((bucket) => ({
     bucket,
-    sessions: (byBucket.get(bucket) ?? []).sort((a, b) => b.createdAt - a.createdAt),
+    sessions: (byBucket.get(bucket) ?? []).sort((a, b) => activityOf(b) - activityOf(a)),
   }));
 }

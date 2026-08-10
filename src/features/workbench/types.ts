@@ -6,6 +6,13 @@ export interface SessionSummary {
   workspaceDir: string;
   title?: string;
   createdAt: number;
+  /**
+   * 跑过的轮次数。只有列表接口会聚合出来 ——
+   * 新建会话的 POST 响应里没有,所以是可选的。
+   */
+  runCount?: number;
+  /** 最后一次发起运行的时间;一轮都没跑过时等于创建时间。 */
+  lastActiveAt?: number;
 }
 
 export interface AssistantSummary {
