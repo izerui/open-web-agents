@@ -1,7 +1,6 @@
 "use client";
 
 import type { AssistantSummary } from "@/features/workbench/types";
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -13,18 +12,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect as Select } from "@/components/ui/native-select";
 import { Separator } from "@/components/ui/separator";
 import { errorText, fetchJson } from "@/lib/fetch-json";
-import { LogOut } from "lucide-react";
-
-interface Me {
-  authenticated: boolean;
-  user?: {
-    id: string;
-    email: string;
-    role: string;
-    defaultBaseUrl: string | null;
-    anthropicKeyMask: string | null;
-  };
-}
+import { refreshMe, useMe } from "@/lib/use-me";
 
 interface KeyRecord {
   id: string;
@@ -35,8 +23,8 @@ interface KeyRecord {
 }
 
 export function SettingsView() {
-  const router = useRouter();
-  const [me, setMe] = useState<Me | null>(null);
+  // 和侧栏用户菜单共用同一份登录态:这里保存凭证后,菜单上的信息会跟着更新
+  const { me } = useMe();
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
 
@@ -48,25 +36,17 @@ export function SettingsView() {
   const [issued, setIssued] = useState<string | null>(null);
 
   /**
-   * 三块数据各拉各的。
+   * 两块数据各拉各的(登录态由 useMe 统一管)。
    *
    * 【为什么改成并行且互不牵连】原来是顺序 await 且不看 res.ok:
-   * /api/auth 一挂,后面 keys 和 assistants 根本不会执行,整页空白且无任何提示。
+   * 任一个挂掉后面的根本不会执行,整页空白且无任何提示。
    * 现在任一块失败只影响它自己,并且说得出是哪一块出了问题。
    */
   const reload = useCallback(async () => {
-    const [m, k, a] = await Promise.allSettled([
-      fetchJson<Me>("/api/auth"),
+    const [k, a] = await Promise.allSettled([
       fetchJson<{ keys?: KeyRecord[] }>("/api/keys"),
       fetchJson<{ assistants?: AssistantSummary[] }>("/api/assistants"),
     ]);
-
-    if (m.status === "fulfilled") {
-      setMe(m.value);
-      setBaseUrl(m.value.user?.defaultBaseUrl ?? "");
-    } else {
-      toast.error(`登录信息加载失败:${errorText(m.reason)}`);
-    }
 
     if (k.status === "fulfilled") setKeys(k.value.keys ?? []);
     else toast.error(`API Key 列表加载失败:${errorText(k.reason)}`);
@@ -78,6 +58,17 @@ export function SettingsView() {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  /**
+   * 服务端的 baseUrl 落到输入框。
+   *
+   * 【为什么依赖的是这个值本身,而不是整个 me】me 对象每次刷新都是新引用,
+   * 拿它当依赖会在用户正打字时把输入框重置回服务端的旧值。
+   */
+  const serverBaseUrl = me?.user?.defaultBaseUrl ?? "";
+  useEffect(() => {
+    setBaseUrl(serverBaseUrl);
+  }, [serverBaseUrl]);
 
   async function saveCredentials() {
     const body: Record<string, string> = { baseUrl };
@@ -95,7 +86,8 @@ export function SettingsView() {
       toast.error(`保存失败:${data.error}`);
     }
     setApiKey("");
-    await reload();
+    // 掩码变了,连侧栏用户菜单一起刷新
+    await refreshMe();
   }
 
   async function clearKey() {
@@ -105,7 +97,7 @@ export function SettingsView() {
       body: JSON.stringify({ apiKey: "" }),
     });
     toast.success("已清除自带密钥,将回落到平台默认");
-    await reload();
+    await refreshMe();
   }
 
   async function issueKey() {
@@ -133,28 +125,10 @@ export function SettingsView() {
     await reload();
   }
 
-  async function logout() {
-    await fetch("/api/auth", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "logout" }),
-    });
-    router.replace("/login");
-    router.refresh();
-  }
-
-  const logoutButton = (
-    <Button variant="outline" size="sm" onClick={logout}>
-      <LogOut className="size-3.5" />
-      登出
-    </Button>
-  );
-
   return (
     <AppShell
       title="设置"
       subtitle={me?.user ? `${me.user.email} · ${me.user.role}` : "未登录"}
-      actions={logoutButton}
       width="narrow"
     >
       {/* ── 模型凭证 ── */}

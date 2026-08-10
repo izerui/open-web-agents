@@ -3,6 +3,7 @@
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupLabel,
   SidebarHeader,
@@ -11,6 +12,7 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import { UserMenu } from "@/components/user-menu";
 import { cn } from "@/lib/utils";
 import { BarChart3, LayoutDashboard, Settings, Users, Wrench } from "lucide-react";
 import Link from "next/link";
@@ -92,6 +94,15 @@ export function AppSidebar({
 
         {children}
       </SidebarContent>
+
+      {/*
+        用户菜单固定在底部。
+        【为什么不放在 SidebarContent 里】工作台的会话列表挂在 children 上,
+        会话一多就把它顶出可视区 —— 而"我是谁 / 怎么退出"是任何时候都得够得着的东西。
+      */}
+      <SidebarFooter className="border-t border-sidebar-border">
+        <UserMenu />
+      </SidebarFooter>
 
       <SidebarRail />
     </Sidebar>
