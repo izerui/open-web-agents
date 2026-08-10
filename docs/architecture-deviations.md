@@ -116,6 +116,66 @@ MVP 范围内,没有前瞻到二期;`model-gateway` 则是文稿 §4 就有的 `
 
 ---
 
+## E. 历史回放读 SDK 的 jsonl,而不是自建事件表
+
+设计文稿里过程事件只有两个去处:Redis 事件总线与 `ReplayBuffer`。两者都是易失的 ——
+运行一结束过程就不可恢复,用户刷新页面看到一片空白。
+
+**没有新建 `run_events` 表**,而是加了 `TranscriptPort`(`agent-engine/ports.ts`)
+去读 SDK 自己写的 jsonl(`dataDir/.agent-home/.claude/projects/<编码 cwd>/<sdkSessionId>.jsonl`)。
+
+- **理由**:SDK 本来就把完整过程落了盘 —— thinking / tool_use / tool_result / text / usage 全在
+  (对真实文件核对过)。再建一张表就是把同一份数据存两遍,还要维护写入一致性、保留期与
+  体积上限。而 `normalizeSdkMessage` 读的正是 `m.type` + `m.message`,与 jsonl 行同构,
+  **一份归一逻辑同时服务实时流与历史回放**,SDK 变更只有一处要改。
+- **什么时候该改回去**:若要按内容检索历史(全文搜工具调用、跨会话统计),
+  或 transcript 必须跨机共享而又不想上共享卷 —— 前者需要索引,后者该换成 SDK 的
+  `SessionStore` 适配器(见 `sdk-docs/session-storage.md`),端口不变、换实现即可。
+
+### E1. 分工:runs 表定骨架,jsonl 填血肉
+
+轮次顺序、提示词、runId、分支来源全部取自 `runs` 表;jsonl 只提供过程事件。
+jsonl 里虽然也有用户提示词,但从中反推轮次边界既脆弱又多余 —— SDK 换个写法就散架,
+而 runs 表本来就精确记着这些。
+
+### E2. 活跃轮【刻意不读】transcript
+
+`history.ts` 对仍在跑的那一轮只回提示词,事件留空,由 `/events` 实时推。
+
+这不是性能优化,是**让「不重复」成为结构上的必然**:`AgentEvent` 没有唯一 id,
+真让同一批事件从两条路进来,前端去不了重。两个来源各管一段就不存在这个问题。
+(另外该轮的 `sdkSessionId` 此刻多半还没落库 —— 它在运行结束时才写。)
+
+### E3. 三条已知限制
+
+| 限制 | 影响 | 何时该处理 |
+|---|---|---|
+| 子代理归属丢失 | jsonl 用 `isSidechain` 标记子代理,而归一层读的是 `parent_tool_use_id`(jsonl 里没有)。回放时子代理输出以主 agent 身份呈现,信息不丢、少了标签 | 用户开始依赖子代理分组来读历史时 |
+| 活跃轮开头可能缺失 | 分进程部署(`OWA_EMBEDDED_WORKER=0`)下 ReplayBuffer 为空,活跃轮开头要等它跑完、刷新后才从 jsonl 看到。默认内嵌 worker 不受影响 | 正式采用分进程部署时,与 ReplayBuffer 换 Redis 一并做 |
+| jsonl 无限增长 | 工作空间 GC 只清 `dataDir/workspaces/`,不覆盖 `.agent-home` | 长期运行的部署占盘变明显时 |
+
+### E4. 路径编码规则只对 `/` 与 `.` 有实证
+
+`projectDirNameFor` 把 `/` 与 `.` 都替换成 `-`。**点这一条是踩过之后加的**:
+原本只替换分隔符,于是 `.claude` 推成 `-.claude`,而 SDK 写的是 `--claude` ——
+含点的路径整份读不到,表现是**历史一片空白、零报错**。
+反例取自本机盘上真实存在的目录(worktree 的 cwd 含 `.claude`),已写进测试钉死。
+
+不需要改代码就能踩到:`OWA_DATA_DIR=/srv/app.v2/data` 这样的部署配置即可。
+
+**尚无实证的是空格、中文等字符** —— SDK 是否另有替换规则不得而知。
+所以 `JsonlTranscript` 读不到文件时会扫一眼 `projects` 目录:
+同名 jsonl 若躺在别的目录下,`console.warn` 指出实际目录名。
+只在已经读不到的路径上跑,正常情况零开销;扫盘自身失败一律忽略。
+
+- **为什么留探针而不是穷举规则**:SDK 的编码规则不是公开契约,穷举只能靠反例,
+  而反例要等真实路径出现才有。探针把"静默空白"变成"日志里有线索" ——
+  这是规则未知时能做的最有价值的事。
+- **什么时候该改**:探针报出新字符,就补进 `projectDirNameFor` 并加测试;
+  若改用 SDK 的 `SessionStore`(见 E 节),整套路径推导连同探针一起作废。
+
+---
+
 ## 维护约定
 
 改动如果与文稿不一致,就在这里加一条,写清楚**为什么**以及**什么时候该改回去**。

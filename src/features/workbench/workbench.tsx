@@ -79,6 +79,8 @@ export function Workbench() {
   const [running, setRunning] = useState(false);
   const [filesKey, setFilesKey] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
+  /** 打开会话的序号:用来丢弃"切走之后才回来"的过期响应。 */
+  const openSeqRef = useRef(0);
 
   useEffect(() => {
     void fetch("/api/assistants")
@@ -108,10 +110,70 @@ export function Workbench() {
     abortRef.current?.abort();
   }, [sessionId]);
 
+  /**
+   * 打开一个历史会话:先把跑过的轮次还原出来,若其中一轮还在跑就接回实时流。
+   *
+   * 【为什么要还原】这里曾经只做 setTurns([]) —— 打开历史会话是一片空白。
+   * 过程事件只活在 Redis 与进程内的 replay 缓冲里,运行一结束就没了,
+   * 用户刷新一下,刚才看到的思考、工具调用、产出全部消失。
+   *
+   * 【为什么历史与实时流不会重复】/history 只回【已终态】轮次的过程,仍在跑的那一轮
+   * 由 /events 推 —— 两个来源各管一段。AgentEvent 里没有唯一 id,真要重了也去不掉,
+   * 所以这个"不重复"必须由结构保证,而不是靠去重逻辑兜。
+   */
   async function openSession(id: string) {
+    // 切走之前必须断掉上一条流,否则旧会话的事件会继续灌进来 —— 而界面已经是新会话了
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setRunning(false);
+
+    const seq = ++openSeqRef.current;
     setSessionId(id);
     setTurns([]);
     setFilesKey((k) => k + 1);
+
+    let history: { turns?: Turn[]; activeRunId?: string };
+    try {
+      const res = await fetch(`/api/sessions/${id}/history`);
+      if (!res.ok) return;
+      history = (await res.json()) as typeof history;
+    } catch {
+      // 历史拉不到就退回空白 —— 不该挡住用户接着发新的一轮
+      return;
+    }
+
+    // 拉取期间用户可能又切走了。丢弃过期响应,否则上一个会话的历史会画到当前界面上。
+    if (seq !== openSeqRef.current) return;
+    setTurns(history.turns ?? []);
+
+    const activeRunId = history.activeRunId;
+    if (!activeRunId) return;
+
+    setRunning(true);
+    const abort = new AbortController();
+    abortRef.current = abort;
+
+    // 【按 runId 定位而不是下标】下标会在并发/快速切换时错位,把事件灌进别的轮次。
+    const patch = (fn: (t: Turn) => Turn) =>
+      setTurns((all) => all.map((t) => (t.runId === activeRunId ? fn(t) : t)));
+    const push = (e: AgentEvent) => patch((t) => ({ ...t, events: [...t.events, e] }));
+
+    try {
+      const stream = await fetch(`/api/sessions/${id}/events`, { signal: abort.signal });
+      if (stream.body) await readEventStream(stream.body, push);
+    } catch (err) {
+      if (!abort.signal.aborted) {
+        push({ kind: "result", status: "failed", summary: String(err) });
+      }
+    } finally {
+      // 已经切到别的会话了就别再动状态 —— 那些 setState 针对的是已经不在屏幕上的数据
+      if (seq === openSeqRef.current) {
+        patch((t) => ({ ...t, running: false }));
+        setRunning(false);
+        abortRef.current = null;
+        setFilesKey((k) => k + 1);
+      }
+    }
   }
 
   async function ensureSession(): Promise<string> {

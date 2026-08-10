@@ -13,8 +13,9 @@ import { PUBLIC_PRINCIPAL } from "@/lib/modules/access/domain/grants";
 import type { GroupRepo } from "@/lib/modules/access/group-ports";
 import type { GrantRepo } from "@/lib/modules/access/ports";
 import { createClaudeSdkEngine } from "@/lib/modules/agent-engine/adapters/claude-sdk/default-engine";
+import { JsonlTranscript } from "@/lib/modules/agent-engine/adapters/claude-sdk/jsonl-transcript";
 import type { EngineDeps } from "@/lib/modules/agent-engine/adapters/claude-sdk/runner";
-import type { EnginePort } from "@/lib/modules/agent-engine/ports";
+import type { EnginePort, TranscriptPort } from "@/lib/modules/agent-engine/ports";
 import { RedisApproval } from "@/lib/modules/approval/adapters/redis-approval";
 import type { ApprovalPort } from "@/lib/modules/approval/ports";
 import { LocalFsStorage } from "@/lib/modules/artifacts/adapters/local-fs-storage";
@@ -52,6 +53,8 @@ export interface Container {
   engine: EnginePort;
   gateway: ModelGatewayPort;
   storage: StoragePort;
+  /** 读 SDK 落盘的会话过程记录,供历史回放。 */
+  transcript: TranscriptPort;
   approval: ApprovalPort;
   gc: WorkspaceGc;
   replay: ReplayBuffer;
@@ -141,6 +144,7 @@ function build(): Container {
   const bus = new RedisBus(env.redisUrl);
   const runs = new MysqlRunRepo(db);
   const storage = new LocalFsStorage();
+  const transcript = new JsonlTranscript();
   const approval = new RedisApproval(env.redisUrl);
   const usage = new MysqlUsageRepo(db);
   const knowledge = new MysqlKnowledgeRepo(db);
@@ -312,6 +316,7 @@ function build(): Container {
     engine,
     gateway,
     storage,
+    transcript,
     approval,
     gc,
     replay,
