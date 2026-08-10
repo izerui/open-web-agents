@@ -264,10 +264,15 @@ export function SettingsView() {
                     ? `最近使用 ${new Date(k.lastUsedAt).toLocaleDateString()}`
                     : "从未使用"}
                 </span>
+                {/*
+                  【为什么不是 h-auto p-0】那样按钮只有文字那么高(约 20px),
+                  低于 24px 的最小触控尺寸,手机上很难点准 —— 而这是【吊销】,
+                  一个不可撤销的破坏性操作,点不准的代价是误吊销一把还在用的 key。
+                */}
                 <Button
                   variant="link"
                   size="sm"
-                  className="h-auto p-0 text-destructive"
+                  className="h-8 shrink-0 px-2 text-destructive"
                   onClick={() => revokeKey(k.id)}
                 >
                   吊销

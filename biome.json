@@ -1,9 +1,26 @@
 {
   "$schema": "https://biomejs.dev/schemas/1.9.0/schema.json",
-  "organizeImports": { "enabled": true },
+  "organizeImports": {
+    "enabled": true
+  },
   "linter": {
     "enabled": true,
-    "rules": { "recommended": true }
+    "rules": {
+      "recommended": true,
+      "a11y": {
+        "noLabelWithoutControl": {
+          "level": "error",
+          "options": {
+            "inputComponents": [
+              "Input",
+              "Textarea",
+              "NativeSelect",
+              "Select"
+            ]
+          }
+        }
+      }
+    }
   },
   "formatter": {
     "enabled": true,
@@ -12,6 +29,12 @@
     "lineWidth": 100
   },
   "files": {
-    "ignore": ["node_modules", ".next", "dist", "data", "drizzle"]
+    "ignore": [
+      "node_modules",
+      ".next",
+      "dist",
+      "data",
+      "drizzle"
+    ]
   }
 }
