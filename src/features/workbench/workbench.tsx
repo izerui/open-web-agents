@@ -3,19 +3,68 @@
 import { readEventStream } from "@/features/chat/event-stream";
 import type { AgentEvent } from "@/lib/shared";
 import { cn } from "@/lib/utils";
-import { MessageSquare, Plus } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  BarChart3,
+  Check,
+  ChevronsUpDown,
+  MessageSquare,
+  Plus,
+  Search,
+  Settings,
+  Users,
+  Wrench,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApprovalBar } from "./approval-bar";
+import { CommandPalette } from "./command-palette";
 import { ChatThread } from "./conversation";
 import { FilePanel } from "./file-panel";
+import { groupSessions, relativeTime } from "./session-groups";
 import type { AssistantSummary, SessionSummary, Turn } from "./types";
 
+import {
+  ModelSelector,
+  ModelSelectorContent,
+  ModelSelectorEmpty,
+  ModelSelectorGroup,
+  ModelSelectorInput,
+  ModelSelectorItem,
+  ModelSelectorList,
+  ModelSelectorTrigger,
+} from "@/components/ai-elements/model-selector";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { NativeSelect as Select } from "@/components/ui/native-select";
+import { Kbd } from "@/components/ui/kbd";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+  layoutStorage,
+  useDefaultLayout,
+} from "@/components/ui/resizable";
 import { Separator } from "@/components/ui/separator";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarRail,
+  SidebarTrigger,
+} from "@/components/ui/sidebar";
 
+import {
+  Attachment,
+  AttachmentPreview,
+  AttachmentRemove,
+  Attachments,
+} from "@/components/ai-elements/attachments";
 import {
   Conversation,
   ConversationContent,
@@ -38,12 +87,6 @@ import {
   usePromptInputAttachments,
 } from "@/components/ai-elements/prompt-input";
 import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion";
-import {
-  Attachment,
-  AttachmentPreview,
-  AttachmentRemove,
-  Attachments,
-} from "@/components/ai-elements/attachments";
 
 /* ------------------------------------------------------------------ */
 /*  附件展示子组件 — 在 PromptInput 内部使用 usePromptInputAttachments   */
@@ -65,6 +108,13 @@ function AttachmentsDisplay() {
   );
 }
 
+const NAV_ITEMS = [
+  { href: "/builder", label: "构建器", icon: Wrench },
+  { href: "/groups", label: "组", icon: Users },
+  { href: "/usage", label: "用量", icon: BarChart3 },
+  { href: "/settings", label: "设置", icon: Settings },
+] as const;
+
 /* ================================================================== */
 /*  Workbench                                                         */
 /* ================================================================== */
@@ -78,6 +128,8 @@ export function Workbench() {
   const [input, setInput] = useState("");
   const [running, setRunning] = useState(false);
   const [filesKey, setFilesKey] = useState(0);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   /** 打开会话的序号:用来丢弃"切走之后才回来"的过期响应。 */
   const openSeqRef = useRef(0);
@@ -280,6 +332,15 @@ export function Workbench() {
   }
 
   const current = assistants.find((a) => a.id === assistantId);
+  const sessionGroups = useMemo(() => groupSessions(sessions), [sessions]);
+
+  // 记住用户拖出来的分栏宽度,下次进来还是这个宽度
+  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
+    id: "workbench-panels",
+    panelIds: ["chat", "files"],
+    storage: layoutStorage,
+    onlySaveAfterUserInteractions: true,
+  });
 
   const handlePromptSubmit = useCallback(
     (message: PromptInputMessage) => {
@@ -300,162 +361,300 @@ export function Workbench() {
   );
 
   return (
-    <div className="flex h-screen">
-      {/* 侧边栏:助手选择 + 会话列表 */}
-      <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-sidebar">
-        <div className="space-y-2 border-b border-border p-3">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold">Open Web Agents</span>
-            <nav className="flex gap-1.5 text-xs">
-              <a href="/builder" className="text-muted-foreground transition-colors hover:text-foreground">
-                构建器
-              </a>
-              <a href="/groups" className="text-muted-foreground transition-colors hover:text-foreground">
-                组
-              </a>
-              <a href="/usage" className="text-muted-foreground transition-colors hover:text-foreground">
-                用量
-              </a>
-              <a href="/settings" className="text-muted-foreground transition-colors hover:text-foreground">
-                设置
-              </a>
-            </nav>
-          </div>
-          <Select
-            className="w-full text-xs"
-            value={assistantId}
-            onChange={(e) => {
-              setAssistantId(e.target.value);
-              newSession();
-            }}
-            disabled={running}
-          >
-            {assistants.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-                {a.config.outputSchema ? " ·接口型" : ""}
-              </option>
-            ))}
-          </Select>
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full"
-            onClick={newSession}
-          >
-            <Plus className="size-3.5" />
-            新会话
-          </Button>
-        </div>
+    <SidebarProvider className="h-screen min-h-0">
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        sessions={sessions}
+        assistants={assistants}
+        currentAssistantId={assistantId}
+        running={running}
+        onOpenSession={(id) => void openSession(id)}
+        onNewSession={newSession}
+        onPickAssistant={(id) => {
+          setAssistantId(id);
+          newSession();
+        }}
+      />
 
-        <ScrollArea className="min-h-0 flex-1">
-          {sessions.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              className={cn(
-                "block w-full truncate px-3 py-2 text-left font-mono text-xs transition-colors hover:bg-accent",
-                s.id === sessionId && "bg-accent text-accent-foreground",
-              )}
-              onClick={() => void openSession(s.id)}
-            >
-              {s.title || s.id.slice(0, 12)}
-            </button>
-          ))}
+      {/* 侧边栏:助手选择 + 会话列表。Cmd/Ctrl+B 折叠,移动端自动变抽屉 */}
+      <Sidebar collapsible="icon">
+        <SidebarHeader className="gap-2 border-b border-sidebar-border">
+          <div className="flex items-center gap-2 px-1 group-data-[collapsible=icon]:px-0">
+            <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-brand text-[11px] font-bold text-primary-foreground">
+              A
+            </span>
+            <span className="truncate text-sm font-semibold group-data-[collapsible=icon]:hidden">
+              Open Web Agents
+            </span>
+          </div>
+
+          <div className="space-y-2 group-data-[collapsible=icon]:hidden">
+            <ModelSelector open={pickerOpen} onOpenChange={setPickerOpen}>
+              <ModelSelectorTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full justify-between font-normal"
+                  disabled={running}
+                  title={running ? "运行中不能切换助手" : "切换助手"}
+                >
+                  <span className="truncate">{current?.name ?? assistantId}</span>
+                  <ChevronsUpDown className="size-3.5 shrink-0 opacity-50" />
+                </Button>
+              </ModelSelectorTrigger>
+              <ModelSelectorContent title="选择助手">
+                <ModelSelectorInput placeholder="搜索助手…" />
+                <ModelSelectorList>
+                  <ModelSelectorEmpty>没有匹配的助手</ModelSelectorEmpty>
+                  <ModelSelectorGroup heading="助手">
+                    {assistants.map((a) => (
+                      <ModelSelectorItem
+                        key={a.id}
+                        value={`${a.name} ${a.id}`}
+                        onSelect={() => {
+                          // 换助手等于换一套系统提示与工具,继续用旧会话没有意义
+                          setAssistantId(a.id);
+                          newSession();
+                          setPickerOpen(false);
+                        }}
+                      >
+                        <Check
+                          className={cn(
+                            "size-3.5",
+                            a.id === assistantId ? "text-brand" : "opacity-0",
+                          )}
+                        />
+                        <span className="flex-1 truncate">{a.name}</span>
+                        {a.config.outputSchema && (
+                          <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+                            接口型
+                          </Badge>
+                        )}
+                      </ModelSelectorItem>
+                    ))}
+                  </ModelSelectorGroup>
+                </ModelSelectorList>
+              </ModelSelectorContent>
+            </ModelSelector>
+
+            <Button variant="outline" size="sm" className="w-full" onClick={newSession}>
+              <Plus className="size-3.5" />
+              新会话
+            </Button>
+          </div>
+        </SidebarHeader>
+
+        <SidebarContent>
           {sessions.length === 0 && (
-            <p className="p-3 text-xs text-muted-foreground">暂无会话</p>
-          )}
-        </ScrollArea>
-      </aside>
-
-      {/* 主区:对话 */}
-      <main className="flex min-w-0 flex-1 flex-col">
-        <div className="flex items-center gap-2 border-b border-border px-4 py-2 text-xs text-muted-foreground">
-          <span>{current?.name ?? assistantId}</span>
-          {current?.config.outputSchema && (
-            <Badge variant="secondary">结构化输出</Badge>
-          )}
-          <Separator orientation="vertical" className="h-3" />
-          <span>
-            {sessionId ? `会话 ${sessionId.slice(0, 8)}…` : "(发送后创建会话)"}
-          </span>
-        </div>
-
-        <div className="relative flex min-h-0 flex-1 flex-col divide-y overflow-hidden">
-          <Conversation className="min-h-0 flex-1">
-            <ConversationContent className="px-4 py-4">
-              {turns.length === 0 ? (
-                <ConversationEmptyState
-                  title="开始对话"
-                  description="发一句话试试..."
-                  icon={<MessageSquare className="size-12" />}
-                />
-              ) : (
-                <ChatThread turns={turns} onRerun={rerun} onAnswer={(t: string) => void send(t)} />
-              )}
-            </ConversationContent>
-            <ConversationScrollButton />
-          </Conversation>
-
-          <ApprovalBar sessionId={sessionId} running={running} />
-
-          <div className="grid shrink-0 gap-4 pt-4">
-            {turns.length === 0 && (
-              <Suggestions className="px-4">
-                <Suggestion
-                  suggestion="在工作目录写一个 hello.py"
-                  onClick={handleSuggestionClick}
-                />
-                <Suggestion
-                  suggestion="帮我分析这个项目的架构"
-                  onClick={handleSuggestionClick}
-                />
-                <Suggestion
-                  suggestion="创建一个简单的 REST API"
-                  onClick={handleSuggestionClick}
-                />
-              </Suggestions>
-            )}
-            <div className="w-full px-4 pb-4">
-              <PromptInput
-                globalDrop
-                multiple
-                onSubmit={handlePromptSubmit}
-              >
-                <PromptInputHeader>
-                  <AttachmentsDisplay />
-                </PromptInputHeader>
-                <PromptInputBody>
-                  <PromptInputTextarea
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    placeholder={running ? "运行中…" : "说点什么"}
-                  />
-                </PromptInputBody>
-                <PromptInputFooter>
-                  <PromptInputTools>
-                    <PromptInputActionMenu>
-                      <PromptInputActionMenuTrigger tooltip="添加附件" />
-                      <PromptInputActionMenuContent>
-                        <PromptInputActionAddAttachments label="添加图片或文件" />
-                      </PromptInputActionMenuContent>
-                    </PromptInputActionMenu>
-                  </PromptInputTools>
-                  <PromptInputSubmit
-                    status={running ? "streaming" : "ready"}
-                    onStop={cancelRun}
-                  />
-                </PromptInputFooter>
-              </PromptInput>
+            <div className="flex flex-col items-center gap-1.5 px-3 py-10 text-center group-data-[collapsible=icon]:hidden">
+              <MessageSquare className="size-5 text-muted-foreground/30" />
+              <p className="text-xs text-muted-foreground">还没有会话</p>
+              <p className="text-[11px] text-muted-foreground/60">发一条消息就会创建一个</p>
             </div>
-          </div>
-        </div>
-      </main>
+          )}
 
-      {/* 右栏:工作空间文件 */}
-      <aside className="w-80 shrink-0 border-l border-border">
-        <FilePanel sessionId={sessionId} refreshKey={filesKey} />
-      </aside>
-    </div>
+          {/* 按时间分档 —— 一列没有层次的标题里,人找不到"刚才那条" */}
+          {sessionGroups.map(({ bucket, sessions: group }) => (
+            <SidebarGroup key={bucket}>
+              <SidebarGroupLabel>{bucket}</SidebarGroupLabel>
+              <SidebarMenu>
+                {group.map((s) => {
+                  const active = s.id === sessionId;
+                  const label = s.title || s.id.slice(0, 12);
+                  // 【为什么时间旁边还要挂 id】批量 invoke 建出来的会话标题会完全一样
+                  // (清一色 "invoke"),连创建时间都落在同一天 —— 只有 id 能区分是哪一条
+                  const when = `${relativeTime(s.createdAt)} · ${s.id.slice(0, 6)}`;
+                  return (
+                    <SidebarMenuItem key={s.id}>
+                      <SidebarMenuButton
+                        isActive={active}
+                        tooltip={`${label} · ${when}`}
+                        onClick={() => void openSession(s.id)}
+                        className="relative h-auto py-1.5 data-[active=true]:bg-sidebar-active data-[active=true]:text-sidebar-active-foreground"
+                      >
+                        {/* 选中指示条:全站唯一的强色锚点 */}
+                        <span
+                          className={cn(
+                            "absolute left-0 top-1.5 bottom-1.5 w-0.5 origin-left rounded-r-full bg-brand transition-transform duration-200",
+                            active ? "scale-x-100" : "scale-x-0",
+                          )}
+                        />
+                        <MessageSquare
+                          className={cn(
+                            "shrink-0 transition-colors",
+                            active ? "text-brand" : "text-muted-foreground/60",
+                          )}
+                        />
+                        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                          <span className="truncate text-xs leading-tight">{label}</span>
+                          <span className="truncate text-[10px] leading-tight text-muted-foreground">
+                            {when}
+                          </span>
+                        </span>
+                        {active && running && (
+                          <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-brand" />
+                        )}
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroup>
+          ))}
+        </SidebarContent>
+
+        <SidebarFooter className="border-t border-sidebar-border">
+          <SidebarMenu>
+            {NAV_ITEMS.map((item) => (
+              <SidebarMenuItem key={item.href}>
+                <SidebarMenuButton asChild size="sm" tooltip={item.label}>
+                  <a href={item.href}>
+                    <item.icon />
+                    <span className="text-xs">{item.label}</span>
+                  </a>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+        </SidebarFooter>
+
+        <SidebarRail />
+      </Sidebar>
+
+      {/* 主区:对话 + 工作空间,可拖拽调宽并记忆 */}
+      <SidebarInset className="min-w-0 overflow-hidden">
+        <ResizablePanelGroup defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
+          {/* 尺寸必须带单位:v4 把裸数字当像素 */}
+          <ResizablePanel
+            id="chat"
+            defaultSize="74%"
+            minSize="40%"
+            className="flex min-w-0 flex-col"
+          >
+            <div
+              className={cn(
+                "flex shrink-0 items-center gap-2.5 border-b border-border px-3 py-2.5 text-xs",
+                running && "run-line",
+              )}
+            >
+              <SidebarTrigger className="-ml-1" />
+              <Separator orientation="vertical" className="h-4" />
+              <span className="font-medium text-foreground">{current?.name ?? assistantId}</span>
+              {current?.config.outputSchema && (
+                <Badge variant="secondary" className="h-5 px-1.5 text-[10px] font-normal">
+                  结构化输出
+                </Badge>
+              )}
+              <Separator orientation="vertical" className="h-3" />
+              <span className="truncate font-mono text-muted-foreground">
+                {sessionId ? `${sessionId.slice(0, 8)}…` : "尚未创建会话"}
+              </span>
+              {running && (
+                <span className="flex shrink-0 items-center gap-1.5 text-brand">
+                  <span className="size-1.5 animate-pulse rounded-full bg-brand" />
+                  运行中
+                </span>
+              )}
+
+              {/* 快捷键本身不可发现,得留一个看得见的入口 */}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="ml-auto h-7 shrink-0 gap-2 text-muted-foreground"
+                onClick={() => setPaletteOpen(true)}
+              >
+                <Search className="size-3.5" />
+                <span className="hidden sm:inline">搜索</span>
+                <Kbd>⌘K</Kbd>
+              </Button>
+            </div>
+
+            <div className="relative flex min-h-0 flex-1 flex-col divide-y overflow-hidden">
+              <Conversation className="min-h-0 flex-1">
+                <ConversationContent className="px-4 py-4">
+                  {turns.length === 0 ? (
+                    <ConversationEmptyState
+                      title="开始对话"
+                      description="发一句话试试..."
+                      icon={<MessageSquare className="size-12" />}
+                    />
+                  ) : (
+                    <ChatThread
+                      turns={turns}
+                      onRerun={rerun}
+                      onAnswer={(t: string) => void send(t)}
+                    />
+                  )}
+                </ConversationContent>
+                <ConversationScrollButton />
+              </Conversation>
+
+              <ApprovalBar sessionId={sessionId} running={running} />
+
+              <div className="grid shrink-0 gap-4 pt-4">
+                {turns.length === 0 && (
+                  <Suggestions className="px-4">
+                    <Suggestion
+                      suggestion="在工作目录写一个 hello.py"
+                      onClick={handleSuggestionClick}
+                    />
+                    <Suggestion
+                      suggestion="帮我分析这个项目的架构"
+                      onClick={handleSuggestionClick}
+                    />
+                    <Suggestion
+                      suggestion="创建一个简单的 REST API"
+                      onClick={handleSuggestionClick}
+                    />
+                  </Suggestions>
+                )}
+                <div className="w-full px-4 pb-4">
+                  <PromptInput globalDrop multiple onSubmit={handlePromptSubmit}>
+                    <PromptInputHeader>
+                      <AttachmentsDisplay />
+                    </PromptInputHeader>
+                    <PromptInputBody>
+                      <PromptInputTextarea
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        placeholder={running ? "运行中…" : "说点什么"}
+                      />
+                    </PromptInputBody>
+                    <PromptInputFooter>
+                      <PromptInputTools>
+                        <PromptInputActionMenu>
+                          <PromptInputActionMenuTrigger tooltip="添加附件" />
+                          <PromptInputActionMenuContent>
+                            <PromptInputActionAddAttachments label="添加图片或文件" />
+                          </PromptInputActionMenuContent>
+                        </PromptInputActionMenu>
+                      </PromptInputTools>
+                      <PromptInputSubmit
+                        status={running ? "streaming" : "ready"}
+                        onStop={cancelRun}
+                      />
+                    </PromptInputFooter>
+                  </PromptInput>
+                </div>
+              </div>
+            </div>
+          </ResizablePanel>
+
+          <ResizableHandle withHandle />
+
+          {/* 右栏:工作空间文件 */}
+          <ResizablePanel
+            id="files"
+            defaultSize="21%"
+            minSize="14%"
+            maxSize="45%"
+            className="panel-edge min-w-0 bg-card/40"
+          >
+            <FilePanel sessionId={sessionId} refreshKey={filesKey} />
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }

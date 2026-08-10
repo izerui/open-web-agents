@@ -4,40 +4,53 @@ import type { AgentEvent } from "@/lib/shared";
 import { useState } from "react";
 import type { Turn } from "./types";
 
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
 import {
-  RotateCcw,
-  Check,
-  X,
+  Activity,
   AlertTriangle,
-  HelpCircle,
+  Brain,
+  Check,
   CopyIcon,
+  HelpCircle,
+  RotateCcw,
+  TerminalIcon,
+  Wrench,
+  X,
 } from "lucide-react";
 
 import {
+  ChainOfThought,
+  ChainOfThoughtContent,
+  ChainOfThoughtHeader,
+  ChainOfThoughtStep,
+} from "@/components/ai-elements/chain-of-thought";
+import {
   Message,
+  MessageAction,
+  MessageActions,
   MessageBranch,
   MessageBranchContent,
   MessageContent,
-  MessageActions,
-  MessageAction,
   MessageResponse,
 } from "@/components/ai-elements/message";
 import {
+  Terminal,
+  TerminalActions,
+  TerminalContent,
+  TerminalCopyButton,
+  TerminalHeader,
+  TerminalStatus,
+  TerminalTitle,
+} from "@/components/ai-elements/terminal";
+import {
   Tool,
-  ToolHeader,
   ToolContent,
+  ToolHeader,
   ToolInput,
   ToolOutput,
 } from "@/components/ai-elements/tool";
-import {
-  Reasoning,
-  ReasoningTrigger,
-  ReasoningContent,
-} from "@/components/ai-elements/reasoning";
 
 /** 把 tool_use 与其 tool_result 配对,渲染成一条可折叠的工具调用。 */
 interface ToolCall {
@@ -96,7 +109,6 @@ export function foldEvents(events: AgentEvent[]): Rendered[] {
       out.push({ kind: "event", event: e });
     }
   }
-  if (typeof window !== "undefined") { const tc = out.filter(x => x.kind === "event" && x.event.kind === "text").length; if (tc > 1) console.warn("[fold] text items:", tc, "events:", events.length); }
   return out;
 }
 
@@ -247,21 +259,41 @@ function getToolState(call: ToolCall): "input-available" | "output-available" | 
   return "output-available";
 }
 
-// ─────────────────────────── 辅助:收集思考文本 ───────────────────────────
+// ─────────────────────────── 过程 / 结论 分流 ───────────────────────────
 
-/** 从渲染项中提取所有 thinking 事件的文本,合并为一段。 */
-function collectThinkingText(items: Rendered[]): string {
-  const parts: string[] = [];
+/** 命令类工具 —— 输出用终端渲染,而不是塞进折叠面板的纯文本。 */
+const SHELL_TOOLS = new Set(["bash", "bashoutput"]);
+
+function isShellTool(name: string): boolean {
+  return SHELL_TOOLS.has(name.toLowerCase());
+}
+
+/**
+ * 把渲染项拆成【过程】与【结论】两股。
+ *
+ * 【为什么要按原顺序留在一起】过程 = 思考与工具调用交替发生的一条时间线。
+ * 这里曾经把所有 thinking 抽出来合并成一个块摆在最前面,工具调用留在下面 ——
+ * agent 真实的"想一下→调工具→看结果→再想"的因果顺序被抹平了,
+ * 读的人没法判断某个工具是基于哪一段判断调的。
+ *
+ * 结论(回答文本、提问、最终结果)要留在折叠区外面 —— 那是用户真正要看的东西,
+ * 尤其 question 还需要点击作答,藏进折叠区就等于没有。
+ */
+function splitItems(items: Rendered[]): { process: Rendered[]; outcome: Rendered[] } {
+  const process: Rendered[] = [];
+  const outcome: Rendered[] = [];
+
   for (const item of items) {
-    if (item.kind === "event" && item.event.kind === "thinking") {
-      const tag =
-        "subagent" in item.event && item.event.subagent
-          ? `[${item.event.subagent}] `
-          : "";
-      parts.push(`${tag}${item.event.text}`);
+    if (item.kind === "tool") {
+      process.push(item);
+    } else if (item.event.kind === "thinking" || item.event.kind === "status") {
+      process.push(item);
+    } else if (item.event.kind !== "text") {
+      // text 由上层合并成一条 MessageResponse,这里不重复收
+      outcome.push(item);
     }
   }
-  return parts.join("");
+  return { process, outcome };
 }
 
 /** 从渲染项中提取所有助手文本内容(用于复制)。 */
@@ -277,17 +309,43 @@ function collectAllTextContent(items: Rendered[]): string {
 
 // ─────────────────────────── 单条渲染项(不含 thinking) ───────────────────────────
 
-function renderItem(item: Rendered, turn: Turn, itemIndex: number): React.ReactNode {
+/** 命令类工具:整块渲染成终端。命令本身就是标题,不再套一层工具卡片。 */
+function ShellCall({ call, running }: { call: ToolCall; running: boolean }) {
+  const command =
+    call.input && typeof call.input === "object" && "command" in call.input
+      ? String((call.input as { command: unknown }).command)
+      : call.tool;
+  const pending = !call.result;
+
+  return (
+    <Terminal
+      className="border-border/60 bg-zinc-950/80"
+      isStreaming={pending && running}
+      output={call.result?.text ?? ""}
+    >
+      <TerminalHeader className="border-border/60">
+        <TerminalTitle className="min-w-0">
+          <span className="truncate font-mono text-xs">{command}</span>
+        </TerminalTitle>
+        <div className="flex items-center gap-1">
+          <TerminalStatus />
+          <TerminalActions>
+            <TerminalCopyButton />
+          </TerminalActions>
+        </div>
+      </TerminalHeader>
+      {!pending && <TerminalContent className="max-h-64 text-xs" />}
+    </Terminal>
+  );
+}
+
+function renderItem(item: Rendered, itemIndex: number): React.ReactNode {
   if (item.kind === "tool") {
     const state = getToolState(item);
     const title = item.subagent ? `[${item.subagent}] ${item.tool}` : undefined;
     return (
       <Tool key={`t-${itemIndex}-${item.tool}`}>
-        <ToolHeader
-          type={`tool-${item.tool}` as any}
-          state={state}
-          title={title}
-        />
+        <ToolHeader type={`tool-${item.tool}`} state={state} title={title} />
         <ToolContent>
           <ToolInput input={item.input} />
           {item.result && (
@@ -306,7 +364,6 @@ function renderItem(item: Rendered, turn: Turn, itemIndex: number): React.ReactN
   }
 
   const e = item.event;
-  const tag = "subagent" in e && e.subagent ? `[${e.subagent}] ` : "";
 
   switch (e.kind) {
     case "text":
@@ -314,7 +371,7 @@ function renderItem(item: Rendered, turn: Turn, itemIndex: number): React.ReactN
       return null;
 
     case "thinking":
-      // thinking 已经在上层合并渲染,跳过单条
+      // thinking 由过程时间线渲染
       return null;
 
     case "tool_result":
@@ -397,6 +454,74 @@ function renderItem(item: Rendered, turn: Turn, itemIndex: number): React.ReactN
   }
 }
 
+// ─────────────────────────── 过程时间线 ───────────────────────────
+
+/**
+ * agent 的工作过程:思考与工具调用按发生顺序排成一条时间线。
+ * 运行中默认展开(用户想看它在干嘛),历史轮次默认收起(用户只想看结论)。
+ */
+function ProcessTimeline({ items, running }: { items: Rendered[]; running: boolean }) {
+  if (items.length === 0) return null;
+
+  const toolCount = items.filter((x) => x.kind === "tool").length;
+  const summary = running
+    ? "正在处理…"
+    : toolCount > 0
+      ? `工作过程 · ${items.length} 步,调用 ${toolCount} 次工具`
+      : `工作过程 · ${items.length} 步`;
+
+  return (
+    <ChainOfThought defaultOpen={running}>
+      <ChainOfThoughtHeader>{summary}</ChainOfThoughtHeader>
+      <ChainOfThoughtContent>
+        {items.map((item, i) => {
+          const last = i === items.length - 1;
+          const status = running && last ? "active" : "complete";
+
+          if (item.kind === "tool") {
+            const shell = isShellTool(item.tool);
+            const label = item.subagent ? `[${item.subagent}] ${item.tool}` : item.tool;
+            return (
+              <ChainOfThoughtStep
+                key={`p-${i}-${item.tool}`}
+                icon={shell ? TerminalIcon : Wrench}
+                label={shell ? "执行命令" : label}
+                status={status}
+              >
+                {shell ? <ShellCall call={item} running={running} /> : renderItem(item, i)}
+              </ChainOfThoughtStep>
+            );
+          }
+
+          const e = item.event;
+          if (e.kind === "status") {
+            return (
+              <ChainOfThoughtStep
+                // biome-ignore lint/suspicious/noArrayIndexKey: 事件流只追加不重排,下标即稳定身份
+                key={`p-${i}-status`}
+                icon={Activity}
+                label={e.label}
+                status={status}
+              />
+            );
+          }
+
+          // thinking
+          const who = "subagent" in e && e.subagent ? `[${e.subagent}] 思考` : "思考";
+          return (
+            // biome-ignore lint/suspicious/noArrayIndexKey: 同上。流式下文本在变,拿内容当 key 会反复重挂载
+            <ChainOfThoughtStep key={`p-${i}-thinking`} icon={Brain} label={who} status={status}>
+              <div className="whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
+                {"text" in e ? e.text : ""}
+              </div>
+            </ChainOfThoughtStep>
+          );
+        })}
+      </ChainOfThoughtContent>
+    </ChainOfThought>
+  );
+}
+
 // ─────────────────────────── 主组件 ───────────────────────────
 
 export function ChatThread({
@@ -418,11 +543,11 @@ export function ChatThread({
       {turns.map((turn, i) => {
         const items = foldEvents(turn.events);
         const usage = sumUsage(turn.events);
-        const thinkingText = collectThinkingText(items);
+        const { process, outcome } = splitItems(items);
         const allTextContent = collectAllTextContent(items);
 
         return (
-          <div key={`${i}-${turn.prompt.slice(0, 20)}`} className="space-y-4">
+          <div key={`${i}-${turn.prompt.slice(0, 20)}`} className="rise-in space-y-4">
             {/* 分叉标记 */}
             {turn.branchedFrom && (
               <p className="text-xs text-muted-foreground">⑂ 从上文某轮分叉重跑</p>
@@ -444,23 +569,16 @@ export function ChatThread({
               <MessageBranchContent>
                 <Message from="assistant">
                   <MessageContent>
-                    {/* 合并后的思考块 —— 放在助手消息最前面 */}
-                    {thinkingText && (
-                      <Reasoning isStreaming={turn.running}>
-                        <ReasoningTrigger />
-                        <ReasoningContent>{thinkingText}</ReasoningContent>
-                      </Reasoning>
-                    )}
+                    {/* 过程:思考与工具调用按真实顺序排成时间线,可整体折叠 */}
+                    <ProcessTimeline items={process} running={turn.running === true} />
 
-                    {/* 合并后的文本 —— 所有 text 事件拼成一个 MessageResponse */}
+                    {/* 结论:合并后的回答文本 */}
                     {allTextContent && (
-                      <MessageResponse isAnimating={turn.running}>
-                        {allTextContent}
-                      </MessageResponse>
+                      <MessageResponse isAnimating={turn.running}>{allTextContent}</MessageResponse>
                     )}
 
-                    {/* 其余渲染项(thinking 和 text 已在上方合并渲染,renderItem 中跳过) */}
-                    {items.map((item, j) => {
+                    {/* 提问、最终结果等需要用户看见或操作的东西,留在折叠区外 */}
+                    {outcome.map((item, j) => {
                       // question 需要特殊处理(answerable / onAnswer)
                       if (item.kind === "event" && item.event.kind === "question") {
                         return (
@@ -472,7 +590,7 @@ export function ChatThread({
                           />
                         );
                       }
-                      return renderItem(item, turn, j);
+                      return renderItem(item, j);
                     })}
                     {turn.running && (
                       <p className="text-xs text-muted-foreground">
