@@ -1,6 +1,7 @@
 "use client";
 
-import { AppHeader } from "@/components/app-header";
+import { AppShell } from "@/components/app-shell";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { NativeSelect as Select } from "@/components/ui/native-select";
@@ -9,7 +10,7 @@ import {
   type UsageTotals,
   formatUsd,
 } from "@/lib/modules/usage/domain/aggregate";
-import { cn } from "@/lib/utils";
+import { AlertTriangle } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 interface UsageData {
@@ -72,38 +73,41 @@ export function UsageView() {
   const successRate = t && t.runs > 0 ? Math.round((t.succeeded / t.runs) * 100) : null;
 
   return (
-    <main className="mx-auto max-w-4xl space-y-6 p-6">
-      <AppHeader
-        title="用量与成本"
-        subtitle={`${data?.scope === "all" ? "全平台" : "仅我的会话"} · 最近 ${data?.days ?? days} 天`}
-        actions={
-          <div className="flex items-center gap-3">
+    <AppShell
+      title="用量与成本"
+      subtitle={`${data?.scope === "all" ? "全平台" : "仅我的会话"} · 最近 ${data?.days ?? days} 天`}
+      actions={
+        <>
+          <Select
+            className="h-7 w-auto text-xs"
+            value={days}
+            onChange={(e) => setDays(Number(e.target.value))}
+          >
+            {[1, 7, 30, 90].map((d) => (
+              <option key={d} value={d}>
+                最近 {d} 天
+              </option>
+            ))}
+          </Select>
+          {data?.canViewAll && (
             <Select
               className="h-7 w-auto text-xs"
-              value={days}
-              onChange={(e) => setDays(Number(e.target.value))}
+              value={scope}
+              onChange={(e) => setScope(e.target.value as "self" | "all")}
             >
-              {[1, 7, 30, 90].map((d) => (
-                <option key={d} value={d}>
-                  最近 {d} 天
-                </option>
-              ))}
+              <option value="self">仅我的</option>
+              <option value="all">全平台</option>
             </Select>
-            {data?.canViewAll && (
-              <Select
-                className="h-7 w-auto text-xs"
-                value={scope}
-                onChange={(e) => setScope(e.target.value as "self" | "all")}
-              >
-                <option value="self">仅我的</option>
-                <option value="all">全平台</option>
-              </Select>
-            )}
-          </div>
-        }
-      />
-
-      {error && <p className="text-sm text-destructive">{error}</p>}
+          )}
+        </>
+      }
+    >
+      {error && (
+        <Alert variant="destructive">
+          <AlertTriangle />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
 
       {t && (
         <>
@@ -156,6 +160,9 @@ export function UsageView() {
               <CardTitle className="text-sm font-medium">按天(UTC)</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
+              {data.byDay.length === 0 && (
+                <p className="text-xs text-muted-foreground">窗口内没有运行记录</p>
+              )}
               {data.byDay.map((b) => (
                 <div key={b.key} className="flex items-center gap-3 text-xs">
                   <span className="w-24 font-mono">{b.key}</span>
@@ -168,6 +175,6 @@ export function UsageView() {
           </Card>
         </>
       )}
-    </main>
+    </AppShell>
   );
 }

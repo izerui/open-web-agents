@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { toast } from "sonner";
-import { AppHeader } from "@/components/app-header";
+import { AppShell } from "@/components/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 
 interface Group {
   id: string;
@@ -95,12 +95,11 @@ export function GroupsView() {
   const current = groups.find((g) => g.id === selected);
 
   return (
-    <main className="mx-auto max-w-3xl space-y-6 p-6">
-      <AppHeader
-        title="用户组"
-        subtitle="把助手分享给整个团队,不必逐个点人。组变动后授权自动跟着变。"
-      />
-
+    <AppShell
+      title="用户组"
+      subtitle="把助手分享给整个团队,不必逐个点人。组变动后授权自动跟着变。"
+      width="narrow"
+    >
       <div className="flex gap-2">
         <Input
           className="flex-1"
@@ -117,9 +116,7 @@ export function GroupsView() {
       <div className="grid grid-cols-[220px_1fr] gap-4">
         <Card>
           <CardContent className="space-y-1 p-3">
-            {groups.length === 0 && (
-              <p className="text-xs text-muted-foreground">还没有组</p>
-            )}
+            {groups.length === 0 && <p className="text-xs text-muted-foreground">还没有组</p>}
             {groups.map((g) => (
               <button
                 key={g.id}
@@ -141,9 +138,7 @@ export function GroupsView() {
 
         <Card>
           <CardContent className="space-y-3 p-4">
-            {!current && (
-              <p className="text-xs text-muted-foreground">选一个组来管理成员</p>
-            )}
+            {!current && <p className="text-xs text-muted-foreground">选一个组来管理成员</p>}
             {current && (
               <>
                 <div className="flex items-center justify-between">
@@ -195,6 +190,6 @@ export function GroupsView() {
           </CardContent>
         </Card>
       </div>
-    </main>
+    </AppShell>
   );
 }

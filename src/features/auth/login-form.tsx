@@ -3,15 +3,11 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-} from "@/components/ui/card";
+import { AlertTriangle } from "lucide-react";
 
 export function LoginForm({ firstRun }: { firstRun: boolean }) {
   const router = useRouter();
@@ -47,6 +43,10 @@ export function LoginForm({ firstRun }: { firstRun: boolean }) {
     <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center p-8">
       <Card>
         <CardHeader>
+          {/* 和全站侧栏同一个徽标 —— 登录是第一眼,不该是唯一没有品牌的页面 */}
+          <span className="mb-1 flex size-8 items-center justify-center rounded-lg bg-brand text-sm font-bold text-primary-foreground">
+            A
+          </span>
           <CardTitle className="text-xl">Open Web Agents</CardTitle>
           <CardDescription>
             {mode === "register"
@@ -81,13 +81,15 @@ export function LoginForm({ firstRun }: { firstRun: boolean }) {
             />
           </label>
 
-          {error && <p className="text-red-600 text-xs">{error}</p>}
+          {/* 原来是硬编码的 text-red-600,不跟主题走,暗色下偏暗看不清 */}
+          {error && (
+            <Alert variant="destructive">
+              <AlertTriangle />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
 
-          <Button
-            type="button"
-            onClick={submit}
-            disabled={busy || !email.trim() || !password}
-          >
+          <Button type="button" onClick={submit} disabled={busy || !email.trim() || !password}>
             {busy ? "处理中…" : mode === "register" ? "注册并进入" : "登录"}
           </Button>
 

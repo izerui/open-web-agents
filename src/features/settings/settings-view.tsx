@@ -5,13 +5,14 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
-import { AppHeader } from "@/components/app-header";
+import { AppShell } from "@/components/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { NativeSelect as Select } from "@/components/ui/native-select";
 import { Separator } from "@/components/ui/separator";
+import { LogOut } from "lucide-react";
 
 interface Me {
   authenticated: boolean;
@@ -126,19 +127,19 @@ export function SettingsView() {
   }
 
   const logoutButton = (
-    <Button variant="ghost" size="sm" onClick={logout}>
+    <Button variant="outline" size="sm" onClick={logout}>
+      <LogOut className="size-3.5" />
       登出
     </Button>
   );
 
   return (
-    <main className="mx-auto max-w-3xl space-y-6 p-6">
-      <AppHeader
-        title="设置"
-        subtitle={me?.user ? `${me.user.email} · ${me.user.role}` : "未登录"}
-        actions={logoutButton}
-      />
-
+    <AppShell
+      title="设置"
+      subtitle={me?.user ? `${me.user.email} · ${me.user.role}` : "未登录"}
+      actions={logoutButton}
+      width="narrow"
+    >
       {/* ── 模型凭证 ── */}
       <Card>
         <CardHeader>
@@ -216,7 +217,12 @@ export function SettingsView() {
             <div className="space-y-1 rounded border border-amber-500/40 bg-amber-500/10 p-3">
               <p className="font-medium text-xs">请立刻保存 —— 关闭后无法再次显示:</p>
               <code className="block break-all font-mono text-xs">{issued}</code>
-              <Button variant="link" size="sm" className="h-auto p-0" onClick={() => setIssued(null)}>
+              <Button
+                variant="link"
+                size="sm"
+                className="h-auto p-0"
+                onClick={() => setIssued(null)}
+              >
                 我已保存
               </Button>
             </div>
@@ -225,9 +231,7 @@ export function SettingsView() {
           <Separator />
 
           <div className="divide-y divide-border rounded border">
-            {keys.length === 0 && (
-              <p className="p-3 text-xs text-muted-foreground">暂无 key</p>
-            )}
+            {keys.length === 0 && <p className="p-3 text-xs text-muted-foreground">暂无 key</p>}
             {keys.map((k) => (
               <div key={k.id} className="flex items-center gap-3 p-2 text-xs">
                 <span className="flex-1 truncate">
@@ -256,6 +260,6 @@ export function SettingsView() {
           </div>
         </CardContent>
       </Card>
-    </main>
+    </AppShell>
   );
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { AppSidebar } from "@/components/app-sidebar";
 import { readEventStream } from "@/features/chat/event-stream";
 import type { AgentEvent } from "@/lib/shared";
 import { cn } from "@/lib/utils";
@@ -44,18 +45,13 @@ import {
 } from "@/components/ui/resizable";
 import { Separator } from "@/components/ui/separator";
 import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupLabel,
-  SidebarHeader,
   SidebarInset,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
-  SidebarRail,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 
@@ -107,13 +103,6 @@ function AttachmentsDisplay() {
     </Attachments>
   );
 }
-
-const NAV_ITEMS = [
-  { href: "/builder", label: "构建器", icon: Wrench },
-  { href: "/groups", label: "组", icon: Users },
-  { href: "/usage", label: "用量", icon: BarChart3 },
-  { href: "/settings", label: "设置", icon: Settings },
-] as const;
 
 /* ================================================================== */
 /*  Workbench                                                         */
@@ -377,18 +366,9 @@ export function Workbench() {
         }}
       />
 
-      {/* 侧边栏:助手选择 + 会话列表。Cmd/Ctrl+B 折叠,移动端自动变抽屉 */}
-      <Sidebar collapsible="icon">
-        <SidebarHeader className="gap-2 border-b border-sidebar-border">
-          <div className="flex items-center gap-2 px-1 group-data-[collapsible=icon]:px-0">
-            <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-brand text-[11px] font-bold text-primary-foreground">
-              A
-            </span>
-            <span className="truncate text-sm font-semibold group-data-[collapsible=icon]:hidden">
-              Open Web Agents
-            </span>
-          </div>
-
+      {/* 侧边栏与其余页面共用 AppSidebar,只把助手选择器和会话列表插进去 */}
+      <AppSidebar
+        headerExtra={
           <div className="space-y-2 group-data-[collapsible=icon]:hidden">
             <ModelSelector open={pickerOpen} onOpenChange={setPickerOpen}>
               <ModelSelectorTrigger asChild>
@@ -443,9 +423,10 @@ export function Workbench() {
               新会话
             </Button>
           </div>
-        </SidebarHeader>
-
-        <SidebarContent>
+        }
+      >
+        {/* 以下作为 AppSidebar 的 children,挂在统一导航下面 */}
+        <>
           {sessions.length === 0 && (
             <div className="flex flex-col items-center gap-1.5 px-3 py-10 text-center group-data-[collapsible=icon]:hidden">
               <MessageSquare className="size-5 text-muted-foreground/30" />
@@ -502,25 +483,8 @@ export function Workbench() {
               </SidebarMenu>
             </SidebarGroup>
           ))}
-        </SidebarContent>
-
-        <SidebarFooter className="border-t border-sidebar-border">
-          <SidebarMenu>
-            {NAV_ITEMS.map((item) => (
-              <SidebarMenuItem key={item.href}>
-                <SidebarMenuButton asChild size="sm" tooltip={item.label}>
-                  <a href={item.href}>
-                    <item.icon />
-                    <span className="text-xs">{item.label}</span>
-                  </a>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            ))}
-          </SidebarMenu>
-        </SidebarFooter>
-
-        <SidebarRail />
-      </Sidebar>
+        </>
+      </AppSidebar>
 
       {/* 主区:对话 + 工作空间,可拖拽调宽并记忆 */}
       <SidebarInset className="min-w-0 overflow-hidden">

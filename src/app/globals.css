@@ -46,6 +46,7 @@
 
 /* ── Light theme (kept for future toggle) ── */
 :root {
+  color-scheme: light;
   --radius: 0.625rem;
   --brand: oklch(0.68 0.145 62);
   --brand-dim: oklch(0.68 0.145 62 / 12%);
@@ -83,6 +84,15 @@
 
 /* ── Dark theme (matches open-agents) ── */
 .dark {
+  /**
+   * 告诉浏览器这是暗色界面。
+   *
+   * 【为什么必须有】原生控件(select 的下拉列表、日期选择器、滚动条)由系统绘制,
+   * 不吃我们的 Tailwind 类。少了这一行,深色页面上的 <select> 会是白底黑字,
+   * 展开的选项列表更是一整块刺眼的白 —— 用量页右上角那两个筛选器就是这么露馅的。
+   */
+  color-scheme: dark;
+
   /* 冷蓝灰底 + 琥珀铜强调:agent 运行是"有热度的过程",热信号比常见的荧光绿更贴题 */
   --background: oklch(0.155 0.011 252);
   --foreground: oklch(0.97 0.003 250);
