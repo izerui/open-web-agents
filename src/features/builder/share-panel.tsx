@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect as Select } from "@/components/ui/native-select";
+import { fetchJson } from "@/lib/fetch-json";
 import { PUBLIC_PRINCIPAL } from "@/lib/modules/access/domain/grants";
 import { Globe, Trash2, Users } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -35,8 +36,14 @@ export function SharePanel({ assistantId }: { assistantId: string }) {
 
   const reload = useCallback(async () => {
     const res = await fetch(`/api/assistants/${assistantId}/share`);
+    // 403 是"没权限管这个助手的分享",属于正常状态,单独渲染而不是当错误
     if (res.status === 403) {
       setDenied(true);
+      return;
+    }
+    // 其余非 2xx 原本会掉进 res.json() 抛出解析错误 —— 看不出是接口挂了
+    if (!res.ok) {
+      setMsg(`分享信息加载失败:HTTP ${res.status}`);
       return;
     }
     const d = (await res.json()) as { grants?: Grant[] };
@@ -46,10 +53,10 @@ export function SharePanel({ assistantId }: { assistantId: string }) {
 
   useEffect(() => {
     void reload();
-    void fetch("/api/groups")
-      .then((r) => r.json())
-      .then((d: { groups?: GroupOption[] }) => setGroupOptions(d.groups ?? []))
-      .catch(() => {});
+    // 组列表拉不到只是少一个"分享给全组"的入口,不值得打断分享面板,静默降级
+    void fetchJson<{ groups?: GroupOption[] }>("/api/groups")
+      .then((d) => setGroupOptions(d.groups ?? []))
+      .catch(() => setGroupOptions([]));
   }, [reload]);
 
   async function share(target: string) {

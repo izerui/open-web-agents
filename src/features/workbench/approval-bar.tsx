@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
+import { fetchJson } from "@/lib/fetch-json";
 import { cn } from "@/lib/utils";
 import { CheckCircle2, Clock, ShieldAlert, Terminal, XCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -54,9 +55,7 @@ export function ApprovalBar({
   const poll = useCallback(async () => {
     if (!sessionId) return;
     try {
-      const d = (await fetch(`/api/sessions/${sessionId}/approvals`).then((r) => r.json())) as {
-        pending?: Pending[];
-      };
+      const d = await fetchJson<{ pending?: Pending[] }>(`/api/sessions/${sessionId}/approvals`);
       setPending(d.pending ?? []);
     } catch {
       // 轮询失败不打断界面

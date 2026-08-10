@@ -1,4 +1,10 @@
-import { foldEvents, sumUsage } from "@/features/workbench/conversation";
+import {
+  contextTokens,
+  foldEvents,
+  formatTokens,
+  sumUsage,
+} from "@/features/workbench/conversation";
+import type { Turn } from "@/features/workbench/types";
 import type { AgentEvent } from "@/lib/shared";
 import { describe, expect, it } from "vitest";
 
@@ -98,5 +104,43 @@ describe("sumUsage", () => {
 
   it("没有用量事件时为零", () => {
     expect(sumUsage([{ kind: "text", text: "hi" }])).toEqual({ input: 0, output: 0 });
+  });
+});
+
+describe("formatTokens", () => {
+  it("四位数以下原样显示", () => {
+    expect(formatTokens(0)).toBe("0");
+    expect(formatTokens(999)).toBe("999");
+  });
+
+  it("千位用 K,百万用 M", () => {
+    expect(formatTokens(1000)).toBe("1.0K");
+    expect(formatTokens(45231)).toBe("45.2K");
+    expect(formatTokens(1_000_000)).toBe("1.00M");
+    expect(formatTokens(1_234_567)).toBe("1.23M");
+  });
+});
+
+describe("contextTokens", () => {
+  const turnWith = (input: number, output = 0): Turn => ({
+    prompt: "p",
+    running: false,
+    events: input > 0 || output > 0 ? [{ kind: "usage", input, output }] : [],
+  });
+
+  it("取最后一轮的 input,而不是各轮累加", () => {
+    // 每轮 input 都含全部历史,累加会得到 300 —— 那是计费总量,不是上下文占用
+    const turns = [turnWith(50), turnWith(100), turnWith(150)];
+    expect(contextTokens(turns)).toBe(150);
+  });
+
+  it("最后一轮还没有用量时往前找,避免数字突然归零", () => {
+    const turns = [turnWith(120), turnWith(0)];
+    expect(contextTokens(turns)).toBe(120);
+  });
+
+  it("一轮用量都没有时返回 0", () => {
+    expect(contextTokens([turnWith(0)])).toBe(0);
+    expect(contextTokens([])).toBe(0);
   });
 });

@@ -17,6 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { KnowledgePanel } from "@/features/builder/knowledge-panel";
 import { SharePanel } from "@/features/builder/share-panel";
 import type { AssistantSummary } from "@/features/workbench/types";
+import { errorText, fetchJson } from "@/lib/fetch-json";
 import { PERMISSION_MODES, type PermissionMode } from "@/lib/shared";
 import { cn } from "@/lib/utils";
 import { Bot, FileCode, Plus, Save, Trash2 } from "lucide-react";
@@ -177,12 +178,12 @@ export function Builder() {
 
   const reload = useCallback(
     () =>
-      fetch("/api/assistants")
-        .then((r) => r.json())
-        .then((d: AssistantsResponse) => {
+      fetchJson<AssistantsResponse>("/api/assistants")
+        .then((d) => {
           setList(d.assistants ?? []);
           setAllowStdioMcp(d.capabilities?.stdioMcp === true);
-        }),
+        })
+        .catch((e: unknown) => toast.error(`助手列表加载失败:${errorText(e)}`)),
     [],
   );
 
@@ -313,9 +314,8 @@ export function Builder() {
   }
 
   function edit(a: AssistantSummary) {
-    void fetch("/api/assistants")
-      .then((r) => r.json())
-      .then((d: AssistantsResponse) => {
+    void fetchJson<AssistantsResponse>("/api/assistants")
+      .then((d) => {
         setAllowStdioMcp(d.capabilities?.stdioMcp === true);
         const full = d.assistants?.find((x) => x.id === a.id);
         if (!full) return;
@@ -387,7 +387,9 @@ export function Builder() {
               )
             : [],
         });
-      });
+      })
+      // 点了助手却没反应最让人困惑 —— 至少说清楚是没读到,而不是这个助手本身是空的
+      .catch((e: unknown) => toast.error(`打开助手失败:${errorText(e)}`));
   }
 
   /** 助手列表挂进全站侧栏 —— 再开一条自己的侧栏就成了两级导航,看着像两个产品 */

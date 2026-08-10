@@ -113,6 +113,33 @@ export function foldEvents(events: AgentEvent[]): Rendered[] {
 }
 
 /** 按 messageId 去重后求和 —— 流式下同一条消息会多次上报用量。 */
+/** 12345 → "12.3K"。四位数以上的原始数字在界面上没人读得出量级。 */
+export function formatTokens(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}K`;
+  return `${(n / 1_000_000).toFixed(2)}M`;
+}
+
+/**
+ * 当前上下文占用的估计值。
+ *
+ * 【为什么是"最后一轮的 input"】每一轮请求都会把此前全部对话重新发给模型,
+ * 所以最新一轮的 input tokens 就约等于此刻上下文里装了多少东西 ——
+ * 把各轮 input 累加起来反而是错的(那是重复计费的总量,不是占用)。
+ *
+ * 【为什么要往前找】最后几轮可能还没跑完、或者失败了没有 usage,
+ * 取到 0 会让界面上的数字突然归零,看起来像上下文被清空了。
+ */
+export function contextTokens(turns: Turn[]): number {
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const t = turns[i];
+    if (!t) continue;
+    const { input } = sumUsage(t.events);
+    if (input > 0) return input;
+  }
+  return 0;
+}
+
 export function sumUsage(events: AgentEvent[]): { input: number; output: number } {
   const latest = new Map<string, { input: number; output: number }>();
   let anonInput = 0;
@@ -638,7 +665,7 @@ export function ChatThread({
             {/* ── 用量页脚 ── */}
             {(usage.input > 0 || usage.output > 0) && (
               <Badge variant="secondary" className="font-normal">
-                tokens ↑{usage.input} ↓{usage.output}
+                本轮 ↑{formatTokens(usage.input)} ↓{formatTokens(usage.output)}
               </Badge>
             )}
           </div>

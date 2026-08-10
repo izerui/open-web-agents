@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { errorText, fetchJson } from "@/lib/fetch-json";
 import { cn } from "@/lib/utils";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -31,8 +32,13 @@ export function GroupsView() {
   const [email, setEmail] = useState("");
 
   const reload = useCallback(async () => {
-    const d = (await fetch("/api/groups").then((r) => r.json())) as { groups?: Group[] };
-    setGroups(d.groups ?? []);
+    try {
+      const d = await fetchJson<{ groups?: Group[] }>("/api/groups");
+      setGroups(d.groups ?? []);
+    } catch (e) {
+      // 不看 res.ok 直接 json() 的话,接口 500 会抛"JSON 解析失败",看不出是后端挂了
+      toast.error(`组列表加载失败:${errorText(e)}`);
+    }
   }, []);
 
   useEffect(() => {
@@ -41,10 +47,13 @@ export function GroupsView() {
 
   const loadMembers = useCallback(async (id: string) => {
     setSelected(id);
-    const d = (await fetch(`/api/groups/${id}/members`).then((r) => r.json())) as {
-      members?: Member[];
-    };
-    setMembers(d.members ?? []);
+    try {
+      const d = await fetchJson<{ members?: Member[] }>(`/api/groups/${id}/members`);
+      setMembers(d.members ?? []);
+    } catch (e) {
+      setMembers([]);
+      toast.error(`成员加载失败:${errorText(e)}`);
+    }
   }, []);
 
   async function createGroup() {

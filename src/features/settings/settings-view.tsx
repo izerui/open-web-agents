@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { NativeSelect as Select } from "@/components/ui/native-select";
 import { Separator } from "@/components/ui/separator";
+import { errorText, fetchJson } from "@/lib/fetch-json";
 import { LogOut } from "lucide-react";
 
 interface Me {
@@ -46,16 +47,32 @@ export function SettingsView() {
   /** 新签发的明文,只在本次会话内显示一次 */
   const [issued, setIssued] = useState<string | null>(null);
 
+  /**
+   * 三块数据各拉各的。
+   *
+   * 【为什么改成并行且互不牵连】原来是顺序 await 且不看 res.ok:
+   * /api/auth 一挂,后面 keys 和 assistants 根本不会执行,整页空白且无任何提示。
+   * 现在任一块失败只影响它自己,并且说得出是哪一块出了问题。
+   */
   const reload = useCallback(async () => {
-    const m = (await fetch("/api/auth").then((r) => r.json())) as Me;
-    setMe(m);
-    setBaseUrl(m.user?.defaultBaseUrl ?? "");
-    const k = (await fetch("/api/keys").then((r) => r.json())) as { keys?: KeyRecord[] };
-    setKeys(k.keys ?? []);
-    const a = (await fetch("/api/assistants").then((r) => r.json())) as {
-      assistants?: AssistantSummary[];
-    };
-    setAssistants(a.assistants ?? []);
+    const [m, k, a] = await Promise.allSettled([
+      fetchJson<Me>("/api/auth"),
+      fetchJson<{ keys?: KeyRecord[] }>("/api/keys"),
+      fetchJson<{ assistants?: AssistantSummary[] }>("/api/assistants"),
+    ]);
+
+    if (m.status === "fulfilled") {
+      setMe(m.value);
+      setBaseUrl(m.value.user?.defaultBaseUrl ?? "");
+    } else {
+      toast.error(`登录信息加载失败:${errorText(m.reason)}`);
+    }
+
+    if (k.status === "fulfilled") setKeys(k.value.keys ?? []);
+    else toast.error(`API Key 列表加载失败:${errorText(k.reason)}`);
+
+    if (a.status === "fulfilled") setAssistants(a.value.assistants ?? []);
+    else toast.error(`助手列表加载失败:${errorText(a.reason)}`);
   }, []);
 
   useEffect(() => {

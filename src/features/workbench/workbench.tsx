@@ -17,7 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ApprovalBar } from "./approval-bar";
 import { CommandPalette } from "./command-palette";
-import { ChatThread } from "./conversation";
+import { ChatThread, contextTokens, formatTokens } from "./conversation";
 import { FilePanel } from "./file-panel";
 import { activityOf, groupSessions, relativeTime } from "./session-groups";
 import type { AssistantSummary, SessionSummary, Turn } from "./types";
@@ -250,6 +250,13 @@ export function Workbench() {
     }
   }
 
+  /**
+   * 拿到可用的会话 id,没有就现建一个。
+   *
+   * 【为什么要校验返回体】这里原本直接解构 `{ session }` 就用 `session.id`:
+   * 建会话失败(未登录、库挂了)时 session 是 undefined,下一行立刻 TypeError,
+   * 而这个异常发生在发送流程内部 —— 用户点了发送,界面毫无反应,也没有任何提示。
+   */
   async function ensureSession(): Promise<string> {
     if (sessionId) return sessionId;
     const res = await fetch("/api/sessions", {
@@ -257,7 +264,14 @@ export function Workbench() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ assistantId }),
     });
-    const { session } = (await res.json()) as { session: SessionSummary };
+    const body = (await res.json().catch(() => null)) as {
+      session?: SessionSummary;
+      error?: string;
+    } | null;
+    if (!res.ok || !body?.session) {
+      throw new Error(body?.error ?? `创建会话失败(HTTP ${res.status})`);
+    }
+    const session = body.session;
     setSessionId(session.id);
     setSessions((s) => [session, ...s]);
     return session.id;
@@ -355,6 +369,7 @@ export function Workbench() {
 
   const current = assistants.find((a) => a.id === assistantId);
   const sessionGroups = useMemo(() => groupSessions(sessions), [sessions]);
+  const contextUsed = useMemo(() => contextTokens(turns), [turns]);
 
   // 记住用户拖出来的分栏宽度,下次进来还是这个宽度
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -568,6 +583,19 @@ export function Workbench() {
               <span className="truncate font-mono text-muted-foreground">
                 {sessionId ? `${sessionId.slice(0, 8)}…` : "尚未创建会话"}
               </span>
+              {/* 上下文占用 —— 长会话里最想知道的一个数,长到该开新会话时能提前察觉 */}
+              {contextUsed > 0 && (
+                <>
+                  <Separator orientation="vertical" className="h-3" />
+                  <span
+                    className="shrink-0 font-mono text-muted-foreground"
+                    title="最近一轮请求的输入 tokens ≈ 当前上下文装了多少内容"
+                  >
+                    上下文 {formatTokens(contextUsed)}
+                  </span>
+                </>
+              )}
+
               {running && (
                 <span className="flex shrink-0 items-center gap-1.5 text-brand">
                   <span className="size-1.5 animate-pulse rounded-full bg-brand" />

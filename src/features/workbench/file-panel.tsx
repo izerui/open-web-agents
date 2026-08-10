@@ -277,10 +277,23 @@ export function FilePanel({
 
       {/* 文件树 */}
       <ScrollArea className="min-h-0 flex-1">
+        {/*
+          【为什么不直接把 error 甩出来】接口回的是 "not found" 这种给程序看的字符串,
+          用户看到只会一头雾水。把最常见的一种翻译成人话,其余仍原样附在下面备查。
+        */}
         {error && (
-          <div className="flex items-start gap-2 p-3">
-            <FileWarning className="size-4 shrink-0 text-destructive" />
-            <p className="text-xs text-destructive">{error}</p>
+          <div className="flex flex-col items-center gap-2 px-3 py-8 text-center">
+            <FileWarning className="size-5 text-destructive" />
+            <p className="text-xs text-destructive">
+              {/^not found$/i.test(error) ? "工作空间不存在" : "工作空间读取失败"}
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              {/^not found$/i.test(error) ? "这个会话的工作目录已被清理,或还没产生任何文件" : error}
+            </p>
+            <Button variant="outline" size="sm" onClick={refreshAll}>
+              <RefreshCw className="size-3.5" />
+              重试
+            </Button>
           </div>
         )}
 
