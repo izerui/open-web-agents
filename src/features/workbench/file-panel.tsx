@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FileNode, FilePreview } from "./types";
 
-import { CodeBlock, CodeBlockCopyButton } from "@/components/ai-elements/code-block";
+import { CodeBlock } from "@/components/ai-elements/code-block";
 import {
   FileTree,
   FileTreeFile,
@@ -16,7 +16,16 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
-import { Download, FileText, FileWarning, Folder, FolderOpen, RefreshCw, X } from "lucide-react";
+import {
+  Copy,
+  Download,
+  FileText,
+  FileWarning,
+  Folder,
+  FolderOpen,
+  RefreshCw,
+  X,
+} from "lucide-react";
 import type { BundledLanguage } from "shiki";
 
 /**
@@ -306,6 +315,17 @@ export function FilePanel({
             <FileText className="size-4 shrink-0 text-muted-foreground" />
             <span className="truncate font-mono text-xs">{preview.path}</span>
             <div className="ml-auto flex items-center gap-1">
+              {/* 复制按钮放头部而不是浮在代码上 —— 侧栏太窄,浮动按钮会直接压住第一行 */}
+              {preview.text !== null && (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  title="复制内容"
+                  onClick={() => void navigator.clipboard.writeText(preview.text ?? "")}
+                >
+                  <Copy />
+                </Button>
+              )}
               <Button variant="ghost" size="icon-sm" asChild title="下载">
                 <a
                   href={`/api/sessions/${sessionId}/files?download=${encodeURIComponent(preview.path)}`}
@@ -328,14 +348,22 @@ export function FilePanel({
                 </span>
               </div>
             ) : (
+              /**
+               * 侧栏只有两百多像素宽,不换行的话每一行都被切掉大半,
+               * 要横向拖着看 —— 预览的意义就没了。
+               *
+               * 行号是 ::before 伪元素(w-8 + mr-4 = 3rem),一旦换行,
+               * 续行会顶到最左边跟行号列串在一起;用等量的负缩进把续行推回代码列。
+               */
               <CodeBlock
-                className="text-xs"
+                className={
+                  "text-xs [&_pre]:whitespace-pre-wrap [&_pre]:break-words " +
+                  "[&_code>span]:pl-12 [&_code>span]:-indent-12"
+                }
                 code={preview.text}
                 language={guessLanguage(preview.path)}
                 showLineNumbers
-              >
-                <CodeBlockCopyButton />
-              </CodeBlock>
+              />
             )}
             {preview.truncated && (
               <p className="pt-2 text-xs text-muted-foreground">…内容过长已截断</p>
