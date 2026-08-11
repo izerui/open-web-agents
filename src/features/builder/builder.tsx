@@ -442,7 +442,7 @@ export function Builder() {
 
   return (
     <AppShell
-      title="助手构建器"
+      title="我的智能体"
       subtitle={'定义一个只干特定某件事的"员工"。填了 outputSchema,它就能被企业系统当接口调用。'}
       sidebarExtra={assistantList}
       actions={

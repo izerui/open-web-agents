@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { topicOf } from "@/lib/modules/run/application/orchestrator";
+import { assertWithinQuota, quotaErrorResponse } from "@/lib/modules/usage/application/quota-guard";
 import type { AgentEvent } from "@/lib/shared";
 
 export const runtime = "nodejs";
@@ -23,12 +24,27 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { runs, bus, sessions, auth } = getContainer();
+  const { runs, bus, sessions, auth, users, usage } = getContainer();
 
   try {
     const principal = await auth.resolveWeb(req);
     await auth.assertSessionAccess(principal, id);
+
+    /*
+     * 额度关卡。
+     *
+     * 【为什么在这里,而不是在 worker 里】拦在发起之前才叫"上限" ——
+     * 一次运行可能跑很久、烧掉可观的花费,等 worker 跑完再发现超支
+     * 只能追认。这里多一次查询,换的是超支根本不会发生。
+     *
+     * 【为什么按 principal 的归属人算,而不是会话归属】会话可能是
+     * 别人分享/系统建的,但花费永远记在发起这次运行的账号头上。
+     */
+    const ownerId = principal.type === "web" ? principal.userId : principal.ownerId;
+    if (ownerId) await assertWithinQuota({ users, usage }, ownerId);
   } catch (err) {
+    const quota = quotaErrorResponse(err);
+    if (quota) return quota;
     const res = authErrorResponse(err);
     if (res) return res;
     throw err;

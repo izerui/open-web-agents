@@ -21,6 +21,18 @@ export const users = mysqlTable("users", {
   defaultBaseUrl: varchar("default_base_url", { length: 512 }),
   /** 每用户自带的 Anthropic key,加密入库 */
   anthropicKeyEnc: varchar("anthropic_key_enc", { length: 1024 }),
+  /**
+   * 禁用的账号不能登录,已登录的会话也立即失效。
+   * 【为什么用 int 而不是 boolean】drizzle 的 mysql boolean 底层就是 tinyint,
+   * 用 int 少一层映射歧义;这张表也没有别的布尔列可循例。
+   */
+  disabled: int("disabled").notNull().default(0),
+  /**
+   * 月度花费上限(微美元)。null = 不限。
+   * 【为什么是微美元】和 runs.costMicroUsd 同一单位,比较时不必换算,
+   * 也避免浮点误差 —— 本文件开头就定了"金额一律整数"。
+   */
+  monthlyQuotaMicroUsd: bigint("monthly_quota_micro_usd", { mode: "number" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

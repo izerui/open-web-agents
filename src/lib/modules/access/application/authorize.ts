@@ -6,6 +6,7 @@ import {
   type Decision,
   type Principal,
   canAccessSession,
+  canAdministerPlatform,
   canInvokeAssistant,
   canManageAssistants,
 } from "@/lib/modules/access/domain/principal";
@@ -139,6 +140,11 @@ export class Authorizer {
 
   assertCanManageAssistants(p: Principal): void {
     this.assert(canManageAssistants(p));
+  }
+
+  /** 平台管理关卡:改别人账号(角色/停用/额度)之前必须过这一关。 */
+  assertCanAdministerPlatform(p: Principal): void {
+    this.assert(canAdministerPlatform(p));
   }
 }
 

@@ -4,6 +4,7 @@ import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { validateInput } from "@/lib/modules/assistant/domain/validate-output";
 import { workspacePathFor } from "@/lib/modules/session/domain/workspace";
+import { assertWithinQuota, quotaErrorResponse } from "@/lib/modules/usage/application/quota-guard";
 import type { ModelAlias } from "@/lib/shared";
 
 export const runtime = "nodejs";
@@ -29,13 +30,26 @@ interface InvokeBody {
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id: assistantId } = await params;
-  const { assistants, sessions, runs, env, auth } = getContainer();
+  const { assistants, sessions, runs, env, auth, users, usage } = getContainer();
 
   let principal: Awaited<ReturnType<typeof auth.requireApiKey>>;
   try {
     principal = await auth.requireApiKey(req);
     await auth.assertCanInvoke(principal, assistantId);
+
+    /*
+     * 额度关卡 —— 对外接口尤其需要。
+     *
+     * 【为什么这条路径比 web 更要紧】invoke 是给第三方系统轮询调用的,
+     * 对方的一个死循环就能在几分钟内烧掉整月预算,而且没有人盯着屏幕。
+     * 花费记在签发这把 key 的账号头上,额度自然也按它算。
+     */
+    // requireApiKey 的返回类型是 Principal 联合类型,这里窄化一下拿归属账号
+    const keyOwnerId = principal.type === "apiKey" ? principal.ownerId : principal.userId;
+    await assertWithinQuota({ users, usage }, keyOwnerId);
   } catch (err) {
+    const quota = quotaErrorResponse(err);
+    if (quota) return quota;
     const res = authErrorResponse(err);
     if (res) return res;
     throw err;

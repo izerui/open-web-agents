@@ -3,6 +3,7 @@ import {
   type Principal,
   type SessionOwnership,
   canAccessSession,
+  canAdministerPlatform,
   canInvokeAssistant,
   canManageAssistants,
 } from "@/lib/modules/access/domain/principal";
@@ -137,5 +138,31 @@ describe("canManageAssistants", () => {
   it("对外 key 不能改助手定义(防调用方篡改提示词)", () => {
     expect(canManageAssistants(keyA).allowed).toBe(false);
     expect(canManageAssistants(keyBound).allowed).toBe(false);
+  });
+});
+
+describe("canAdministerPlatform", () => {
+  it("管理员放行", () => {
+    expect(canAdministerPlatform({ type: "web", userId: "u1", role: "admin" }).allowed).toBe(true);
+  });
+
+  it("普通用户拒绝", () => {
+    expect(canAdministerPlatform({ type: "web", userId: "u1", role: "user" }).allowed).toBe(false);
+  });
+
+  it("没写 role 的 web 主体也拒绝 —— 缺省不能等于放行", () => {
+    expect(canAdministerPlatform({ type: "web", userId: "u1" }).allowed).toBe(false);
+  });
+
+  it("对外 key 一律拒绝 —— 哪怕签发它的人是管理员", () => {
+    /*
+     * 【为什么这条必须有】key 会躺在第三方的服务器配置里。
+     * Principal 里 apiKey 分支根本没有 role 字段(类型上就断了继承的可能),
+     * 但判定函数仍要显式拒绝:将来若有人给 apiKey 补上 role,
+     * 这条测试会立刻挡住"key 顺带继承管理权"这个变化。
+     */
+    expect(canAdministerPlatform({ type: "apiKey", keyId: "k1", ownerId: "u1" }).allowed).toBe(
+      false,
+    );
   });
 });

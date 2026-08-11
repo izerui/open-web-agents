@@ -1,7 +1,7 @@
 import type { Db } from "@/lib/db/client";
 import { assistants, runs, sessions } from "@/lib/db/schema";
 import { type RunUsageRecord, toMicroUsd } from "@/lib/modules/usage/domain/aggregate";
-import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, sql } from "drizzle-orm";
 
 export interface UsageQuery {
   /** 只统计该用户归属的会话;不传则统计全部(仅 admin 可用)。 */
@@ -80,6 +80,46 @@ export class MysqlUsageRepo {
         at: (r.endedAt ?? r.createdAt).getTime(),
       };
     });
+  }
+
+  /**
+   * 按账号聚合窗口内花费(微美元)。账号管理页用。
+   *
+   * 【为什么在 SQL 里聚合,而不是复用 list()】list 有 5000 条上限,
+   * 用它算总额会在活跃平台上悄悄少算 —— 而这里的数字是要拿来做额度判断的,
+   * 少算意味着该拦的没拦。聚合下推到 SQL 就没有条数上限。
+   *
+   * 【为什么要 CAST 成 DECIMAL】cost.usd 是 JSON 里的浮点数,
+   * 直接 SUM 会按 DOUBLE 累加,几千条累加下来末位会漂。
+   * DECIMAL 是定点数,加多少条都不会引入新的误差。
+   *
+   * 【为什么一次查完所有账号】账号列表要给每个账号显示花费,
+   * 逐个查就是典型的 N+1 —— 一百个账号就是一百次往返。
+   */
+  async costByOwner(since: number, ownerId?: string): Promise<Map<string, number>> {
+    // 【为什么要能只查一个】额度检查在每次运行前都跑一次,
+    // 那时只关心当前这一个账号 —— 为它去扫全平台的运行记录是白费的
+    const conds = [gte(runs.createdAt, new Date(since)), isNotNull(sessions.ownerId)];
+    if (ownerId) conds.push(eq(sessions.ownerId, ownerId));
+
+    const rows = await this.db
+      .select({
+        ownerId: sessions.ownerId,
+        usd: sql<string>`COALESCE(SUM(CAST(JSON_EXTRACT(${runs.cost}, '$.usd') AS DECIMAL(24,10))), 0)`,
+      })
+      .from(runs)
+      .innerJoin(sessions, eq(runs.sessionId, sessions.id))
+      .where(and(...conds))
+      .groupBy(sessions.ownerId);
+
+    const out = new Map<string, number>();
+    for (const r of rows) {
+      if (!r.ownerId) continue;
+      // MySQL 的 DECIMAL 经驱动回来是字符串,Number() 到这一步才损失精度 ——
+      // 而此时已经加完了,不会再累积
+      out.set(r.ownerId, toMicroUsd(Number(r.usd)));
+    }
+    return out;
   }
 
   /** 当前排队/在跑的任务数,看板用来判断系统是否积压。 */

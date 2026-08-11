@@ -1,6 +1,6 @@
 "use client";
 
-import { AppShell } from "@/components/app-shell";
+import { SettingsShell } from "@/components/settings-shell";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -45,9 +45,15 @@ function Bar({ value, max }: { value: number; max: number }) {
   );
 }
 
-export function UsageView() {
+/**
+ * 用量看板。
+ *
+ * 【为什么 scope 由外部固定,而不是页内切换】改造后「我的用量」和「全平台用量」
+ * 是两个不同的页面(个人区 / 管理员区),范围由所在位置决定。
+ * 再留一个页内下拉,等于同一个页面能变成另一个页面 —— 面包屑和地址都会说谎。
+ */
+export function UsageView({ scope = "self" }: { scope?: "self" | "all" }) {
   const [days, setDays] = useState(7);
-  const [scope, setScope] = useState<"self" | "all">("self");
   const [data, setData] = useState<UsageData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -73,33 +79,22 @@ export function UsageView() {
   const successRate = t && t.runs > 0 ? Math.round((t.succeeded / t.runs) * 100) : null;
 
   return (
-    <AppShell
-      title="用量与成本"
-      subtitle={`${data?.scope === "all" ? "全平台" : "仅我的会话"} · 最近 ${data?.days ?? days} 天`}
+    <SettingsShell
+      area={scope === "all" ? "admin" : "personal"}
+      title={scope === "all" ? "全平台用量" : "我的用量"}
+      subtitle={`${scope === "all" ? "所有用户的会话" : "仅我的会话"} · 最近 ${data?.days ?? days} 天`}
       actions={
-        <>
-          <Select
-            className="h-7 w-auto text-xs"
-            value={days}
-            onChange={(e) => setDays(Number(e.target.value))}
-          >
-            {[1, 7, 30, 90].map((d) => (
-              <option key={d} value={d}>
-                最近 {d} 天
-              </option>
-            ))}
-          </Select>
-          {data?.canViewAll && (
-            <Select
-              className="h-7 w-auto text-xs"
-              value={scope}
-              onChange={(e) => setScope(e.target.value as "self" | "all")}
-            >
-              <option value="self">仅我的</option>
-              <option value="all">全平台</option>
-            </Select>
-          )}
-        </>
+        <Select
+          className="h-7 w-auto text-xs"
+          value={days}
+          onChange={(e) => setDays(Number(e.target.value))}
+        >
+          {[1, 7, 30, 90].map((d) => (
+            <option key={d} value={d}>
+              最近 {d} 天
+            </option>
+          ))}
+        </Select>
       }
     >
       {error && (
@@ -175,6 +170,6 @@ export function UsageView() {
           </Card>
         </>
       )}
-    </AppShell>
+    </SettingsShell>
   );
 }

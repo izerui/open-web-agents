@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { __resetMe, clearMe, initialsOf, peekMe, refreshMe } from "../use-me";
+import { __resetMe, clearMe, initialsOf, isAdminView, peekMe, refreshMe } from "../use-me";
 
 afterEach(() => {
   __resetMe();
@@ -40,6 +40,36 @@ describe("initialsOf", () => {
     // 本地部分为空(@ 开头)是非法邮箱,但界面不该因为脏数据崩掉或留白
     expect(initialsOf("@x.io")).toBe("?");
     expect(initialsOf("")).toBe("?");
+  });
+});
+
+describe("isAdminView", () => {
+  it("真实 admin 算", () => {
+    expect(isAdminView({ authenticated: true, user: { role: "admin" } as never })).toBe(true);
+  });
+
+  it("普通用户不算 —— 哪怕平台没开登录要求", () => {
+    expect(
+      isAdminView({ authenticated: true, authRequired: false, user: { role: "user" } as never }),
+    ).toBe(false);
+  });
+
+  it("本地模式(未开登录且无账号)算管理员", () => {
+    /*
+     * 【为什么这条最容易写错】直觉上"没登录"就该不是管理员。
+     * 但 OWA_AUTH_REQUIRED=0 时后端发的是匿名 admin,scope=all 对它放行、
+     * requireAdmin 也放行 —— 前端若判成 false,就会出现
+     * "接口愿意给全平台数据、界面却没有入口"的错位。
+     */
+    expect(isAdminView({ authenticated: false, authRequired: false })).toBe(true);
+  });
+
+  it("要求登录但没登录,不算", () => {
+    expect(isAdminView({ authenticated: false, authRequired: true })).toBe(false);
+  });
+
+  it("还没拿到登录态时不算 —— 加载中不能先把管理入口闪出来", () => {
+    expect(isAdminView(null)).toBe(false);
   });
 });
 

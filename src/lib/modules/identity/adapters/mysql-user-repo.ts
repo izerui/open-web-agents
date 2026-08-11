@@ -1,7 +1,7 @@
 import type { Db } from "@/lib/db/client";
 import { users } from "@/lib/db/schema";
 import type { NewUser, User, UserRepo } from "@/lib/modules/identity/user-ports";
-import { eq, sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 
 interface Row {
   id: string;
@@ -9,6 +9,8 @@ interface Row {
   role: string;
   defaultBaseUrl: string | null;
   anthropicKeyEnc: string | null;
+  disabled: number;
+  monthlyQuotaMicroUsd: number | null;
   createdAt: Date;
 }
 
@@ -18,6 +20,8 @@ const COLUMNS = {
   role: users.role,
   defaultBaseUrl: users.defaultBaseUrl,
   anthropicKeyEnc: users.anthropicKeyEnc,
+  disabled: users.disabled,
+  monthlyQuotaMicroUsd: users.monthlyQuotaMicroUsd,
   createdAt: users.createdAt,
 };
 
@@ -28,6 +32,9 @@ function toUser(r: Row): User {
     role: r.role === "admin" ? "admin" : "user",
     defaultBaseUrl: r.defaultBaseUrl ?? undefined,
     anthropicKeyEnc: r.anthropicKeyEnc ?? undefined,
+    // 存量行是 NULL(加列前就有的数据),按"未禁用"处理
+    disabled: Number(r.disabled ?? 0) !== 0,
+    monthlyQuotaMicroUsd: r.monthlyQuotaMicroUsd ?? undefined,
     createdAt: r.createdAt.getTime(),
   };
 }
@@ -70,6 +77,36 @@ export class MysqlUserRepo implements UserRepo {
 
   async count(): Promise<number> {
     const rows = await this.db.select({ n: sql<number>`COUNT(*)` }).from(users);
+    return Number(rows[0]?.n ?? 0);
+  }
+
+  async listAll(limit = 500): Promise<User[]> {
+    const rows = await this.db
+      .select(COLUMNS)
+      .from(users)
+      .orderBy(desc(users.createdAt))
+      .limit(limit);
+    return rows.map(toUser);
+  }
+
+  async adminUpdate(
+    id: string,
+    v: { role?: "admin" | "user"; disabled?: boolean; monthlyQuotaMicroUsd?: number | null },
+  ): Promise<void> {
+    const patch: Record<string, string | number | null> = {};
+    if (v.role !== undefined) patch.role = v.role;
+    if (v.disabled !== undefined) patch.disabled = v.disabled ? 1 : 0;
+    if (v.monthlyQuotaMicroUsd !== undefined) patch.monthlyQuotaMicroUsd = v.monthlyQuotaMicroUsd;
+    // 【为什么空补丁要早退】drizzle 的 update().set({}) 会生成非法 SQL 直接抛错
+    if (Object.keys(patch).length === 0) return;
+    await this.db.update(users).set(patch).where(eq(users.id, id));
+  }
+
+  async countAdmins(): Promise<number> {
+    const rows = await this.db
+      .select({ n: sql<number>`COUNT(*)` })
+      .from(users)
+      .where(eq(users.role, "admin"));
     return Number(rows[0]?.n ?? 0);
   }
 

@@ -12,6 +12,7 @@ class InMemoryUserRepo implements UserRepo {
       email: u.email.toLowerCase(),
       role: u.role ?? ("user" as const),
       passwordHash: u.passwordHash,
+      disabled: false,
       createdAt: 1000,
     };
     this.byId.set(u.id, rec);
@@ -41,6 +42,26 @@ class InMemoryUserRepo implements UserRepo {
     if (!r) return;
     if (v.defaultBaseUrl !== undefined) r.defaultBaseUrl = v.defaultBaseUrl ?? undefined;
     if (v.anthropicKeyEnc !== undefined) r.anthropicKeyEnc = v.anthropicKeyEnc ?? undefined;
+  }
+  async listAll(limit = 500): Promise<User[]> {
+    return [...this.byId.values()]
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, limit)
+      .map(({ passwordHash: _p, ...u }) => u);
+  }
+  async adminUpdate(
+    id: string,
+    v: { role?: "admin" | "user"; disabled?: boolean; monthlyQuotaMicroUsd?: number | null },
+  ): Promise<void> {
+    const r = this.byId.get(id);
+    if (!r) return;
+    if (v.role !== undefined) r.role = v.role;
+    if (v.disabled !== undefined) r.disabled = v.disabled;
+    if (v.monthlyQuotaMicroUsd !== undefined)
+      r.monthlyQuotaMicroUsd = v.monthlyQuotaMicroUsd ?? undefined;
+  }
+  async countAdmins(): Promise<number> {
+    return [...this.byId.values()].filter((u) => u.role === "admin").length;
   }
   /** 测试用:删掉用户,模拟"令牌有效但账号已删"。 */
   _delete(id: string) {
@@ -153,6 +174,52 @@ describe("AuthService.currentUser", () => {
     const { user, cookie } = await auth.register("a@x.com", "password123");
     users._delete(user.id);
     expect(await auth.currentUser(reqWithCookie(tokenOf(cookie)))).toBeNull();
+  });
+
+  it("账号被停用后,手上那张仍然合法的 cookie 立刻失效", async () => {
+    /*
+     * 【为什么这条最关键】会话令牌签发后有 7 天有效期,签名一直是对的。
+     * 如果只在 login 处拦截停用,一个正在使用中的账号被停用后,
+     * 它当前这张 cookie 还能继续用满一周 —— 那"停用"这个动作等于没做。
+     */
+    const { auth, users } = setup();
+    const { user, cookie } = await auth.register("a@x.com", "password123");
+    const token = tokenOf(cookie);
+    expect(await auth.currentUser(reqWithCookie(token))).not.toBeNull();
+
+    await users.adminUpdate(user.id, { disabled: true });
+    expect(await auth.currentUser(reqWithCookie(token))).toBeNull();
+  });
+
+  it("解除停用后又能用了 —— 停用是可逆的,不是删号", async () => {
+    const { auth, users } = setup();
+    const { user, cookie } = await auth.register("a@x.com", "password123");
+    const token = tokenOf(cookie);
+    await users.adminUpdate(user.id, { disabled: true });
+    await users.adminUpdate(user.id, { disabled: false });
+    expect((await auth.currentUser(reqWithCookie(token)))?.id).toBe(user.id);
+  });
+});
+
+describe("停用账号的登录", () => {
+  it("被停用的账号密码正确也登不上", async () => {
+    const { auth, users } = setup();
+    const { user } = await auth.register("a@x.com", "password123");
+    await users.adminUpdate(user.id, { disabled: true });
+    await expect(auth.login("a@x.com", "password123")).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("密码错误时报的仍是 401,不泄露账号是否存在", async () => {
+    /*
+     * 【为什么要单独守这一条】如果把停用检查放在密码校验【之前】,
+     * 这个接口就成了账号存在性预言机:拿一个乱密码去试,
+     * 回 403「已停用」说明这个邮箱注册过,回 401 说明没注册。
+     * 顺序必须是:先证明你是账号主人,再告诉你账号状态。
+     */
+    const { auth, users } = setup();
+    const { user } = await auth.register("a@x.com", "password123");
+    await users.adminUpdate(user.id, { disabled: true });
+    await expect(auth.login("a@x.com", "wrong-password")).rejects.toMatchObject({ status: 401 });
   });
 });
 

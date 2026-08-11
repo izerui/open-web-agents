@@ -1,5 +1,6 @@
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
+import { ownerFilter, resolveScope } from "@/lib/modules/access/domain/scope";
 import { aggregateUsage } from "@/lib/modules/usage/domain/aggregate";
 
 export const runtime = "nodejs";
@@ -27,11 +28,10 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url);
   const days = Math.min(Math.max(Number(url.searchParams.get("days") ?? 7) || 7, 1), MAX_DAYS);
-  const wantAll = url.searchParams.get("scope") === "all";
 
   const isAdmin = principal.type === "web" && principal.role === "admin";
-  // 非 admin 请求全平台数据时静默降级为只看自己,而不是报错
-  const ownerId = wantAll && isAdmin ? undefined : (principal as { userId: string }).userId;
+  const scope = resolveScope(url.searchParams.get("scope"), isAdmin);
+  const ownerId = ownerFilter(scope, (principal as { userId: string }).userId);
 
   const since = Date.now() - days * 24 * 60 * 60 * 1000;
   const [records, truncated] = await Promise.all([
@@ -41,7 +41,7 @@ export async function GET(req: Request) {
 
   return Response.json({
     days,
-    scope: ownerId ? "self" : "all",
+    scope,
     canViewAll: isAdmin,
     queue: await usage.queueDepth(),
     // 结果被截断时必须说明 —— 否则「最新 5000 条的合计」会被当成总花费,

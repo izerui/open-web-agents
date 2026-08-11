@@ -81,3 +81,15 @@ export function canInvokeAssistant(
 export function canManageAssistants(p: Principal): Decision {
   return p.type === "web" ? ALLOW : deny("api keys cannot manage assistants");
 }
+
+/**
+ * 能否做平台管理动作(改别人的账号)。
+ *
+ * 【为什么对外 key 一律不行,哪怕它归管理员所有】key 是发给第三方系统的凭据,
+ * 会躺在别人的服务器配置里。它的用途是调用助手,不该顺带继承签发人的平台管理权 ——
+ * 否则一把泄漏的 key 就能停掉全平台的账号。
+ */
+export function canAdministerPlatform(p: Principal): Decision {
+  if (p.type !== "web") return deny("api keys cannot administer the platform");
+  return p.role === "admin" ? ALLOW : deny("admin only");
+}

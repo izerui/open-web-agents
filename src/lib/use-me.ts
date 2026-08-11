@@ -102,6 +102,22 @@ export function useMe(): { me: Me | null; loading: boolean } {
 }
 
 /**
+ * 界面上该不该按管理员对待。
+ *
+ * 【为什么本地模式也算】关掉登录要求时(OWA_AUTH_REQUIRED=0),后端发的是一个
+ * 匿名 admin(access/application/authorize.ts),`?scope=all` 对它放行,
+ * 页面守卫 requireAdmin 也直接放行。前端若只认 `user.role`,就会出现
+ * "接口愿意给你全平台数据、界面却不给你入口"的错位。
+ *
+ * 【为什么要抽出来】这个判断在用户菜单和设置区侧栏各要用一次。
+ * 同一条规则写两遍,迟早有一处漏掉本地模式这个分支。
+ */
+export function isAdminView(me: Me | null): boolean {
+  if (!me) return false;
+  return me.user ? me.user.role === "admin" : me.authRequired === false;
+}
+
+/**
  * 邮箱 → 头像里的字母。
  *
  * 【为什么不用 Gravatar】那要把用户邮箱的哈希发给第三方,并且每个头像多一个跨域请求 ——

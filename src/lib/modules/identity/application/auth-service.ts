@@ -71,18 +71,35 @@ export class AuthService {
     const ok = record ? await verifyPassword(password, record.passwordHash) : false;
     if (!record || !ok) throw new AuthError("邮箱或密码不正确", 401);
 
+    /*
+     * 【为什么密码验过了才查禁用】先查禁用会让这个接口变成账号存在性预言机:
+     * 拿一个乱密码试,回"账号已停用"就说明这个邮箱注册过。
+     * 顺序必须是"先证明你是账号主人,再告诉你账号状态"。
+     */
+    if (record.disabled) throw new AuthError("该账号已被停用,请联系平台管理员", 403);
+
     const { passwordHash: _drop, ...user } = record;
     return { user, cookie: this.cookieFor(user.id) };
   }
 
-  /** 从请求 cookie 解析当前用户;无效/过期返回 null。 */
+  /** 从请求 cookie 解析当前用户;无效/过期/已停用返回 null。 */
   async currentUser(req: Request): Promise<User | null> {
     const token = readSessionCookie(req.headers.get("cookie"));
     if (!token) return null;
     const payload = verifyToken(this.deps.sessionSecret, token);
     if (!payload) return null;
     // 令牌有效但用户已被删除 → 视为未登录
-    return this.deps.users.get(payload.userId);
+    const user = await this.deps.users.get(payload.userId);
+    if (!user) return null;
+
+    /*
+     * 【为什么这里也要查,而不只在登录时查】会话令牌签发后有 7 天有效期,
+     * 只在登录处拦截的话,一个正在使用中的账号被停用后,它手上那张
+     * 仍然合法的 cookie 还能继续用整整一周 —— 停用等于没停。
+     * 每个请求都要判,停用才是即时生效的。
+     */
+    if (user.disabled) return null;
+    return user;
   }
 
   private cookieFor(userId: string): string {

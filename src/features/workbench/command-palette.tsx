@@ -11,16 +11,23 @@ import {
   CommandShortcut,
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
-import { BarChart3, Bot, MessageSquare, Plus, Settings, Users, Wrench } from "lucide-react";
+import { BarChart3, Bot, KeyRound, MessageSquare, Plus, Terminal, Users } from "lucide-react";
 import { useEffect } from "react";
 import { activityOf, relativeTime } from "./session-groups";
 import type { AssistantSummary, SessionSummary } from "./types";
 
+/**
+ * 可跳转的设置项。
+ *
+ * 【为什么不含管理员页】命令面板拿不到当前用户的角色(它只收到会话和助手),
+ * 把 /admin/* 列在这儿,非管理员搜出来点进去会被服务端弹回工作台 ——
+ * 一个搜得到却用不了的结果比没有更让人困惑。管理入口只在用户菜单里出现。
+ */
 const PAGES = [
-  { href: "/builder", label: "构建器", icon: Wrench },
-  { href: "/groups", label: "组", icon: Users },
-  { href: "/usage", label: "用量", icon: BarChart3 },
-  { href: "/settings", label: "设置", icon: Settings },
+  { href: "/assistants", label: "我的智能体", icon: Bot },
+  { href: "/settings/keys", label: "接入与 API Key", icon: Terminal },
+  { href: "/settings/usage", label: "用量与成本", icon: BarChart3 },
+  { href: "/settings/credentials", label: "模型凭证", icon: KeyRound },
 ] as const;
 
 /**

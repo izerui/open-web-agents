@@ -14,16 +14,24 @@ import {
 } from "@/components/ui/sidebar";
 import { UserMenu } from "@/components/user-menu";
 import { cn } from "@/lib/utils";
-import { BarChart3, LayoutDashboard, Settings, Users, Wrench } from "lucide-react";
+import { Bot, LayoutDashboard } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+/**
+ * 主区导航 = 企业日常要干的两件事。
+ *
+ * 【为什么是这两项】一个账号就是一家企业,它在这个平台上的日常只有两件事:
+ * 造自己的智能体,以及用它。剩下的(接入、用量、凭证)都是低频配置,
+ * 收进设置区从底部头像进入。
+ *
+ * 【为什么智能体不放在设置里】它是企业的核心创作物,不是一项配置。
+ * 之前把它塞进 /settings/assistants,等于把这个产品最重要的功能
+ * 藏进了"设置"——那是个人们只在出问题时才会点开的地方。
+ */
 const NAV_ITEMS = [
   { href: "/", label: "工作台", icon: LayoutDashboard },
-  { href: "/builder", label: "构建器", icon: Wrench },
-  { href: "/groups", label: "组", icon: Users },
-  { href: "/usage", label: "用量", icon: BarChart3 },
-  { href: "/settings", label: "设置", icon: Settings },
+  { href: "/assistants", label: "我的智能体", icon: Bot },
 ] as const;
 
 /**

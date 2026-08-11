@@ -13,8 +13,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
-import { clearMe, initialsOf, useMe } from "@/lib/use-me";
-import { BarChart3, ChevronsUpDown, LogIn, LogOut, Settings } from "lucide-react";
+import { clearMe, initialsOf, isAdminView, useMe } from "@/lib/use-me";
+import { ChevronsUpDown, LogIn, LogOut, Settings, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -24,7 +24,8 @@ import { toast } from "sonner";
  *
  * 【为什么要有】改造前只有设置页显示了当前账号,也只有它有登出按钮 ——
  * 在工作台、构建器、用量页里,既看不到自己是谁,也没有任何退出的入口。
- * 用户菜单放在侧栏底部是各家产品的共识位置,顺手把"设置/用量"也收进来。
+ * 用户菜单放在侧栏底部是各家产品的共识位置,同时它也是进入设置区的唯一入口 ——
+ * 主区导航只剩会话,配置类的去处全在这里面。
  */
 export function UserMenu() {
   const { me, loading } = useMe();
@@ -141,18 +142,28 @@ export function UserMenu() {
             <DropdownMenuSeparator />
 
             <DropdownMenuGroup>
+              {/*
+                落点必须和设置区侧栏的第一项一致,否则进去会看到一个
+                和高亮项对不上的页面。
+              */}
               <DropdownMenuItem asChild>
-                <Link href="/settings">
+                <Link href="/settings/keys">
                   <Settings />
-                  设置与密钥
+                  账号设置
                 </Link>
               </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link href="/usage">
-                  <BarChart3 />
-                  用量
-                </Link>
-              </DropdownMenuItem>
+              {/*
+                非 admin 完全看不到这一项。服务端还有一道 requireAdmin ——
+                隐藏入口只是不摆在眼前,手敲地址一样要挡住。
+              */}
+              {isAdminView(me) && (
+                <DropdownMenuItem asChild>
+                  <Link href="/admin/accounts">
+                    <ShieldCheck />
+                    平台管理
+                  </Link>
+                </DropdownMenuItem>
+              )}
             </DropdownMenuGroup>
 
             {user && (
