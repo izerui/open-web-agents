@@ -3,7 +3,7 @@ import type { ModelAlias } from "@/lib/shared";
 /** 会话 = 项目 = 工作目录,一对一。 */
 export interface Session {
   id: string;
-  assistantId: string;
+  agentId: string;
   /** 人用时的归属用户;归属校验靠它。 */
   ownerId?: string;
   /** 系统 invoke 时发起该会话的 API Key;归属校验靠它。 */
@@ -21,7 +21,7 @@ export interface Session {
 
 export interface NewSession {
   id: string;
-  assistantId: string;
+  agentId: string;
   workspaceDir: string;
   title?: string;
   ownerId?: string;

@@ -15,7 +15,7 @@ const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
 function session(id: string, createdAt: number): SessionSummary {
-  return { id, assistantId: "a", workspaceDir: `/tmp/${id}`, createdAt };
+  return { id, agentId: "a", workspaceDir: `/tmp/${id}`, createdAt };
 }
 
 describe("relativeTime", () => {

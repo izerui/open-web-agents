@@ -16,13 +16,13 @@ import { createClaudeSdkEngine } from "@/lib/modules/agent-engine/adapters/claud
 import { JsonlTranscript } from "@/lib/modules/agent-engine/adapters/claude-sdk/jsonl-transcript";
 import type { EngineDeps } from "@/lib/modules/agent-engine/adapters/claude-sdk/runner";
 import type { EnginePort, TranscriptPort } from "@/lib/modules/agent-engine/ports";
+import { MysqlAgentRepo } from "@/lib/modules/agent/adapters/mysql-agent-repo";
+import type { AgentRepo } from "@/lib/modules/agent/ports";
 import { RedisApproval } from "@/lib/modules/approval/adapters/redis-approval";
 import type { ApprovalPort } from "@/lib/modules/approval/ports";
 import { LocalFsStorage } from "@/lib/modules/artifacts/adapters/local-fs-storage";
 import { WorkspaceGc } from "@/lib/modules/artifacts/application/gc";
 import type { StoragePort } from "@/lib/modules/artifacts/ports";
-import { MysqlAssistantRepo } from "@/lib/modules/assistant/adapters/mysql-assistant-repo";
-import type { AssistantRepo } from "@/lib/modules/assistant/ports";
 import { RedisBus } from "@/lib/modules/events/adapters/redis-bus";
 import { ReplayBuffer } from "@/lib/modules/events/adapters/replay-buffer";
 import type { BusPort } from "@/lib/modules/events/ports";
@@ -48,7 +48,7 @@ export interface Container {
   env: Env;
   db: Db;
   sessions: SessionRepo;
-  assistants: AssistantRepo;
+  agents: AgentRepo;
   bus: BusPort;
   engine: EnginePort;
   gateway: ModelGatewayPort;
@@ -76,18 +76,18 @@ export interface Container {
 const APPROVAL_TIMEOUT_MS = 10 * 60_000;
 
 /**
- * 内置的通用助手:未定义 outputSchema,故只回对话文本(设计文档 §3)。
- * 助手构建器接入后改为从库里读。
+ * 内置的通用智能体:未定义 outputSchema,故只回对话文本(设计文档 §3)。
+ * 智能体构建器接入后改为从库里读。
  */
-const DEFAULT_ASSISTANT = {
+const DEFAULT_AGENT = {
   id: "default",
   // 平台内置,归 system 所有;通过公开授权让所有人可用(见 build())
   ownerId: "system",
-  name: "通用助手",
-  description: "可对话、可用工具在会话工作目录里干活的通用助手",
+  name: "通用智能体",
+  description: "可对话、可用工具在会话工作目录里干活的通用智能体",
   config: {
     systemPrompt: [
-      "你是 Open Web Agents 平台上的通用助手。",
+      "你是 Open Web Agents 平台上的通用智能体。",
       "你在一个独立的会话工作目录里工作,可以自由读写其中的文件。",
       "回答简洁,用中文。",
     ].join("\n"),
@@ -125,16 +125,16 @@ function build(): Container {
   });
 
   const sessions = new MysqlSessionRepo(db);
-  const assistants = new MysqlAssistantRepo(db);
-  // 首次启动播种内置助手,保证开箱可用;已存在则覆盖为最新定义。
+  const agents = new MysqlAgentRepo(db);
+  // 首次启动播种内置智能体,保证开箱可用;已存在则覆盖为最新定义。
   // 它归 system 所有,故必须同时授予公开 read —— 否则新注册用户在列表里看不到它。
-  void assistants
-    .upsert(DEFAULT_ASSISTANT)
+  void agents
+    .upsert(DEFAULT_AGENT)
     .then(() =>
       grants.grant({
         id: "grant-default-public",
-        resourceType: "assistant",
-        resourceId: DEFAULT_ASSISTANT.id,
+        resourceType: "agent",
+        resourceId: DEFAULT_AGENT.id,
         principalType: "*",
         principalId: PUBLIC_PRINCIPAL,
         permission: "read",
@@ -162,7 +162,7 @@ function build(): Container {
   const auth = new Authorizer({
     apiKeys,
     sessions,
-    assistants,
+    agents,
     grants,
     authRequired: env.authRequired,
     currentUser: (req) => authService.currentUser(req),
@@ -228,7 +228,7 @@ function build(): Container {
 
   const orchestrator = new RunOrchestrator({
     sessions,
-    assistants,
+    agents,
     engine,
     bus,
     platformCredentials: { baseUrl: env.defaultBaseUrl, key: env.defaultApiKey },
@@ -240,8 +240,8 @@ function build(): Container {
     recordRunSession: (runId, sdkSessionId) => runs.setSdkSessionId(runId, sdkSessionId),
     recordRunAnchor: (runId, anchor) => runs.setResumeAnchor(runId, anchor),
     // 知识检索:没有文档或没命中都返回空串,上层据此决定不注入
-    retrieveKnowledge: async (assistantId, query) => {
-      const chunks = await knowledge.chunksOf(assistantId);
+    retrieveKnowledge: async (agentId, query) => {
+      const chunks = await knowledge.chunksOf(agentId);
       if (chunks.length === 0) return "";
       return formatContext(retrieve(query, chunks));
     },
@@ -252,10 +252,10 @@ function build(): Container {
       const key = u.anthropicKeyEnc ? secrets.decrypt(u.anthropicKeyEnc) : null;
       return { baseUrl: u.defaultBaseUrl, key: key ?? undefined };
     },
-    // 助手配了 webhookUrl 就在终态推一次;失败不影响 run 状态(可轮询兜底)
-    onComplete: ({ runId, assistantId, result }) => {
+    // 智能体配了 webhookUrl 就在终态推一次;失败不影响 run 状态(可轮询兜底)
+    onComplete: ({ runId, agentId, result }) => {
       void (async () => {
-        const a = await assistants.get(assistantId);
+        const a = await agents.get(agentId);
         const url = a?.webhookUrl;
         if (!url || !runId) return;
         await deliverWebhook(url, {
@@ -311,7 +311,7 @@ function build(): Container {
     env,
     db,
     sessions,
-    assistants,
+    agents,
     bus,
     engine,
     gateway,

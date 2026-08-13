@@ -67,7 +67,7 @@ export interface Env {
   /** 是否要求登录 */
   authRequired: boolean;
   sandbox: boolean;
-  /** 是否允许助手配置在宿主机启动 stdio MCP 进程。 */
+  /** 是否允许智能体配置在宿主机启动 stdio MCP 进程。 */
   allowStdioMcp: boolean;
 }
 

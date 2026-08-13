@@ -1,10 +1,10 @@
-// 助手配置的校验。纯逻辑,构建器与 API 共用同一套规则。
+// 智能体配置的校验。纯逻辑,构建器与 API 共用同一套规则。
 //
 // 为什么要单独校验:MCP/skills 配错了不会在保存时报错,而是在【运行时】让 agent
 // 起不来或静默少能力 —— 那时候排查成本高得多。宁可在构建器里当场拦住。
 
 import { PERMISSION_MODES } from "@/lib/shared";
-import type { AssistantConfig } from "./config";
+import type { AgentConfig } from "./config";
 
 export interface ConfigIssue {
   field: string;
@@ -36,8 +36,8 @@ function checkUrl(raw: string): string | null {
 }
 
 /** 返回所有问题(而非遇到第一个就停)—— 一次性把配置问题都告诉用户。 */
-export function validateAssistantConfig(
-  cfg: Partial<AssistantConfig>,
+export function validateAgentConfig(
+  cfg: Partial<AgentConfig>,
   policy: ConfigValidationPolicy = {},
 ): ConfigIssue[] {
   const issues: ConfigIssue[] = [];

@@ -8,7 +8,7 @@
 // 结果已经算出来了,不能因为"记审计日志失败"就把它丢掉。
 
 import type { EnginePort, RunResult } from "@/lib/modules/agent-engine/ports";
-import { InMemoryAssistantRepo } from "@/lib/modules/assistant/adapters/in-memory-assistant-repo";
+import { InMemoryAgentRepo } from "@/lib/modules/agent/adapters/in-memory-agent-repo";
 import { InMemoryBus } from "@/lib/modules/events/adapters/in-memory-bus";
 import { InMemoryRunRepo } from "@/lib/modules/run/adapters/in-memory-run-repo";
 import { type OrchestratorDeps, RunOrchestrator } from "@/lib/modules/run/application/orchestrator";
@@ -36,14 +36,14 @@ const boom = () => Promise.reject(new Error("依赖挂了"));
 
 async function setup(over: Partial<OrchestratorDeps> = {}, engine = new OkEngine()) {
   const sessions = new InMemorySessionRepo();
-  const assistants = new InMemoryAssistantRepo([
-    { id: "a1", ownerId: "u1", name: "助手", config: { systemPrompt: "p", model: "sonnet" } },
+  const agents = new InMemoryAgentRepo([
+    { id: "a1", ownerId: "u1", name: "智能体", config: { systemPrompt: "p", model: "sonnet" } },
   ]);
-  await sessions.create({ id: "s1", assistantId: "a1", workspaceDir: "/ws", ownerId: "u1" });
+  await sessions.create({ id: "s1", agentId: "a1", workspaceDir: "/ws", ownerId: "u1" });
 
   const orch = new RunOrchestrator({
     sessions,
-    assistants,
+    agents,
     engine,
     bus: new InMemoryBus(),
     platformCredentials: { baseUrl: "platform", key: "pk" },
@@ -85,7 +85,7 @@ describe("故障注入 / 知识检索", () => {
     await expect(orch.execute({ sessionId: "s1", prompt: "hi" }, signal())).resolves.toMatchObject({
       status: "success",
     });
-    // 提示词退回助手原始配置,没有被半截的检索结果污染
+    // 提示词退回智能体原始配置,没有被半截的检索结果污染
     expect(engine.lastSpec?.systemPrompt).toBe("p");
   });
 
@@ -182,7 +182,7 @@ describe("故障注入 / 审计与回调", () => {
   it("读用户凭证失败时回落平台默认并继续 —— 但会记一条告警", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { orch, engine, sessions } = await setup({ userCredentials: boom });
-    await sessions.create({ id: "s-own", assistantId: "a1", workspaceDir: "/ws", ownerId: "u1" });
+    await sessions.create({ id: "s-own", agentId: "a1", workspaceDir: "/ws", ownerId: "u1" });
     await expect(
       orch.execute({ sessionId: "s-own", prompt: "hi" }, signal()),
     ).resolves.toMatchObject({ status: "success" });

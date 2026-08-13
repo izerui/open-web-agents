@@ -6,7 +6,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 
 interface Row {
   id: string;
-  assistantId: string;
+  agentId: string;
   ownerId: string | null;
   callerApiKeyId: string | null;
   workspaceDir: string;
@@ -20,7 +20,7 @@ interface Row {
 function toSession(r: Row): Session {
   return {
     id: r.id,
-    assistantId: r.assistantId,
+    agentId: r.agentId,
     ownerId: r.ownerId ?? undefined,
     callerApiKeyId: r.callerApiKeyId ?? undefined,
     workspaceDir: r.workspaceDir,
@@ -34,7 +34,7 @@ function toSession(r: Row): Session {
 
 const COLUMNS = {
   id: sessions.id,
-  assistantId: sessions.assistantId,
+  agentId: sessions.agentId,
   ownerId: sessions.ownerId,
   callerApiKeyId: sessions.callerApiKeyId,
   workspaceDir: sessions.workspaceDir,
@@ -67,7 +67,7 @@ export class MysqlSessionRepo implements SessionRepo {
   async create(s: NewSession): Promise<Session> {
     await this.db.insert(sessions).values({
       id: s.id,
-      assistantId: s.assistantId,
+      agentId: s.agentId,
       ownerId: s.ownerId,
       callerApiKeyId: s.callerApiKeyId,
       workspaceDir: s.workspaceDir,

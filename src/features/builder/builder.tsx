@@ -16,7 +16,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { KnowledgePanel } from "@/features/builder/knowledge-panel";
 import { SharePanel } from "@/features/builder/share-panel";
-import type { AssistantSummary } from "@/features/workbench/types";
+import type { AgentSummary } from "@/features/workbench/types";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { PERMISSION_MODES, type PermissionMode } from "@/lib/shared";
 import { cn } from "@/lib/utils";
@@ -70,7 +70,7 @@ function newMcpRow(): McpDraft {
   };
 }
 
-/** 子代理:让助手把一类子任务交给一个带专属提示词的下级去做。 */
+/** 子代理:让智能体把一类子任务交给一个带专属提示词的下级去做。 */
 interface SubagentDraft {
   uid: string;
   name: string;
@@ -107,10 +107,10 @@ interface Draft {
   permissionMode: PermissionMode;
 }
 
-type BuilderAssistant = AssistantSummary & { config: Record<string, unknown> };
+type BuilderAgent = AgentSummary & { config: Record<string, unknown> };
 
-interface AssistantsResponse {
-  assistants?: BuilderAssistant[];
+interface AgentsResponse {
+  agents?: BuilderAgent[];
   capabilities?: { stdioMcp?: boolean };
 }
 
@@ -171,19 +171,19 @@ function parseSkills(text: string): string[] {
 }
 
 export function Builder() {
-  const [list, setList] = useState<AssistantSummary[]>([]);
+  const [list, setList] = useState<AgentSummary[]>([]);
   const [allowStdioMcp, setAllowStdioMcp] = useState(false);
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [saving, setSaving] = useState(false);
 
   const reload = useCallback(
     () =>
-      fetchJson<AssistantsResponse>("/api/assistants")
+      fetchJson<AgentsResponse>("/api/agents")
         .then((d) => {
-          setList(d.assistants ?? []);
+          setList(d.agents ?? []);
           setAllowStdioMcp(d.capabilities?.stdioMcp === true);
         })
-        .catch((e: unknown) => toast.error(`助手列表加载失败:${errorText(e)}`)),
+        .catch((e: unknown) => toast.error(`智能体列表加载失败:${errorText(e)}`)),
     [],
   );
 
@@ -191,7 +191,7 @@ export function Builder() {
     void reload();
   }, [reload]);
 
-  // outputSchema 的合法性即时反馈 —— 它是对外接口契约,写错了整个助手就不可用
+  // outputSchema 的合法性即时反馈 —— 它是对外接口契约,写错了整个智能体就不可用
   const schemaText = draft.outputSchemaText.trim();
   let schemaError: string | null = null;
   let parsedSchema: Record<string, unknown> | undefined;
@@ -261,7 +261,7 @@ export function Builder() {
           };
         });
 
-      const res = await fetch("/api/assistants", {
+      const res = await fetch("/api/agents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -302,9 +302,9 @@ export function Builder() {
           },
         }),
       });
-      const data = (await res.json()) as { assistant?: AssistantSummary; error?: string };
+      const data = (await res.json()) as { agent?: AgentSummary; error?: string };
       if (!res.ok || data.error) throw new Error(data.error ?? `HTTP ${res.status}`);
-      toast.success(`已保存:${data.assistant?.id}`);
+      toast.success(`已保存:${data.agent?.id}`);
       await reload();
     } catch (e) {
       toast.error(`保存失败:${e instanceof Error ? e.message : String(e)}`);
@@ -313,11 +313,11 @@ export function Builder() {
     }
   }
 
-  function edit(a: AssistantSummary) {
-    void fetchJson<AssistantsResponse>("/api/assistants")
+  function edit(a: AgentSummary) {
+    void fetchJson<AgentsResponse>("/api/agents")
       .then((d) => {
         setAllowStdioMcp(d.capabilities?.stdioMcp === true);
-        const full = d.assistants?.find((x) => x.id === a.id);
+        const full = d.agents?.find((x) => x.id === a.id);
         if (!full) return;
         const cfg = full.config as Record<string, unknown>;
         setDraft({
@@ -388,19 +388,19 @@ export function Builder() {
             : [],
         });
       })
-      // 点了助手却没反应最让人困惑 —— 至少说清楚是没读到,而不是这个助手本身是空的
-      .catch((e: unknown) => toast.error(`打开助手失败:${errorText(e)}`));
+      // 点了智能体却没反应最让人困惑 —— 至少说清楚是没读到,而不是这个智能体本身是空的
+      .catch((e: unknown) => toast.error(`打开智能体失败:${errorText(e)}`));
   }
 
-  /** 助手列表挂进全站侧栏 —— 再开一条自己的侧栏就成了两级导航,看着像两个产品 */
-  const assistantList = (
+  /** 智能体列表挂进全站侧栏 —— 再开一条自己的侧栏就成了两级导航,看着像两个产品 */
+  const agentList = (
     <SidebarGroup>
-      <SidebarGroupLabel>助手</SidebarGroupLabel>
+      <SidebarGroupLabel>智能体</SidebarGroupLabel>
       <SidebarMenu>
         <SidebarMenuItem>
-          <SidebarMenuButton onClick={() => setDraft(EMPTY)} tooltip="新建助手">
+          <SidebarMenuButton onClick={() => setDraft(EMPTY)} tooltip="新建智能体">
             <Plus className="text-muted-foreground/60" />
-            <span className="text-xs">新建助手</span>
+            <span className="text-xs">新建智能体</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
 
@@ -444,11 +444,11 @@ export function Builder() {
     <AppShell
       title="我的智能体"
       subtitle={'定义一个只干特定某件事的"员工"。填了 outputSchema,它就能被企业系统当接口调用。'}
-      sidebarExtra={assistantList}
+      sidebarExtra={agentList}
       actions={
         <Button size="sm" onClick={save} disabled={!canSave}>
           <Save className="size-3.5" />
-          {saving ? "保存中…" : "保存助手"}
+          {saving ? "保存中…" : "保存智能体"}
         </Button>
       }
     >
@@ -458,7 +458,7 @@ export function Builder() {
           <Input
             value={draft.name}
             onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-            placeholder="代码评审助手"
+            placeholder="代码评审智能体"
           />
         </label>
         <label className="space-y-1">
@@ -530,7 +530,7 @@ export function Builder() {
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-sm">MCP 服务</CardTitle>
-              <CardDescription>给助手接外部工具(可选)</CardDescription>
+              <CardDescription>给智能体接外部工具(可选)</CardDescription>
             </div>
             <Button
               variant="ghost"
@@ -816,17 +816,17 @@ export function Builder() {
           <FileCode /> 填入示例 schema
         </Button>
         {schemaError && <span className="text-xs text-destructive">schema 非法:{schemaError}</span>}
-        {!schemaError && schemaText && <Badge variant="success">schema 合法 · 接口型助手</Badge>}
+        {!schemaError && schemaText && <Badge variant="success">schema 合法 · 接口型智能体</Badge>}
       </div>
 
       {draft.id && (
         <KnowledgePanel
-          assistantId={draft.id}
+          agentId={draft.id}
           canWrite={list.find((a) => a.id === draft.id)?.canWrite !== false}
         />
       )}
 
-      {draft.id && <SharePanel assistantId={draft.id} />}
+      {draft.id && <SharePanel agentId={draft.id} />}
 
       {draft.id && parsedSchema && (
         <Card>

@@ -179,7 +179,7 @@ interface BlockingResponse {
     result?: string;
     isError?: boolean;
   }[];
-  /** 结构化输出(助手配了 outputSchema 时才有) */
+  /** 结构化输出(智能体配了 outputSchema 时才有) */
   structured?: unknown;
   /** 错误摘要(失败时) */
   error?: string;

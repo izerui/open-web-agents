@@ -8,7 +8,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { BASE, type Client, newUser, serverUp } from "./client";
 
 type SessionRes = { session?: { id: string } };
-type ListRes = { assistants?: { id: string }[] };
+type ListRes = { agents?: { id: string }[] };
 type BranchRes = { runs?: { id: string; status: string }[] };
 type CancelRes = { cancelled?: string[]; note?: string };
 type HealthRes = {
@@ -56,10 +56,10 @@ describe("会话归属隔离", () => {
     if (!(await serverUp())) throw new Error("e2e 需要一个跑着的服务");
     a = await newUser("sess-a");
     b = await newUser("sess-b");
-    const list = await a.get<ListRes>("/api/assistants");
-    const assistantId = list.body.assistants?.[0]?.id;
-    expect(assistantId).toBeTruthy();
-    const s = await a.post<SessionRes>("/api/sessions", { assistantId });
+    const list = await a.get<ListRes>("/api/agents");
+    const agentId = list.body.agents?.[0]?.id;
+    expect(agentId).toBeTruthy();
+    const s = await a.post<SessionRes>("/api/sessions", { agentId });
     sessionId = s.body.session?.id ?? "";
     expect(sessionId).toBeTruthy();
   });
@@ -99,9 +99,9 @@ describe("工作空间路径守卫", () => {
   beforeAll(async () => {
     if (!(await serverUp())) throw new Error("e2e 需要一个跑着的服务");
     a = await newUser("fs");
-    const list = await a.get<ListRes>("/api/assistants");
+    const list = await a.get<ListRes>("/api/agents");
     const s = await a.post<SessionRes>("/api/sessions", {
-      assistantId: list.body.assistants?.[0]?.id,
+      agentId: list.body.agents?.[0]?.id,
     });
     sessionId = s.body.session?.id ?? "";
   });
@@ -144,9 +144,9 @@ describe("取消", () => {
   beforeAll(async () => {
     if (!(await serverUp())) throw new Error("e2e 需要一个跑着的服务");
     a = await newUser("cancel");
-    const list = await a.get<ListRes>("/api/assistants");
+    const list = await a.get<ListRes>("/api/agents");
     const s = await a.post<SessionRes>("/api/sessions", {
-      assistantId: list.body.assistants?.[0]?.id,
+      agentId: list.body.agents?.[0]?.id,
     });
     sessionId = s.body.session?.id ?? "";
   });

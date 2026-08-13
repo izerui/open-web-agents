@@ -13,26 +13,26 @@ function monthStart(): number {
 /**
  * 平台账号列表。
  *
- * 【为什么把花费和助手数一起算进来】这是运营看的页面,光有邮箱和注册时间
+ * 【为什么把花费和智能体数一起算进来】这是运营看的页面,光有邮箱和注册时间
  * 判断不了任何事 —— 谁在真正使用、谁在烧钱,才是决定要不要调额度/停用的依据。
  */
 export async function GET(req: Request) {
-  const { users, usage, assistants, auth } = getContainer();
+  const { users, usage, agents, auth } = getContainer();
   try {
     const principal = await auth.resolveWeb(req);
     auth.assertCanAdministerPlatform(principal);
 
     const since = monthStart();
     // 三个查询互不依赖,并行拿;各自都是一次性批量,没有 N+1
-    const [list, costMap, allAssistants] = await Promise.all([
+    const [list, costMap, allAgents] = await Promise.all([
       users.listAll(),
       usage.costByOwner(since),
-      assistants.list(),
+      agents.list(),
     ]);
 
-    const assistantCount = new Map<string, number>();
-    for (const a of allAssistants) {
-      assistantCount.set(a.ownerId, (assistantCount.get(a.ownerId) ?? 0) + 1);
+    const agentCount = new Map<string, number>();
+    for (const a of allAgents) {
+      agentCount.set(a.ownerId, (agentCount.get(a.ownerId) ?? 0) + 1);
     }
 
     return Response.json({
@@ -43,7 +43,7 @@ export async function GET(req: Request) {
         role: u.role,
         disabled: u.disabled,
         createdAt: u.createdAt,
-        assistantCount: assistantCount.get(u.id) ?? 0,
+        agentCount: agentCount.get(u.id) ?? 0,
         monthCostMicroUsd: costMap.get(u.id) ?? 0,
         monthlyQuotaMicroUsd: u.monthlyQuotaMicroUsd ?? null,
       })),

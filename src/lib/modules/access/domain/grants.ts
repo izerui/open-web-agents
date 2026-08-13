@@ -3,11 +3,11 @@
 //
 // 与"归属"的分工:
 // - 归属(ownerId/callerApiKeyId)决定【会话/运行】这类私有执行痕迹归谁
-// - 授权(本文件)决定【助手】这类可共享的定义能被谁使用/修改
-// 两者独立:把助手分享给同事,不等于同事能看你用它跑出来的会话。
+// - 授权(本文件)决定【智能体】这类可共享的定义能被谁使用/修改
+// 两者独立:把智能体分享给同事,不等于同事能看你用它跑出来的会话。
 
 export type Permission = "read" | "write";
-export type ResourceType = "assistant";
+export type ResourceType = "agent";
 
 /** `*` 作为 principalId 表示"所有登录用户"(公开)。 */
 export const PUBLIC_PRINCIPAL = "*";
@@ -49,7 +49,7 @@ export interface OwnedResource {
  * 判定某主体对某资源是否有指定权限。
  *
  * 顺序:owner 恒有全权 → admin 恒有全权 → 逐条匹配授权。
- * admin 在这里放开是刻意的:助手是平台配置资产,管理员需要能接管无人维护的助手。
+ * admin 在这里放开是刻意的:智能体是平台配置资产,管理员需要能接管无人维护的智能体。
  * (注意这与会话的规则不同 —— 会话是私有执行痕迹,admin 也不越权,见 principal.ts。)
  */
 export function hasResourceAccess(

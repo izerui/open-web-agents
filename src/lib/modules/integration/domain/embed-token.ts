@@ -11,8 +11,8 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 export interface EmbedClaims {
-  /** 允许调用的助手。 */
-  assistantId: string;
+  /** 允许调用的智能体。 */
+  agentId: string;
   /** 绑定的会话 —— 令牌只能操作这一个会话,拿到也读不了别人的。 */
   sessionId: string;
   /** 签发它的 API Key id,用于审计与吊销追溯。 */
@@ -70,7 +70,7 @@ export function verifyEmbedToken(
   }
 
   if (
-    !claims?.assistantId ||
+    !claims?.agentId ||
     !claims.sessionId ||
     !claims.keyId ||
     !Number.isFinite(claims.expiresAt) ||

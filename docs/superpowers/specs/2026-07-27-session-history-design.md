@@ -84,7 +84,7 @@ via parentUuid links, and returns user/assistant messages in chronological order
 ### transcript 保留期(已解决)
 
 原设计漏了一条:`cleanupPeriodDays` 默认 **30 天**,到期 SDK 自己删掉 jsonl。
-除了历史消失,`resume` 找不到文件时会**静默开新会话而不报错**,表现成"助手突然失忆"。
+除了历史消失,`resume` 找不到文件时会**静默开新会话而不报错**,表现成"智能体突然失忆"。
 
 已在 `options.ts` 显式设为一年。不设永久是因为磁盘无上限增长会把队列和数据库一起拖垮。
 

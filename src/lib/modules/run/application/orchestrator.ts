@@ -6,9 +6,9 @@ import {
   resolveModelAlias,
 } from "@/lib/modules/agent-engine/domain/resolve-credentials";
 import type { EnginePort, RunResult } from "@/lib/modules/agent-engine/ports";
-import { buildSpec } from "@/lib/modules/assistant/domain/build-spec";
-import { validateStructured } from "@/lib/modules/assistant/domain/validate-output";
-import type { AssistantRepo } from "@/lib/modules/assistant/ports";
+import { buildSpec } from "@/lib/modules/agent/domain/build-spec";
+import { validateStructured } from "@/lib/modules/agent/domain/validate-output";
+import type { AgentRepo } from "@/lib/modules/agent/ports";
 import type { BusPort } from "@/lib/modules/events/ports";
 import type { SessionRepo } from "@/lib/modules/session/ports";
 import type { AgentEvent, CredentialChain, ModelAlias } from "@/lib/shared";
@@ -25,7 +25,7 @@ export interface RunCommand {
 
 export interface OrchestratorDeps {
   sessions: SessionRepo;
-  assistants: AssistantRepo;
+  agents: AgentRepo;
   engine: EnginePort;
   bus: BusPort;
   /** 平台默认凭证(三级链兜底)。 */
@@ -50,15 +50,15 @@ export interface OrchestratorDeps {
   /** 记录本轮实际使用的起跑锚点,供审计。 */
   recordRunAnchor?: (runId: string, anchor: string | null) => Promise<void>;
   /**
-   * 按本轮输入检索助手知识库,返回可直接注入提示词的文本(无命中则空串)。
+   * 按本轮输入检索智能体知识库,返回可直接注入提示词的文本(无命中则空串)。
    * 检索失败不该让整轮运行失败 —— 降级成"没有知识库"继续跑。
    */
-  retrieveKnowledge?: (assistantId: string, query: string) => Promise<string>;
+  retrieveKnowledge?: (agentId: string, query: string) => Promise<string>;
   /** 终态时投递 webhook(可选)。 */
   onComplete?: (info: {
     runId?: string;
     sessionId: string;
-    assistantId: string;
+    agentId: string;
     result: RunResult;
   }) => void;
 }
@@ -100,8 +100,8 @@ export class RunOrchestrator {
     const session = await this.deps.sessions.get(cmd.sessionId);
     if (!session) throw new Error(`session not found: ${cmd.sessionId}`);
 
-    const assistant = await this.deps.assistants.get(session.assistantId);
-    if (!assistant) throw new Error(`assistant not found: ${session.assistantId}`);
+    const agent = await this.deps.agents.get(session.agentId);
+    if (!agent) throw new Error(`agent not found: ${session.agentId}`);
 
     // 三级链的 user 层:会话归属用户自带的 base_url/key(设计文稿 §9)。
     //
@@ -128,7 +128,7 @@ export class RunOrchestrator {
       request: cmd.override,
     };
     const credentials = resolveCredentials(chain);
-    const model = resolveModelAlias(chain, assistant.config.model);
+    const model = resolveModelAlias(chain, agent.config.model);
 
     // 分支重跑:优先用该运行自己的锚点。只有它没有明确意图时才回退到会话最新状态
     let resumeSessionId = session.sdkSessionId;
@@ -157,10 +157,10 @@ export class RunOrchestrator {
     };
     // 知识检索:命中才注入。检索挂了就当没有知识库,不牵连整轮运行
     const knowledgeContext = this.deps.retrieveKnowledge
-      ? await this.deps.retrieveKnowledge(session.assistantId, cmd.prompt).catch(() => "")
+      ? await this.deps.retrieveKnowledge(session.agentId, cmd.prompt).catch(() => "")
       : "";
 
-    const spec = buildSpec(assistant.config, ctx, { model, knowledgeContext });
+    const spec = buildSpec(agent.config, ctx, { model, knowledgeContext });
 
     // 广播按会话(重连方只知道 sessionId),缓冲按运行(两轮并发时互不清空)
     const topic = topicOf(cmd.sessionId);
@@ -247,7 +247,7 @@ export class RunOrchestrator {
       this.deps.onComplete?.({
         runId: cmd.runId,
         sessionId: cmd.sessionId,
-        assistantId: session.assistantId,
+        agentId: session.agentId,
         result,
       });
     } catch {

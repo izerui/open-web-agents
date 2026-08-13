@@ -9,25 +9,25 @@ export const dynamic = "force-dynamic";
 /**
  * 按操作分级鉴权。
  *
- * 口径要与助手本身一致:被分享 read 的人能从助手列表看到完整 systemPrompt,
- * 那么"这个助手挂了哪几篇资料"(仅标题)同样属于 read 范畴 —— 两条路径不该一个
+ * 口径要与智能体本身一致:被分享 read 的人能从智能体列表看到完整 systemPrompt,
+ * 那么"这个智能体挂了哪几篇资料"(仅标题)同样属于 read 范畴 —— 两条路径不该一个
  * 能看一个 403。而增删知识文档会改变回答内容,与改提示词同级,必须 write。
  */
-async function requirePermission(req: Request, assistantId: string, need: "read" | "write") {
-  const { assistants, grants, auth } = getContainer();
+async function requirePermission(req: Request, agentId: string, need: "read" | "write") {
+  const { agents, grants, auth } = getContainer();
   const subject = await auth.resolveSubject(req);
-  const assistant = await assistants.get(assistantId);
-  if (!assistant) return { error: Response.json({ error: "not found" }, { status: 404 }) };
+  const agent = await agents.get(agentId);
+  if (!agent) return { error: Response.json({ error: "not found" }, { status: 404 }) };
 
-  const list = await grants.listForResource("assistant", assistantId);
+  const list = await grants.listForResource("agent", agentId);
   // 连读都无权 → 404,不确认资源存在
-  if (!hasResourceAccess(subject, assistant, "read", list)) {
+  if (!hasResourceAccess(subject, agent, "read", list)) {
     return { error: Response.json({ error: "not found" }, { status: 404 }) };
   }
-  if (need === "write" && !hasResourceAccess(subject, assistant, "write", list)) {
+  if (need === "write" && !hasResourceAccess(subject, agent, "write", list)) {
     return { error: Response.json({ error: "no write permission" }, { status: 403 }) };
   }
-  return { assistant };
+  return { agent };
 }
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -65,7 +65,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     const doc = await knowledge.create({
       id: randomUUID().replace(/-/g, "").slice(0, 24),
-      assistantId: id,
+      agentId: id,
       title,
       content,
     });
@@ -87,10 +87,10 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
     const docId = new URL(req.url).searchParams.get("docId");
     if (!docId) return Response.json({ error: "docId is required" }, { status: 400 });
 
-    // 只能删本助手的文档,防止拿别助手的 docId 越权删除
+    // 只能删本智能体的文档,防止拿别智能体的 docId 越权删除
     const doc = await knowledge.get(docId);
-    if (!doc || doc.assistantId !== id) {
-      return Response.json({ error: "该文档不属于本助手" }, { status: 404 });
+    if (!doc || doc.agentId !== id) {
+      return Response.json({ error: "该文档不属于本智能体" }, { status: 404 });
     }
     await knowledge.delete(docId);
     return Response.json({ deleted: docId });

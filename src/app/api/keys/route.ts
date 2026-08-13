@@ -21,7 +21,7 @@ async function currentUserId(req: Request): Promise<string> {
   const { auth } = getContainer();
   const principal = await auth.resolveWeb(req);
   // 对外 key 不能自我枚举/提权
-  auth.assertCanManageAssistants(principal);
+  auth.assertCanManageAgents(principal);
   return (await auth.subjectOf(principal)).userId;
 }
 
@@ -42,7 +42,7 @@ export async function GET(req: Request) {
  * 明文【只在本次响应里返回一次】—— 库里只有哈希,丢了只能重新签发。
  */
 export async function POST(req: Request) {
-  const { apiKeys, assistants, grants, auth } = getContainer();
+  const { apiKeys, agents, grants, auth } = getContainer();
 
   let ownerId: string;
   try {
@@ -53,19 +53,26 @@ export async function POST(req: Request) {
     throw err;
   }
 
-  const body = (await req.json().catch(() => ({}))) as { name?: string; assistantId?: string };
+  // assistantId 是改名前的字段名,回退一层保住已接入的调用方。
+  const raw = (await req.json().catch(() => ({}))) as {
+    name?: string;
+    agentId?: string;
+    /* 旧字段,仅供回退 */
+    assistantId?: string;
+  };
+  const body = { name: raw.name, agentId: raw.agentId ?? raw.assistantId };
 
-  // 绑定到具体助手时,不仅要确认它存在,还要确认签发人对它有权限 ——
-  // 否则等于把「越权运行他人助手」从一次性利用固化成一把长期有效的专用凭证,
+  // 绑定到具体智能体时,不仅要确认它存在,还要确认签发人对它有权限 ——
+  // 否则等于把「越权运行他人智能体」从一次性利用固化成一把长期有效的专用凭证,
   // 而且那把 key 在受害者的界面上根本看不见。
   //
-  // 存在与无权返回同一个 404:不区分二者,免得这个接口变成助手 id 的存在性预言机。
-  if (body.assistantId) {
-    const a = await assistants.get(body.assistantId);
+  // 存在与无权返回同一个 404:不区分二者,免得这个接口变成智能体 id 的存在性预言机。
+  if (body.agentId) {
+    const a = await agents.get(body.agentId);
     const subject = await auth.subjectOf(await auth.resolveWeb(req));
-    const list = await grants.listForResource("assistant", body.assistantId);
+    const list = await grants.listForResource("agent", body.agentId);
     if (!a || !hasResourceAccess(subject, a, "read", list)) {
-      return Response.json({ error: "assistant not found" }, { status: 404 });
+      return Response.json({ error: "agent not found" }, { status: 404 });
     }
   }
 
@@ -73,7 +80,7 @@ export async function POST(req: Request) {
   const record = await apiKeys.create({
     id: randomUUID().replace(/-/g, "").slice(0, 24),
     ownerId,
-    assistantId: body.assistantId,
+    agentId: body.agentId,
     name: body.name,
     hashedKey: hashApiKey(plain),
   });

@@ -23,7 +23,7 @@ export interface ResolvedCredentials {
   key: string;
 }
 
-// ─────────────────────────── 助手能力片段 ───────────────────────────
+// ─────────────────────────── 智能体能力片段 ───────────────────────────
 
 export interface McpDef {
   name: string;
@@ -101,7 +101,7 @@ export interface AgentSpec {
   tools?: ToolDef[];
   subagents?: SubagentDef[];
   model: ModelSelection;
-  /** 有则启用结构化输出 —— 决定该助手能否被企业系统当接口消费。 */
+  /** 有则启用结构化输出 —— 决定该智能体能否被企业系统当接口消费。 */
   outputSchema?: JsonSchema;
   verifyRules?: VerifyRule[];
   /** 人工审批规则(HITL);不配则不审批。 */

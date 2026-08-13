@@ -321,7 +321,7 @@ describe("权限模式", () => {
  *
  * SDK 默认 30 天就把 ~/.claude/projects 下的 jsonl 删掉(subagents.md:582)。
  * 后果有两层:会话历史整体消失;更隐蔽的是 resume 会【静默开一个新会话而不报错】
- * (sessions.md:255),表现成"助手突然失忆",日志里干干净净。
+ * (sessions.md:255),表现成"智能体突然失忆",日志里干干净净。
  */
 describe("transcript 保留期", () => {
   it("显式设置 cleanupPeriodDays,不吃 30 天的默认值", () => {
@@ -347,7 +347,7 @@ describe("transcript 保留期", () => {
  * 【为什么换】实测 SDK 会发 CLAUDE_SDK_CAN_USE_TOOL_SHADOWED 告警:
  *   "canUseTool will not be invoked for: Bash. Bare allowedTools entries
  *    auto-approve the whole tool before the callback is consulted."
- * 也就是说,只要助手配了工具白名单(裸名),路径守卫和人工审批就【双双静默失效】——
+ * 也就是说,只要智能体配了工具白名单(裸名),路径守卫和人工审批就【双双静默失效】——
  * 一个本意是收紧权限的配置,反而把围栏拆了。
  * 官方给的正解是 PreToolUse hook:它在所有权限步骤之前跑,连 bypassPermissions 都拦得住。
  */

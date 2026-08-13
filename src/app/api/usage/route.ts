@@ -19,7 +19,7 @@ export async function GET(req: Request) {
   try {
     principal = await auth.resolveWeb(req);
     // 对外 key 不该看到平台运营数据
-    auth.assertCanManageAssistants(principal);
+    auth.assertCanManageAgents(principal);
   } catch (err) {
     const res = authErrorResponse(err);
     if (res) return res;

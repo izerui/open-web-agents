@@ -1,8 +1,8 @@
 export interface ApiKeyRecord {
   id: string;
   ownerId: string;
-  /** 绑定到具体助手则只能调该助手;为空是账户级 key。 */
-  assistantId?: string;
+  /** 绑定到具体智能体则只能调该智能体;为空是账户级 key。 */
+  agentId?: string;
   name?: string;
   createdAt: number;
   lastUsedAt?: number;
@@ -11,7 +11,7 @@ export interface ApiKeyRecord {
 export interface NewApiKey {
   id: string;
   ownerId: string;
-  assistantId?: string;
+  agentId?: string;
   name?: string;
   /** 已哈希;明文绝不入库。 */
   hashedKey: string;

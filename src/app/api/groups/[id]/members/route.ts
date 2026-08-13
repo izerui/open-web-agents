@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 async function requireGroupAdmin(req: Request, groupId: string) {
   const { groups, auth } = getContainer();
   const principal = await auth.resolveWeb(req);
-  auth.assertCanManageAssistants(principal);
+  auth.assertCanManageAgents(principal);
 
   const group = await groups.get(groupId);
   // 无权时与"不存在"同样返回 404,不确认资源存在

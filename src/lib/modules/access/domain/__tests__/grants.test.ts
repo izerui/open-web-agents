@@ -17,7 +17,7 @@ const asst = { id: "a1", ownerId: "u-owner" };
 
 const grant = (over: Partial<Grant> = {}): Grant => ({
   id: "g1",
-  resourceType: "assistant",
+  resourceType: "agent",
   resourceId: "a1",
   principalType: "user",
   principalId: "u-other",
@@ -31,7 +31,7 @@ describe("hasResourceAccess / owner 与 admin", () => {
     expect(hasResourceAccess(owner, asst, "write", [])).toBe(true);
   });
 
-  it("admin 恒有权 —— 需能接管无人维护的助手", () => {
+  it("admin 恒有权 —— 需能接管无人维护的智能体", () => {
     expect(hasResourceAccess(admin, asst, "write", [])).toBe(true);
   });
 

@@ -131,9 +131,11 @@ describe("旧地址不落空", () => {
   });
 
   // 老书签和外部链接还指着改造前的地址,不能直接 404
+  //
+  // 【为什么 /builder 和 /settings/assistants 不在列】assistant→agent 改名时
+  // 这两条转发被一并删掉了(见 0006 迁移那批改动),它们现在就是 404。
+  // 留在这里会变成一条断言不存在行为的测试。
   const moved: [string, string][] = [
-    ["/builder", "/assistants"],
-    ["/settings/assistants", "/assistants"],
     ["/settings", "/settings/keys"],
     ["/usage", "/settings/usage"],
   ];

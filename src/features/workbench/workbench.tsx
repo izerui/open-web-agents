@@ -20,7 +20,7 @@ import { CommandPalette } from "./command-palette";
 import { ChatThread, contextTokens, formatTokens } from "./conversation";
 import { FilePanel } from "./file-panel";
 import { activityOf, groupSessions, relativeTime } from "./session-groups";
-import type { AssistantSummary, SessionSummary, Turn } from "./types";
+import type { AgentSummary, SessionSummary, Turn } from "./types";
 
 import {
   ModelSelector,
@@ -108,8 +108,8 @@ function AttachmentsDisplay() {
 /* ================================================================== */
 
 export function Workbench() {
-  const [assistants, setAssistants] = useState<AssistantSummary[]>([]);
-  const [assistantId, setAssistantId] = useState("default");
+  const [agents, setAgents] = useState<AgentSummary[]>([]);
+  const [agentId, setAgentId] = useState("default");
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -131,11 +131,11 @@ export function Workbench() {
   const openSeqRef = useRef(0);
 
   /**
-   * 拉助手与会话列表。
+   * 拉智能体与会话列表。
    *
    * 【为什么不能直接 r.json()】接口 500 时响应体是空的,json() 会抛 SyntaxError,
    * 而这两条链原本既不看 res.ok 也没有 catch —— 于是变成 unhandledRejection,
-   * 助手和会话【双双设不进去】,界面静默变成"一条历史都没有"的空白。
+   * 智能体和会话【双双设不进去】,界面静默变成"一条历史都没有"的空白。
    * 用户看到的是"数据没了",实际只是一个接口挂了,而且屏幕上没有任何线索。
    */
   const loadSessions = useCallback(async () => {
@@ -151,16 +151,16 @@ export function Workbench() {
   }, []);
 
   useEffect(() => {
-    void fetch("/api/assistants")
+    void fetch("/api/agents")
       .then(async (r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return (await r.json()) as { assistants?: AssistantSummary[] };
+        return (await r.json()) as { agents?: AgentSummary[] };
       })
-      .then((d) => setAssistants(d.assistants ?? []))
+      .then((d) => setAgents(d.agents ?? []))
       .catch((e: unknown) => {
-        // 助手拉不到不该连累会话列表 —— 原来两条链共用一个 effect 且都没 catch,
+        // 智能体拉不到不该连累会话列表 —— 原来两条链共用一个 effect 且都没 catch,
         // 任一失败都变成 unhandledRejection,两边一起空掉
-        toast.error(`助手列表加载失败:${e instanceof Error ? e.message : String(e)}`);
+        toast.error(`智能体列表加载失败:${e instanceof Error ? e.message : String(e)}`);
       });
     void loadSessions();
   }, [loadSessions]);
@@ -262,7 +262,7 @@ export function Workbench() {
     const res = await fetch("/api/sessions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ assistantId }),
+      body: JSON.stringify({ agentId }),
     });
     const body = (await res.json().catch(() => null)) as {
       session?: SessionSummary;
@@ -367,7 +367,7 @@ export function Workbench() {
     }
   }
 
-  const current = assistants.find((a) => a.id === assistantId);
+  const current = agents.find((a) => a.id === agentId);
   const sessionGroups = useMemo(() => groupSessions(sessions), [sessions]);
   const contextUsed = useMemo(() => contextTokens(turns), [turns]);
 
@@ -403,18 +403,18 @@ export function Workbench() {
         open={paletteOpen}
         onOpenChange={setPaletteOpen}
         sessions={sessions}
-        assistants={assistants}
-        currentAssistantId={assistantId}
+        agents={agents}
+        currentAgentId={agentId}
         running={running}
         onOpenSession={(id) => void openSession(id)}
         onNewSession={newSession}
-        onPickAssistant={(id) => {
-          setAssistantId(id);
+        onPickAgent={(id) => {
+          setAgentId(id);
           newSession();
         }}
       />
 
-      {/* 侧边栏与其余页面共用 AppSidebar,只把助手选择器和会话列表插进去 */}
+      {/* 侧边栏与其余页面共用 AppSidebar,只把智能体选择器和会话列表插进去 */}
       <AppSidebar
         headerExtra={
           <div className="space-y-2 group-data-[collapsible=icon]:hidden">
@@ -425,33 +425,30 @@ export function Workbench() {
                   size="sm"
                   className="w-full justify-between font-normal"
                   disabled={running}
-                  title={running ? "运行中不能切换助手" : "切换助手"}
+                  title={running ? "运行中不能切换智能体" : "切换智能体"}
                 >
-                  <span className="truncate">{current?.name ?? assistantId}</span>
+                  <span className="truncate">{current?.name ?? agentId}</span>
                   <ChevronsUpDown className="size-3.5 shrink-0 opacity-50" />
                 </Button>
               </ModelSelectorTrigger>
-              <ModelSelectorContent title="选择助手">
-                <ModelSelectorInput placeholder="搜索助手…" />
+              <ModelSelectorContent title="选择智能体">
+                <ModelSelectorInput placeholder="搜索智能体…" />
                 <ModelSelectorList>
-                  <ModelSelectorEmpty>没有匹配的助手</ModelSelectorEmpty>
-                  <ModelSelectorGroup heading="助手">
-                    {assistants.map((a) => (
+                  <ModelSelectorEmpty>没有匹配的智能体</ModelSelectorEmpty>
+                  <ModelSelectorGroup heading="智能体">
+                    {agents.map((a) => (
                       <ModelSelectorItem
                         key={a.id}
                         value={`${a.name} ${a.id}`}
                         onSelect={() => {
-                          // 换助手等于换一套系统提示与工具,继续用旧会话没有意义
-                          setAssistantId(a.id);
+                          // 换智能体等于换一套系统提示与工具,继续用旧会话没有意义
+                          setAgentId(a.id);
                           newSession();
                           setPickerOpen(false);
                         }}
                       >
                         <Check
-                          className={cn(
-                            "size-3.5",
-                            a.id === assistantId ? "text-brand" : "opacity-0",
-                          )}
+                          className={cn("size-3.5", a.id === agentId ? "text-brand" : "opacity-0")}
                         />
                         <span className="flex-1 truncate">{a.name}</span>
                         {a.config.outputSchema && (
@@ -573,7 +570,7 @@ export function Workbench() {
             >
               <SidebarTrigger className="-ml-1" />
               <Separator orientation="vertical" className="h-4" />
-              <span className="font-medium text-foreground">{current?.name ?? assistantId}</span>
+              <span className="font-medium text-foreground">{current?.name ?? agentId}</span>
               {current?.config.outputSchema && (
                 <Badge variant="secondary" className="h-5 px-1.5 text-[10px] font-normal">
                   结构化输出

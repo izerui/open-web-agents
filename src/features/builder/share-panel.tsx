@@ -14,27 +14,27 @@ interface Grant {
 }
 
 /**
- * 助手发布面板 —— 把一个助手公开给平台上所有企业账号。
+ * 智能体发布面板 —— 把一个智能体公开给平台上所有企业账号。
  *
  * 【为什么从"分享"缩成"发布"】原来这里能按邮箱分享给同事、能分享给用户组,
  * 那是"一个企业内有多个成员账号"才成立的模型。现在一个账号就是一个企业,
- * 企业之间不该互相分享助手 —— 那些入口分享给谁都不对。
+ * 企业之间不该互相分享智能体 —— 那些入口分享给谁都不对。
  *
- * 【为什么还保留"公开"】平台内置的「通用助手」正是靠一条 public read 授权
+ * 【为什么还保留"公开"】平台内置的「通用智能体」正是靠一条 public read 授权
  * 才对所有新注册企业可见(container.ts 播种时授予)。这条机制是平台发布
- * 公共助手的唯一途径,不能拆;但它是运营动作,所以只给管理员。
+ * 公共智能体的唯一途径,不能拆;但它是运营动作,所以只给管理员。
  *
- * 只在已保存的助手上显示 —— 新建中的助手还没 id,谈不上发布。
+ * 只在已保存的智能体上显示 —— 新建中的智能体还没 id,谈不上发布。
  */
-export function SharePanel({ assistantId }: { assistantId: string }) {
+export function SharePanel({ agentId }: { agentId: string }) {
   const { me } = useMe();
   const [grants, setGrants] = useState<Grant[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const [denied, setDenied] = useState(false);
 
   const reload = useCallback(async () => {
-    const res = await fetch(`/api/assistants/${assistantId}/share`);
-    // 403 是"没权限管这个助手"，属于正常状态,单独渲染而不是当错误
+    const res = await fetch(`/api/agents/${agentId}/share`);
+    // 403 是"没权限管这个智能体"，属于正常状态,单独渲染而不是当错误
     if (res.status === 403) {
       setDenied(true);
       return;
@@ -46,7 +46,7 @@ export function SharePanel({ assistantId }: { assistantId: string }) {
     const d = (await res.json()) as { grants?: Grant[] };
     setDenied(false);
     setGrants(d.grants ?? []);
-  }, [assistantId]);
+  }, [agentId]);
 
   const isAdmin = isAdminView(me);
 
@@ -59,7 +59,7 @@ export function SharePanel({ assistantId }: { assistantId: string }) {
 
   async function publish() {
     setMsg(null);
-    const res = await fetch(`/api/assistants/${assistantId}/share`, {
+    const res = await fetch(`/api/agents/${agentId}/share`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ target: "public", permission: "read" }),
@@ -73,14 +73,14 @@ export function SharePanel({ assistantId }: { assistantId: string }) {
   }
 
   async function revoke(grantId: string) {
-    await fetch(`/api/assistants/${assistantId}/share?grantId=${encodeURIComponent(grantId)}`, {
+    await fetch(`/api/agents/${agentId}/share?grantId=${encodeURIComponent(grantId)}`, {
       method: "DELETE",
     });
     await reload();
   }
 
   if (denied) {
-    return <p className="text-xs opacity-45">这个助手不归你管,不能改它的发布状态。</p>;
+    return <p className="text-xs opacity-45">这个智能体不归你管,不能改它的发布状态。</p>;
   }
 
   const publicGrant = grants.find(
@@ -100,7 +100,7 @@ export function SharePanel({ assistantId }: { assistantId: string }) {
         <div className="min-w-0">
           <p className="font-medium text-xs">发布</p>
           <p className="text-[11px] text-muted-foreground">
-            公开后,平台上所有企业账号都能在助手列表里看到并使用它。
+            公开后,平台上所有企业账号都能在智能体列表里看到并使用它。
           </p>
         </div>
         {publicGrant ? (

@@ -8,7 +8,7 @@ import { extractJsonObject } from "./extract-json";
  *
  * - status:仅 `subtype==="success"` 算成功
  * - structured:官方约定只在 success 时可读;错误 subtype 下即便带残留输出也不当契约结果
- * - 契约缺失:助手声明了 outputSchema 却没拿到 structured_output → 降为 failed
+ * - 契约缺失:智能体声明了 outputSchema 却没拿到 structured_output → 降为 failed
  *   (否则调用方会拿到一个"成功但没有结果"的响应,对接系统无法消费)
  */
 export function extractRunResult(resultMsg: unknown, opts: { hasSchema: boolean }): RunResult {
@@ -52,7 +52,7 @@ export function extractRunResult(resultMsg: unknown, opts: { hasSchema: boolean 
       cost,
       error: {
         kind: "no_structured_output",
-        message: "助手声明了 outputSchema 但未产出结构化结果,且无法从文本中提取",
+        message: "智能体声明了 outputSchema 但未产出结构化结果,且无法从文本中提取",
       },
     };
   }

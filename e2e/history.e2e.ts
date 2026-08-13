@@ -12,7 +12,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { type Client, newUser, serverUp } from "./client";
 
 type SessionRes = { session?: { id: string } };
-type ListRes = { assistants?: { id: string }[] };
+type ListRes = { agents?: { id: string }[] };
 type HistoryRes = {
   turns?: { prompt: string; events: unknown[]; running: boolean; runId: string }[];
   activeRunId?: string;
@@ -27,10 +27,10 @@ describe("历史会话回放", () => {
     if (!(await serverUp())) throw new Error("e2e 需要一个跑着的服务");
     a = await newUser("hist-a");
     b = await newUser("hist-b");
-    const list = await a.get<ListRes>("/api/assistants");
-    const assistantId = list.body.assistants?.[0]?.id;
-    expect(assistantId).toBeTruthy();
-    const s = await a.post<SessionRes>("/api/sessions", { assistantId });
+    const list = await a.get<ListRes>("/api/agents");
+    const agentId = list.body.agents?.[0]?.id;
+    expect(agentId).toBeTruthy();
+    const s = await a.post<SessionRes>("/api/sessions", { agentId });
     sessionId = s.body.session?.id ?? "";
     expect(sessionId).toBeTruthy();
   });

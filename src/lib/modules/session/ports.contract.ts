@@ -26,7 +26,7 @@ export function sessionRepoContract(name: string, harness: SessionRepoHarness): 
     });
 
     const mk = (id: string, over: Partial<{ ownerId: string; callerApiKeyId: string }> = {}) =>
-      repo.create({ id, assistantId: "a1", workspaceDir: `/ws/${id}`, ...over });
+      repo.create({ id, agentId: "a1", workspaceDir: `/ws/${id}`, ...over });
 
     it("按 ownerId 过滤只回该用户的会话", async () => {
       await mk("s1", { ownerId: "u1" });

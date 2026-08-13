@@ -17,7 +17,7 @@ type AccountsRes = {
     role: string;
     disabled: boolean;
     monthlyQuotaMicroUsd: number | null;
-    assistantCount: number;
+    agentCount: number;
     monthCostMicroUsd: number;
   }[];
   error?: string;
@@ -75,7 +75,7 @@ describe("平台账号管理", () => {
     const found = (r.body.accounts ?? []).find((a) => a.id === memberId);
     expect(found).toBeDefined();
     expect(found?.role).toBe("user");
-    expect(typeof found?.assistantCount).toBe("number");
+    expect(typeof found?.agentCount).toBe("number");
     expect(typeof found?.monthCostMicroUsd).toBe("number");
   });
 
@@ -204,7 +204,7 @@ describe("额度对运行路径的拦截", () => {
 
     // 先确认没设额度时是能建会话并发起运行的(对照组)
     const s1 = await u.post<{ session?: { id: string } }>("/api/sessions", {
-      assistantId: "default",
+      agentId: "default",
     });
     expect(s1.status).toBe(201);
     const sid = s1.body.session?.id ?? "";
@@ -227,7 +227,7 @@ describe("额度对运行路径的拦截", () => {
     const u = await newUser("quota-restore");
     const uid = (await u.get<MeRes>("/api/auth")).body.user?.id ?? "";
     const s = await u.post<{ session?: { id: string } }>("/api/sessions", {
-      assistantId: "default",
+      agentId: "default",
     });
     const sid = s.body.session?.id ?? "";
 
@@ -249,7 +249,7 @@ describe("额度对运行路径的拦截", () => {
   it("没设额度的账号不受影响 —— 关卡不能误伤大多数", async () => {
     const u = await newUser("quota-free");
     const s = await u.post<{ session?: { id: string } }>("/api/sessions", {
-      assistantId: "default",
+      agentId: "default",
     });
     expect(s.status).toBe(201);
     const run = await u.post(`/api/sessions/${s.body.session?.id}/run`, {

@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
  * 令牌绑定单个会话:泄露了也只能操作那一个会话,读不到别人的。
  */
 export async function POST(req: Request) {
-  const { assistants, sessions, auth, env } = getContainer();
+  const { agents, sessions, auth, env } = getContainer();
 
   let principal: Awaited<ReturnType<typeof auth.requireApiKey>>;
   try {
@@ -26,20 +26,27 @@ export async function POST(req: Request) {
     throw err;
   }
 
-  const body = (await req.json().catch(() => ({}))) as { assistantId?: string; title?: string };
-  const assistantId = body.assistantId?.trim();
-  if (!assistantId) return Response.json({ error: "assistantId is required" }, { status: 400 });
+  // 这是第三方直接打进来的接口(API Key 鉴权),改名最不能在这里断人家的线。
+  // assistantId 是改名前的字段名,回退一层;新调用方一律用 agentId。
+  const body = (await req.json().catch(() => ({}))) as {
+    agentId?: string;
+    /* 旧字段,仅供回退 */
+    assistantId?: string;
+    title?: string;
+  };
+  const agentId = (body.agentId ?? body.assistantId)?.trim();
+  if (!agentId) return Response.json({ error: "agentId is required" }, { status: 400 });
 
   try {
-    await auth.assertCanInvoke(principal, assistantId);
+    await auth.assertCanInvoke(principal, agentId);
   } catch (err) {
     const res = authErrorResponse(err);
     if (res) return res;
     throw err;
   }
 
-  if (!(await assistants.get(assistantId))) {
-    return Response.json({ error: "assistant not found" }, { status: 404 });
+  if (!(await agents.get(agentId))) {
+    return Response.json({ error: "agent not found" }, { status: 404 });
   }
 
   // 每枚令牌配一个新会话(= 独立工作目录),互不干扰
@@ -48,7 +55,7 @@ export async function POST(req: Request) {
   await fs.mkdir(workspaceDir, { recursive: true });
   await sessions.create({
     id: sessionId,
-    assistantId,
+    agentId,
     workspaceDir,
     title: body.title ?? "embed",
     callerApiKeyId: principal.type === "apiKey" ? principal.keyId : undefined,
@@ -57,7 +64,7 @@ export async function POST(req: Request) {
   const token = issueEmbedToken(
     env.sessionSecret,
     {
-      assistantId,
+      agentId,
       sessionId,
       keyId: principal.type === "apiKey" ? principal.keyId : "web",
     },

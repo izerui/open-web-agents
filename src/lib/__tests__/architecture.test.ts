@@ -88,7 +88,7 @@ describe("架构边界 / 模块间只经公开面交互", () => {
   // 允许被别的模块 import 的目录:端口、用例、域逻辑。
   // adapters 是实现细节 —— 跨模块直接 import 它,等于把"可替换"这件事作废:
   // 换实现时要改的就不只是 container 一处了。
-  // 注意不带 .ts —— import 说明符里没有扩展名,`assistant/ports` 切出来是 `ports`
+  // 注意不带 .ts —— import 说明符里没有扩展名,`agent/ports` 切出来是 `ports`
   const PUBLIC = new Set(["ports", "ports.contract", "application", "domain"]);
 
   it("没有任何模块直接 import 别的模块的 adapters/", () => {

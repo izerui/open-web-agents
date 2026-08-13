@@ -77,6 +77,8 @@ export function CredentialsView() {
           <label className="block space-y-1">
             <span className="text-xs text-muted-foreground">Base URL(留空用平台默认)</span>
             <Input
+              name="model-base-url"
+              autoComplete="off"
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
               placeholder="https://api.anthropic.com"
@@ -90,6 +92,9 @@ export function CredentialsView() {
             </span>
             <Input
               type="password"
+              name="model-api-key"
+              // new-password 是唯一能让 Chrome 稳定放弃自动填充的取值,off 会被忽略
+              autoComplete="new-password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               placeholder="sk-…"

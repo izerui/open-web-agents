@@ -31,7 +31,7 @@ export async function GET(req: Request) {
       (s) =>
         canAccessSession(principal, {
           id: s.id,
-          assistantId: s.assistantId,
+          agentId: s.agentId,
           ownerId: s.ownerId,
           callerApiKeyId: s.callerApiKeyId,
         }).allowed,
@@ -80,10 +80,17 @@ export async function POST(req: Request) {
     throw err;
   }
 
-  const body = (await req.json().catch(() => ({}))) as { assistantId?: string; title?: string };
-  const assistantId = body.assistantId ?? "default";
+  // assistantId 是改名前的字段名。回退一层是因为改名不该让已接入的调用方一夜之间 400 ——
+  // 新调用方用 agentId,旧的照常能跑,等确认没人再发旧字段了再摘掉。
+  const body = (await req.json().catch(() => ({}))) as {
+    agentId?: string;
+    /* 旧字段,仅供回退 */
+    assistantId?: string;
+    title?: string;
+  };
+  const agentId = body.agentId ?? body.assistantId ?? "default";
   try {
-    await auth.assertCanInvoke(principal, assistantId);
+    await auth.assertCanInvoke(principal, agentId);
   } catch (err) {
     const res = authErrorResponse(err);
     if (res) return res;
@@ -96,7 +103,7 @@ export async function POST(req: Request) {
 
   const session = await sessions.create({
     id,
-    assistantId,
+    agentId,
     workspaceDir,
     title: body.title,
     ownerId: principal.type === "web" ? principal.userId : undefined,

@@ -27,7 +27,7 @@ export function AppShell({
   children: React.ReactNode;
   className?: string;
   width?: "narrow" | "wide";
-  /** 挂在统一导航下面的页面级条目列表(如构建器的助手列表),避免再开第二条侧栏。 */
+  /** 挂在统一导航下面的页面级条目列表(如构建器的智能体列表),避免再开第二条侧栏。 */
   sidebarExtra?: React.ReactNode;
 }) {
   return (

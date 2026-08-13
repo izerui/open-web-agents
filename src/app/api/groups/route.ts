@@ -24,7 +24,7 @@ export async function GET(req: Request) {
   const { groups, auth } = getContainer();
   try {
     const principal = await auth.resolveWeb(req);
-    auth.assertCanManageAssistants(principal);
+    auth.assertCanManageAgents(principal);
     const isAdmin = principal.type === "web" && principal.role === "admin";
     const userId = principal.type === "web" ? principal.userId : principal.ownerId;
 
@@ -50,7 +50,7 @@ export async function POST(req: Request) {
   const { groups, auth } = getContainer();
   try {
     const principal = await auth.resolveWeb(req);
-    auth.assertCanManageAssistants(principal);
+    auth.assertCanManageAgents(principal);
     const userId = principal.type === "web" ? principal.userId : principal.ownerId;
 
     const body = (await req.json().catch(() => ({}))) as { name?: string; description?: string };

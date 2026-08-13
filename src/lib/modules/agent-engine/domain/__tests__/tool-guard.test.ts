@@ -136,7 +136,7 @@ describe("guardToolUse / 不假装能管 Bash", () => {
 });
 
 describe("guardToolUse / 未知工具", () => {
-  it("未识别的工具放行,避免 SDK 新增工具时静默弄坏助手", () => {
+  it("未识别的工具放行,避免 SDK 新增工具时静默弄坏智能体", () => {
     expect(guardToolUse("WebFetch", { url: "https://x.com" }, policy).allow).toBe(true);
     expect(guardToolUse("SomeFutureTool", { anything: 1 }, policy).allow).toBe(true);
   });

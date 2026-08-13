@@ -1,6 +1,6 @@
 // schema 编译与缓存的行为。
 //
-// 这两条是真踩过的坑,合起来会让助手【每个进程只能正常工作一次】:
+// 这两条是真踩过的坑,合起来会让智能体【每个进程只能正常工作一次】:
 // 1. 缓存按对象身份(WeakMap)存,而仓储每次 get() 都从 JSON 列解析出新对象 —— 永不命中
 // 2. 全局共享的 Ajv 实例不允许同一个 $id 注册两次,于是第 2 次编译抛
 //    "schema with key or id already exists",被上层 catch 成"outputSchema 非法",
@@ -11,7 +11,7 @@
 import {
   _clearSchemaCache,
   validateAgainstSchema,
-} from "@/lib/modules/assistant/domain/validate-schema";
+} from "@/lib/modules/agent/domain/validate-schema";
 import { beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(() => _clearSchemaCache());

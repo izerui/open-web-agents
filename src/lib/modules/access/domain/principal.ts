@@ -10,12 +10,12 @@ import {
 /** 谁在调用。web = 平台内人类(当前单用户);apiKey = 第三方系统。 */
 export type Principal =
   | { type: "web"; userId: string; role?: "admin" | "user" }
-  | { type: "apiKey"; keyId: string; ownerId: string; assistantId?: string };
+  | { type: "apiKey"; keyId: string; ownerId: string; agentId?: string };
 
 /** 资源的归属信息(从库里读出后传入)。 */
 export interface SessionOwnership {
   id: string;
-  assistantId: string;
+  agentId: string;
   ownerId?: string;
   callerApiKeyId?: string;
 }
@@ -31,8 +31,8 @@ const deny = (reason: string): Decision => ({ allowed: false, reason });
  * 这是 question-bank 的已知短板:那边任何人拿到 sessionId 就能读别人的工作空间。
  * 这里的规则:
  * - web 用户:只能访问自己创建的会话
- * - API Key:只能访问【由它自己发起】的会话 —— 光有同一助手的 key 还不够,
- *   否则同一助手的两个调用方能互相读到对方的输入与产物
+ * - API Key:只能访问【由它自己发起】的会话 —— 光有同一智能体的 key 还不够,
+ *   否则同一智能体的两个调用方能互相读到对方的输入与产物
  */
 export function canAccessSession(p: Principal, s: SessionOwnership): Decision {
   if (p.type === "web") {
@@ -49,44 +49,44 @@ export function canAccessSession(p: Principal, s: SessionOwnership): Decision {
 }
 
 /**
- * 能否调用某助手。两道关卡缺一不可:
+ * 能否调用某智能体。两道关卡缺一不可:
  *
- * 1. **key 绑定**:key 若绑定了具体助手,就只能调那一个 —— 便于给每个对接方发限定 key。
- * 2. **资源授权**:调用方必须对该助手有 read 权限(owner / admin / 被分享)。
+ * 1. **key 绑定**:key 若绑定了具体智能体,就只能调那一个 —— 便于给每个对接方发限定 key。
+ * 2. **资源授权**:调用方必须对该智能体有 read 权限(owner / admin / 被分享)。
  *
  * 第 2 关曾经缺失,是个真实越权:当时 web 主体一律放行、未绑定的 key 也一律放行,
- * 于是【知道 assistantId 就能运行别人的私有助手】—— 撤销分享只是从列表里隐藏,
- * 不阻止使用,而助手的 systemPrompt 与知识库正文会直接进入攻击者的会话。
+ * 于是【知道 agentId 就能运行别人的私有智能体】—— 撤销分享只是从列表里隐藏,
+ * 不阻止使用,而智能体的 systemPrompt 与知识库正文会直接进入攻击者的会话。
  *
  * 教训:「有一套授权体系」不等于「每条路径都接了它」。分享读写路径当时都接了,
  * 唯独最要紧的运行路径没接 —— 而那才是资产真正泄漏的地方。
  */
-export function canInvokeAssistant(
+export function canInvokeAgent(
   p: Principal,
-  assistant: OwnedResource,
+  agent: OwnedResource,
   subject: Subject,
   grants: Grant[],
 ): Decision {
-  if (p.type === "apiKey" && p.assistantId && p.assistantId !== assistant.id) {
-    return deny("api key is bound to another assistant");
+  if (p.type === "apiKey" && p.agentId && p.agentId !== agent.id) {
+    return deny("api key is bound to another agent");
   }
   // key 以其归属用户的身份参与判定 —— 不能靠签发 key 给自己提权
-  if (!hasResourceAccess(subject, assistant, "read", grants)) {
-    return deny("no access to this assistant");
+  if (!hasResourceAccess(subject, agent, "read", grants)) {
+    return deny("no access to this agent");
   }
   return ALLOW;
 }
 
-/** 能否管理助手定义(创建/修改)。对外 key 一律不行,防止调用方改提示词。 */
-export function canManageAssistants(p: Principal): Decision {
-  return p.type === "web" ? ALLOW : deny("api keys cannot manage assistants");
+/** 能否管理智能体定义(创建/修改)。对外 key 一律不行,防止调用方改提示词。 */
+export function canManageAgents(p: Principal): Decision {
+  return p.type === "web" ? ALLOW : deny("api keys cannot manage agents");
 }
 
 /**
  * 能否做平台管理动作(改别人的账号)。
  *
  * 【为什么对外 key 一律不行,哪怕它归管理员所有】key 是发给第三方系统的凭据,
- * 会躺在别人的服务器配置里。它的用途是调用助手,不该顺带继承签发人的平台管理权 ——
+ * 会躺在别人的服务器配置里。它的用途是调用智能体,不该顺带继承签发人的平台管理权 ——
  * 否则一把泄漏的 key 就能停掉全平台的账号。
  */
 export function canAdministerPlatform(p: Principal): Decision {

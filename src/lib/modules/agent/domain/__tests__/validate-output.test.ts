@@ -1,4 +1,4 @@
-import { validateStructured } from "@/lib/modules/assistant/domain/validate-output";
+import { validateStructured } from "@/lib/modules/agent/domain/validate-output";
 import { describe, expect, it } from "vitest";
 
 const videoSchema = {
@@ -58,7 +58,7 @@ describe("validateStructured", () => {
     expect(r.errors?.[0]).toMatch(/outputSchema 非法/);
   });
 
-  it("空 schema 放行任何结果(通用助手)", () => {
+  it("空 schema 放行任何结果(通用智能体)", () => {
     expect(validateStructured({}, { anything: true })).toEqual({ ok: true });
   });
 

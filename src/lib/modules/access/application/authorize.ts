@@ -7,11 +7,11 @@ import {
   type Principal,
   canAccessSession,
   canAdministerPlatform,
-  canInvokeAssistant,
-  canManageAssistants,
+  canInvokeAgent,
+  canManageAgents,
 } from "@/lib/modules/access/domain/principal";
 import type { GrantRepo } from "@/lib/modules/access/ports";
-import type { AssistantRepo } from "@/lib/modules/assistant/ports";
+import type { AgentRepo } from "@/lib/modules/agent/ports";
 import { extractApiKey, hashApiKey, looksLikeApiKey } from "@/lib/modules/identity/domain/api-key";
 import type { ApiKeyRepo } from "@/lib/modules/identity/ports";
 import type { SessionRepo } from "@/lib/modules/session/ports";
@@ -25,8 +25,8 @@ export const WEB_USER_ID = "local-user";
 export interface AuthDeps {
   apiKeys: ApiKeyRepo;
   sessions: SessionRepo;
-  /** 助手定义与其授权 —— 判定「能否运行某助手」要读它们。 */
-  assistants: AssistantRepo;
+  /** 智能体定义与其授权 —— 判定「能否运行某智能体」要读它们。 */
+  agents: AgentRepo;
   grants: GrantRepo;
   /** 是否要求网页侧登录。生产必须为 true。 */
   authRequired: boolean;
@@ -65,7 +65,7 @@ export class Authorizer {
       type: "apiKey",
       keyId: record.id,
       ownerId: record.ownerId,
-      assistantId: record.assistantId,
+      agentId: record.agentId,
     };
   }
 
@@ -116,7 +116,7 @@ export class Authorizer {
     this.assert(
       canAccessSession(p, {
         id: s.id,
-        assistantId: s.assistantId,
+        agentId: s.agentId,
         ownerId: s.ownerId,
         callerApiKeyId: s.callerApiKeyId,
       }),
@@ -124,22 +124,22 @@ export class Authorizer {
   }
 
   /**
-   * 运行助手前的授权关卡:key 绑定 + 资源 read 权限。
+   * 运行智能体前的授权关卡:key 绑定 + 资源 read 权限。
    *
-   * 必须是 async —— 判定需要读助手归属与授权表。曾经这里是同步的纯 key 绑定检查,
-   * 看起来"有授权",实际上任何登录用户知道 id 就能跑别人的私有助手。
+   * 必须是 async —— 判定需要读智能体归属与授权表。曾经这里是同步的纯 key 绑定检查,
+   * 看起来"有授权",实际上任何登录用户知道 id 就能跑别人的私有智能体。
    */
-  async assertCanInvoke(p: Principal, assistantId: string): Promise<void> {
-    const a = await this.deps.assistants.get(assistantId);
+  async assertCanInvoke(p: Principal, agentId: string): Promise<void> {
+    const a = await this.deps.agents.get(agentId);
     // 不区分「不存在」与「无权」,避免把 id 存在性当成预言机泄漏出去
-    if (!a) throw new Forbidden("no access to this assistant");
+    if (!a) throw new Forbidden("no access to this agent");
     const subject = await this.subjectOf(p);
-    const grants = await this.deps.grants.listForResource("assistant", assistantId);
-    this.assert(canInvokeAssistant(p, { id: a.id, ownerId: a.ownerId }, subject, grants));
+    const grants = await this.deps.grants.listForResource("agent", agentId);
+    this.assert(canInvokeAgent(p, { id: a.id, ownerId: a.ownerId }, subject, grants));
   }
 
-  assertCanManageAssistants(p: Principal): void {
-    this.assert(canManageAssistants(p));
+  assertCanManageAgents(p: Principal): void {
+    this.assert(canManageAgents(p));
   }
 
   /** 平台管理关卡:改别人账号(角色/停用/额度)之前必须过这一关。 */

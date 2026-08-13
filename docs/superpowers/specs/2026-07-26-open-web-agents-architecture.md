@@ -15,7 +15,7 @@
 | **可替换基础设施** | DB/Redis/存储/模型网关都可能换 | Ports & Adapters,基础设施全是可插拔 adapter |
 | **可水平扩容** | 单机起步,后期 k8s | 队列 + 事件总线用端口抽象,worker 无状态 |
 | **多租户安全** | 每用户 key、会话归属、沙箱 | 域层强制归属校验 + 边界处脱敏 + 执行隔离 adapter |
-| **结构化输出契约** | 助手 = 可被系统调用的接口 | 显式的 Schema/Result 抽象,贯穿域层 |
+| **结构化输出契约** | 智能体 = 可被系统调用的接口 | 显式的 Schema/Result 抽象,贯穿域层 |
 | **可测试** | 核心逻辑不碰 IO 即可单测 | 依赖倒置,域层纯逻辑,IO 在 adapter |
 
 **反目标(YAGNI)**:不引入 DDD 聚合根/事件溯源/CQRS/重型 DI 容器/微服务拆分。保持单体 Next.js。
@@ -27,7 +27,7 @@
 ```
                      ┌─────────────────────────────────────────────┐
                      │           Presentation(Next.js UI)          │  React Server/Client Components
-                     │      工作台 / 助手构建器 / 管理后台           │
+                     │      工作台 / 智能体构建器 / 管理后台           │
                      └───────────────────────┬─────────────────────┘
                                               │ (fetch / SSE)
    ┌──────────── Driving Adapters(入站)─────┴───────────────────┐
@@ -36,13 +36,13 @@
                                │ 调用 Application 用例(端口:输入)
    ┌───────────────────────────┴─────────────────────────────────┐
    │                   Application(用例编排层)                    │  无框架、无 IO 细节
-   │   AssistantService · SessionService · RunOrchestrator ·      │  只依赖「端口接口」
+   │   AgentService · SessionService · RunOrchestrator ·      │  只依赖「端口接口」
    │   IntegrationService · AccessService                         │
    └───────────────────────────┬─────────────────────────────────┘
                                │ 依赖倒置(依赖抽象端口,非实现)
    ┌───────────────────────────┴─────────────────────────────────┐
    │                     Domain(核心域)                          │  纯 TypeScript,零外部依赖
-   │  实体/值对象: Assistant · Session · Run · AgentEvent ·       │  可 100% 单测
+   │  实体/值对象: Agent · Session · Run · AgentEvent ·       │  可 100% 单测
    │  结果契约: OutputSchema · StructuredResult · VerifyRule      │
    │  纯逻辑: buildSpec() · 状态机 · 三级模型解析 · 事件归一规则   │
    └───────────────────────────┬─────────────────────────────────┘
@@ -68,7 +68,7 @@
 |---|---|---|---|
 | **identity** | 用户、登录(NextAuth)、API Key、每用户凭证 | SecretPort, UserRepo | 业务权限判定(→access) |
 | **access** | 通用授权(AccessGrant 表)、归属校验、角色 | GrantRepo | 认证(→identity) |
-| **assistant** | 助手定义、config、input/output schema、`buildSpec` | AssistantRepo | 运行(→run) |
+| **agent** | 智能体定义、config、input/output schema、`buildSpec` | AgentRepo | 运行(→run) |
 | **session** | 会话(=项目=工作目录)生命周期、resume 上下文、工作目录分配 | SessionRepo, StoragePort | agent 执行(→engine) |
 | **agent-engine** | **唯一**封装 claude-agent-sdk:query 循环、options 组装、消息归一、结构化输出、沙箱 | EnginePort, SandboxPort, ModelGatewayPort | 队列/持久化(→run) |
 | **run** | 运行编排、状态机、队列、worker、租约、孤儿回收 | QueuePort, RunRepo, EnginePort, BusPort | SDK 细节(→engine) |
@@ -78,10 +78,10 @@
 
 **模块依赖图(无环)**:
 ```
-presentation → integration/session/assistant/access/identity
+presentation → integration/session/agent/access/identity
 integration → run → agent-engine → (engine/sandbox/model ports)
 run → events → (bus port)
-session/assistant/run → artifacts → (storage port)
+session/agent/run → artifacts → (storage port)
 所有模块 → access(校验) / identity(凭证)
 ```
 
@@ -93,7 +93,7 @@ session/assistant/run → artifacts → (storage port)
 |---|---|---|
 | **Ports & Adapters(六边形)** | 全局:engine/repo/bus/queue/storage/model/sandbox | 基础设施可替换 + 域层可测 |
 | **Anti-Corruption Layer** | agent-engine 的 `normalizeEvent`:SDK 消息 → 域内 `AgentEvent` | SDK 升级/变更不外溢到业务 |
-| **Builder** | `buildSpec(AssistantConfig, RunContext) → AgentSpec` | 分层优先级组装(默认<spec<会话<invoke override) |
+| **Builder** | `buildSpec(AgentConfig, RunContext) → AgentSpec` | 分层优先级组装(默认<spec<会话<invoke override) |
 | **Strategy** | ModelResolver(三级 key/base_url)、ResultDelivery(poll/sse/webhook)、Storage(local/oss) | 同一入口多种可切换算法 |
 | **State Machine** | Run:`pending→running→success/failed/cancelled` | 状态迁移合法性集中管控,防非法态 |
 | **Producer–Consumer + Lease** | run 队列:MySQL 乐观锁认领 + 租约续期 + 孤儿回收 | 零中间件的可靠异步任务 |
@@ -157,7 +157,7 @@ interface SandboxPort { materialize(cfg:SandboxCfg):{ sandbox:unknown; disallowe
 interface SecretPort { encrypt(v:string):string; decrypt(v:string):string; redact(text:string):string; }
 
 // ── 纯逻辑(域层函数,可直接单测)──────────────────────────
-function buildSpec(a: AssistantConfig, ctx: RunContext): AgentSpec;    // Builder
+function buildSpec(a: AgentConfig, ctx: RunContext): AgentSpec;    // Builder
 function resolveModel(chain: CredentialChain): ResolvedCredentials;    // 三级 Strategy
 function nextRunState(cur: RunState, ev: RunSignal): RunState;         // State Machine
 function normalizeSdkMessage(msg: unknown): AgentEvent[];              // ACL(在 engine adapter 内)
@@ -174,7 +174,7 @@ UI ──POST /api/sessions/{id}/run──▶ [API adapter]
    → RunOrchestrator.enqueue(Run:pending)    (State Machine: →pending)
    ─ ─ ─ 异步解耦 ─ ─ ─
    worker ─claimNext(lease)─▶ RunOrchestrator.execute()   (→running)
-     → buildSpec(assistant, ctx)             (Builder, 域纯逻辑)
+     → buildSpec(agent, ctx)             (Builder, 域纯逻辑)
      → EnginePort.run(spec, onEvent)          (SDK adapter: query()+resume)
          每个 SDK 消息 → normalizeSdkMessage → AgentEvent   (ACL)
          → SecretPort.redact → BusPort.publish(topic=sessionId)   (Pub/Sub)
@@ -187,7 +187,7 @@ UI ◀─SSE /api/sessions/{id}/events─ [SSE adapter] ◀─ BusPort.subscribe
 ```
 第三方 ──POST /api/agents/{aid}/invoke (X-Api-Key)──▶ [API adapter]
    → IntegrationService.invoke(cmd)
-   → AccessService.assertApiKey(key, assistant)      (鉴权+归属)
+   → AccessService.assertApiKey(key, agent)      (鉴权+归属)
    → 复用 RunOrchestrator(创建会话+入队)  ← 同一 Command 入口
    → ResultDelivery(Strategy): poll GET /result | SSE /events | webhook 回调
 ```
@@ -204,14 +204,14 @@ src/
 │  ├─ (workbench)/  (builder)/  (admin)/  # UI
 │  └─ api/
 │     ├─ sessions/[id]/(run|events|files)/route.ts     # 薄:HTTP↔用例
-│     ├─ assistants/…  auth/…
+│     ├─ agents/…  auth/…
 │     └─ agents/[aid]/invoke · [taskId]/(result|events)/route.ts
 ├─ lib/
 │  ├─ container.ts                        # composition root(手工装配端口→adapter)
 │  ├─ modules/
 │  │  ├─ identity/     { domain/ application/ ports.ts adapters/ }
 │  │  ├─ access/       { … }
-│  │  ├─ assistant/    { domain/{config,schema,buildSpec}.ts application/ ports.ts }
+│  │  ├─ agent/    { domain/{config,schema,buildSpec}.ts application/ ports.ts }
 │  │  ├─ session/      { … }
 │  │  ├─ agent-engine/ { domain/{event,spec}.ts application/ ports.ts
 │  │  │                  adapters/claude-sdk/{runner,normalize,options,sandbox}.ts }
@@ -235,7 +235,7 @@ src/
 | Domain | buildSpec / 状态机 / 模型三级解析 / 归一规则 | 纯单测,零 mock |
 | Application | 用例编排(如 orchestrator 认领→执行→完成) | mock 端口(内存 fake) |
 | Adapter | SDK 归一、队列租约、SSE 编帧 | 针对性集成测(fake SDK 消息、真 MySQL/Redis 容器) |
-| E2E | 造助手→跑会话→拿结构化结果闭环 | 少量,覆盖关键路径 |
+| E2E | 造智能体→跑会话→拿结构化结果闭环 | 少量,覆盖关键路径 |
 
 **关键杠杆**:所有端口都有一个 `InMemory*` fake 实现,application 层测试不碰真 IO;agent-engine 用**录制的 SDK 消息序列**回放测归一,不真调模型。
 
@@ -243,7 +243,7 @@ src/
 
 ## 8. 扩展点(Open for Extension)
 
-- **新助手能力** → 加 skill/mcp/tool 到 AssistantConfig,`buildSpec` 无需改
+- **新智能体能力** → 加 skill/mcp/tool 到 AgentConfig,`buildSpec` 无需改
 - **新存储后端** → 实现 StoragePort(已规划 local/oss)
 - **新结果投递** → 加 ResultDelivery strategy(poll/sse/webhook 之外)
 - **新模型网关** → 实现 ModelGatewayPort

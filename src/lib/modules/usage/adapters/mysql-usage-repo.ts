@@ -1,5 +1,5 @@
 import type { Db } from "@/lib/db/client";
-import { assistants, runs, sessions } from "@/lib/db/schema";
+import { agents, runs, sessions } from "@/lib/db/schema";
 import { type RunUsageRecord, toMicroUsd } from "@/lib/modules/usage/domain/aggregate";
 import { and, desc, eq, gte, isNotNull, sql } from "drizzle-orm";
 
@@ -39,7 +39,7 @@ export class MysqlUsageRepo {
   /**
    * 拉取窗口内的运行记录,聚合交给纯域函数。
    *
-   * 有意不在 SQL 里做聚合:分组口径(按天/按助手/UTC 边界)属于业务规则,
+   * 有意不在 SQL 里做聚合:分组口径(按天/按智能体/UTC 边界)属于业务规则,
    * 放在可单测的域层比藏在 SQL 里更容易验证与演进。窗口有上限,不会拉爆内存 ——
    * 但上限意味着结果可能不完整,故配套提供 isTruncated。
    */
@@ -52,15 +52,15 @@ export class MysqlUsageRepo {
         runId: runs.id,
         status: runs.status,
         cost: runs.cost,
-        assistantId: sessions.assistantId,
-        assistantName: assistants.name,
+        agentId: sessions.agentId,
+        agentName: agents.name,
         ownerId: sessions.ownerId,
         endedAt: runs.endedAt,
         createdAt: runs.createdAt,
       })
       .from(runs)
       .innerJoin(sessions, eq(runs.sessionId, sessions.id))
-      .leftJoin(assistants, eq(sessions.assistantId, assistants.id))
+      .leftJoin(agents, eq(sessions.agentId, agents.id))
       .where(and(...conds))
       .orderBy(desc(runs.createdAt))
       .limit(q.limit ?? DEFAULT_LIMIT);
@@ -69,8 +69,8 @@ export class MysqlUsageRepo {
       const cost = (r.cost ?? {}) as { usd?: number; input?: number; output?: number };
       return {
         runId: r.runId,
-        assistantId: r.assistantId,
-        assistantName: r.assistantName ?? undefined,
+        agentId: r.agentId,
+        agentName: r.agentName ?? undefined,
         ownerId: r.ownerId ?? undefined,
         status: r.status,
         costMicroUsd: toMicroUsd(cost.usd),

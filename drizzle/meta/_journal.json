@@ -43,6 +43,13 @@
       "when": 1786383663067,
       "tag": "0005_daffy_proudstar",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1786470000000,
+      "tag": "0006_rename_assistants_to_agents",
+      "breakpoints": true
     }
   ]
 }

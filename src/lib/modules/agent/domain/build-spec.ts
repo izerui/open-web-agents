@@ -1,11 +1,11 @@
-// Builder:助手配置 + 运行上下文 → AgentSpec。纯逻辑,零框架/SDK 依赖。
-// 组装优先级:框架默认 < 助手配置;凭证与模型别名的三级覆盖在 resolve-credentials 里完成。
+// Builder:智能体配置 + 运行上下文 → AgentSpec。纯逻辑,零框架/SDK 依赖。
+// 组装优先级:框架默认 < 智能体配置;凭证与模型别名的三级覆盖在 resolve-credentials 里完成。
 
 import type { AgentSpec, ModelAlias, RunContext } from "@/lib/shared";
-import type { AssistantConfig } from "./config";
+import type { AgentConfig } from "./config";
 
 export function buildSpec(
-  cfg: AssistantConfig,
+  cfg: AgentConfig,
   _ctx: RunContext,
   overrides?: {
     model?: ModelAlias;

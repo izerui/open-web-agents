@@ -26,12 +26,12 @@ import { usePathname } from "next/navigation";
  * 收进设置区从底部头像进入。
  *
  * 【为什么智能体不放在设置里】它是企业的核心创作物,不是一项配置。
- * 之前把它塞进 /settings/assistants,等于把这个产品最重要的功能
+ * 之前把它塞进设置区的二级页,等于把这个产品最重要的功能
  * 藏进了"设置"——那是个人们只在出问题时才会点开的地方。
  */
 const NAV_ITEMS = [
   { href: "/", label: "工作台", icon: LayoutDashboard },
-  { href: "/assistants", label: "我的智能体", icon: Bot },
+  { href: "/agents", label: "我的智能体", icon: Bot },
 ] as const;
 
 /**
@@ -40,7 +40,7 @@ const NAV_ITEMS = [
  * 【为什么要统一】工作台原本是一套可折叠侧栏,其余页面是右上角一排小灰字 ——
  * 从工作台点进构建器,导航整个换了个样子,像是两个产品拼在一起。
  *
- * `headerExtra` 与 `children` 是给工作台留的口子:它在品牌下面还要放助手选择器,
+ * `headerExtra` 与 `children` 是给工作台留的口子:它在品牌下面还要放智能体选择器,
  * 在导航下面还要挂会话列表。其余页面两个都不传,侧栏就只剩导航。
  */
 export function AppSidebar({

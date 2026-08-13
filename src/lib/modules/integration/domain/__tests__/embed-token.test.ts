@@ -6,7 +6,7 @@ import {
 import { describe, expect, it } from "vitest";
 
 const S = "embed-secret";
-const claims = { assistantId: "a1", sessionId: "s1", keyId: "k1" };
+const claims = { agentId: "a1", sessionId: "s1", keyId: "k1" };
 
 describe("issueEmbedToken / verifyEmbedToken", () => {
   it("签发的令牌可校验并解出全部声明", () => {
@@ -68,7 +68,7 @@ describe("issueEmbedToken / verifyEmbedToken", () => {
   });
 
   it("缺必要声明的令牌无效", () => {
-    const t = issueEmbedToken(S, { assistantId: "", sessionId: "s1", keyId: "k1" }, 60_000);
+    const t = issueEmbedToken(S, { agentId: "", sessionId: "s1", keyId: "k1" }, 60_000);
     expect(verifyEmbedToken(S, t)).toBeNull();
   });
 

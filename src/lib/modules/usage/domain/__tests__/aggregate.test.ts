@@ -12,8 +12,8 @@ const D2 = Date.UTC(2026, 6, 21, 10, 0, 0);
 
 const rec = (over: Partial<RunUsageRecord> = {}): RunUsageRecord => ({
   runId: "r1",
-  assistantId: "a1",
-  assistantName: "助手甲",
+  agentId: "a1",
+  agentName: "智能体甲",
   status: "success",
   costMicroUsd: 1_000_000,
   inputTokens: 100,
@@ -33,7 +33,7 @@ describe("aggregateUsage / 总计", () => {
       inputTokens: 0,
       outputTokens: 0,
     });
-    expect(s.byAssistant).toEqual([]);
+    expect(s.byAgent).toEqual([]);
   });
 
   it("累加运行数、token 与花费", () => {
@@ -54,33 +54,30 @@ describe("aggregateUsage / 总计", () => {
   });
 });
 
-describe("aggregateUsage / 按助手", () => {
-  it("按助手分组并用名称作标签", () => {
-    const s = aggregateUsage([
-      rec(),
-      rec({ runId: "r2", assistantId: "a2", assistantName: "助手乙" }),
-    ]);
-    expect(s.byAssistant).toHaveLength(2);
-    expect(s.byAssistant.map((b) => b.label).sort()).toEqual(["助手乙", "助手甲"]);
+describe("aggregateUsage / 按智能体", () => {
+  it("按智能体分组并用名称作标签", () => {
+    const s = aggregateUsage([rec(), rec({ runId: "r2", agentId: "a2", agentName: "智能体乙" })]);
+    expect(s.byAgent).toHaveLength(2);
+    expect(s.byAgent.map((b) => b.label).sort()).toEqual(["智能体乙", "智能体甲"]);
   });
 
   it("花费高的排前面(看板第一眼看到钱花在哪)", () => {
     const s = aggregateUsage([
-      rec({ assistantId: "cheap", costMicroUsd: 100 }),
-      rec({ runId: "r2", assistantId: "pricey", costMicroUsd: 9_000_000 }),
+      rec({ agentId: "cheap", costMicroUsd: 100 }),
+      rec({ runId: "r2", agentId: "pricey", costMicroUsd: 9_000_000 }),
     ]);
-    expect(s.byAssistant[0]?.key).toBe("pricey");
+    expect(s.byAgent[0]?.key).toBe("pricey");
   });
 
   it("缺名称时回退到 id", () => {
-    const s = aggregateUsage([rec({ assistantName: undefined })]);
-    expect(s.byAssistant[0]?.label).toBe("a1");
+    const s = aggregateUsage([rec({ agentName: undefined })]);
+    expect(s.byAgent[0]?.label).toBe("a1");
   });
 
-  it("同一助手多次运行合并", () => {
+  it("同一智能体多次运行合并", () => {
     const s = aggregateUsage([rec(), rec({ runId: "r2" })]);
-    expect(s.byAssistant).toHaveLength(1);
-    expect(s.byAssistant[0]?.runs).toBe(2);
+    expect(s.byAgent).toHaveLength(1);
+    expect(s.byAgent[0]?.runs).toBe(2);
   });
 });
 

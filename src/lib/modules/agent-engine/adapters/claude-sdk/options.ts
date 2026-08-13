@@ -41,7 +41,7 @@ const APPROVAL_HOOK_TIMEOUT_SEC = 11 * 60;
  *
  * 【为什么必须显式设】SDK 默认 30 天就清掉 projects 下的 jsonl。后果有两层:
  * 一是会话历史整体消失;二是更隐蔽的 —— resume 找不到文件时【静默开一个新会话
- * 而不报错】,表现成"助手突然失忆",日志里什么异常都没有。
+ * 而不报错】,表现成"智能体突然失忆",日志里什么异常都没有。
  *
  * 【为什么是一年,不是永久】永久保留等于让磁盘无上限增长,而这是个自托管单机产品,
  * 磁盘满了会连带把队列和数据库一起拖垮 —— 那比丢历史严重得多。
@@ -204,7 +204,7 @@ export function buildSdkOptions(
   const options: Record<string, unknown> = {
     // ① 框架默认(安全/隔离约定)
     //
-    // 权限模式由助手按【场景】选,不是安全等级:
+    // 权限模式由智能体按【场景】选,不是安全等级:
     //   default            有人盯着的 web 对话,危险操作弹给人确认
     //   bypassPermissions  接口调用,无人值守 —— 等确认只会挂到超时,所以全放行
     //
@@ -239,7 +239,7 @@ export function buildSdkOptions(
      *
      * 这是个多租户平台:宿主机上任何一份 CLAUDE.md 或 settings.json,都会无差别地
      * 混进【每一个租户】的会话。开发机上更明显 —— 本仓库根目录就有 CLAUDE.md。
-     * 平台要的是"助手的行为完全由它自己的配置决定",不是"取决于服务器上碰巧有什么文件"。
+     * 平台要的是"智能体的行为完全由它自己的配置决定",不是"取决于服务器上碰巧有什么文件"。
      */
     settingSources: [],
 
@@ -278,8 +278,8 @@ export function buildSdkOptions(
   /**
    * 工具白名单。
    *
-   * 【这条链曾经断在半路】ToolDef 定义了、AssistantConfig 收了、buildSpec 也原样
-   * 传下来了,却没人把它交给 SDK —— 配了工具限制的助手照样能用全部工具。
+   * 【这条链曾经断在半路】ToolDef 定义了、AgentConfig 收了、buildSpec 也原样
+   * 传下来了,却没人把它交给 SDK —— 配了工具限制的智能体照样能用全部工具。
    * 一个"配置项存在但不生效"的安全设置,比没有这个配置项更糟:
    * 它让人以为已经限制住了。
    *
@@ -329,7 +329,7 @@ export function buildSdkOptions(
     // 【正向白名单而非反向黑名单】不认识的工具一律拒 —— SDK 将来新增工具时,
     // 黑名单会静默放行(fail-open),白名单则自动拒绝(fail-closed)。
     if (allowPatterns && !allowPatterns.some((p) => matchesTool(p, toolName))) {
-      return { allow: false, reason: `工具 ${toolName} 不在该助手的白名单内` };
+      return { allow: false, reason: `工具 ${toolName} 不在该智能体的白名单内` };
     }
 
     // 顺序要紧:先守卫再审批 —— 结构性越界不该浪费人的注意力去审
@@ -377,7 +377,7 @@ export function buildSdkOptions(
    * 【为什么不能用 canUseTool 当围栏】SDK 自己会发这条告警:
    *   CLAUDE_SDK_CAN_USE_TOOL_SHADOWED —— "canUseTool will not be invoked for: Bash.
    *   Bare allowedTools entries auto-approve the whole tool before the callback is consulted."
-   * 也就是说,只要助手配了工具白名单(上面那段传的正是裸工具名),路径守卫和人工审批
+   * 也就是说,只要智能体配了工具白名单(上面那段传的正是裸工具名),路径守卫和人工审批
    * 就【双双静默失效】。一个本意是收紧权限的配置,反而把围栏拆了 —— 而且不报错。
    * 官方给的正解是 PreToolUse hook:它在所有权限步骤之前跑,连 bypassPermissions 都拦得住。
    *

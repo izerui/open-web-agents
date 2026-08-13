@@ -222,7 +222,7 @@ function QuestionBlock({
       <CardContent className="space-y-3 p-3">
         <p className="text-xs text-muted-foreground">
           <HelpCircle className="mr-1 inline-block h-3 w-3" />
-          助手在等你选择
+          智能体在等你选择
         </p>
         {e.questions.map((q, qi) => (
           <div key={`${q.question}-${qi}`} className="space-y-2">

@@ -2,7 +2,7 @@ import type { AgentEvent } from "@/lib/shared";
 
 export interface SessionSummary {
   id: string;
-  assistantId: string;
+  agentId: string;
   workspaceDir: string;
   title?: string;
   createdAt: number;
@@ -15,7 +15,7 @@ export interface SessionSummary {
   lastActiveAt?: number;
 }
 
-export interface AssistantSummary {
+export interface AgentSummary {
   id: string;
   name: string;
   icon?: string;

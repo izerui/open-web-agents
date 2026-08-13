@@ -20,7 +20,7 @@ interface Account {
   role: "admin" | "user";
   disabled: boolean;
   createdAt: number;
-  assistantCount: number;
+  agentCount: number;
   monthCostMicroUsd: number;
   monthlyQuotaMicroUsd: number | null;
 }
@@ -163,7 +163,7 @@ export function AccountsView() {
 
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                   <span>注册于 {new Date(a.createdAt).toLocaleDateString()}</span>
-                  <span>{a.assistantCount} 个智能体</span>
+                  <span>{a.agentCount} 个智能体</span>
                   <span className={cn(over && "font-medium text-[var(--warning)]")}>
                     本月 {formatUsd(a.monthCostMicroUsd)}
                     {a.monthlyQuotaMicroUsd !== null &&

@@ -13,7 +13,7 @@ ai-elements 期望的是 role-based message + parts。
   替代手写的 scrollRef + overflow-y-auto
 - 输入区域：`<PromptInput>` + `<PromptInputTextarea>` + `<PromptInputSubmit>`
   替代手写的 Input + Button（发送/中断）
-- 助手选择：`<PromptInputSelect>` 替代 NativeSelect
+- 智能体选择：`<PromptInputSelect>` 替代 NativeSelect
 - 侧边栏/文件面板：保持不变（不属于 ai-elements 范畴）
 
 ### 2. conversation.tsx — 消息渲染重写

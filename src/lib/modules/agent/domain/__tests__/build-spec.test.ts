@@ -1,5 +1,5 @@
-import { buildSpec } from "@/lib/modules/assistant/domain/build-spec";
-import type { AssistantConfig } from "@/lib/modules/assistant/domain/config";
+import { buildSpec } from "@/lib/modules/agent/domain/build-spec";
+import type { AgentConfig } from "@/lib/modules/agent/domain/config";
 import type { RunContext } from "@/lib/shared";
 import { describe, expect, it } from "vitest";
 
@@ -13,15 +13,15 @@ const ctx: RunContext = {
 
 describe("buildSpec", () => {
   it("最小配置产出合法 AgentSpec", () => {
-    const spec = buildSpec({ systemPrompt: "你是助手", model: "sonnet" }, ctx);
-    expect(spec.systemPrompt).toBe("你是助手");
+    const spec = buildSpec({ systemPrompt: "你是智能体", model: "sonnet" }, ctx);
+    expect(spec.systemPrompt).toBe("你是智能体");
     expect(spec.model).toEqual({ alias: "sonnet" });
     expect(spec.limits).toEqual({ maxTurns: undefined, effort: undefined });
     expect(spec.outputSchema).toBeUndefined();
   });
 
   // 【这条链断过一次】ToolDef 定义了、配置收了、buildSpec 也传了,却没人交给 SDK,
-  // 于是"配了工具限制的助手照样能用全部工具"。permissionMode 是同一形状的字段,
+  // 于是"配了工具限制的智能体照样能用全部工具"。permissionMode 是同一形状的字段,
   // 断在哪一环都表现为"界面选了但运行时没效果",所以每一环都要有断言。
   it("permissionMode 透传;不配则不带该字段", () => {
     expect(
@@ -37,7 +37,7 @@ describe("buildSpec", () => {
   });
 
   it("outputSchema / verifyRules 透传", () => {
-    const cfg: AssistantConfig = {
+    const cfg: AgentConfig = {
       systemPrompt: "p",
       model: "opus",
       outputSchema: { type: "object" },

@@ -13,15 +13,15 @@ interface Doc {
 }
 
 /**
- * 助手知识库面板。
- * 与会话工作空间的区别:工作空间每会话独立、开局为空;知识库是助手级、跨会话长存,
+ * 智能体知识库面板。
+ * 与会话工作空间的区别:工作空间每会话独立、开局为空;知识库是智能体级、跨会话长存,
  * 运行时按用户问题检索相关片段注入提示词。
  */
 export function KnowledgePanel({
-  assistantId,
+  agentId,
   canWrite = true,
 }: {
-  assistantId: string;
+  agentId: string;
   canWrite?: boolean;
 }) {
   const [docs, setDocs] = useState<Doc[]>([]);
@@ -32,7 +32,7 @@ export function KnowledgePanel({
   const [busy, setBusy] = useState(false);
 
   const reload = useCallback(async () => {
-    const res = await fetch(`/api/assistants/${assistantId}/knowledge`);
+    const res = await fetch(`/api/agents/${agentId}/knowledge`);
     if (res.status === 403 || res.status === 404) {
       setDenied(true);
       return;
@@ -40,7 +40,7 @@ export function KnowledgePanel({
     const d = (await res.json()) as { docs?: Doc[] };
     setDenied(false);
     setDocs(d.docs ?? []);
-  }, [assistantId]);
+  }, [agentId]);
 
   useEffect(() => {
     void reload();
@@ -51,7 +51,7 @@ export function KnowledgePanel({
     setBusy(true);
     setMsg(null);
     try {
-      const res = await fetch(`/api/assistants/${assistantId}/knowledge`, {
+      const res = await fetch(`/api/agents/${agentId}/knowledge`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: title.trim(), content: content.trim() }),
@@ -70,7 +70,7 @@ export function KnowledgePanel({
   }
 
   async function remove(docId: string) {
-    await fetch(`/api/assistants/${assistantId}/knowledge?docId=${encodeURIComponent(docId)}`, {
+    await fetch(`/api/agents/${agentId}/knowledge?docId=${encodeURIComponent(docId)}`, {
       method: "DELETE",
     });
     await reload();
@@ -83,13 +83,13 @@ export function KnowledgePanel({
       <div>
         <span className="font-medium text-xs">知识库</span>
         <p className="text-xs opacity-55">
-          助手级、跨会话长存。运行时按用户问题检索相关片段注入提示词;没命中就不注入。
+          智能体级、跨会话长存。运行时按用户问题检索相关片段注入提示词;没命中就不注入。
         </p>
       </div>
 
       {!canWrite && (
         <p className="text-xs opacity-45">
-          这个助手是别人分享给你的 —— 可以看资料清单,但不能增删。
+          这个智能体是别人分享给你的 —— 可以看资料清单,但不能增删。
         </p>
       )}
 

@@ -6,7 +6,7 @@ import { desc, eq } from "drizzle-orm";
 interface Row {
   id: string;
   ownerId: string;
-  assistantId: string | null;
+  agentId: string | null;
   name: string | null;
   createdAt: Date;
   lastUsedAt: Date | null;
@@ -15,7 +15,7 @@ interface Row {
 const COLUMNS = {
   id: apiKeys.id,
   ownerId: apiKeys.ownerId,
-  assistantId: apiKeys.assistantId,
+  agentId: apiKeys.agentId,
   name: apiKeys.name,
   createdAt: apiKeys.createdAt,
   lastUsedAt: apiKeys.lastUsedAt,
@@ -25,7 +25,7 @@ function toRecord(r: Row): ApiKeyRecord {
   return {
     id: r.id,
     ownerId: r.ownerId,
-    assistantId: r.assistantId ?? undefined,
+    agentId: r.agentId ?? undefined,
     name: r.name ?? undefined,
     createdAt: r.createdAt.getTime(),
     lastUsedAt: r.lastUsedAt?.getTime(),
@@ -39,7 +39,7 @@ export class MysqlApiKeyRepo implements ApiKeyRepo {
     await this.db.insert(apiKeys).values({
       id: k.id,
       ownerId: k.ownerId,
-      assistantId: k.assistantId,
+      agentId: k.agentId,
       name: k.name,
       hashedKey: k.hashedKey,
     });

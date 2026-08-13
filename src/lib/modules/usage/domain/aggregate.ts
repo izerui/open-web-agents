@@ -3,8 +3,8 @@
 
 export interface RunUsageRecord {
   runId: string;
-  assistantId: string;
-  assistantName?: string;
+  agentId: string;
+  agentName?: string;
   ownerId?: string;
   status: string;
   /** 以整数"微美元"(1e-6 USD)记账。浮点累加会累积误差,金额一律不用 float。 */
@@ -31,7 +31,7 @@ export interface UsageBucket extends UsageTotals {
 
 export interface UsageSummary {
   totals: UsageTotals;
-  byAssistant: UsageBucket[];
+  byAgent: UsageBucket[];
   byDay: UsageBucket[];
 }
 
@@ -60,18 +60,17 @@ export function dayKey(ms: number): string {
 
 export function aggregateUsage(records: RunUsageRecord[]): UsageSummary {
   const totals = empty();
-  const assistants = new Map<string, UsageBucket>();
+  const agents = new Map<string, UsageBucket>();
   const days = new Map<string, UsageBucket>();
 
   for (const r of records) {
     accumulate(totals, r);
 
-    const aKey = r.assistantId;
+    const aKey = r.agentId;
     const a =
-      assistants.get(aKey) ??
-      ({ key: aKey, label: r.assistantName ?? aKey, ...empty() } as UsageBucket);
+      agents.get(aKey) ?? ({ key: aKey, label: r.agentName ?? aKey, ...empty() } as UsageBucket);
     accumulate(a, r);
-    assistants.set(aKey, a);
+    agents.set(aKey, a);
 
     const dKey = dayKey(r.at);
     const d = days.get(dKey) ?? ({ key: dKey, label: dKey, ...empty() } as UsageBucket);
@@ -82,7 +81,7 @@ export function aggregateUsage(records: RunUsageRecord[]): UsageSummary {
   return {
     totals,
     // 花费高的排前面 —— 看板第一眼要看到钱花在哪
-    byAssistant: [...assistants.values()].sort((x, y) => y.costMicroUsd - x.costMicroUsd),
+    byAgent: [...agents.values()].sort((x, y) => y.costMicroUsd - x.costMicroUsd),
     // 时间序按自然顺序
     byDay: [...days.values()].sort((x, y) => x.key.localeCompare(y.key)),
   };
@@ -94,7 +93,7 @@ export function aggregateUsage(records: RunUsageRecord[]): UsageSummary {
  * 【进位必须先做】曾经是"先取整数美元、再对余数四舍五入到分",余数进位到 100 时
  * padStart(2) 不补位,于是 999900 显示成 `$0.100` —— 人眼读作一毛钱,实为一块钱,
  * 差一个数量级。错的不是浮点,是进位:任何小数部分 ≥ $0.995 的金额都会中招,
- * 而看板恰好按花费排序,最烧钱的助手反而显示得最便宜。
+ * 而看板恰好按花费排序,最烧钱的智能体反而显示得最便宜。
  */
 export function formatUsd(microUsd: number): string {
   const sign = microUsd < 0 ? "-" : "";

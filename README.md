@@ -1,14 +1,14 @@
 # Open Web Agents
 
 基于 [claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) 的智能体平台:
-可视化地定义**特定场景的专用助手**,每个助手对外提供一套统一接口 —— 既能网页对话使用,
+可视化地定义**特定场景的专用智能体**,每个智能体对外提供一套统一接口 —— 既能网页对话使用,
 也能被企业系统当接口调用,拿到**结构化结果**与**全程过程监控**。
 
 与通用智能体(Claude app / Codex / LobeHub)的区别:它们产出对话文本,没法直接喂给应用系统。
-这里的助手可以定义 `outputSchema`,于是「跑一次」就变成「调一个接口拿一段 JSON」。
+这里的智能体可以定义 `outputSchema`,于是「跑一次」就变成「调一个接口拿一段 JSON」。
 
 ```
-企业后端 ──invoke──▶ 助手 ──▶ { "verdict": "pass", "issues": [...], "score": 88 }
+企业后端 ──invoke──▶ 智能体 ──▶ { "verdict": "pass", "issues": [...], "score": 88 }
                       │
 网页工作台 ────────────┘   同一个运行内核,只是入口与结果投递不同
 ```
@@ -30,12 +30,12 @@ pnpm dev                          # http://localhost:5678
 
 ### 一分钟体验闭环
 
-1. `/builder` 建一个助手,填提示词;想让它能被系统调用就再填 `outputSchema`
+1. `/builder` 建一个智能体,填提示词;想让它能被系统调用就再填 `outputSchema`
 2. `/` 工作台里跟它对话,右侧看它在独立工作目录里生成的文件
 3. `/settings` 签发 API Key,然后:
 
 ```bash
-curl -X POST localhost:5678/api/agents/<助手id>/invoke \
+curl -X POST localhost:5678/api/agents/<智能体id>/invoke \
   -H "X-Api-Key: <key>" -H 'Content-Type: application/json' \
   -d '{"input":"……"}'
 # → { "taskId": "..." }
@@ -49,17 +49,17 @@ curl localhost:5678/api/agents/<taskId>/result -H "X-Api-Key: <key>"
 
 | 能力         | 说明                                                                                       |
 |------------|------------------------------------------------------------------------------------------|
-| 助手构建器      | 提示词 / 模型 / 轮次 / Skills / MCP / 子代理 / 工具白名单 / inputSchema / outputSchema / 审批规则 / Webhook |
+| 智能体构建器      | 提示词 / 模型 / 轮次 / Skills / MCP / 子代理 / 工具白名单 / inputSchema / outputSchema / 审批规则 / Webhook |
 | 统一运行接口     | 网页对话与系统 invoke **共用同一个运行内核**                                                             |
-| 结构化输出      | 定义了 `outputSchema` 才算「接口型助手」;结果经 JSON Schema 校验,不合格判失败                                   |
+| 结构化输出      | 定义了 `outputSchema` 才算「接口型智能体」;结果经 JSON Schema 校验,不合格判失败                                   |
 | 入参契约       | 定义了 `inputSchema` 则 `invoke` 的入参必须符合它,否则 400 并指出是哪个字段                                    |
 | 工作空间       | 每会话一个独立目录,文件树 / 预览 / 下载                                                                  |
 | 执行隔离       | OS 内核沙箱(Bash)+ 路径守卫(文件工具),见下文限制                                                          |
 | 人工审批(HITL) | 按工具名或命令模式挂起等人确认,超时自动拒绝                                                                   |
-| 知识库        | 助手级文档,运行时按问题检索片段注入提示词(BM25)                                                              |
-| 权限         | 登录 / 每用户凭证 / API Key / 助手分享 / 用户组                                                        |
+| 知识库        | 智能体级文档,运行时按问题检索片段注入提示词(BM25)                                                              |
+| 权限         | 登录 / 每用户凭证 / API Key / 智能体分享 / 用户组                                                        |
 | 可嵌入 widget | 一行 `<script>` 挂到企业页面;**API Key 不下发浏览器**                                                  |
-| 用量监控       | 按助手 / 按天的花费与 token,队列积压提示                                                                |
+| 用量监控       | 按智能体 / 按天的花费与 token,队列积压提示                                                                |
 | 队列与扩容      | MySQL 租约队列 + Redis 事件总线 + 可独立扩容的 worker                                                  |
 
 ---
@@ -74,7 +74,7 @@ lib/container   composition root —— 全工程唯一决定「用哪个实现�
 lib/modules/
   agent-engine  唯一封装 SDK 的模块(ACL:SDK 消息 → 域内 AgentEvent)
   run           编排 / 状态机 / 队列 / worker
-  assistant     助手配置 / buildSpec / 输出校验
+  agent         智能体配置 / buildSpec / 输出校验
   model-gateway 模型别名槽 → 真实 modelId(可挂任意兼容网关)
   session       会话与工作空间
   access        授权判定 / 用户组
@@ -118,7 +118,7 @@ const bus = new RedisBus(env.redisUrl); // 曾是 InMemoryBus
 | `OWA_SECRET_KEY`                                    | 用户凭证加密主密钥。**生产未设置会拒绝启动**                   |
 | `OWA_AUTH_REQUIRED`                                 | 是否要求登录,默认 1;仅本地开发可设 0                      |
 | `OWA_SANDBOX`                                       | OS 内核沙箱,默认 1;**macOS 本地开发需设 0**,见限制        |
-| `OWA_ALLOW_STDIO_MCP`                               | 是否允许 stdio MCP,默认 0;开启后助手可在宿主机启动程序,仅可信部署使用 |
+| `OWA_ALLOW_STDIO_MCP`                               | 是否允许 stdio MCP,默认 0;开启后智能体可在宿主机启动程序,仅可信部署使用 |
 | `OWA_EMBEDDED_WORKER`                               | 设 0 关掉 web 进程内嵌的 worker(拆进程部署时用)           |
 | `OWA_SHUTDOWN_GRACE_MS`                             | worker 收到 SIGTERM 后等在途任务的上限,默认 60000       |
 
@@ -189,9 +189,9 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 | POST            | `/api/auth`                                | —                      | 登录 / 注册 / 登出        |
 | GET             | `/api/auth`                                | cookie                 | 当前登录态(key 只回掩码)     |
 | PUT             | `/api/me/credentials`                      | cookie                 | 设置自带 base_url / key |
-| GET/POST        | `/api/assistants`                          | cookie                 | 列出可见助手 / 创建更新       |
-| GET/POST/DELETE | `/api/assistants/{id}/share`               | cookie(write)          | 分享给用户 / 组 / 公开      |
-| GET/POST/DELETE | `/api/assistants/{id}/knowledge`           | cookie(读 read、写 write) | 知识文档                |
+| GET/POST        | `/api/agents`                              | cookie                 | 列出可见智能体 / 创建更新       |
+| GET/POST/DELETE | `/api/agents/{id}/share`                   | cookie(write)          | 分享给用户 / 组 / 公开      |
+| GET/POST/DELETE | `/api/agents/{id}/knowledge`               | cookie(读 read、写 write) | 知识文档                |
 | GET/POST        | `/api/groups` · `/api/groups/{id}/members` | cookie                 | 用户组与成员              |
 | GET/POST/DELETE | `/api/keys`                                | cookie                 | API Key(明文仅签发时返回一次) |
 | GET/POST        | `/api/sessions`                            | cookie / key           | 会话列表与创建             |
@@ -225,7 +225,7 @@ macOS 的 seatbelt 沙箱会**吞掉沙箱内 Bash 的 stdout** —— agent 跑
 
 **沙箱关闭时 Bash 没有围栏。** 文件工具(Write/Edit/Read)由路径守卫拦住,始终生效;
 但 Bash 执行任意命令,路径藏在命令文本里,引号/变量/拼接都能绕过匹配 ——
-只能靠内核沙箱。所以本地开发环境下不要跑不受信任的助手。
+只能靠内核沙箱。所以本地开发环境下不要跑不受信任的智能体。
 
 ### SDK 的 session id 不是时间点快照
 
@@ -239,7 +239,7 @@ macOS 的 seatbelt 沙箱会**吞掉沙箱内 Bash 的 stdout** —— agent 跑
 ### 兼容网关对结构化输出的支持不一致
 
 第三方 Anthropic 兼容网关(DashScope / GLM 等)对 `output_format` 的支持并不稳定,
-实测同一助手时而拿不到 `structured_output`。平台留了降级路径:从最终文本里提取 JSON,
+实测同一智能体时而拿不到 `structured_output`。平台留了降级路径:从最终文本里提取 JSON,
 **提取结果仍要过 outputSchema 校验**,并打 `salvagedFromText` 标记便于运维识别。
 
 ### 两处「写了但没跑过」
@@ -344,7 +344,7 @@ export OWA_TEST_REDIS_URL=redis://127.0.0.1:6379
 | 端到端  | 对真正跑着的服务从 HTTP 打进去:越权攻击面、归属隔离、路径穿越、取消、健康探针      |
 | 架构边界 | 机械检查依赖铁律:domain 零框架依赖、模块间只经公开面、SDK 只在一个文件、装配点唯一 |
 
-**为什么端到端这一层不能省。** 最严重的那几个缺陷(任意用户能跑他人私有助手、
+**为什么端到端这一层不能省。** 最严重的那几个缺陷(任意用户能跑他人私有智能体、
 API Key 可被全平台枚举吊销)的共同点是:每一层单独看都合理,合起来才出事 ——
 授权体系写得好好的,只是**运行路径没接上它**。域层单测覆盖得了判定表,
 覆盖不了"路由到底有没有调它"。

@@ -16,7 +16,6 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { UserMenu } from "@/components/user-menu";
-import { isAdminView, useMe } from "@/lib/use-me";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
@@ -62,7 +61,7 @@ export type SettingsArea = "personal" | "admin";
  * 【为什么不是一个侧栏里的两个分组】那样管理员无论从哪个入口进来,
  * 看到的都是同一份并排的清单 —— 分组标签只是给列表加了小标题,
  * "我现在在个人设置里"还是"在管理后台里"依旧无从判断。
- * 改成一次只显示一个区,顶部写清是哪个区,要去另一个区得显式切过去。
+ * 改成一次只显示一个区,顶部写清是哪个区;换区走头像菜单。
  */
 const AREAS = {
   personal: {
@@ -70,15 +69,12 @@ const AREAS = {
     hint: "只影响本企业账号",
     icon: User,
     items: PERSONAL_NAV,
-    /** 切过去时的落点 —— 该区的第一项 */
-    entry: "/settings/keys",
   },
   admin: {
     label: "平台管理",
     hint: "影响所有企业账号",
     icon: ShieldCheck,
     items: ADMIN_NAV,
-    entry: "/admin/accounts",
   },
 } as const;
 
@@ -106,22 +102,13 @@ export function SettingsShell({
   actions?: React.ReactNode;
   children: React.ReactNode;
   width?: "narrow" | "wide";
-  /** 页面级条目挂在设置导航下方(如构建器的助手列表),避免再开第二条侧栏。 */
+  /** 页面级条目挂在设置导航下方(如构建器的智能体列表),避免再开第二条侧栏。 */
   sidebarExtra?: React.ReactNode;
   /** 当前页属于哪个区。一次只显示一个区的导航。 */
   area?: SettingsArea;
 }) {
   const pathname = usePathname();
-  const { me } = useMe();
-  // 非 admin 完全看不到管理区的存在。真正的拦截在服务端(requireAdmin),
-  // 这里只是别把一个点了必然碰壁的入口摆在人眼前。
-  const isAdmin = isAdminView(me);
-
   const current = AREAS[area];
-  const other = AREAS[area === "personal" ? "admin" : "personal"];
-  // 去管理区的入口只给管理员;反方向(管理区→个人设置)总是给 ——
-  // 能站在管理区里的人,必定已经通过了 requireAdmin。
-  const canSwitch = area === "admin" || isAdmin;
 
   const renderItems = (items: readonly { href: string; label: string; icon: typeof Bot }[]) => (
     <SidebarMenu>
@@ -204,33 +191,16 @@ export function SettingsShell({
           {/* 只显示当前区的导航 —— 分组标签没了,因为整个侧栏就是这一个区 */}
           <SidebarGroup>{renderItems(current.items)}</SidebarGroup>
 
-          {/* 页面自己的条目(如构建器的助手列表)紧跟其后 */}
+          {/* 页面自己的条目(如构建器的智能体列表)紧跟其后 */}
           {sidebarExtra}
         </SidebarContent>
 
         <SidebarFooter className="border-t border-sidebar-border">
           {/*
-            去另一个区的入口。
-            【为什么在 footer 而不是导航区末尾】导航区是 overflow-auto 的,
-            构建器的助手列表一长就把它推到要滚动才看得见的地方 ——
-            而"我要去另一个区"随时都该够得着。footer 不参与滚动。
-
-            【为什么不做成顶部的 tab】两个区不是平级的两个视图,而是两个
-            不同的地方:绝大多数时候人只待在其中一个里。做成"离开当前区"
-            的动作,比做成常驻 tab 更贴近实际用法。
+            这里曾经有一条"前往另一个区"的按钮。去掉了 —— 头像菜单里
+            「账号设置」和「平台管理」两个入口本来就都在,再放一条只是
+            让同一个去处在一屏里出现两次。要换区从头像菜单走。
           */}
-          {canSwitch && (
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild tooltip={`前往${other.label}`}>
-                  <Link href={other.entry}>
-                    <other.icon className="text-muted-foreground/60" />
-                    <span className="text-xs">前往{other.label}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          )}
           <UserMenu />
         </SidebarFooter>
 

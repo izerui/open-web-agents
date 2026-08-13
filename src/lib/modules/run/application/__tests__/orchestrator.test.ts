@@ -1,7 +1,7 @@
 // 用例编排测试:全部端口用内存 fake,不碰真 IO、不调模型。
 
 import type { EnginePort, RunResult } from "@/lib/modules/agent-engine/ports";
-import { InMemoryAssistantRepo } from "@/lib/modules/assistant/adapters/in-memory-assistant-repo";
+import { InMemoryAgentRepo } from "@/lib/modules/agent/adapters/in-memory-agent-repo";
 import { InMemoryBus } from "@/lib/modules/events/adapters/in-memory-bus";
 import { RunOrchestrator, topicOf } from "@/lib/modules/run/application/orchestrator";
 import { InMemorySessionRepo } from "@/lib/modules/session/adapters/in-memory-session-repo";
@@ -34,24 +34,24 @@ const PLATFORM = { baseUrl: "https://platform-gw", key: "sk-platform" };
 
 async function setup(engine: EnginePort) {
   const sessions = new InMemorySessionRepo();
-  const assistants = new InMemoryAssistantRepo([
+  const agents = new InMemoryAgentRepo([
     {
       id: "a1",
       ownerId: "u1",
-      name: "通用助手",
-      config: { systemPrompt: "你是助手", model: "sonnet" },
+      name: "通用智能体",
+      config: { systemPrompt: "你是智能体", model: "sonnet" },
     },
   ]);
   const bus = new InMemoryBus();
-  await sessions.create({ id: "s1", assistantId: "a1", workspaceDir: "/ws/s1" });
+  await sessions.create({ id: "s1", agentId: "a1", workspaceDir: "/ws/s1" });
   const orch = new RunOrchestrator({
     sessions,
-    assistants,
+    agents,
     engine,
     bus,
     platformCredentials: PLATFORM,
   });
-  return { sessions, assistants, bus, orch };
+  return { sessions, agents, bus, orch };
 }
 
 describe("RunOrchestrator.execute", () => {
@@ -152,10 +152,10 @@ describe("RunOrchestrator.execute", () => {
 
   it("事件总线故障不影响 agent 跑完", async () => {
     const engine = new FakeEngine([{ kind: "text", text: "x" }]);
-    const { sessions, assistants } = await setup(engine);
+    const { sessions, agents } = await setup(engine);
     const broken = new RunOrchestrator({
       sessions,
-      assistants,
+      agents,
       engine,
       bus: {
         publish: async () => {
@@ -181,19 +181,19 @@ describe("outputSchema 契约守门", () => {
 
   async function setupWithSchema(result: RunResult) {
     const sessions = new InMemorySessionRepo();
-    const assistants = new InMemoryAssistantRepo([
+    const agents = new InMemoryAgentRepo([
       {
         id: "a1",
         ownerId: "u1",
-        name: "专用助手",
+        name: "专用智能体",
         config: { systemPrompt: "p", model: "sonnet", outputSchema: schema },
       },
     ]);
     const bus = new InMemoryBus();
-    await sessions.create({ id: "s1", assistantId: "a1", workspaceDir: "/ws/s1" });
+    await sessions.create({ id: "s1", agentId: "a1", workspaceDir: "/ws/s1" });
     const orch = new RunOrchestrator({
       sessions,
-      assistants,
+      agents,
       engine: new FakeEngine([], result),
       bus,
       platformCredentials: PLATFORM,

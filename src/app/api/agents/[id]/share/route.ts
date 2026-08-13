@@ -8,27 +8,27 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * 只有对助手有 write 权限的人才能改它的分享设置 ——
- * 否则被分享 read 的人可以把别人的助手再公开出去。
+ * 只有对智能体有 write 权限的人才能改它的分享设置 ——
+ * 否则被分享 read 的人可以把别人的智能体再公开出去。
  */
-async function requireWrite(req: Request, assistantId: string) {
-  const { assistants, grants, auth } = getContainer();
+async function requireWrite(req: Request, agentId: string) {
+  const { agents, grants, auth } = getContainer();
   const subject = await auth.resolveSubject(req);
-  const assistant = await assistants.get(assistantId);
-  if (!assistant) return { error: Response.json({ error: "not found" }, { status: 404 }) };
+  const agent = await agents.get(agentId);
+  if (!agent) return { error: Response.json({ error: "not found" }, { status: 404 }) };
 
-  const list = await grants.listForResource("assistant", assistantId);
+  const list = await grants.listForResource("agent", agentId);
   // 连读都无权 → 404,不确认资源存在;能读但不能写 → 403
-  if (!hasResourceAccess(subject, assistant, "read", list)) {
+  if (!hasResourceAccess(subject, agent, "read", list)) {
     return { error: Response.json({ error: "not found" }, { status: 404 }) };
   }
-  if (!hasResourceAccess(subject, assistant, "write", list)) {
+  if (!hasResourceAccess(subject, agent, "write", list)) {
     return { error: Response.json({ error: "no write permission" }, { status: 403 }) };
   }
-  return { subject, assistant, list };
+  return { subject, agent, list };
 }
 
-/** 查看某助手当前的分享设置。 */
+/** 查看某智能体当前的分享设置。 */
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   try {
@@ -70,7 +70,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (target === "public") {
       const g = await grants.grant({
         id: randomUUID().replace(/-/g, "").slice(0, 24),
-        resourceType: "assistant",
+        resourceType: "agent",
         resourceId: id,
         principalType: "*",
         principalId: PUBLIC_PRINCIPAL,
@@ -88,7 +88,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       }
       const g = await grants.grant({
         id: randomUUID().replace(/-/g, "").slice(0, 24),
-        resourceType: "assistant",
+        resourceType: "agent",
         resourceId: id,
         principalType: "group",
         principalId: groupId,
@@ -103,7 +103,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     const g = await grants.grant({
       id: randomUUID().replace(/-/g, "").slice(0, 24),
-      resourceType: "assistant",
+      resourceType: "agent",
       resourceId: id,
       principalType: "user",
       principalId: user.id,
@@ -128,9 +128,9 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
     const grantId = new URL(req.url).searchParams.get("grantId");
     if (!grantId) return Response.json({ error: "grantId is required" }, { status: 400 });
 
-    // 只允许撤销本助手上的授权,防止拿别的资源的 grantId 越权删除
+    // 只允许撤销本智能体上的授权,防止拿别的资源的 grantId 越权删除
     if (!r.list.some((g) => g.id === grantId)) {
-      return Response.json({ error: "grant not found on this assistant" }, { status: 404 });
+      return Response.json({ error: "grant not found on this agent" }, { status: 404 });
     }
     await grants.revoke(grantId);
     return Response.json({ revoked: grantId });

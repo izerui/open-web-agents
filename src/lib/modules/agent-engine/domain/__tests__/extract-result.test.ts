@@ -36,7 +36,7 @@ describe("extractRunResult", () => {
     expect(r.error?.kind).toBe("no_structured_output");
   });
 
-  it("通用助手(无 schema)success 无结构化 → 仍成功,只回文本", () => {
+  it("通用智能体(无 schema)success 无结构化 → 仍成功,只回文本", () => {
     const r = extractRunResult({ subtype: "success", result: "just text" }, { hasSchema: false });
     expect(r.status).toBe("success");
     expect(r.summary).toBe("just text");
@@ -116,7 +116,7 @@ describe("兼容网关降级:从文本提取结构化结果", () => {
     expect(r.structured).toBeUndefined();
   });
 
-  it("无 schema 的通用助手不做提取(不该凭空造结构化结果)", () => {
+  it("无 schema 的通用智能体不做提取(不该凭空造结构化结果)", () => {
     const r = extractRunResult({ subtype: "success", result: '{"a":1}' }, { hasSchema: false });
     expect(r.structured).toBeUndefined();
   });

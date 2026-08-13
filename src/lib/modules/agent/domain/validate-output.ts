@@ -1,6 +1,6 @@
 // 结构化输出的契约校验。
 //
-// 这是"助手能被企业系统当接口用"的守门人:调用方按 outputSchema 写死了解析逻辑,
+// 这是"智能体能被企业系统当接口用"的守门人:调用方按 outputSchema 写死了解析逻辑,
 // 平台就必须保证——要么给出符合契约的 JSON,要么明确报失败,绝不给"半对"的结果。
 //
 // 编译与缓存下沉到 validate-schema:输入契约与输出契约是同一件事的两侧,
@@ -19,7 +19,7 @@ export function validateStructured(schema: JsonSchema, value: unknown): Validati
 }
 
 /**
- * 入站契约校验:助手声明了 inputSchema,调用方就必须按它传。
+ * 入站契约校验:智能体声明了 inputSchema,调用方就必须按它传。
  *
  * 【为什么对外接口必须校验入参】这个平台的定位是"被 Java/Go/Python 系统当接口调"。
  * 不校验的话,一个字段拼错的请求会被原样塞进提示词,agent 照跑不误,

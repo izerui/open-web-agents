@@ -1,8 +1,8 @@
 // 从模型的自由文本里提取 JSON 对象。
 //
 // 为什么需要:SDK 原生 outputFormat 靠约束解码保证结构化输出,但第三方 Anthropic 兼容网关
-// (DashScope / GLM 等)对 output_format 的支持并不一致 —— 实测同一助手有时拿不到
-// structured_output。此时若直接判失败,"助手即接口"在兼容网关上就不可用。
+// (DashScope / GLM 等)对 output_format 的支持并不一致 —— 实测同一智能体有时拿不到
+// structured_output。此时若直接判失败,"智能体即接口"在兼容网关上就不可用。
 //
 // 故留一条【明确的降级路径】:文本里能提取出合规 JSON 就采信,提取不出才判失败。
 // 这不放松契约 —— 提取结果仍要过 outputSchema 校验。

@@ -25,12 +25,12 @@ export async function GET(req: Request) {
   frame.style.cssText =
     "position:fixed;right:20px;bottom:88px;width:380px;height:560px;border:0;border-radius:12px;" +
     "box-shadow:0 8px 32px rgba(0,0,0,.18);z-index:2147483000;display:none;background:#fff";
-  frame.setAttribute("title", "AI 助手");
+  frame.setAttribute("title", "AI 智能体");
 
   var btn = document.createElement("button");
   btn.type = "button";
   btn.textContent = "💬";
-  btn.setAttribute("aria-label", "打开 AI 助手");
+  btn.setAttribute("aria-label", "打开 AI 智能体");
   btn.style.cssText =
     "position:fixed;right:20px;bottom:20px;width:56px;height:56px;border:0;border-radius:50%;" +
     "background:#111;color:#fff;font-size:24px;cursor:pointer;z-index:2147483001;" +

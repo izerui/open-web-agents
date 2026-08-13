@@ -10,7 +10,7 @@
 import { randomUUID } from "node:crypto";
 import { createDb } from "@/lib/db/client";
 import type { EnginePort, RunResult } from "@/lib/modules/agent-engine/ports";
-import { InMemoryAssistantRepo } from "@/lib/modules/assistant/adapters/in-memory-assistant-repo";
+import { InMemoryAgentRepo } from "@/lib/modules/agent/adapters/in-memory-agent-repo";
 import { InMemoryBus } from "@/lib/modules/events/adapters/in-memory-bus";
 import { MysqlRunRepo } from "@/lib/modules/run/adapters/mysql-run-repo";
 import { RunOrchestrator } from "@/lib/modules/run/application/orchestrator";
@@ -69,11 +69,11 @@ if (!TEST_DB_URL) {
   }
 
   const sessions = new InMemorySessionRepo();
-  const assistants = new InMemoryAssistantRepo([
+  const agents = new InMemoryAgentRepo([
     {
       id: "a1",
       ownerId: "u1",
-      name: "并发测试助手",
+      name: "并发测试智能体",
       config: { systemPrompt: "p", model: "sonnet" },
     },
   ]);
@@ -81,7 +81,7 @@ if (!TEST_DB_URL) {
   function makeWorker(workerId: string, engineDelayMs = 5) {
     const orchestrator = new RunOrchestrator({
       sessions,
-      assistants,
+      agents,
       engine: new RecordingEngine(workerId, engineDelayMs),
       bus: new InMemoryBus(),
       platformCredentials: { baseUrl: "b", key: "k" },
@@ -107,7 +107,7 @@ if (!TEST_DB_URL) {
   describe("多 worker 并发", { timeout: 60_000 }, () => {
     it("N 个 worker 抢同一队列:每个任务恰好执行一次,不重不漏", async () => {
       const SESSION = "s-conc";
-      await sessions.create({ id: SESSION, assistantId: "a1", workspaceDir: "/ws" });
+      await sessions.create({ id: SESSION, agentId: "a1", workspaceDir: "/ws" });
 
       const TASKS = 24;
       const ids: string[] = [];
@@ -158,7 +158,7 @@ if (!TEST_DB_URL) {
 
     it("worker 崩溃后任务被其它 worker 接手,且最终只成功一次", async () => {
       const SESSION = "s-crash";
-      await sessions.create({ id: SESSION, assistantId: "a1", workspaceDir: "/ws" });
+      await sessions.create({ id: SESSION, agentId: "a1", workspaceDir: "/ws" });
       const id = randomUUID().replace(/-/g, "").slice(0, 24);
       await repo.create({ id, sessionId: SESSION, prompt: "crash-task" });
 
@@ -234,7 +234,7 @@ if (!TEST_DB_URL) {
 
     it("租约内的任务不会被其它 worker 抢走(执行中不被打断)", async () => {
       const SESSION = "s-lease";
-      await sessions.create({ id: SESSION, assistantId: "a1", workspaceDir: "/ws" });
+      await sessions.create({ id: SESSION, agentId: "a1", workspaceDir: "/ws" });
       const id = randomUUID().replace(/-/g, "").slice(0, 24);
       await repo.create({ id, sessionId: SESSION, prompt: "long-task" });
 
@@ -251,7 +251,7 @@ if (!TEST_DB_URL) {
 
     it("持续入队时多 worker 也不重复执行(边跑边加)", async () => {
       const SESSION = "s-stream";
-      await sessions.create({ id: SESSION, assistantId: "a1", workspaceDir: "/ws" });
+      await sessions.create({ id: SESSION, agentId: "a1", workspaceDir: "/ws" });
 
       const workers = ["s1", "s2", "s3"].map((id) => makeWorker(id, 2));
       for (const w of workers) w.start();

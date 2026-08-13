@@ -36,15 +36,15 @@ export const users = mysqlTable("users", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-export const assistants = mysqlTable(
-  "assistants",
+export const agents = mysqlTable(
+  "agents",
   {
     id: varchar("id", { length: 36 }).primaryKey(),
     ownerId: varchar("owner_id", { length: 36 }).notNull(),
     name: varchar("name", { length: 255 }).notNull(),
     icon: varchar("icon", { length: 64 }),
     description: varchar("description", { length: 1024 }),
-    /** AssistantConfig:systemPrompt/skills/mcpServers/tools/subagents/model/effort/maxTurns */
+    /** AgentConfig:systemPrompt/skills/mcpServers/tools/subagents/model/effort/maxTurns */
     config: json("config").notNull(),
     inputSchema: json("input_schema"),
     /** 定义了才能被企业系统当接口消费(设计文档 §3) */
@@ -55,7 +55,7 @@ export const assistants = mysqlTable(
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
   },
-  (t) => ({ byOwner: index("idx_assistants_owner").on(t.ownerId) }),
+  (t) => ({ byOwner: index("idx_agents_owner").on(t.ownerId) }),
 );
 
 /** 会话 = 项目 = 工作目录,一对一。 */
@@ -63,7 +63,7 @@ export const sessions = mysqlTable(
   "sessions",
   {
     id: varchar("id", { length: 36 }).primaryKey(),
-    assistantId: varchar("assistant_id", { length: 36 }).notNull(),
+    agentId: varchar("agent_id", { length: 36 }).notNull(),
     /** 人用时归属用户 */
     ownerId: varchar("owner_id", { length: 36 }),
     /** 系统 invoke 时归属调用方 key */
@@ -80,7 +80,7 @@ export const sessions = mysqlTable(
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (t) => ({
-    byAssistant: index("idx_sessions_assistant").on(t.assistantId),
+    byAgent: index("idx_sessions_agent").on(t.agentId),
     byOwner: index("idx_sessions_owner").on(t.ownerId),
   }),
 );
@@ -161,7 +161,7 @@ export const apiKeys = mysqlTable(
   "api_keys",
   {
     id: varchar("id", { length: 36 }).primaryKey(),
-    assistantId: varchar("assistant_id", { length: 36 }),
+    agentId: varchar("agent_id", { length: 36 }),
     ownerId: varchar("owner_id", { length: 36 }).notNull(),
     /** 只存哈希,明文只在创建时返回一次 */
     hashedKey: varchar("hashed_key", { length: 128 }).notNull().unique(),
@@ -173,7 +173,7 @@ export const apiKeys = mysqlTable(
   (t) => ({ byOwner: index("idx_api_keys_owner").on(t.ownerId) }),
 );
 
-/** 通用授权:一张表覆盖 assistants/sessions 等资源;principalId="*" 表示 public。 */
+/** 通用授权:一张表覆盖 agents/sessions 等资源;principalId="*" 表示 public。 */
 export const accessGrants = mysqlTable(
   "access_grants",
   {
@@ -188,20 +188,20 @@ export const accessGrants = mysqlTable(
 );
 
 /**
- * 助手的知识文档。
- * 与会话工作空间的区别:工作空间是每会话独立且开局为空,知识库是助手级、跨会话长存。
+ * 智能体的知识文档。
+ * 与会话工作空间的区别:工作空间是每会话独立且开局为空,知识库是智能体级、跨会话长存。
  */
 export const knowledgeDocs = mysqlTable(
   "knowledge_docs",
   {
     id: varchar("id", { length: 36 }).primaryKey(),
-    assistantId: varchar("assistant_id", { length: 36 }).notNull(),
+    agentId: varchar("agent_id", { length: 36 }).notNull(),
     title: varchar("title", { length: 255 }).notNull(),
     /** 原文。切块与索引在读取时算 —— 文档量级不大时省掉一层一致性维护。 */
     content: text("content").notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
-  (t) => ({ byAssistant: index("idx_knowledge_assistant").on(t.assistantId) }),
+  (t) => ({ byAgent: index("idx_knowledge_agent").on(t.agentId) }),
 );
 
 /** 用户组:让"分享给整个团队"成为可能,而不必逐个点人。 */

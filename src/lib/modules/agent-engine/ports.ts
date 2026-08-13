@@ -2,7 +2,7 @@ import type { AgentEvent, AgentSpec, RunContext } from "@/lib/shared";
 
 export interface RunResult {
   status: "success" | "failed";
-  /** 仅当助手定义了 outputSchema 且 SDK 产出结构化输出时存在。 */
+  /** 仅当智能体定义了 outputSchema 且 SDK 产出结构化输出时存在。 */
   structured?: unknown;
   summary?: string;
   /** SDK session id,供下一轮 resume。 */

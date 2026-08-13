@@ -19,7 +19,7 @@ interface UsageData {
   canViewAll: boolean;
   queue: { pending: number; running: number };
   totals: UsageTotals;
-  byAssistant: UsageBucket[];
+  byAgent: UsageBucket[];
   byDay: UsageBucket[];
 }
 
@@ -74,7 +74,7 @@ export function UsageView({ scope = "self" }: { scope?: "self" | "all" }) {
   }, [load]);
 
   const maxDayCost = Math.max(1, ...(data?.byDay.map((b) => b.costMicroUsd) ?? [0]));
-  const maxAsstCost = Math.max(1, ...(data?.byAssistant.map((b) => b.costMicroUsd) ?? [0]));
+  const maxAsstCost = Math.max(1, ...(data?.byAgent.map((b) => b.costMicroUsd) ?? [0]));
   const t = data?.totals;
   const successRate = t && t.runs > 0 ? Math.round((t.succeeded / t.runs) * 100) : null;
 
@@ -128,13 +128,13 @@ export function UsageView({ scope = "self" }: { scope?: "self" | "all" }) {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-sm font-medium">按助手</CardTitle>
+              <CardTitle className="text-sm font-medium">按智能体</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              {data.byAssistant.length === 0 && (
+              {data.byAgent.length === 0 && (
                 <p className="text-xs text-muted-foreground">窗口内没有运行记录</p>
               )}
-              {data.byAssistant.map((b) => (
+              {data.byAgent.map((b) => (
                 <div key={b.key} className="flex items-center gap-3 text-xs">
                   <span className="w-32 truncate">{b.label}</span>
                   <Bar value={b.costMicroUsd} max={maxAsstCost} />

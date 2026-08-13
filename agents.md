@@ -2,21 +2,21 @@
 
 ## 1. 项目定位
 
-Open Web Agents 是一个基于 `@anthropic-ai/claude-agent-sdk` 的多助手平台。
-用户可以配置专用助手,然后通过两种入口使用同一个运行内核:
+Open Web Agents 是一个基于 `@anthropic-ai/claude-agent-sdk` 的多智能体平台。
+用户可以配置专用智能体,然后通过两种入口使用同一个运行内核:
 
 1. Web 工作台中的流式对话
 2. 后端 API 的异步任务调用
 
-项目目标不是只返回聊天文本,而是把 agent 能力收敛成可配置、可授权、可监控、可集成的业务助手。
+项目目标不是只返回聊天文本,而是把 agent 能力收敛成可配置、可授权、可监控、可集成的业务智能体。
 
 ---
 
 ## 2. 当前功能
 
-### 2.1 助手管理
+### 2.1 智能体管理
 
-- 创建、更新助手
+- 创建、更新智能体
 - 配置 `systemPrompt`、`skills`、`mcpServers`、`tools`、`subagents`
 - 配置模型别名、努力级别、最大轮次、权限模式、审批规则
 - 可选配置 `inputSchema`、`outputSchema`、`verifyRules`、`webhookUrl`
@@ -32,20 +32,20 @@ Open Web Agents 是一个基于 `@anthropic-ai/claude-agent-sdk` 的多助手平
 
 ### 2.3 系统调用
 
-- `POST /api/agents/{assistantId}/invoke`
+- `POST /api/agents/{agentId}/invoke`
 - `GET /api/agents/{taskId}/result`
 - API Key 鉴权
 - 每次 invoke 独立创建会话和工作目录
-- 助手定义 `outputSchema` 时返回结构化结果
+- 智能体定义 `outputSchema` 时返回结构化结果
 
 ### 2.4 多用户与权限
 
 - 注册、登录、登出
 - 首个注册用户自动成为 admin
-- 助手分享给用户、用户组或公开
+- 智能体分享给用户、用户组或公开
 - 用户组与成员管理
 - API Key 签发与删除
-- 会话、助手、调用接口均做显式授权校验
+- 会话、智能体、调用接口均做显式授权校验
 
 ### 2.5 运行安全与运维
 
@@ -84,9 +84,9 @@ Open Web Agents 是一个基于 `@anthropic-ai/claude-agent-sdk` 的多助手平
 
 两者最终都汇聚到 `RunOrchestrator.execute()`。
 
-### 3.2 助手是否可集成,由 `outputSchema` 决定
+### 3.2 智能体是否可集成,由 `outputSchema` 决定
 
-系统里只有一种助手实体 `assistant`。
+系统里只有一种智能体实体 `agent`。
 是否适合作为程序接口使用,由它是否定义 `outputSchema` 决定:
 
 - 无 `outputSchema`:主要消费对话文本
@@ -120,7 +120,7 @@ Open Web Agents 是一个基于 `@anthropic-ai/claude-agent-sdk` 的多助手平
 2. `ApiKey`
    - 系统调用凭证
    - 只存哈希,明文只在创建时返回一次
-   - 归属用户,可选关联助手
+   - 归属用户,可选关联智能体
 
 3. `Group`
    - 用户组
@@ -130,15 +130,15 @@ Open Web Agents 是一个基于 `@anthropic-ai/claude-agent-sdk` 的多助手平
    - 通用授权记录
    - 用一张表覆盖不同资源
 
-### 4.2 助手与知识
+### 4.2 智能体与知识
 
-1. `Assistant`
+1. `Agent`
    - 平台一等公民
-   - `config` 是完整的助手定义
+   - `config` 是完整的智能体定义
    - `inputSchema` 与 `outputSchema` 决定接口契约
 
 2. `KnowledgeDoc`
-   - 助手级知识文档
+   - 智能体级知识文档
    - 运行时按输入检索片段并注入提示词
 
 ### 4.3 会话、运行与产物
@@ -166,14 +166,14 @@ Open Web Agents 是一个基于 `@anthropic-ai/claude-agent-sdk` 的多助手平
 | 表 | 作用 | 关键字段 |
 |---|---|---|
 | `users` | 平台用户 | `email`, `role`, `default_base_url`, `anthropic_key_enc` |
-| `assistants` | 助手定义 | `config`, `input_schema`, `output_schema`, `verify_rules`, `webhook_url` |
-| `sessions` | 会话与工作目录 | `assistant_id`, `workspace_dir`, `sdk_session_id`, `base_url`, `key_enc`, `model` |
+| `agents` | 智能体定义 | `config`, `input_schema`, `output_schema`, `verify_rules`, `webhook_url` |
+| `sessions` | 会话与工作目录 | `agent_id`, `workspace_dir`, `sdk_session_id`, `base_url`, `key_enc`, `model` |
 | `messages` | 会话消息存档 | `session_id`, `role`, `content` |
 | `runs` | 运行队列与终态 | `status`, `prompt`, `resume_anchor`, `sdk_session_id`, `lease_until`, `lease_owner` |
 | `artifacts` | 产物文件元数据 | `session_id`, `path`, `mime`, `size`, `storage_url` |
-| `api_keys` | 系统调用鉴权 | `owner_id`, `assistant_id`, `hashed_key`, `quota` |
+| `api_keys` | 系统调用鉴权 | `owner_id`, `agent_id`, `hashed_key`, `quota` |
 | `access_grants` | 通用授权 | `resource_type`, `resource_id`, `principal_type`, `principal_id`, `permission` |
-| `knowledge_docs` | 助手级知识库 | `assistant_id`, `title`, `content` |
+| `knowledge_docs` | 智能体级知识库 | `agent_id`, `title`, `content` |
 | `groups` | 用户组 | `name`, `owner_id` |
 | `group_members` | 用户组成员 | `group_id`, `user_id` |
 | `user_valves` | 每用户工具配置 | `user_id`, `tool_id`, `config` |
@@ -197,11 +197,11 @@ Open Web Agents 是一个基于 `@anthropic-ai/claude-agent-sdk` 的多助手平
 | `agent-engine` | Claude SDK 适配、消息归一、沙箱和工具守卫 |
 | `approval` | 人工审批请求、裁决与超时 |
 | `artifacts` | 工作空间文件树、读取、预览、GC |
-| `assistant` | 助手配置、构建 spec、输入输出校验 |
+| `agent` | 智能体配置、构建 spec、输入输出校验 |
 | `events` | 事件总线与重放缓冲 |
 | `identity` | 用户、登录、API Key、密钥加解密 |
 | `integration` | webhook 等外部集成 |
-| `knowledge` | 助手级知识文档和检索 |
+| `knowledge` | 智能体级知识文档和检索 |
 | `model-gateway` | 模型别名槽到真实 modelId 的映射 |
 | `run` | 运行编排、队列、worker、分支锚点 |
 | `session` | 会话实体、工作目录路径规则 |
@@ -212,7 +212,7 @@ Open Web Agents 是一个基于 `@anthropic-ai/claude-agent-sdk` 的多助手平
 当前 UI 侧主要在 `src/features/`:
 
 - `workbench`: 主工作台,包含对话区、审批条、文件面板
-- `builder`: 助手构建器、知识库、分享面板
+- `builder`: 智能体构建器、知识库、分享面板
 - `chat`: SSE 拆帧与聊天视图
 - `embed`: 嵌入式聊天
 - `settings`: 凭证与 API Key 管理
@@ -280,7 +280,7 @@ Open Web Agents 是一个基于 `@anthropic-ai/claude-agent-sdk` 的多助手平
 
 `RunOrchestrator.execute()` 当前负责:
 
-1. 读取 session 和 assistant
+1. 读取 session 和 agent
 2. 解析用户级、会话级、请求级凭证覆盖
 3. 解析模型别名
 4. 解析本轮起跑的 `resumeAnchor`
@@ -414,13 +414,13 @@ Redis 当前用于:
 | `GET/POST /api/sessions/{id}/branch` | 分支与重跑 |
 | `POST /api/sessions/{id}/cancel` | 取消运行 |
 
-### 11.2 助手与管理入口
+### 11.2 智能体与管理入口
 
 | 路径 | 说明 |
 |---|---|
-| `GET/POST /api/assistants` | 助手列表 / 创建更新 |
-| `GET/POST/DELETE /api/assistants/{id}/share` | 分享管理 |
-| `GET/POST/DELETE /api/assistants/{id}/knowledge` | 助手知识库 |
+| `GET/POST /api/agents` | 智能体列表 / 创建更新 |
+| `GET/POST/DELETE /api/agents/{id}/share` | 分享管理 |
+| `GET/POST/DELETE /api/agents/{id}/knowledge` | 智能体知识库 |
 | `GET/POST /api/groups` | 用户组 |
 | `POST /api/groups/{id}/members` | 组成员管理 |
 | `GET/POST/DELETE /api/keys` | API Key 管理 |
@@ -431,7 +431,7 @@ Redis 当前用于:
 
 | 路径 | 说明 |
 |---|---|
-| `POST /api/agents/{id}/invoke` | 对外触发助手运行 |
+| `POST /api/agents/{id}/invoke` | 对外触发智能体运行 |
 | `GET /api/agents/{id}/result` | 查询任务结果 |
 | `POST /api/embed/token` | 生成 embed token |
 | `POST /api/embed/run` | 嵌入会话运行 |
@@ -499,7 +499,7 @@ agent 实际使用的凭证解析顺序为:
 ### 13.2 当前边界
 
 1. `OWA_SANDBOX=0` 时不具备 OS 沙箱
-2. 开启 `OWA_ALLOW_STDIO_MCP=1` 后,助手可在宿主机启动进程
+2. 开启 `OWA_ALLOW_STDIO_MCP=1` 后,智能体可在宿主机启动进程
 3. 共享 `.agent-home` 带来缓存复用,也提高宿主级污染风险
 4. 事件总线不是持久队列,依赖 replay 与数据库终态兜底
 

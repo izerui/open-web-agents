@@ -1,4 +1,4 @@
-// 助手配置:落库为 assistants.config(JSON)的域内形状。零外部依赖。
+// 智能体配置:落库为 agents.config(JSON)的域内形状。零外部依赖。
 
 import type {
   Effort,
@@ -12,10 +12,10 @@ import type {
 } from "@/lib/shared";
 
 /**
- * 一个助手 = 一个只干特定某件事的专精"员工"。
+ * 一个智能体 = 一个只干特定某件事的专精"员工"。
  * 是否定义 outputSchema,决定它能否被企业系统当接口消费(见设计文档 §3 统一接口原则)。
  */
-export interface AssistantConfig {
+export interface AgentConfig {
   systemPrompt: string;
   skills?: string[];
   mcpServers?: McpDef[];
@@ -28,7 +28,7 @@ export interface AssistantConfig {
    * 入站契约。声明了它,对外 invoke 就必须按它传参,不合格直接 400。
    *
    * 【曾经只有一个数据库列】input_schema 建了表、invoke 路由的注释也写着
-   * "符合助手 inputSchema 的输入",但配置类型里没有这个字段、没有任何校验 ——
+   * "符合智能体 inputSchema 的输入",但配置类型里没有这个字段、没有任何校验 ——
    * 一个只活在列名和注释里的功能,而设计文稿的 MVP 清单明确列了它。
    */
   inputSchema?: JsonSchema;

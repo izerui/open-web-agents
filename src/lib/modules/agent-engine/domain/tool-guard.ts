@@ -66,7 +66,7 @@ function allowedFor(policy: GuardPolicy): string[] {
  * 判定一次工具调用是否放行。
  *
  * 未识别的工具一律放行 —— 守卫只负责它确知语义的文件工具;
- * 把未知工具默认拒掉会在 SDK 新增工具时静默弄坏助手。
+ * 把未知工具默认拒掉会在 SDK 新增工具时静默弄坏智能体。
  */
 export function guardToolUse(
   toolName: string,

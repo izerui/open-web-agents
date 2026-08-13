@@ -23,7 +23,7 @@ export function resolveCredentials(chain: CredentialChain): ResolvedCredentials 
   return { baseUrl, key };
 }
 
-/** 模型别名解析,优先级 request > session > 助手配置兜底。 */
+/** 模型别名解析,优先级 request > session > 智能体配置兜底。 */
 export function resolveModelAlias(chain: CredentialChain, fallback: ModelAlias): ModelAlias {
   return chain.request?.model ?? chain.session?.model ?? fallback;
 }

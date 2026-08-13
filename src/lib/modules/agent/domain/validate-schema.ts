@@ -9,7 +9,7 @@
 //    "schema with key or id already exists" —— 而这个异常被上层 catch 成
 //    "outputSchema 非法",把库的内部状态问题说成用户的配置写错了。
 //
-// 结果就是:助手每进程只能正常工作一次,重启前永久损坏,且错误信息指错了方向。
+// 结果就是:智能体每进程只能正常工作一次,重启前永久损坏,且错误信息指错了方向。
 //
 // 现在按 schema 的【内容】缓存,并且每个 schema 用独立的 Ajv 实例 ——
 // 注册表不再共享,`$id` 冲突从根上不存在。
@@ -27,7 +27,7 @@ export interface ValidationResult {
 type Compiled = { fn: ValidateFunction } | { error: string };
 
 const cache = new Map<string, Compiled>();
-/** 上限只是防呆:助手数量有限,不会真的涨到这个量级。 */
+/** 上限只是防呆:智能体数量有限,不会真的涨到这个量级。 */
 const CACHE_LIMIT = 500;
 
 function compile(schema: JsonSchema): Compiled {
@@ -72,7 +72,7 @@ export function validateAgainstSchema(
 ): ValidationResult {
   const compiled = compile(schema);
   if ("error" in compiled) {
-    // schema 本身非法(助手配置问题),必须与"值不合格"区分开
+    // schema 本身非法(智能体配置问题),必须与"值不合格"区分开
     return { ok: false, errors: [`${label} 非法: ${compiled.error}`] };
   }
 

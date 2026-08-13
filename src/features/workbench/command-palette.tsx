@@ -14,24 +14,24 @@ import { cn } from "@/lib/utils";
 import { BarChart3, Bot, KeyRound, MessageSquare, Plus, Terminal, Users } from "lucide-react";
 import { useEffect } from "react";
 import { activityOf, relativeTime } from "./session-groups";
-import type { AssistantSummary, SessionSummary } from "./types";
+import type { AgentSummary, SessionSummary } from "./types";
 
 /**
  * 可跳转的设置项。
  *
- * 【为什么不含管理员页】命令面板拿不到当前用户的角色(它只收到会话和助手),
+ * 【为什么不含管理员页】命令面板拿不到当前用户的角色(它只收到会话和智能体),
  * 把 /admin/* 列在这儿,非管理员搜出来点进去会被服务端弹回工作台 ——
  * 一个搜得到却用不了的结果比没有更让人困惑。管理入口只在用户菜单里出现。
  */
 const PAGES = [
-  { href: "/assistants", label: "我的智能体", icon: Bot },
+  { href: "/agents", label: "我的智能体", icon: Bot },
   { href: "/settings/keys", label: "接入与 API Key", icon: Terminal },
   { href: "/settings/usage", label: "用量与成本", icon: BarChart3 },
   { href: "/settings/credentials", label: "模型凭证", icon: KeyRound },
 ] as const;
 
 /**
- * Cmd/Ctrl+K 命令面板:会话搜索、切换助手、跳页面。
+ * Cmd/Ctrl+K 命令面板:会话搜索、切换智能体、跳页面。
  *
  * 【为什么需要】会话在侧栏是一个只能滚动的列表,攒到几十条之后就只能靠肉眼找。
  * 这里让标题可搜。
@@ -40,22 +40,22 @@ export function CommandPalette({
   open,
   onOpenChange,
   sessions,
-  assistants,
-  currentAssistantId,
+  agents,
+  currentAgentId,
   running,
   onOpenSession,
   onNewSession,
-  onPickAssistant,
+  onPickAgent,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   sessions: SessionSummary[];
-  assistants: AssistantSummary[];
-  currentAssistantId: string;
+  agents: AgentSummary[];
+  currentAgentId: string;
   running: boolean;
   onOpenSession: (id: string) => void;
   onNewSession: () => void;
-  onPickAssistant: (id: string) => void;
+  onPickAgent: (id: string) => void;
 }) {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -79,7 +79,7 @@ export function CommandPalette({
       open={open}
       onOpenChange={onOpenChange}
       title="命令面板"
-      description="搜索会话、切换助手或跳转页面"
+      description="搜索会话、切换智能体或跳转页面"
     >
       <CommandInput placeholder="搜索会话,或输入命令…" />
       <CommandList>
@@ -116,19 +116,19 @@ export function CommandPalette({
           </>
         )}
 
-        {/* 运行中切助手会把当前这轮丢掉,不给这个入口 */}
-        {!running && assistants.length > 1 && (
+        {/* 运行中切智能体会把当前这轮丢掉,不给这个入口 */}
+        {!running && agents.length > 1 && (
           <>
             <CommandSeparator />
-            <CommandGroup heading="切换助手(会开一个新会话)">
-              {assistants.map((a) => (
+            <CommandGroup heading="切换智能体(会开一个新会话)">
+              {agents.map((a) => (
                 <CommandItem
                   key={a.id}
-                  value={`助手 ${a.name} ${a.id}`}
-                  onSelect={() => run(() => onPickAssistant(a.id))}
+                  value={`智能体 ${a.name} ${a.id}`}
+                  onSelect={() => run(() => onPickAgent(a.id))}
                 >
-                  {/* 助手不能跟"前往构建器"共用扳手图标,一列看下来分不清哪行是什么 */}
-                  <Bot className={cn(a.id === currentAssistantId && "text-brand")} />
+                  {/* 智能体不能跟"前往构建器"共用扳手图标,一列看下来分不清哪行是什么 */}
+                  <Bot className={cn(a.id === currentAgentId && "text-brand")} />
                   <span className="flex-1 truncate">{a.name}</span>
                 </CommandItem>
               ))}

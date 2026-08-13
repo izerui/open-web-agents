@@ -123,16 +123,16 @@ Run the adapter test again and expect all cases to pass.
 
 Use `Flexbox`, `ActionIcon`, `Avatar`, `Tooltip`, and Lucide icons. Keep navigation commands linked to `/`, `/builder`, `/groups`, `/usage`, and `/settings`.
 
-- [ ] **Step 2: Move assistant and session controls into `SessionSidebar`**
+- [ ] **Step 2: Move agent and session controls into `SessionSidebar`**
 
 Props must contain plain data and callbacks only:
 
 ```ts
 interface SessionSidebarProps {
-  assistantId: string;
-  assistants: AssistantSummary[];
+  agentId: string;
+  agents: AgentSummary[];
   disabled: boolean;
-  onAssistantChange(id: string): void;
+  onAgentChange(id: string): void;
   onNewSession(): void;
   onOpenSession(id: string): void;
   sessionId: string | null;
@@ -272,7 +272,7 @@ At 768x1024 and 390x844, confirm drawers replace fixed sidebars, controls do not
 
 - [ ] **Step 5: Verify interactions**
 
-Test send, stop, assistant switch, session switch, question selection, rerun, inspector toggle, and file preview.
+Test send, stop, agent switch, session switch, question selection, rerun, inspector toggle, and file preview.
 
 - [ ] **Step 6: Re-run full checks after visual fixes**
 

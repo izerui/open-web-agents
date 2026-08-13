@@ -1,17 +1,17 @@
-import { validateAssistantConfig } from "@/lib/modules/assistant/domain/validate-config";
+import { validateAgentConfig } from "@/lib/modules/agent/domain/validate-config";
 import { PERMISSION_MODES } from "@/lib/shared";
 import { describe, expect, it } from "vitest";
 
-const ok = { systemPrompt: "你是助手", model: "sonnet" as const };
+const ok = { systemPrompt: "你是智能体", model: "sonnet" as const };
 
 /** 断言某字段有问题;比只断言"有几个问题"更能定位回归。 */
-function fields(cfg: Parameters<typeof validateAssistantConfig>[0]): string[] {
-  return validateAssistantConfig(cfg).map((i) => i.field);
+function fields(cfg: Parameters<typeof validateAgentConfig>[0]): string[] {
+  return validateAgentConfig(cfg).map((i) => i.field);
 }
 
-describe("validateAssistantConfig / 基础字段", () => {
+describe("validateAgentConfig / 基础字段", () => {
   it("最小合法配置无问题", () => {
-    expect(validateAssistantConfig(ok)).toEqual([]);
+    expect(validateAgentConfig(ok)).toEqual([]);
   });
 
   it("空提示词被拦", () => {
@@ -33,15 +33,15 @@ describe("validateAssistantConfig / 基础字段", () => {
   });
 
   it("一次性报出所有问题,不是遇到第一个就停", () => {
-    const issues = validateAssistantConfig({ systemPrompt: "", model: "x" as never, maxTurns: 0 });
+    const issues = validateAgentConfig({ systemPrompt: "", model: "x" as never, maxTurns: 0 });
     expect(issues.length).toBeGreaterThanOrEqual(3);
   });
 });
 
-describe("validateAssistantConfig / MCP", () => {
+describe("validateAgentConfig / MCP", () => {
   it("合法 http MCP 通过", () => {
     expect(
-      validateAssistantConfig({
+      validateAgentConfig({
         ...ok,
         mcpServers: [{ name: "fs", type: "http", url: "https://mcp.example.com" }],
       }),
@@ -97,7 +97,7 @@ describe("validateAssistantConfig / MCP", () => {
 
   it("平台开启后 stdio 要求 command,不要求 url", () => {
     expect(
-      validateAssistantConfig(
+      validateAgentConfig(
         {
           ...ok,
           mcpServers: [
@@ -114,7 +114,7 @@ describe("validateAssistantConfig / MCP", () => {
       ),
     ).toEqual([]);
     expect(
-      validateAssistantConfig(
+      validateAgentConfig(
         { ...ok, mcpServers: [{ name: "local", type: "stdio" }] },
         { allowStdioMcp: true },
       ).map((i) => i.field),
@@ -122,7 +122,7 @@ describe("validateAssistantConfig / MCP", () => {
   });
 
   it("stdio args 只能是字符串数组,env 只能含字符串值", () => {
-    const issues = validateAssistantConfig(
+    const issues = validateAgentConfig(
       {
         ...ok,
         mcpServers: [
@@ -144,7 +144,7 @@ describe("validateAssistantConfig / MCP", () => {
 
   it("stdio command 不能为空白", () => {
     expect(
-      validateAssistantConfig(
+      validateAgentConfig(
         {
           ...ok,
           mcpServers: [{ name: "local", type: "stdio", command: "   " }],
@@ -155,14 +155,14 @@ describe("validateAssistantConfig / MCP", () => {
   });
 });
 
-describe("validateAssistantConfig / skills 与子代理", () => {
+describe("validateAgentConfig / skills 与子代理", () => {
   it("空技能名与重复技能被拦", () => {
     expect(fields({ ...ok, skills: [""] })).toContain("skills[0]");
     expect(fields({ ...ok, skills: ["pdf", "pdf"] })).toContain("skills[1]");
   });
 
   it("合法技能列表通过", () => {
-    expect(validateAssistantConfig({ ...ok, skills: ["pdf", "xlsx"] })).toEqual([]);
+    expect(validateAgentConfig({ ...ok, skills: ["pdf", "xlsx"] })).toEqual([]);
   });
 
   it("子代理缺名或缺提示词被拦", () => {
@@ -187,10 +187,10 @@ describe("validateAssistantConfig / skills 与子代理", () => {
   });
 });
 
-describe("validateAssistantConfig / permissionMode", () => {
+describe("validateAgentConfig / permissionMode", () => {
   it("六种合法模式都放行", () => {
     for (const m of PERMISSION_MODES) {
-      expect(validateAssistantConfig({ ...ok, permissionMode: m })).toEqual([]);
+      expect(validateAgentConfig({ ...ok, permissionMode: m })).toEqual([]);
     }
   });
 
@@ -203,13 +203,13 @@ describe("validateAssistantConfig / permissionMode", () => {
   });
 
   it("不配不算错(等同 default)", () => {
-    expect(validateAssistantConfig(ok)).toEqual([]);
+    expect(validateAgentConfig(ok)).toEqual([]);
   });
 });
 
-describe("validateAssistantConfig / outputSchema", () => {
+describe("validateAgentConfig / outputSchema", () => {
   it("顶层 object 通过", () => {
-    expect(validateAssistantConfig({ ...ok, outputSchema: { type: "object" } })).toEqual([]);
+    expect(validateAgentConfig({ ...ok, outputSchema: { type: "object" } })).toEqual([]);
   });
 
   it("顶层数组被拦(调用方按字段取值,数组当不了接口契约)", () => {
@@ -217,6 +217,6 @@ describe("validateAssistantConfig / outputSchema", () => {
   });
 
   it("未声明 type 时不强求(交给 ajv 在运行时判)", () => {
-    expect(validateAssistantConfig({ ...ok, outputSchema: { properties: {} } })).toEqual([]);
+    expect(validateAgentConfig({ ...ok, outputSchema: { properties: {} } })).toEqual([]);
   });
 });

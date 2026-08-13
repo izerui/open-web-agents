@@ -48,7 +48,7 @@ function commandOf(input: Record<string, unknown>): string {
 
 /**
  * 判定是否需要人工审批。
- * 未配置任何规则时一律不需要 —— 审批是显式开启的能力,不能默认卡住所有助手。
+ * 未配置任何规则时一律不需要 —— 审批是显式开启的能力,不能默认卡住所有智能体。
  */
 export function needsApproval(
   toolName: string,
@@ -58,7 +58,7 @@ export function needsApproval(
   if (!rules) return NOT_NEEDED;
 
   if (rules.all) {
-    return { needed: true, reason: "该助手配置了全部工具调用均需审批" };
+    return { needed: true, reason: "该智能体配置了全部工具调用均需审批" };
   }
 
   if (rules.tools?.includes(toolName)) {

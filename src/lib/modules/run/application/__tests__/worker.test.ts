@@ -1,7 +1,7 @@
 // Worker 测试:用内存 repo + 假引擎,时钟由测试控制,确定性地断言租约与崩溃恢复。
 
 import type { EnginePort, RunResult } from "@/lib/modules/agent-engine/ports";
-import { InMemoryAssistantRepo } from "@/lib/modules/assistant/adapters/in-memory-assistant-repo";
+import { InMemoryAgentRepo } from "@/lib/modules/agent/adapters/in-memory-agent-repo";
 import { InMemoryBus } from "@/lib/modules/events/adapters/in-memory-bus";
 import { InMemoryRunRepo } from "@/lib/modules/run/adapters/in-memory-run-repo";
 import { RunOrchestrator } from "@/lib/modules/run/application/orchestrator";
@@ -43,14 +43,14 @@ class FakeEngine implements EnginePort {
 async function setup(engine: EnginePort, now: () => number = () => 1000) {
   const repo = new TestRepo();
   const sessions = new InMemorySessionRepo();
-  const assistants = new InMemoryAssistantRepo([
-    { id: "a1", ownerId: "u1", name: "助手", config: { systemPrompt: "p", model: "sonnet" } },
+  const agents = new InMemoryAgentRepo([
+    { id: "a1", ownerId: "u1", name: "智能体", config: { systemPrompt: "p", model: "sonnet" } },
   ]);
-  await sessions.create({ id: "s1", assistantId: "a1", workspaceDir: "/ws/s1" });
+  await sessions.create({ id: "s1", agentId: "a1", workspaceDir: "/ws/s1" });
 
   const orchestrator = new RunOrchestrator({
     sessions,
-    assistants,
+    agents,
     engine,
     bus: new InMemoryBus(),
     platformCredentials: { baseUrl: "b", key: "k" },

@@ -1,6 +1,6 @@
 "use client";
 
-import type { AssistantSummary } from "@/features/workbench/types";
+import type { AgentSummary } from "@/features/workbench/types";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -16,17 +16,17 @@ import { errorText, fetchJson } from "@/lib/fetch-json";
 interface KeyRecord {
   id: string;
   name?: string;
-  assistantId?: string;
+  agentId?: string;
   createdAt: number;
   lastUsedAt?: number;
 }
 
-/** 对外 API Key:给第三方系统调用助手用。 */
+/** 对外 API Key:给第三方系统调用智能体用。 */
 export function ApiKeysView() {
   const [keys, setKeys] = useState<KeyRecord[]>([]);
-  const [assistants, setAssistants] = useState<AssistantSummary[]>([]);
+  const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [keyName, setKeyName] = useState("");
-  const [keyAssistant, setKeyAssistant] = useState("");
+  const [keyAgent, setKeyAgent] = useState("");
   /** 新签发的明文,只在本次会话内显示一次 */
   const [issued, setIssued] = useState<string | null>(null);
 
@@ -40,14 +40,14 @@ export function ApiKeysView() {
   const reload = useCallback(async () => {
     const [k, a] = await Promise.allSettled([
       fetchJson<{ keys?: KeyRecord[] }>("/api/keys"),
-      fetchJson<{ assistants?: AssistantSummary[] }>("/api/assistants"),
+      fetchJson<{ agents?: AgentSummary[] }>("/api/agents"),
     ]);
 
     if (k.status === "fulfilled") setKeys(k.value.keys ?? []);
     else toast.error(`API Key 列表加载失败:${errorText(k.reason)}`);
 
-    if (a.status === "fulfilled") setAssistants(a.value.assistants ?? []);
-    else toast.error(`助手列表加载失败:${errorText(a.reason)}`);
+    if (a.status === "fulfilled") setAgents(a.value.agents ?? []);
+    else toast.error(`智能体列表加载失败:${errorText(a.reason)}`);
   }, []);
 
   useEffect(() => {
@@ -60,7 +60,7 @@ export function ApiKeysView() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: keyName.trim() || undefined,
-        assistantId: keyAssistant || undefined,
+        agentId: keyAgent || undefined,
       }),
     });
     const data = (await res.json()) as { plaintext?: string; error?: string };
@@ -85,7 +85,7 @@ export function ApiKeysView() {
         <CardHeader>
           <CardTitle className="text-sm">对外 API Key</CardTitle>
           <CardDescription>
-            给第三方系统调用助手用。明文只在签发时显示一次,服务端只存哈希。
+            给第三方系统调用智能体用。明文只在签发时显示一次,服务端只存哈希。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -95,9 +95,9 @@ export function ApiKeysView() {
               onChange={(e) => setKeyName(e.target.value)}
               placeholder="用途备注,如「订单系统」"
             />
-            <Select value={keyAssistant} onChange={(e) => setKeyAssistant(e.target.value)}>
-              <option value="">不限助手</option>
-              {assistants.map((a) => (
+            <Select value={keyAgent} onChange={(e) => setKeyAgent(e.target.value)}>
+              <option value="">不限智能体</option>
+              {agents.map((a) => (
                 <option key={a.id} value={a.id}>
                   仅 {a.name}
                 </option>
@@ -131,9 +131,9 @@ export function ApiKeysView() {
               <div key={k.id} className="flex items-center gap-3 p-2 text-xs">
                 <span className="flex-1 truncate">
                   {k.name || "(未命名)"}
-                  {k.assistantId && (
+                  {k.agentId && (
                     <Badge variant="secondary" className="ml-1.5 text-[10px]">
-                      仅 {k.assistantId}
+                      仅 {k.agentId}
                     </Badge>
                   )}
                 </span>

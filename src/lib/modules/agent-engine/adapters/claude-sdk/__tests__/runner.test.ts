@@ -182,7 +182,7 @@ describe("ClaudeSdkEngine 回放", () => {
     expect(r.error?.kind).toBe("no_structured_output");
   });
 
-  it("通用助手(无 schema)只回文本也算成功", async () => {
+  it("通用智能体(无 schema)只回文本也算成功", async () => {
     const r = await engine(
       replay([{ type: "result", subtype: "success", result: "文本而已" }]),
     ).run(spec(), ctx, () => {}, new AbortController().signal);
