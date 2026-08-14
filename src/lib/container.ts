@@ -245,12 +245,18 @@ function build(): Container {
       if (chunks.length === 0) return "";
       return formatContext(retrieve(query, chunks));
     },
-    // 每用户自带凭证:运行时才解密,解不开(换过主密钥)就当未配置、回落平台默认
+    // 用户自带凭证:未配置时返回空对象并回落平台默认;已配置却无法解密时必须失败,
+    // 避免在用户不知情时改用平台共享 key、造成计费归属错误。
     userCredentials: async (userId) => {
       const u = await users.get(userId);
       if (!u) return {};
-      const key = u.anthropicKeyEnc ? secrets.decrypt(u.anthropicKeyEnc) : null;
-      return { baseUrl: u.defaultBaseUrl, key: key ?? undefined };
+      if (!u.anthropicKeyEnc) return { baseUrl: u.defaultBaseUrl };
+
+      const key = secrets.decrypt(u.anthropicKeyEnc);
+      if (key === null) {
+        throw new Error(`用户凭证无法解密(user=${userId}),请重新保存凭证`);
+      }
+      return { baseUrl: u.defaultBaseUrl, key };
     },
     // 智能体配了 webhookUrl 就在终态推一次;失败不影响 run 状态(可轮询兜底)
     onComplete: ({ runId, agentId, result }) => {

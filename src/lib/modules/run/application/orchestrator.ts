@@ -103,22 +103,12 @@ export class RunOrchestrator {
     const agent = await this.deps.agents.get(session.agentId);
     if (!agent) throw new Error(`agent not found: ${session.agentId}`);
 
-    // 三级链的 user 层:会话归属用户自带的 base_url/key(设计文稿 §9)。
-    //
-    // 【读不到用户凭证不能静默回落】—— 这里 catch 的是一次 DB 读。吞掉它意味着
-    // 本轮改用平台共享 key 执行,计费与配额归属全错,而且无事件、无日志、无报错。
-    // (注意与"解密失败"区别:那是有意为之的降级,在实现内部返回 null;
-    //  DB 读失败不是同一回事。)
+    // 用户级凭证是计费边界,读取失败不能静默改用平台共享 key。
+    // “用户未配置”由实现返回空对象表达;DB 故障、密文损坏或主密钥不匹配必须抛出,
+    // 由 worker 将本轮落为 failed。
     let userCreds: { baseUrl?: string; key?: string } | undefined;
     if (session.ownerId && this.deps.userCredentials) {
-      try {
-        userCreds = await this.deps.userCredentials(session.ownerId);
-      } catch (err) {
-        console.warn(
-          `[owa] 读取用户凭证失败(user=${session.ownerId}),本轮回落平台默认凭证 —— 计费将记在平台账上:`,
-          err instanceof Error ? err.message : err,
-        );
-      }
+      userCreds = await this.deps.userCredentials(session.ownerId);
     }
 
     const chain: CredentialChain = {

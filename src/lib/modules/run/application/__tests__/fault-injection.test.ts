@@ -1,11 +1,11 @@
-// 故障注入:把每个可选依赖依次打挂,验证运行【降级而非崩溃】。
+// 故障注入:把每个可选依赖依次打挂,验证运行是否按它的业务语义降级或失败。
 //
 // 之前所有验证都在"依赖都正常"的前提下做的。但代码里写了不少降级路径 ——
 // 事件发不出去、知识检索挂了、凭证解不开、回调打不通、审计写入失败……
 // 这些分支从没被真正触发过,而它们恰恰是生产环境最先遇到的。
 //
-// 判断标准统一:【任何辅助能力的故障,都不该让用户的这一轮运行失败】。
-// 结果已经算出来了,不能因为"记审计日志失败"就把它丢掉。
+// 判断标准:辅助能力故障不应丢掉已产生的运行结果;凭证和分支锚点等执行边界
+// 无法可靠读取时必须中止,不能用另一套身份或上下文继续。
 
 import type { EnginePort, RunResult } from "@/lib/modules/agent-engine/ports";
 import { InMemoryAgentRepo } from "@/lib/modules/agent/adapters/in-memory-agent-repo";
@@ -102,15 +102,15 @@ describe("故障注入 / 知识检索", () => {
 });
 
 describe("故障注入 / 用户凭证", () => {
-  it("解密失败时回落平台默认凭证,而不是硬失败", async () => {
+  it("读取或解密用户凭证失败时中止,不消耗平台凭证", async () => {
     const { orch, engine } = await setup({ userCredentials: boom });
-    await expect(orch.execute({ sessionId: "s1", prompt: "hi" }, signal())).resolves.toMatchObject({
-      status: "success",
-    });
-    expect(engine.lastCtx?.credentials).toEqual({ baseUrl: "platform", key: "pk" });
+    await expect(orch.execute({ sessionId: "s1", prompt: "hi" }, signal())).rejects.toThrow(
+      "依赖挂了",
+    );
+    expect(engine.lastCtx).toBeUndefined();
   });
 
-  it("用户没配凭证(返回空)也回落平台默认", async () => {
+  it("用户没配凭证(返回空)仍回落平台默认", async () => {
     const { orch, engine } = await setup({ userCredentials: async () => ({}) });
     await orch.execute({ sessionId: "s1", prompt: "hi" }, signal());
     expect(engine.lastCtx?.credentials).toEqual({ baseUrl: "platform", key: "pk" });
@@ -179,17 +179,13 @@ describe("故障注入 / 审计与回调", () => {
     });
   });
 
-  it("读用户凭证失败时回落平台默认并继续 —— 但会记一条告警", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("读用户凭证失败时中止本轮,不改用平台 key", async () => {
     const { orch, engine, sessions } = await setup({ userCredentials: boom });
     await sessions.create({ id: "s-own", agentId: "a1", workspaceDir: "/ws", ownerId: "u1" });
-    await expect(
-      orch.execute({ sessionId: "s-own", prompt: "hi" }, signal()),
-    ).resolves.toMatchObject({ status: "success" });
-    expect(engine.lastCtx?.credentials).toEqual({ baseUrl: "platform", key: "pk" });
-    // 静默换用平台 key = 计费记错账却无人知晓,必须留下痕迹
-    expect(warn).toHaveBeenCalled();
-    warn.mockRestore();
+    await expect(orch.execute({ sessionId: "s-own", prompt: "hi" }, signal())).rejects.toThrow(
+      "依赖挂了",
+    );
+    expect(engine.lastCtx).toBeUndefined();
   });
 });
 
