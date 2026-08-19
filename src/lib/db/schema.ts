@@ -85,18 +85,6 @@ export const sessions = mysqlTable(
   }),
 );
 
-export const messages = mysqlTable(
-  "messages",
-  {
-    id: varchar("id", { length: 36 }).primaryKey(),
-    sessionId: varchar("session_id", { length: 36 }).notNull(),
-    role: varchar("role", { length: 16 }).notNull(),
-    content: json("content").notNull(),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-  },
-  (t) => ({ bySession: index("idx_messages_session").on(t.sessionId) }),
-);
-
 /**
  * 运行队列。MySQL 当队列:乐观锁认领 + 租约续期 + 孤儿回收,零中间件。
  * (status, lease_until) 联合索引支撑认领查询。
@@ -130,6 +118,8 @@ export const runs = mysqlTable(
     /** 被认领的次数,用于识别反复崩溃的任务 */
     attempts: int("attempts").notNull().default(0),
     structuredResult: json("structured_result"),
+    /** 本轮最终 Assistant 文本的查询投影;完整过程仍以 SDK jsonl 为准。 */
+    finalText: text("final_text"),
     cost: json("cost"),
     errorInfo: json("error_info"),
     startedAt: timestamp("started_at"),

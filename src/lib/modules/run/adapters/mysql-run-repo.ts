@@ -8,7 +8,7 @@ import type { Db } from "@/lib/db/client";
 import { runs } from "@/lib/db/schema";
 import type { NewRun, Run, RunRepo, RunStats } from "@/lib/modules/run/ports";
 import type { RunState } from "@/lib/shared";
-import { and, count, eq, inArray, lt, max, or, sql } from "drizzle-orm";
+import { and, count, eq, gte, inArray, lt, ne, or, sql } from "drizzle-orm";
 
 interface RunRow {
   id: string;
@@ -77,43 +77,73 @@ export class MysqlRunRepo implements RunRepo {
       eq(runs.status, "pending"),
       and(eq(runs.status, "running"), lt(runs.leaseUntil, now)),
     );
+    const sessionIdle = sql`NOT EXISTS (
+      SELECT 1 FROM runs active
+      WHERE active.session_id = ${runs.sessionId}
+        AND active.status = 'running'
+        AND active.lease_until >= ${now}
+    )`;
 
     // 多 worker 下同一候选可能被抢,重试几次再放弃
     for (let attempt = 0; attempt < 5; attempt++) {
       const candidates = await this.db
         .select({ id: runs.id, sessionId: runs.sessionId })
         .from(runs)
-        .where(claimable)
+        .where(and(claimable, sessionIdle))
         .orderBy(runs.createdAt)
         .limit(1);
 
       const candidate = candidates[0];
       if (!candidate) return null;
 
-      // 每次认领生成新的栅栏令牌:上一任 worker 手里的旧令牌就此作废
-      const fence = randomUUID();
-      const res = await this.db
-        .update(runs)
-        .set({
-          status: "running",
-          leaseUntil: now + leaseMs,
-          leaseOwner: fence,
-          startedAt: sql`COALESCE(${runs.startedAt}, NOW())`,
-          attempts: sql`${runs.attempts} + 1`,
-        })
-        // 关键:再次带上可认领条件,把"检查"与"占位"合并成一次原子写
-        .where(and(eq(runs.id, candidate.id), claimable));
+      const claimed = await this.db.transaction(async (tx) => {
+        // 以该会话最早的 run 行作为跨 worker 互斥锁。RunRepo 因此不依赖 sessions 表
+        // 的生命周期;不同会话锁不同的行,同一会话的认领事务则在这里排队。
+        await tx.execute(sql`
+          SELECT id FROM runs
+          WHERE session_id = ${candidate.sessionId}
+          ORDER BY created_at, id
+          LIMIT 1 FOR UPDATE
+        `);
 
-      if (affectedRows(res) > 0) {
+        const active = await tx
+          .select({ id: runs.id })
+          .from(runs)
+          .where(
+            and(
+              eq(runs.sessionId, candidate.sessionId),
+              eq(runs.status, "running"),
+              gte(runs.leaseUntil, now),
+              ne(runs.id, candidate.id),
+            ),
+          )
+          .limit(1);
+        if (active.length > 0) return null;
+
+        const fence = randomUUID();
+        const res = await tx
+          .update(runs)
+          .set({
+            status: "running",
+            leaseUntil: now + leaseMs,
+            leaseOwner: fence,
+            startedAt: sql`COALESCE(${runs.startedAt}, NOW())`,
+            attempts: sql`${runs.attempts} + 1`,
+          })
+          .where(and(eq(runs.id, candidate.id), claimable));
+
+        if (affectedRows(res) === 0) return null;
         return {
           id: candidate.id,
           sessionId: candidate.sessionId,
-          state: "running",
+          state: "running" as const,
           leaseUntil: now + leaseMs,
           fence,
         };
-      }
-      // 被别人抢走了,换下一个候选
+      });
+
+      if (claimed) return claimed;
+      // 候选被其它 worker 抢走或同会话已有运行,换下一个候选。
     }
     return null;
   }
@@ -265,13 +295,14 @@ export class MysqlRunRepo implements RunRepo {
   /** 记录终态结果,供轮询接口读取。 */
   async saveResult(
     id: string,
-    data: { structured?: unknown; cost?: unknown; error?: unknown },
+    data: { finalText?: string; structured?: unknown; cost?: unknown; error?: unknown },
     fence?: string,
   ): Promise<void> {
     // 【只写传进来的字段】。曾经是无条件 `?? null` 三连,于是异常路径调用
     // saveResult({error}) 会把上一步刚落库的 structured 与 cost 一起抹成 null ——
     // 一次真正成功、结果已在库里的运行,数据被销毁而不只是被误标。
     const patch: Record<string, unknown> = {};
+    if ("finalText" in data) patch.finalText = data.finalText ?? null;
     if ("structured" in data) patch.structuredResult = data.structured ?? null;
     if ("cost" in data) patch.cost = data.cost ?? null;
     if ("error" in data) patch.errorInfo = data.error ?? null;
@@ -297,6 +328,7 @@ export class MysqlRunRepo implements RunRepo {
         id: runs.id,
         status: runs.status,
         structured: runs.structuredResult,
+        finalText: runs.finalText,
         cost: runs.cost,
         error: runs.errorInfo,
       })
@@ -311,7 +343,7 @@ export class MysqlRunRepo implements RunRepo {
       structured: row.structured,
       cost: row.cost,
       error: row.error,
-      summary: null,
+      summary: row.finalText,
     };
   }
 
@@ -355,15 +387,16 @@ export class MysqlRunRepo implements RunRepo {
       .select({
         sessionId: runs.sessionId,
         total: count(),
-        lastRunAt: max(runs.createdAt),
+        // 聚合 timestamp 经 Drizzle/mysql2 解码时会受进程时区影响;直接取 Unix 毫秒
+        // 可避免 Asia/Shanghai 等环境下把 lastRunAt 重复偏移一次。
+        lastRunAt: sql<number>`MAX(UNIX_TIMESTAMP(${runs.createdAt}) * 1000)`,
       })
       .from(runs)
       .where(inArray(runs.sessionId, [...new Set(sessionIds)]))
       .groupBy(runs.sessionId);
 
     for (const r of rows) {
-      // created_at 是 timestamp 列,driver 给回 Date;历史行可能为 NULL,兜成 0
-      const at = r.lastRunAt instanceof Date ? r.lastRunAt.getTime() : Number(r.lastRunAt ?? 0);
+      const at = Number(r.lastRunAt ?? 0);
       out.set(r.sessionId, { runs: Number(r.total), lastRunAt: Number.isFinite(at) ? at : 0 });
     }
     return out;

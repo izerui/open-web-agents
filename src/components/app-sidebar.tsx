@@ -66,7 +66,7 @@ export function AppSidebar({
         {headerExtra}
       </SidebarHeader>
 
-      <SidebarContent>
+      <SidebarContent className="scrollbar-fade">
         <SidebarGroup>
           <SidebarGroupLabel>导航</SidebarGroupLabel>
           <SidebarMenu>

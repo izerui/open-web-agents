@@ -233,7 +233,10 @@ export function Workbench() {
     const push = (e: AgentEvent) => patch((t) => ({ ...t, events: [...t.events, e] }));
 
     try {
-      const stream = await fetch(`/api/sessions/${id}/events`, { signal: abort.signal });
+      const stream = await fetch(
+        `/api/sessions/${id}/events?runId=${encodeURIComponent(activeRunId)}`,
+        { signal: abort.signal },
+      );
       if (stream.body) await readEventStream(stream.body, push);
     } catch (err) {
       if (!abort.signal.aborted) {
@@ -353,7 +356,10 @@ export function Workbench() {
       patch((t) => ({ ...t, runId: d.runId }));
 
       // 分支已入队,挂上会话事件流观察 worker 执行
-      const stream = await fetch(`/api/sessions/${sessionId}/events`, { signal: abort.signal });
+      const stream = await fetch(
+        `/api/sessions/${sessionId}/events?runId=${encodeURIComponent(d.runId)}`,
+        { signal: abort.signal },
+      );
       if (stream.body) await readEventStream(stream.body, push);
     } catch (err) {
       if (!abort.signal.aborted) {
@@ -379,6 +385,8 @@ export function Workbench() {
     onlySaveAfterUserInteractions: true,
   });
 
+  // send 必须读取当前轮次与运行状态;把它包装进 useCallback 会扩大本组件的状态依赖面。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally use the current send closure
   const handlePromptSubmit = useCallback(
     (message: PromptInputMessage) => {
       const text = message.text.trim();
@@ -389,6 +397,7 @@ export function Workbench() {
     [running, cancelRun, input],
   );
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally use the current send closure
   const handleSuggestionClick = useCallback(
     (suggestion: string) => {
       void send(suggestion);
@@ -613,7 +622,10 @@ export function Workbench() {
               </Button>
             </div>
 
-            <div className="relative flex min-h-0 flex-1 flex-col divide-y overflow-hidden">
+            <div
+              data-conversation-shell=""
+              className="relative flex min-h-0 flex-1 flex-col divide-y overflow-hidden"
+            >
               <Conversation className="min-h-0 flex-1">
                 <ConversationContent className="px-4 py-4">
                   {turns.length === 0 ? (
@@ -625,8 +637,8 @@ export function Workbench() {
                   ) : (
                     <ChatThread
                       turns={turns}
-                      onRerun={rerun}
-                      onAnswer={(t: string) => void send(t)}
+                      onRerunAction={rerun}
+                      onAnswerAction={(text: string) => void send(text)}
                     />
                   )}
                 </ConversationContent>

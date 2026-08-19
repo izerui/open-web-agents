@@ -172,8 +172,33 @@
   scrollbar-color: transparent transparent;
   transition: scrollbar-color 0.3s;
 }
-.scrollbar-fade:hover {
+.scrollbar-fade:hover,
+.scrollbar-fade:focus-within {
   scrollbar-color: var(--border) transparent;
+}
+.scrollbar-fade::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+.scrollbar-fade:hover::-webkit-scrollbar-thumb,
+.scrollbar-fade:focus-within::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+/* Message controls keep their space, but stay quiet until the row is active.
+   Touch devices have no reliable hover, so controls remain visible there. */
+.message-actions {
+  transition: opacity 80ms ease;
+}
+@media (hover: hover) {
+  .group > .message-actions {
+    opacity: 0;
+  }
+  .group:hover > .message-actions,
+  .group:focus-within > .message-actions {
+    opacity: 1;
+  }
 }
 
 /* ── 签名元素:运行态热流。agent 在跑时横贯主区顶部的扫描线 ── */

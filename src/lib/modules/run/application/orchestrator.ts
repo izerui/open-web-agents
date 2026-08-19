@@ -32,8 +32,6 @@ export interface OrchestratorDeps {
   platformCredentials: { baseUrl: string; key: string };
   /** 传给 agent 子进程的基础环境。 */
   baseEnv?: Record<string, string>;
-  /** 记录事件供断线重连回放(可选)。 */
-  replay?: { record(topic: string, e: AgentEvent): void; reset(topic: string): void };
   /**
    * 解析会话归属用户的自带凭证(三级链里的 user 层)。
    * 返回已解密的明文;没配置则返回空对象。
@@ -63,30 +61,9 @@ export interface OrchestratorDeps {
   }) => void;
 }
 
-/**
- * 事件总线上的 topic:按会话隔离。
- *
- * 广播粒度保持在会话级 —— 重连方(joinStream)只知道 sessionId,不知道此刻有哪些
- * 运行在跑,订阅会话最省事。区分具体是哪一轮靠事件里的 runId,而不是靠拆频道。
- */
-export function topicOf(sessionId: string): string {
-  return `session:${sessionId}`;
-}
-
-/**
- * 重放缓冲的 key:【按运行隔离】,比总线更细一级。
- *
- * 缓冲和广播的诉求不一样:广播是"发给所有关心这个会话的人",而缓冲是"这一轮的
- * 过程记录"。曾经两者共用会话粒度,于是同会话并发两轮时,后开始的那轮 reset
- * 会把前一轮的缓冲整个删掉,而先结束那轮的 result 会把整个会话标成 done。
- */
-export function replayKeyOf(sessionId: string, runId?: string): string {
-  return `${topicOf(sessionId)}:run:${runId ?? "adhoc"}`;
-}
-
-/** 某会话下所有运行的缓冲前缀,供 joinStream 合并回放。 */
-export function replayScopeOf(sessionId: string): string {
-  return `${topicOf(sessionId)}:run:`;
+/** 每个运行一条 Stream,避免并发运行的事件和游标相互污染。 */
+export function topicOf(sessionId: string, runId?: string): string {
+  return `session:${sessionId}:run:${runId ?? "adhoc"}`;
 }
 
 export class RunOrchestrator {
@@ -152,27 +129,13 @@ export class RunOrchestrator {
 
     const spec = buildSpec(agent.config, ctx, { model, knowledgeContext });
 
-    // 广播按会话(重连方只知道 sessionId),缓冲按运行(两轮并发时互不清空)
-    const topic = topicOf(cmd.sessionId);
-    const replayKey = replayKeyOf(cmd.sessionId, cmd.runId);
+    const topic = topicOf(cmd.sessionId, cmd.runId);
 
-    // 事件投递是【辅助能力】:发不出去只是看不到过程,绝不该让用户的这一轮运行失败。
-    // 重放缓冲同理 —— 当前内存实现不会抛,但换成 Redis 支撑的实现后一定会。
+    // 事件投递是辅助能力:Redis 暂时不可用只影响实时过程,不能让已经执行的任务失败。
     const publish = (e: AgentEvent) => {
-      try {
-        this.deps.replay?.record(replayKey, e);
-      } catch {
-        // 缓冲写入失败只影响断线重连的回放质量,不影响本次运行
-      }
       void this.deps.bus.publish(topic, e).catch(() => {});
     };
 
-    // 只清【本轮自己】的缓冲。曾经清的是整个会话,于是并发的另一轮过程记录被连坐删掉
-    try {
-      this.deps.replay?.reset(replayKey);
-    } catch {
-      // 同上:缓冲故障不牵连运行
-    }
     publish({ kind: "status", label: "运行中", state: "running" });
     // 让用户看得到"这次回答参考了知识库",而不是凭空多出一些内容
     if (knowledgeContext) {

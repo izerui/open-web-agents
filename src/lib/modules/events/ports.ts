@@ -2,16 +2,20 @@ import type { AgentEvent } from "@/lib/shared";
 
 export type Unsubscribe = () => void;
 
-/** 事件总线。跨进程解耦 worker 与 web(SSE)。 */
+export interface StreamSubscriptionOptions {
+  /** 只读取此游标之后的事件。`0-0` 表示从当前保留窗口的开头读取。 */
+  afterId?: string;
+}
+
+/** 持久事件流。跨进程解耦 worker 与 web(SSE),并提供短期断线回放。 */
 export interface BusPort {
-  publish(topic: string, e: AgentEvent): Promise<void>;
-  subscribe(topic: string, cb: (e: AgentEvent) => void): Unsubscribe;
-  /**
-   * 等待订阅在底层真正生效。
-   *
-   * Redis 的 SUBSCRIBE 是异步往返的:subscribe() 返回时订阅可能还没注册到服务端,
-   * 此时发布的消息会静默丢失。"先订阅再触发运行"的调用方必须先 await 它。
-   * 进程内实现订阅即时生效,可省略。
-   */
-  ready?(topic: string): Promise<void>;
+  /** 写入事件并返回可用于 SSE `id:` 的持久游标。 */
+  publish(topic: string, e: AgentEvent): Promise<string>;
+  subscribe(
+    topic: string,
+    cb: (e: AgentEvent, id: string) => void,
+    options?: StreamSubscriptionOptions,
+  ): Unsubscribe;
+  /** 检查底层事件存储是否可用。 */
+  ready?(): Promise<void>;
 }

@@ -42,7 +42,7 @@ export interface RunPayloadSource {
   /** 落终态结果,供轮询接口读取(内存 fake 可不实现)。只写传进来的字段。 */
   saveResult?(
     id: string,
-    data: { structured?: unknown; cost?: unknown; error?: unknown },
+    data: { finalText?: string; structured?: unknown; cost?: unknown; error?: unknown },
     fence?: string,
   ): Promise<void>;
 }
@@ -142,7 +142,12 @@ export class RunWorker {
       // 先落结果再落终态:轮询方看到终态时结果必定已可读,避免"成功但取不到结果"的竞态
       await this.repo.saveResult?.(
         claimed.id,
-        { structured: result.structured, cost: result.cost, error: result.error },
+        {
+          finalText: result.summary,
+          structured: result.structured,
+          cost: result.cost,
+          error: result.error,
+        },
         fence,
       );
       await this.repo.complete(claimed.id, finalState, fence);

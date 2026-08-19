@@ -41,6 +41,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     status: run.status,
     done,
     structured: run.structured ?? null,
+    text: run.summary,
+    summary: run.summary,
     cost: run.cost ?? null,
     error: run.error ?? null,
   });

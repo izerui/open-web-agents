@@ -1,6 +1,4 @@
-// BusPort 的【端口契约】测试套件。内存与 Redis adapter 跑同一套断言。
-//
-// Redis pub/sub 是异步的,契约用轮询等待而非固定 sleep,避免不稳定的 flaky 测试。
+// BusPort 的端口契约测试套件。内存与 Redis Streams adapter 跑同一套断言。
 
 import type { BusPort } from "@/lib/modules/events/ports";
 import type { AgentEvent } from "@/lib/shared";
@@ -31,7 +29,7 @@ export function busContract(name: string, harness: BusHarness): void {
       const t = harness.topic("same");
       const got: AgentEvent[] = [];
       const off = bus.subscribe(t, (e) => got.push(e));
-      await bus.ready?.(t);
+      await bus.ready?.();
 
       await bus.publish(t, { kind: "text", text: "hi" });
       await waitFor(() => got.length === 1);
@@ -47,8 +45,8 @@ export function busContract(name: string, harness: BusHarness): void {
       const off = bus.subscribe(t1, (e) => got.push(e));
       const marker: AgentEvent[] = [];
       const off2 = bus.subscribe(t2, (e) => marker.push(e));
-      await bus.ready?.(t1);
-      await bus.ready?.(t2);
+      await bus.ready?.();
+      await bus.ready?.();
 
       await bus.publish(t2, { kind: "text", text: "other" });
       await waitFor(() => marker.length === 1);
@@ -64,7 +62,7 @@ export function busContract(name: string, harness: BusHarness): void {
       const b: AgentEvent[] = [];
       const offA = bus.subscribe(t, (e) => a.push(e));
       const offB = bus.subscribe(t, (e) => b.push(e));
-      await bus.ready?.(t);
+      await bus.ready?.();
 
       await bus.publish(t, { kind: "text", text: "x" });
       await waitFor(() => a.length === 1 && b.length === 1);
@@ -85,7 +83,7 @@ export function busContract(name: string, harness: BusHarness): void {
 
       const witness: AgentEvent[] = [];
       const off2 = bus.subscribe(witnessTopic, (e) => witness.push(e));
-      await bus.ready?.(witnessTopic);
+      await bus.ready?.();
 
       await bus.publish(t, { kind: "text", text: "x" });
       await bus.publish(witnessTopic, { kind: "text", text: "w" });
@@ -99,7 +97,7 @@ export function busContract(name: string, harness: BusHarness): void {
       const t = harness.topic("shape");
       const got: AgentEvent[] = [];
       const off = bus.subscribe(t, (e) => got.push(e));
-      await bus.ready?.(t);
+      await bus.ready?.();
 
       const rich: AgentEvent = {
         kind: "tool_use",
@@ -122,7 +120,7 @@ export function busContract(name: string, harness: BusHarness): void {
         const t = harness.topic(`race-${i}`);
         const got: AgentEvent[] = [];
         const off = bus.subscribe(t, (e) => got.push(e));
-        await bus.ready?.(t);
+        await bus.ready?.();
         await bus.publish(t, { kind: "text", text: `n${i}` });
         await waitFor(() => got.length === 1);
         expect(got).toHaveLength(1);
@@ -137,17 +135,30 @@ export function busContract(name: string, harness: BusHarness): void {
       const t = harness.topic("bounded");
       const started = Date.now();
       const off = bus.subscribe(t, () => {});
-      await bus.ready?.(t);
+      await bus.ready?.();
       await bus.publish(t, { kind: "text", text: "x" });
       expect(Date.now() - started).toBeLessThan(10_000);
       off();
     });
 
-    it("无订阅者时发布不报错", async () => {
+    it("游标之后的事件可以回放", async () => {
+      const bus = await harness.makeBus();
+      const t = harness.topic("replay");
+      const firstId = await bus.publish(t, { kind: "text", text: "old" });
+      await bus.publish(t, { kind: "text", text: "new" });
+
+      const got: AgentEvent[] = [];
+      const off = bus.subscribe(t, (event) => got.push(event), { afterId: firstId });
+      await waitFor(() => got.length === 1);
+      expect(got).toEqual([{ kind: "text", text: "new" }]);
+      off();
+    });
+
+    it("无订阅者时发布仍返回游标", async () => {
       const bus = await harness.makeBus();
       await expect(
         bus.publish(harness.topic("nobody"), { kind: "text", text: "x" }),
-      ).resolves.toBeUndefined();
+      ).resolves.toMatch(/^\d+-\d+$/);
     });
   });
 }

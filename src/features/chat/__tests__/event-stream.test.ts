@@ -1,4 +1,4 @@
-import { createSseParser } from "@/features/chat/event-stream";
+import { createSseEnvelopeParser, createSseParser } from "@/features/chat/event-stream";
 import { describe, expect, it } from "vitest";
 
 describe("createSseParser", () => {
@@ -29,6 +29,13 @@ describe("createSseParser", () => {
     const parse = createSseParser();
     expect(parse(': comment\ndata:\n\ndata: {"kind":"text","text":"x"}\n\n')).toEqual([
       { kind: "text", text: "x" },
+    ]);
+  });
+
+  it("解析标准 SSE id 作为断线续读游标", () => {
+    const parse = createSseEnvelopeParser();
+    expect(parse('id: 1748248130123-0\ndata: {"kind":"text","text":"hi"}\n\n')).toEqual([
+      { id: "1748248130123-0", event: { kind: "text", text: "hi" } },
     ]);
   });
 

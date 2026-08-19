@@ -106,14 +106,20 @@ export function runRepoContract(name: string, harness: ContractHarness): void {
       expect(await repo.reclaimOrphans(99999)).toBe(0);
     });
 
-    it("多个 run 逐个认领,不漏不重", async () => {
+    it("同一会话串行认领,不同会话仍可并行", async () => {
       const repo = await harness.makeRepo();
       await repo.create({ id: "r1", sessionId: "s1" });
       await repo.create({ id: "r2", sessionId: "s1" });
-      const a = await repo.claimNext(1000, 100);
-      const b = await repo.claimNext(1000, 100);
-      expect(new Set([a?.id, b?.id])).toEqual(new Set(["r1", "r2"]));
+      await repo.create({ id: "r3", sessionId: "s2" });
+
+      const first = await repo.claimNext(1000, 100);
+      const parallel = await repo.claimNext(1000, 100);
+      expect(first?.id).toBe("r1");
+      expect(parallel?.id).toBe("r3");
+
       expect(await repo.claimNext(1000, 100)).toBeNull();
+      await repo.complete("r1", "success", first?.fence);
+      expect((await repo.claimNext(1000, 100))?.id).toBe("r2");
     });
 
     it("get 不存在的 run 返回 null", async () => {

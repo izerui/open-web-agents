@@ -23,7 +23,15 @@ export class InMemoryRunRepo implements RunRepo {
       const claimable =
         run.state === "pending" ||
         (run.state === "running" && run.leaseUntil !== null && run.leaseUntil < now);
-      if (claimable) {
+      const sessionBusy = [...this.runs.values()].some(
+        (other) =>
+          other.id !== run.id &&
+          other.sessionId === run.sessionId &&
+          other.state === "running" &&
+          other.leaseUntil !== null &&
+          other.leaseUntil >= now,
+      );
+      if (claimable && !sessionBusy) {
         run.state = "running";
         run.leaseUntil = now + leaseMs;
         // 与 MySQL 实现同构:每次认领换新令牌,旧令牌立即作废

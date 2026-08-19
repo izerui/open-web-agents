@@ -24,7 +24,6 @@ import { LocalFsStorage } from "@/lib/modules/artifacts/adapters/local-fs-storag
 import { WorkspaceGc } from "@/lib/modules/artifacts/application/gc";
 import type { StoragePort } from "@/lib/modules/artifacts/ports";
 import { RedisBus } from "@/lib/modules/events/adapters/redis-bus";
-import { ReplayBuffer } from "@/lib/modules/events/adapters/replay-buffer";
 import type { BusPort } from "@/lib/modules/events/ports";
 import { MysqlApiKeyRepo } from "@/lib/modules/identity/adapters/mysql-api-key-repo";
 import { MysqlUserRepo } from "@/lib/modules/identity/adapters/mysql-user-repo";
@@ -38,7 +37,7 @@ import { formatContext, retrieve } from "@/lib/modules/knowledge/domain/retrieva
 import { EnvModelGateway } from "@/lib/modules/model-gateway/adapters/env-gateway";
 import type { ModelGatewayPort } from "@/lib/modules/model-gateway/ports";
 import { MysqlRunRepo } from "@/lib/modules/run/adapters/mysql-run-repo";
-import { RunOrchestrator } from "@/lib/modules/run/application/orchestrator";
+import { RunOrchestrator, topicOf } from "@/lib/modules/run/application/orchestrator";
 import { RunWorker } from "@/lib/modules/run/application/worker";
 import { MysqlSessionRepo } from "@/lib/modules/session/adapters/mysql-session-repo";
 import type { SessionRepo } from "@/lib/modules/session/ports";
@@ -57,7 +56,6 @@ export interface Container {
   transcript: TranscriptPort;
   approval: ApprovalPort;
   gc: WorkspaceGc;
-  replay: ReplayBuffer;
   apiKeys: ApiKeyRepo;
   grants: GrantRepo;
   groups: GroupRepo;
@@ -148,7 +146,6 @@ function build(): Container {
   const approval = new RedisApproval(env.redisUrl);
   const usage = new MysqlUsageRepo(db);
   const knowledge = new MysqlKnowledgeRepo(db);
-  const replay = new ReplayBuffer();
   const apiKeys = new MysqlApiKeyRepo(db);
   const grants = new MysqlGrantRepo(db);
   const groupRepo = new MysqlGroupRepo(db);
@@ -175,7 +172,7 @@ function build(): Container {
     const expiresAt = Date.now() + APPROVAL_TIMEOUT_MS;
 
     await bus
-      .publish(`session:${r.sessionId}`, {
+      .publish(topicOf(r.sessionId, r.runId), {
         kind: "status",
         label: `待审批:${r.toolName} — ${r.summary}(${r.reason})`,
         state: "awaiting_approval",
@@ -205,7 +202,7 @@ function build(): Container {
           ? `审批超时自动拒绝:${r.toolName}`
           : `审批被拒:${r.toolName}`;
     await bus
-      .publish(`session:${r.sessionId}`, { kind: "status", label, state: outcome.decision })
+      .publish(topicOf(r.sessionId, r.runId), { kind: "status", label, state: outcome.decision })
       .catch(() => {});
 
     return {
@@ -235,7 +232,6 @@ function build(): Container {
     // agent 子进程需要继承宿主环境(PATH 等),否则 Bash 里连 ls 都找不到。
     // 凭证与 HOME 会在 buildSdkOptions 里覆盖掉这里的同名项。
     baseEnv: inheritedEnv(),
-    replay,
     runAnchor: (runId) => runs.getResumeAnchor(runId),
     recordRunSession: (runId, sdkSessionId) => runs.setSdkSessionId(runId, sdkSessionId),
     recordRunAnchor: (runId, anchor) => runs.setResumeAnchor(runId, anchor),
@@ -285,19 +281,7 @@ function build(): Container {
     workspacesRoot: path.join(env.dataDir, "workspaces"),
     listWorkspaces: () => runs.listSessionActivity(),
   });
-  /**
-   * 重放缓冲的过期回收。
-   *
-   * evictOlderThan 写好了、也有测试,但【生产侧从来没人调用它】—— 方法存在不等于
-   * 被接上。record 只对 noise 类事件限长,status/artifact/usage/result 这些 state
-   * 事件完全不限,于是 web 进程的堆随「历史会话总数 × state 事件数」单调增长,
-   * 终点是 OOM。这里正是它天然的调用点。
-   */
-  const REPLAY_TTL_MS = 2 * 60 * 60_000;
-
   const gcTimer = setInterval(() => {
-    const evicted = replay.evictOlderThan(REPLAY_TTL_MS);
-    if (evicted > 0) console.log(`[owa][gc] 回收 ${evicted} 个过期重放缓冲`);
     void gc
       .run()
       .then((r) => {
@@ -325,7 +309,6 @@ function build(): Container {
     transcript,
     approval,
     gc,
-    replay,
     apiKeys,
     grants,
     groups: groupRepo,

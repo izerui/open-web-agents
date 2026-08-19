@@ -1,109 +1,167 @@
-// Redis pub/sub 事件总线。
-//
-// 为什么必须是它:单进程 EventEmitter 在多 worker / 多实例下会静默失效 ——
-// 事件发生在 worker 进程,SSE 连接却挂在另一个 web 进程上,订阅者永远收不到。
-// (设计文档 §13.2 把这条列为红线。)
-//
-// ioredis 的订阅连接进入 subscriber 模式后不能再发普通命令,故 pub/sub 各持一条连接。
+// Redis Streams 事件总线。每个 run 使用独立 stream,以 Redis ID 作为 SSE 游标。
+// Streams 同时解决跨进程广播与短期断线回放;完整历史仍由 runs + SDK jsonl 提供。
 
-import type { BusPort, Unsubscribe } from "@/lib/modules/events/ports";
+import type { BusPort, StreamSubscriptionOptions, Unsubscribe } from "@/lib/modules/events/ports";
 import type { AgentEvent } from "@/lib/shared";
 import Redis from "ioredis";
 
+const STREAM_MAX_LENGTH = 2_000;
+const STREAM_TTL_SECONDS = 24 * 60 * 60;
+const COMMAND_TIMEOUT_MS = 2_000;
+const READ_BLOCK_MS = 1_000;
+
+type RedisReadResult = [string, [string, string[]][]][] | null;
+
+function withTimeout<T>(promise: Promise<T>, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), COMMAND_TIMEOUT_MS);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+function waitForConnection(redis: Redis): Promise<void> {
+  if (redis.status === "ready") return Promise.resolve();
+  if (redis.status === "end") return Promise.reject(new Error("redis connection closed"));
+
+  return withTimeout(
+    new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        redis.off("ready", onReady);
+        redis.off("end", onEnd);
+      };
+      const onReady = () => {
+        cleanup();
+        resolve();
+      };
+      const onEnd = () => {
+        cleanup();
+        reject(new Error("redis connection closed"));
+      };
+      redis.once("ready", onReady);
+      redis.once("end", onEnd);
+    }),
+    "redis connection ready timeout",
+  );
+}
+
+function decodeEvent(fields: string[]): AgentEvent | null {
+  const index = fields.indexOf("event");
+  if (index < 0 || index + 1 >= fields.length) return null;
+  const payload = fields[index + 1];
+  if (payload === undefined) return null;
+  try {
+    const value = JSON.parse(payload) as unknown;
+    if (!value || typeof value !== "object" || typeof (value as AgentEvent).kind !== "string") {
+      return null;
+    }
+    return value as AgentEvent;
+  } catch {
+    return null;
+  }
+}
+
 export class RedisBus implements BusPort {
-  private readonly pub: Redis;
-  private readonly sub: Redis;
-  /** 本进程内的订阅者:topic → 回调集合。 */
-  private readonly handlers = new Map<string, Set<(e: AgentEvent) => void>>();
+  private readonly command: Redis;
+  private readonly readers = new Set<Redis>();
 
   constructor(redisUrl: string) {
-    this.pub = new Redis(redisUrl, { maxRetriesPerRequest: null });
-    this.sub = new Redis(redisUrl, { maxRetriesPerRequest: null });
-    // 【必须挂】EventEmitter 没有 error 监听时会把错误 throw 成未捕获异常,
-    // 于是 Redis 重启/连接重置会直接杀掉 web 与 worker 进程 ——
-    // 那样一来 run 路由里精心写的"总线故障不阻止提交任务"降级根本执行不到,
-    // 进程在到达那段代码前就没了。
-    this.pub.on("error", () => {});
-    this.sub.on("error", () => {});
+    this.command = new Redis(redisUrl, {
+      maxRetriesPerRequest: 1,
+      enableOfflineQueue: false,
+    });
+    this.command.on("error", () => {});
+  }
 
-    this.sub.on("message", (channel, payload) => {
-      const set = this.handlers.get(channel);
-      if (!set?.size) return;
-      let event: AgentEvent;
-      try {
-        const parsed = JSON.parse(payload) as unknown;
-        // 形状校验不能省:共享 Redis 上的异类 payload 或跨版本消息会让下游读 e.kind
-        // 时抛 TypeError,而这里是 ioredis 的 emit 栈 —— 抛出去就是未捕获异常。
-        if (
-          !parsed ||
-          typeof parsed !== "object" ||
-          typeof (parsed as AgentEvent).kind !== "string"
-        )
-          return;
-        event = parsed as AgentEvent;
-      } catch {
-        return; // 非本系统写入的脏数据,忽略
-      }
-      // 快照迭代:回调里退订不打乱本次派发。
-      // 单个回调抛错必须隔离 —— 否则同一会话开两个标签页时,A 的回调抛一次,
-      // 遍历中断,B 从此静默收不到任何事件。
-      for (const cb of [...set]) {
+  async publish(topic: string, event: AgentEvent): Promise<string> {
+    const result = await withTimeout(
+      this.command
+        .multi()
+        .xadd(topic, "MAXLEN", "~", STREAM_MAX_LENGTH, "*", "event", JSON.stringify(event))
+        .expire(topic, STREAM_TTL_SECONDS)
+        .exec(),
+      "redis stream publish timeout",
+    );
+    const first = result?.[0];
+    if (!first || first[0] || typeof first[1] !== "string") {
+      throw first?.[0] ?? new Error("redis stream publish failed");
+    }
+    return first[1];
+  }
+
+  subscribe(
+    topic: string,
+    cb: (event: AgentEvent, id: string) => void,
+    options: StreamSubscriptionOptions = {},
+  ): Unsubscribe {
+    const reader = this.command.duplicate({
+      maxRetriesPerRequest: 1,
+      enableOfflineQueue: false,
+    });
+    this.readers.add(reader);
+    reader.on("error", () => {});
+
+    let cursor = options.afterId ?? "0-0";
+    let stopped = false;
+
+    void (async () => {
+      while (!stopped) {
         try {
-          cb(event);
+          const rows = (await reader.call(
+            "XREAD",
+            "BLOCK",
+            READ_BLOCK_MS,
+            "COUNT",
+            100,
+            "STREAMS",
+            topic,
+            cursor,
+          )) as RedisReadResult;
+          for (const [, entries] of rows ?? []) {
+            for (const [id, fields] of entries) {
+              cursor = id;
+              const event = decodeEvent(fields);
+              if (!event || stopped) continue;
+              try {
+                cb(event, id);
+              } catch {
+                // 一个 SSE 消费者异常不能杀死 reader 循环。
+              }
+            }
+          }
         } catch {
-          // 订阅者自己的问题,不牵连其它订阅者
+          if (!stopped) await new Promise((resolve) => setTimeout(resolve, 250));
         }
       }
-    });
-  }
-
-  /** 发布同样要超时:断连时命令无限排队,会把调用方拖住。 */
-  async publish(topic: string, e: AgentEvent, timeoutMs = 2000): Promise<void> {
-    await Promise.race([
-      this.pub.publish(topic, JSON.stringify(e)),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("redis publish timeout")), timeoutMs),
-      ),
-    ]);
-  }
-
-  subscribe(topic: string, cb: (e: AgentEvent) => void): Unsubscribe {
-    const set = this.handlers.get(topic) ?? new Set();
-    const isFirst = set.size === 0;
-    set.add(cb);
-    this.handlers.set(topic, set);
-
-    // 首个订阅者才向 Redis 注册频道
-    if (isFirst) void this.sub.subscribe(topic).catch(() => {});
+    })();
 
     return () => {
-      set.delete(cb);
-      if (set.size === 0) {
-        this.handlers.delete(topic);
-        void this.sub.unsubscribe(topic).catch(() => {});
-      }
+      if (stopped) return;
+      stopped = true;
+      this.readers.delete(reader);
+      reader.disconnect();
     };
   }
 
-  /**
-   * 等订阅在服务端真正生效。
-   *
-   * 【必须带超时】ioredis 配了 maxRetriesPerRequest: null,断连时命令会【无限排队】
-   * 而不是快速失败 —— 光 try/catch 抓不住,调用方会直接挂死。
-   * 实测:Redis 停机后请求卡在这里直到客户端超时,任务连入队都没走到。
-   * 超时后按"订阅没生效"处理,由调用方决定降级(通常是照常入队、放弃实时流)。
-   */
-  async ready(topic: string, timeoutMs = 2000): Promise<void> {
-    await Promise.race([
-      this.sub.subscribe(topic),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("redis subscribe timeout")), timeoutMs),
-      ),
-    ]);
+  async ready(): Promise<void> {
+    await waitForConnection(this.command);
+    await withTimeout(
+      this.command.ping().then(() => undefined),
+      "redis stream ready timeout",
+    );
   }
 
   async close(): Promise<void> {
-    this.handlers.clear();
-    await Promise.allSettled([this.pub.quit(), this.sub.quit()]);
+    for (const reader of this.readers) reader.disconnect();
+    this.readers.clear();
+    await this.command.quit().catch(() => this.command.disconnect());
   }
 }

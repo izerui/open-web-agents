@@ -33,10 +33,11 @@ export async function POST(req: Request) {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       let closed = false;
-      const send = (e: AgentEvent) => {
+      const send = (e: AgentEvent, eventId?: string) => {
         if (closed) return;
+        const idLine = eventId ? `id: ${eventId}\n` : "";
         try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(e)}\n\n`));
+          controller.enqueue(encoder.encode(`${idLine}data: ${JSON.stringify(e)}\n\n`));
         } catch {
           closed = true;
         }
@@ -53,13 +54,14 @@ export async function POST(req: Request) {
         }
       };
 
-      const unsubscribe = bus.subscribe(topicOf(sessionId), (e) => {
-        // 只认自己的终态 —— 同会话并发时,别人的 result 不该把这条流关掉
-        // (widget 场景下会话通常独占,但队列不按 session 串行化,不能假设)
-        if (e.kind === "result" && e.runId !== undefined && e.runId !== runId) return;
-        send(e);
-        if (e.kind === "result") finish();
-      });
+      const unsubscribe = bus.subscribe(
+        topicOf(sessionId, runId),
+        (e, eventId) => {
+          send(e, eventId);
+          if (e.kind === "result") finish();
+        },
+        { afterId: "0-0" },
+      );
       req.signal.addEventListener("abort", finish, { once: true });
 
       try {
@@ -67,7 +69,7 @@ export async function POST(req: Request) {
         // 总线故障不阻止提交 —— 队列在 MySQL,任务照常执行,只是没有实时过程。
         let busUsable = true;
         try {
-          await bus.ready?.(topicOf(sessionId));
+          await bus.ready?.();
         } catch {
           busUsable = false;
           send({ kind: "status", label: "事件通道不可用,本次无实时过程", state: "degraded" });

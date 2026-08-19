@@ -39,7 +39,12 @@ async function probe(fn: () => Promise<unknown>, timeoutMs = 2000): Promise<Prob
  * `?probe=live` 只看进程;默认做完整就绪检查。
  */
 export async function GET(req: Request) {
-  const mode = new URL(req.url).searchParams.get("probe");
+  let mode: string | null;
+  try {
+    mode = new URL(req.url).searchParams.get("probe");
+  } catch {
+    return Response.json({ error: "invalid request URL" }, { status: 400 });
+  }
 
   // 存活探针必须极轻:不碰任何外部依赖
   if (mode === "live") {
@@ -50,8 +55,9 @@ export async function GET(req: Request) {
 
   const [database, redis] = await Promise.all([
     probe(() => db.execute(sql`SELECT 1`)),
-    // 发一条到无人订阅的探测频道 —— 只验证连通性,不产生副作用
-    probe(() => bus.publish("owa:health", { kind: "status", label: "probe" })),
+    probe(async () => {
+      if (bus.ready) await bus.ready();
+    }),
   ]);
 
   /**

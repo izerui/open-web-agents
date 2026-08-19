@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
+import type { BusPort } from "@/lib/modules/events/ports";
 import { topicOf } from "@/lib/modules/run/application/orchestrator";
 import { assertWithinQuota, quotaErrorResponse } from "@/lib/modules/usage/application/quota-guard";
 import type { AgentEvent } from "@/lib/shared";
@@ -71,23 +72,31 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   return handleBlocking(req, { id, runId, prompt, runs, bus });
 }
 
+interface RunRouteContext {
+  id: string;
+  runId: string;
+  prompt: string;
+  runs: {
+    create(input: { id: string; sessionId: string; prompt: string }): Promise<unknown>;
+  };
+  bus: BusPort;
+}
+
 // ─────────────────────────── 流式模式(SSE) ───────────────────────────
 
 /** stream: true → 逐事件 SSE 推送,Web 页面实时打字机效果。 */
-function handleStreaming(
-  req: Request,
-  ctx: { id: string; runId: string; prompt: string; runs: any; bus: any },
-) {
+function handleStreaming(req: Request, ctx: RunRouteContext) {
   const { id, runId, prompt, runs, bus } = ctx;
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       let closed = false;
-      const send = (e: AgentEvent) => {
+      const send = (e: AgentEvent, eventId?: string) => {
         if (closed) return;
+        const idLine = eventId ? `id: ${eventId}\n` : "";
         try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(e)}\n\n`));
+          controller.enqueue(encoder.encode(`${idLine}data: ${JSON.stringify(e)}\n\n`));
         } catch {
           closed = true;
         }
@@ -104,19 +113,21 @@ function handleStreaming(
         }
       };
 
-      // 先订阅再入队,避免 worker 抢先跑完导致漏掉开头的事件
-      const unsubscribe = bus.subscribe(topicOf(id), (e: AgentEvent) => {
-        if (e.kind === "result" && e.runId !== undefined && e.runId !== runId) return;
-        send(e);
-        if (e.kind === "result") finish();
-      });
+      const unsubscribe = bus.subscribe(
+        topicOf(id, runId),
+        (e: AgentEvent, eventId: string) => {
+          send(e, eventId);
+          if (e.kind === "result") finish();
+        },
+        { afterId: "0-0" },
+      );
 
       req.signal.addEventListener("abort", finish, { once: true });
 
       try {
         let busUsable = true;
         try {
-          await bus.ready?.(topicOf(id));
+          await bus.ready?.();
         } catch {
           busUsable = false;
           send({ kind: "status", label: "事件通道不可用,本次无实时过程", state: "degraded" });
@@ -188,10 +199,7 @@ interface BlockingResponse {
 }
 
 /** stream: false → 等运行完成,返回单个 JSON。适合程序调用。 */
-function handleBlocking(
-  req: Request,
-  ctx: { id: string; runId: string; prompt: string; runs: any; bus: any },
-): Promise<Response> {
+function handleBlocking(req: Request, ctx: RunRouteContext): Promise<Response> {
   const { id, runId, prompt, runs, bus } = ctx;
 
   return new Promise<Response>((resolve) => {
@@ -205,20 +213,22 @@ function handleBlocking(
       resolve(resp);
     };
 
-    const unsubscribe = bus.subscribe(topicOf(id), (e: AgentEvent) => {
-      // 只认自己的终态
-      if (e.kind === "result" && e.runId !== undefined && e.runId !== runId) return;
-      events.push(e);
+    const unsubscribe = bus.subscribe(
+      topicOf(id, runId),
+      (e: AgentEvent) => {
+        events.push(e);
 
-      if (e.kind === "result") {
-        settle(
-          Response.json(assembleBlockingResponse(runId, events), {
-            status: e.status === "success" ? 200 : e.status === "unknown" ? 202 : 500,
-            headers: { "X-Run-Id": runId },
-          }),
-        );
-      }
-    });
+        if (e.kind === "result") {
+          settle(
+            Response.json(assembleBlockingResponse(runId, events), {
+              status: e.status === "success" ? 200 : e.status === "unknown" ? 202 : 500,
+              headers: { "X-Run-Id": runId },
+            }),
+          );
+        }
+      },
+      { afterId: "0-0" },
+    );
 
     // 客户端断开 → 不再等结果(但运行仍在后台继续)
     req.signal.addEventListener(
@@ -233,7 +243,7 @@ function handleBlocking(
     (async () => {
       try {
         try {
-          await bus.ready?.(topicOf(id));
+          await bus.ready?.();
         } catch {
           settle(
             Response.json(

@@ -6,6 +6,8 @@ import { PathEscapeError } from "@/lib/modules/artifacts/domain/safe-path";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const NO_STORE_HEADERS = { "Cache-Control": "no-store, max-age=0" };
+
 /**
  * 工作空间文件接口。
  *
@@ -33,7 +35,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const session = await sessions.get(id);
   if (!session) return Response.json({ error: "session not found" }, { status: 404 });
 
-  const url = new URL(req.url);
+  let url: URL;
+  try {
+    url = new URL(req.url);
+  } catch {
+    return Response.json({ error: "invalid request URL" }, { status: 400 });
+  }
   const dir = url.searchParams.get("dir");
   const file = url.searchParams.get("file");
   const download = url.searchParams.get("download");
@@ -61,15 +68,22 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
           "X-Content-Type-Options": "nosniff",
           // SVG 能带脚本。sandbox 把它丢进独立源并禁脚本,直接访问链接也跑不起来
           "Content-Security-Policy": "sandbox; default-src 'none'; style-src 'unsafe-inline'",
+          ...NO_STORE_HEADERS,
         },
       });
     }
 
     if (file !== null) {
-      return Response.json({ preview: await storage.preview(session.workspaceDir, file) });
+      return Response.json(
+        { preview: await storage.preview(session.workspaceDir, file) },
+        { headers: NO_STORE_HEADERS },
+      );
     }
 
-    return Response.json({ nodes: await storage.tree(session.workspaceDir, dir ?? "") });
+    return Response.json(
+      { nodes: await storage.tree(session.workspaceDir, dir ?? "") },
+      { headers: NO_STORE_HEADERS },
+    );
   } catch (err) {
     if (err instanceof PathEscapeError) {
       return Response.json({ error: "path escapes workspace" }, { status: 400 });

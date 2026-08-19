@@ -114,6 +114,11 @@ export function FilePanel({
   const [error, setError] = useState<string | null>(null);
   /** HTML 产物默认渲染出来看效果,可切回源码。非 HTML 文件用不到这个开关。 */
   const [showRendered, setShowRendered] = useState(true);
+  /** 避免轮询、手动刷新和展开动作同时重复请求同一目录。 */
+  const inFlightRef = useRef(new Set<string>());
+  /** 丢弃切换会话后才返回的旧目录请求。 */
+  const sessionRef = useRef(sessionId);
+  sessionRef.current = sessionId;
 
   // 刷新时要遍历"当前已拉过的目录",但那个 effect 不该因为 dirs 变化就重跑
   const dirsRef = useRef(dirs);
@@ -134,23 +139,34 @@ export function FilePanel({
   const loadDir = useCallback(
     async (target: string) => {
       if (!sessionId) return;
+      const requestSession = sessionId;
+      const requestKey = `${requestSession}:${target}`;
+      if (inFlightRef.current.has(requestKey)) return;
+      inFlightRef.current.add(requestKey);
       setLoading((s) => new Set(s).add(target));
       try {
         const res = await fetch(
-          `/api/sessions/${sessionId}/files?dir=${encodeURIComponent(target)}`,
+          `/api/sessions/${requestSession}/files?dir=${encodeURIComponent(target)}`,
+          { cache: "no-store" },
         );
         const data = (await res.json()) as { nodes?: FileNode[]; error?: string };
         if (data.error) throw new Error(data.error);
+        if (sessionRef.current !== requestSession) return;
         setDirs((m) => new Map(m).set(target, data.nodes ?? []));
         setError(null);
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        if (sessionRef.current === requestSession) {
+          setError(e instanceof Error ? e.message : String(e));
+        }
       } finally {
-        setLoading((s) => {
-          const next = new Set(s);
-          next.delete(target);
-          return next;
-        });
+        inFlightRef.current.delete(requestKey);
+        if (sessionRef.current === requestSession) {
+          setLoading((s) => {
+            const next = new Set(s);
+            next.delete(target);
+            return next;
+          });
+        }
       }
     },
     [sessionId],
@@ -160,6 +176,7 @@ export function FilePanel({
   useEffect(() => {
     setDirs(new Map());
     setExpanded(new Set());
+    setLoading(new Set());
     setSelected(undefined);
     setPreview(null);
     setError(null);
@@ -174,9 +191,27 @@ export function FilePanel({
    */
   useEffect(() => {
     if (!sessionId || refreshKey === 0) return;
-    for (const dir of [ROOT, ...dirsRef.current.keys()]) void loadDir(dir);
+    for (const dir of new Set([ROOT, ...dirsRef.current.keys()])) void loadDir(dir);
     // 只在 refreshKey 变化时重拉 —— 展开新目录由展开动作自己负责
   }, [refreshKey, sessionId, loadDir]);
+
+  /**
+   * 工作空间可被长任务或其它 Worker 持续修改。页面可见时低频刷新当前已经展示的层级,
+   * 既能及时出现新文件,也不会递归扫描 node_modules 等大型目录。
+   */
+  useEffect(() => {
+    if (!sessionId) return;
+    const refreshVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      for (const dir of new Set([ROOT, ...dirsRef.current.keys()])) void loadDir(dir);
+    };
+    const timer = window.setInterval(refreshVisible, 2_500);
+    document.addEventListener("visibilitychange", refreshVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshVisible);
+    };
+  }, [sessionId, loadDir]);
 
   const handleExpandedChange = useCallback(
     (next: Set<string>) => {
@@ -197,6 +232,7 @@ export function FilePanel({
       try {
         const res = await fetch(
           `/api/sessions/${sessionId}/files?file=${encodeURIComponent(path)}`,
+          { cache: "no-store" },
         );
         const data = (await res.json()) as { preview?: FilePreview; error?: string };
         if (data.preview) setPreview(data.preview);
@@ -209,7 +245,7 @@ export function FilePanel({
   );
 
   const refreshAll = useCallback(() => {
-    for (const dir of [ROOT, ...dirs.keys()]) void loadDir(dir);
+    for (const dir of new Set([ROOT, ...dirs.keys()])) void loadDir(dir);
   }, [dirs, loadDir]);
 
   if (!sessionId) {
@@ -374,7 +410,6 @@ export function FilePanel({
           <div className="min-h-0 flex-1 overflow-auto px-3 pb-3 pt-2">
             {preview.mime.startsWith("image/") ? (
               /* 图片走内联端点(服务端只对 image/* 放行,并带 nosniff + CSP sandbox) */
-              // biome-ignore lint/performance/noImgElement: 会话产物是运行时文件,没有构建期尺寸信息
               <img
                 src={`/api/sessions/${sessionId}/files?download=${encodeURIComponent(preview.path)}&inline=1`}
                 alt={preview.path}

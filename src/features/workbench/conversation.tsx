@@ -498,9 +498,11 @@ function ProcessTimeline({ items, running }: { items: Rendered[]; running: boole
       : `工作过程 · ${items.length} 步`;
 
   return (
-    <ChainOfThought defaultOpen={running}>
-      <ChainOfThoughtHeader>{summary}</ChainOfThoughtHeader>
-      <ChainOfThoughtContent>
+    <ChainOfThought defaultOpen={running} className="space-y-2">
+      <ChainOfThoughtHeader className="-mx-2 min-h-8 rounded-md px-2 text-xs focus-visible:ring-2 focus-visible:ring-ring/50">
+        {summary}
+      </ChainOfThoughtHeader>
+      <ChainOfThoughtContent className="pl-1">
         {items.map((item, i) => {
           const last = i === items.length - 1;
           const status = running && last ? "active" : "complete";
@@ -553,13 +555,13 @@ function ProcessTimeline({ items, running }: { items: Rendered[]; running: boole
 
 export function ChatThread({
   turns,
-  onRerun,
-  onAnswer,
+  onRerunAction,
+  onAnswerAction,
 }: {
   turns: Turn[];
-  onRerun?: (runId: string, prompt: string) => void;
+  onRerunAction?: (runId: string, prompt: string) => void;
   /** 用户点了 agent 提问里的选项 —— 作为新一轮发出去。 */
-  onAnswer?: (text: string) => void;
+  onAnswerAction?: (text: string) => void;
 }) {
   if (turns.length === 0) {
     return null; // empty state handled by parent (ConversationEmptyState)
@@ -612,8 +614,8 @@ export function ChatThread({
                           <QuestionBlock
                             key={item.event.toolUseId ?? `q-${item.event.questions[0]?.question}`}
                             e={item.event}
-                            answerable={i === turns.length - 1 && !turn.running && !!onAnswer}
-                            onAnswer={onAnswer}
+                            answerable={i === turns.length - 1 && !turn.running && !!onAnswerAction}
+                            onAnswer={onAnswerAction}
                           />
                         );
                       }
@@ -641,7 +643,7 @@ export function ChatThread({
                         </MessageAction>
                       )}
                       {/* 重跑操作 */}
-                      {turn.runId && onRerun && (
+                      {turn.runId && onRerunAction && (
                         <MessageAction
                           label="重跑"
                           tooltip="用干净上下文换个说法重跑,不影响已有记录"
@@ -650,7 +652,9 @@ export function ChatThread({
                               "重跑这一轮(干净上下文),换个说法:",
                               turn.prompt,
                             );
-                            if (next?.trim() && turn.runId) onRerun(turn.runId, next.trim());
+                            if (next?.trim() && turn.runId) {
+                              onRerunAction(turn.runId, next.trim());
+                            }
                           }}
                         >
                           <RotateCcw className="size-3" />

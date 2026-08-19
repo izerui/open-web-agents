@@ -13,12 +13,24 @@ import { describe, expect, it, vi } from "vitest";
 /** 内存 repo + prompt 存储,凑齐 worker 需要的 RunRepo & RunPayloadSource。 */
 class TestRepo extends InMemoryRunRepo {
   private prompts = new Map<string, string>();
+  readonly savedResults = new Map<
+    string,
+    { finalText?: string; structured?: unknown; cost?: unknown; error?: unknown }
+  >();
+
   async createWithPrompt(id: string, sessionId: string, prompt: string) {
     await this.create({ id, sessionId });
     this.prompts.set(id, prompt);
   }
   async getPrompt(id: string): Promise<string | null> {
     return this.prompts.get(id) ?? null;
+  }
+
+  async saveResult(
+    id: string,
+    data: { finalText?: string; structured?: unknown; cost?: unknown; error?: unknown },
+  ): Promise<void> {
+    this.savedResults.set(id, data);
   }
 }
 
@@ -86,6 +98,15 @@ describe("RunWorker.tick", () => {
     const run = await repo.get("r1");
     expect(run?.state).toBe("success");
     expect(run?.leaseUntil).toBeNull();
+  });
+
+  it("成功执行后保存最终文本投影", async () => {
+    const { repo, worker } = await setup(
+      new FakeEngine({ status: "success", summary: "最终回答" }),
+    );
+    await repo.createWithPrompt("r1", "s1", "go");
+    await worker.tick();
+    expect(repo.savedResults.get("r1")?.finalText).toBe("最终回答");
   });
 
   it("引擎返回失败时 run 落 failed", async () => {

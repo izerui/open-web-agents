@@ -164,12 +164,11 @@ Open Web Agents 是一个基于 `@anthropic-ai/claude-agent-sdk` 的多智能体
 当前核心表如下:
 
 | 表 | 作用 | 关键字段 |
-|---|---|---|
+| --- | --- | --- |
 | `users` | 平台用户 | `email`, `role`, `default_base_url`, `anthropic_key_enc` |
 | `agents` | 智能体定义 | `config`, `input_schema`, `output_schema`, `verify_rules`, `webhook_url` |
 | `sessions` | 会话与工作目录 | `agent_id`, `workspace_dir`, `sdk_session_id`, `base_url`, `key_enc`, `model` |
-| `messages` | 会话消息存档 | `session_id`, `role`, `content` |
-| `runs` | 运行队列与终态 | `status`, `prompt`, `resume_anchor`, `sdk_session_id`, `lease_until`, `lease_owner` |
+| `runs` | 运行队列与终态 | `status`, `prompt`, `final_text`, `resume_anchor`, `sdk_session_id`, `lease_until`, `lease_owner` |
 | `artifacts` | 产物文件元数据 | `session_id`, `path`, `mime`, `size`, `storage_url` |
 | `api_keys` | 系统调用鉴权 | `owner_id`, `agent_id`, `hashed_key`, `quota` |
 | `access_grants` | 通用授权 | `resource_type`, `resource_id`, `principal_type`, `principal_id`, `permission` |
@@ -181,9 +180,11 @@ Open Web Agents 是一个基于 `@anthropic-ai/claude-agent-sdk` 的多智能体
 ### 5.1 关键约束
 
 1. `sessions` 保存会话最新锚点,用于普通多轮续跑
-2. `runs` 逐轮保存 `resumeAnchor` 与 `sdkSessionId`,用于分支重跑和审计
-3. `workspaceDir` 是 session 级字段,同一会话多轮共享一个工作目录
-4. `knowledge_docs` 当前存原文,检索时再做切块与匹配
+2. `runs` 逐轮保存 `prompt`、`finalText`、`resumeAnchor` 与 `sdkSessionId`,用于结果查询、分支重跑和审计
+3. 完整 Assistant 过程以 Claude SDK JSONL transcript 为准,不在 MySQL 重复保存消息
+4. `workspaceDir` 是 session 级字段,同一会话多轮共享一个工作目录
+5. 同一 session 的 run 串行认领,不同 session 可由多个 worker 并行执行
+6. `knowledge_docs` 当前存原文,检索时再做切块与匹配
 
 ---
 
@@ -192,13 +193,13 @@ Open Web Agents 是一个基于 `@anthropic-ai/claude-agent-sdk` 的多智能体
 核心模块位于 `src/lib/modules/`:
 
 | 模块 | 职责 |
-|---|---|
+| --- | --- |
 | `access` | 资源授权、会话访问和 invoke 权限判定 |
 | `agent-engine` | Claude SDK 适配、消息归一、沙箱和工具守卫 |
 | `approval` | 人工审批请求、裁决与超时 |
 | `artifacts` | 工作空间文件树、读取、预览、GC |
 | `agent` | 智能体配置、构建 spec、输入输出校验 |
-| `events` | 事件总线与重放缓冲 |
+| `events` | Redis Streams 事件流、SSE 游标和短期回放 |
 | `identity` | 用户、登录、API Key、密钥加解密 |
 | `integration` | webhook 等外部集成 |
 | `knowledge` | 智能体级知识文档和检索 |
@@ -376,25 +377,25 @@ Open Web Agents 是一个基于 `@anthropic-ai/claude-agent-sdk` 的多智能体
 
 `leaseOwner` 的作用是防止失去租约的旧 worker 覆写新 worker 结果。
 
-### 10.2 Redis 事件总线
+### 10.2 Redis 事件流
 
 Redis 当前用于:
 
-1. 运行过程事件广播
-2. SSE 实时订阅
+1. 通过 Redis Streams 保存每个 run 的短期过程事件
+2. 以 Stream ID 作为 SSE 游标,支持跨 Web 实例断线续读
 3. 审批协调
 
-当前不是持久事件存储,因此配合 replay 缓冲使用。
+每个 run 使用独立 Stream,设置长度上限与 TTL。完整历史仍由 `runs` 与 SDK JSONL transcript 提供。
 
 ### 10.3 joinStream
 
-`GET /api/sessions/{id}/events` 的职责是把正在跑的会话重新接上:
+`GET /api/sessions/{id}/events` 的职责是把正在跑的运行重新接上:
 
-1. 建立订阅
-2. 等订阅生效
-3. 读取 replay 缓冲
-4. 补发快照之间到达的实时事件
-5. 再持续跟随后续事件
+1. 根据 `runId` 定位对应 Stream
+2. 从 `Last-Event-ID` 或 `cursor` 之后读取
+3. 先补发保留窗口内的历史事件
+4. 再阻塞等待后续事件
+5. 收到该 run 的终态后关闭 SSE
 
 ---
 
@@ -403,7 +404,7 @@ Redis 当前用于:
 ### 11.1 Web 入口
 
 | 路径 | 说明 |
-|---|---|
+| --- | --- |
 | `POST /api/auth` | 登录 / 注册 / 登出 |
 | `GET /api/auth` | 当前登录态 |
 | `GET/POST /api/sessions` | 列表 / 创建会话 |
@@ -417,7 +418,7 @@ Redis 当前用于:
 ### 11.2 智能体与管理入口
 
 | 路径 | 说明 |
-|---|---|
+| --- | --- |
 | `GET/POST /api/agents` | 智能体列表 / 创建更新 |
 | `GET/POST/DELETE /api/agents/{id}/share` | 分享管理 |
 | `GET/POST/DELETE /api/agents/{id}/knowledge` | 智能体知识库 |
@@ -430,7 +431,7 @@ Redis 当前用于:
 ### 11.3 系统集成入口
 
 | 路径 | 说明 |
-|---|---|
+| --- | --- |
 | `POST /api/agents/{id}/invoke` | 对外触发智能体运行 |
 | `GET /api/agents/{id}/result` | 查询任务结果 |
 | `POST /api/embed/token` | 生成 embed token |
@@ -440,7 +441,7 @@ Redis 当前用于:
 ### 11.4 健康检查
 
 | 路径 | 说明 |
-|---|---|
+| --- | --- |
 | `GET /api/health?probe=live` | 存活探针 |
 | `GET /api/health` | 就绪探针 |
 
@@ -501,7 +502,8 @@ agent 实际使用的凭证解析顺序为:
 1. `OWA_SANDBOX=0` 时不具备 OS 沙箱
 2. 开启 `OWA_ALLOW_STDIO_MCP=1` 后,智能体可在宿主机启动进程
 3. 共享 `.agent-home` 带来缓存复用,也提高宿主级污染风险
-4. 事件总线不是持久队列,依赖 replay 与数据库终态兜底
+4. Redis Streams 只保留近期运行事件,永久历史依赖共享磁盘上的 SDK JSONL transcript
+5. 多 Worker 部署要求所有实例看到一致的 `workspaceDir` 与 `.agent-home` 绝对路径
 
 ---
 
