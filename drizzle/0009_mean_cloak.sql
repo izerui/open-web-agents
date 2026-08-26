@@ -1,0 +1,1 @@
+ALTER TABLE `sessions` ADD `unattended` int DEFAULT 0 NOT NULL;

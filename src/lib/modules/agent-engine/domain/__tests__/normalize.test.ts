@@ -7,7 +7,7 @@ import {
   normalizeStreamEvent,
   shortSubagentId,
 } from "@/lib/modules/agent-engine/domain/normalize";
-import { type AgentEvent, isStateEvent } from "@/lib/shared";
+import type { AgentEvent } from "@/lib/shared";
 import { describe, expect, it } from "vitest";
 
 describe("normalizeSdkMessage / assistant", () => {
@@ -341,11 +341,6 @@ describe("normalizeSdkMessage / AskUserQuestion", () => {
     }) as AgentEvent[];
     expect(out[0]?.kind).toBe("tool_use");
   });
-
-  it("question 属于 state 类事件 —— 断线重连后选项必须还在", () => {
-    const [e] = ask(VALID);
-    expect(e && isStateEvent(e)).toBe(true);
-  });
 });
 
 // ─────────────────────────── normalizeStreamEvent ───────────────────────────
@@ -483,9 +478,7 @@ describe("normalizeSdkMessage / skipStreamed", () => {
               id: "tu_q",
               name: "AskUserQuestion",
               input: {
-                questions: [
-                  { question: "选哪个?", options: [{ label: "A" }, { label: "B" }] },
-                ],
+                questions: [{ question: "选哪个?", options: [{ label: "A" }, { label: "B" }] }],
               },
             },
           ],

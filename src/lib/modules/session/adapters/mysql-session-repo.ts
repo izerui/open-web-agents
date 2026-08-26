@@ -12,6 +12,7 @@ interface Row {
   workspaceDir: string;
   sdkSessionId: string | null;
   title: string | null;
+  unattended: number;
   baseUrl: string | null;
   model: string | null;
   createdAt: Date;
@@ -26,6 +27,7 @@ function toSession(r: Row): Session {
     workspaceDir: r.workspaceDir,
     sdkSessionId: r.sdkSessionId ?? undefined,
     title: r.title ?? undefined,
+    unattended: r.unattended === 1,
     baseUrl: r.baseUrl ?? undefined,
     model: (r.model as ModelAlias | null) ?? undefined,
     createdAt: r.createdAt.getTime(),
@@ -40,6 +42,7 @@ const COLUMNS = {
   workspaceDir: sessions.workspaceDir,
   sdkSessionId: sessions.sdkSessionId,
   title: sessions.title,
+  unattended: sessions.unattended,
   baseUrl: sessions.baseUrl,
   model: sessions.model,
   createdAt: sessions.createdAt,
@@ -72,6 +75,7 @@ export class MysqlSessionRepo implements SessionRepo {
       callerApiKeyId: s.callerApiKeyId,
       workspaceDir: s.workspaceDir,
       title: s.title,
+      unattended: s.unattended ? 1 : 0,
       status: "active",
     });
     const created = await this.get(s.id);

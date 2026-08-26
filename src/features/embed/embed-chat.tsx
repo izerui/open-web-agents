@@ -13,6 +13,87 @@ interface Turn {
   running: boolean;
 }
 
+type QuestionEvent = Extract<AgentEvent, { kind: "question" }>;
+
+/**
+ * agent 的提问 —— widget 里也必须渲染成可点的选项。
+ *
+ * 【为什么不能不管】不渲染的话,agent 发出提问后界面上是一片空白:
+ * 终端用户既不知道被问了什么,也不知道要答 —— 对话就此卡死。
+ * 这里只做最小实现(按钮 + 全答完才能发),不引入工作台那套重组件。
+ */
+function QuestionBlock({
+  e,
+  answerable,
+  onAnswer,
+}: {
+  e: QuestionEvent;
+  answerable: boolean;
+  onAnswer: (text: string) => void;
+}) {
+  const [picked, setPicked] = useState<Record<number, Set<string>>>({});
+
+  const toggle = (qi: number, label: string, multi: boolean) => {
+    setPicked((prev) => {
+      const cur = new Set(prev[qi] ?? []);
+      if (cur.has(label)) cur.delete(label);
+      else {
+        if (!multi) cur.clear();
+        cur.add(label);
+      }
+      return { ...prev, [qi]: cur };
+    });
+  };
+
+  const answered = e.questions.map((_, i) => [...(picked[i] ?? [])]);
+  const complete = answered.every((a) => a.length > 0);
+
+  const submit = () => {
+    if (!complete) return;
+    // 多问一起答时带上标题,agent 才分得清哪个答案对哪个问题
+    const text = e.questions
+      .map((q, i) => {
+        const ans = answered[i]?.join("、") ?? "";
+        return e.questions.length > 1 ? `${q.header ?? q.question}:${ans}` : ans;
+      })
+      .join("\n");
+    onAnswer(text);
+  };
+
+  return (
+    <div className="space-y-2 rounded-lg border border-border p-3">
+      {e.questions.map((q, qi) => (
+        <div key={`${q.question}-${qi}`} className="space-y-1.5">
+          <p className="text-sm font-medium">{q.question}</p>
+          <div className="flex flex-wrap gap-1.5">
+            {q.options.map((opt) => {
+              const on = picked[qi]?.has(opt.label) ?? false;
+              return (
+                <Button
+                  key={opt.label}
+                  type="button"
+                  size="sm"
+                  variant={on ? "default" : "outline"}
+                  disabled={!answerable}
+                  title={opt.description}
+                  onClick={() => toggle(qi, opt.label, q.multiSelect === true)}
+                >
+                  {opt.label}
+                </Button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+      {answerable && (
+        <Button type="button" size="sm" className="w-full" disabled={!complete} onClick={submit}>
+          发送选择
+        </Button>
+      )}
+    </div>
+  );
+}
+
 /** widget 里只显示对用户有意义的内容 —— 工具细节与 token 用量属于运维视角,不该露给终端用户。 */
 function Line({ e }: { e: AgentEvent }) {
   switch (e.kind) {
@@ -49,10 +130,10 @@ export function EmbedChat({ token }: { token: string }) {
   const [expired, setExpired] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
-  async function send() {
-    const prompt = input.trim();
+  async function send(text?: string) {
+    const prompt = (text ?? input).trim();
     if (!prompt || running || expired) return;
-    setInput("");
+    if (text === undefined) setInput("");
     setRunning(true);
 
     const idx = turns.length;
@@ -101,9 +182,18 @@ export function EmbedChat({ token }: { token: string }) {
               {turn.prompt}
             </p>
             <div className="space-y-1">
-              {turn.events.map((e, j) => (
-                <Line key={`${j}-${e.kind}`} e={e} />
-              ))}
+              {turn.events.map((e, j) =>
+                e.kind === "question" ? (
+                  <QuestionBlock
+                    key={e.toolUseId ?? `q-${j}`}
+                    e={e}
+                    answerable={i === turns.length - 1 && !turn.running}
+                    onAnswer={(t) => void send(t)}
+                  />
+                ) : (
+                  <Line key={`${j}-${e.kind}`} e={e} />
+                ),
+              )}
               {turn.running && <p className="animate-pulse text-xs text-brand">▍</p>}
             </div>
           </div>
@@ -124,7 +214,12 @@ export function EmbedChat({ token }: { token: string }) {
             placeholder={running ? "正在回复…" : "输入消息"}
             disabled={running}
           />
-          <Button type="button" className="shrink-0" onClick={send} disabled={!input.trim() || running}>
+          <Button
+            type="button"
+            className="shrink-0"
+            onClick={() => void send()}
+            disabled={!input.trim() || running}
+          >
             <SendHorizontal className="size-4" />
             <span className="hidden sm:inline">发送</span>
           </Button>

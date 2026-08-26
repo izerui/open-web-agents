@@ -208,13 +208,16 @@ export function buildSdkOptions(
     //   default            有人盯着的 web 对话,危险操作弹给人确认
     //   bypassPermissions  接口调用,无人值守 —— 等确认只会挂到超时,所以全放行
     //
+    // 【为什么无人值守要换默认值】invoke 是一次调用拿结果。没人能确认时还走
+    // “问人”的模式,只会把本可以成功的任务挂成超时失败。智能体显式配了就听它的。
+    //
     // 【为什么现在敢把它开放出去】以前写死 default,是因为 bypassPermissions
     // 会连 canUseTool 一起绕过,而当时路径围栏就住在 canUseTool 里 ——
     // 选了它等于零管控(实测 agent 能随意写宿主 HOME)。
     // 现在围栏搬到了 PreToolUse hook,而 hook 跑在所有权限关卡【之前】,
     // 连 bypassPermissions 都绕不过(sdk-docs/permissions.md:81)。
     // 于是这个选项只决定"要不要问人",不再决定"有没有围栏"。
-    permissionMode: spec.permissionMode ?? "default",
+    permissionMode: spec.permissionMode ?? (ctx.unattended ? "bypassPermissions" : "default"),
     // 让 SDK 吐出逐 token 的 stream_event,前端才能实现打字机效果。
     // 不开的话 query() 只 yield 完整的 assistant 消息,文字一次性出现。
     includePartialMessages: true,
@@ -310,14 +313,31 @@ export function buildSdkOptions(
     sharedHome: deps.sharedHome,
   });
   if (sandbox) options.sandbox = sandbox;
+
+  /**
+   * 【不按“有没有人”增删 agent 的工具面】曾经在无人值守时把 AskUserQuestion
+   * 追加进拒绝列表,理由是“没人能答,留着白跑一轮”。但调用它的动作本身包含
+   * 一次结构化推理(枚举 2-4 个候选方案并权衡),摘掉它可能让 agent 在歧义任务上
+   * 直接选一条路走 —— 这是对输出质量的干预,而平台没有数据支撑这个取舍。
+   *
+   * 工具面是 agent 自己的事:要锁定就配 `tools` 白名单(SDK 官方对“锁定代理”的建议),
+   * 平台只负责把“没人可问”这个运行时事实通过 permissionMode 传给 SDK。
+   */
   if (disallowedTools.length) options.disallowedTools = disallowedTools;
 
   // 执行隔离第二道:宿主侧文件工具按路径拦截。
   // 它【不依赖内核沙箱】,故本地开发关掉沙箱时依然生效 —— 正是之前两次
   // "agent 用绝对路径写到宿主 HOME" 的直接补救。
+  //
+  // 【写只允许工作目录 + 临时目录】allowedDirs 曾经把 sharedHome 也放开了,
+  // 于是 Write/Edit 能直接写 agent 的 HOME(.agent-home 里有 .claude 配置与
+  // 全部会话 transcript)。但工具缓存(pip/npm/matplotlib)是 Bash 子进程写的,
+  // 走的是内核沙箱的 allowWrite,压根不经过这道守卫 —— 也就是说放开 sharedHome
+  // 对合法场景没有任何帮助,只是白白多了一条写入路径。
+  // 临时目录保留:它是通用约定,且沙箱的 allowWrite 同样包含,两边语义一致。
   const guardPolicy = {
     workspaceDir: ctx.workspaceDir,
-    allowedDirs: [deps.sharedHome, "/tmp", "/private/tmp", "/var/folders", "/private/var/folders"],
+    allowedDirs: ["/tmp", "/private/tmp", "/var/folders", "/private/var/folders"],
   };
   //
   // 语义是【默认放行 + 路径越界即拒】。
@@ -336,7 +356,10 @@ export function buildSdkOptions(
     const d = guardToolUse(toolName, input, guardPolicy);
     if (!d.allow) return { allow: false, reason: d.reason ?? "越界操作" };
 
-    if (deps.requestApproval) {
+    // 【无人值守不走审批】接口 invoke 是一次调用拿结果,没有人能点批准。
+    // 照常发审批的后果是白等满 10 分钟、超时自动拒绝,任务本来能成功却挂成失败。
+    // 路径围栏与工具白名单仍然生效 —— 那两道是结构性安全边界,不依赖人。
+    if (deps.requestApproval && !ctx.unattended) {
       const need = needsApproval(toolName, input, spec.approvalRules);
       if (need.needed) {
         // 【必须 fail-closed】等待审批期间 Redis 不可达时这个 await 会 reject。

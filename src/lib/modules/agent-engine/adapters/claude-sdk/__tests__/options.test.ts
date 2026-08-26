@@ -409,10 +409,16 @@ describe("PreToolUse 围栏接入 SDK options", () => {
     expect(r.reason).toMatch(/工作空间之外/);
   });
 
-  it("共享 HOME 与临时目录放行(工具缓存需要)", async () => {
-    expect((await gateOf()("Write", { file_path: "/data/.agent-home/.cache/x" })).denied).toBe(
-      false,
-    );
+  // 这条曾经叫“共享 HOME 与临时目录放行(工具缓存需要)” —— 把一个错误假设写成了规格。
+  // 工具缓存(pip/npm/matplotlib)是 Bash 子进程写的,走内核沙箱的 allowWrite,
+  // 压根不经过这道宿主侧守卫。放开 sharedHome 对合法场景零帮助,
+  // 却让 Write/Edit 能直接改 .agent-home 里的 .claude 配置和全部会话 transcript。
+  it("【回归】共享 HOME 不可写 —— 工具缓存走沙箱,不需要守卫放行", async () => {
+    const r = await gateOf()("Write", { file_path: "/data/.agent-home/.cache/x" });
+    expect(r.denied).toBe(true);
+  });
+
+  it("临时目录放行 —— 通用约定,且与沙箱 allowWrite 语义一致", async () => {
     expect((await gateOf()("Write", { file_path: "/tmp/scratch" })).denied).toBe(false);
   });
 
@@ -567,5 +573,61 @@ describe("PreToolUse 围栏接入 SDK options", () => {
     });
     expect((await gateOf(o)("Write", { file_path: "/etc/passwd" })).denied).toBe(true);
     expect(spy).not.toHaveBeenCalled();
+  });
+
+  // 【无人值守】接口 invoke 是一次调用拿结果,没人能点批准。
+  // 照常发审批只会白等满超时再自动拒绝 —— 任务本来能成功,却挂成失败。
+  describe("无人值守(接口调用)", () => {
+    const unattendedCtx: RunContext = { ...ctx, unattended: true };
+
+    it("不发审批,直接放行 —— 否则任务拿不到结果", async () => {
+      const spy = vi.fn(async () => ({ approved: true }));
+      const o = buildSdkOptions(specOf({ approvalRules: { all: true } }), unattendedCtx, {
+        ...deps(),
+        requestApproval: spy,
+      });
+      expect((await gateOf(o)("Bash", { command: "ls" })).denied).toBe(false);
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it("默认权限模式转为 bypassPermissions", () => {
+      expect(buildSdkOptions(specOf(), unattendedCtx, deps()).permissionMode).toBe(
+        "bypassPermissions",
+      );
+    });
+
+    it("智能体显式配了模式就听它的", () => {
+      const o = buildSdkOptions(specOf({ permissionMode: "plan" }), unattendedCtx, deps());
+      expect(o.permissionMode).toBe("plan");
+    });
+
+    // 安全边界不随「没人盯着」而放松:围栏是结构性的,不依赖人判断。
+    it("路径围栏仍然生效", async () => {
+      const o = buildSdkOptions(specOf(), unattendedCtx, deps());
+      expect((await gateOf(o)("Write", { file_path: "/etc/passwd" })).denied).toBe(true);
+    });
+
+    it("工具白名单仍然生效", async () => {
+      const o = buildSdkOptions(specOf({ tools: [{ name: "Read" }] }), unattendedCtx, deps());
+      expect((await gateOf(o)("Bash", { command: "ls" })).denied).toBe(true);
+    });
+
+    // 平台不按“有没有人”增删 agent 的工具面。调用 AskUserQuestion 本身包含一次
+    // 结构化推理(枚举候选方案并权衡),摘掉它是对输出质量的干预 ——
+    // 而要不要锁定工具面应该由 agent 的 tools 配置决定。
+    it("不擅自摘掉 AskUserQuestion —— 工具面由 agent 自己配", () => {
+      const o = buildSdkOptions(specOf(), unattendedCtx, deps());
+      expect((o.disallowedTools as string[] | undefined) ?? []).not.toContain("AskUserQuestion");
+    });
+  });
+
+  it("有人值守(web 对话)仍然走审批", async () => {
+    const spy = vi.fn(async () => ({ approved: true }));
+    const o = buildSdkOptions(specOf({ approvalRules: { all: true } }), ctx, {
+      ...deps(),
+      requestApproval: spy,
+    });
+    await gateOf(o)("Bash", { command: "ls" });
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 });

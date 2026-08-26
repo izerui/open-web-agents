@@ -72,6 +72,14 @@ export const sessions = mysqlTable(
     /** 上一轮 SDK session id,多轮 resume 用 */
     sdkSessionId: varchar("sdk_session_id", { length: 128 }),
     title: varchar("title", { length: 255 }),
+    /**
+     * 无人值守会话(接口 invoke)。
+     *
+     * 【为什么不能用 callerApiKeyId 代替】embed 会话也是 API Key 建的,
+     * 但浏览器前坐着真人 —— 拿它当判据会把嵌入式对话误判成无人值守。
+     * 这个字段只表达一件事:出事时有没有人能回答。
+     */
+    unattended: int("unattended").notNull().default(0),
     status: varchar("status", { length: 16 }).notNull().default("active"),
     /** 会话级凭证覆盖(三级链中间层) */
     baseUrl: varchar("base_url", { length: 512 }),
@@ -131,20 +139,6 @@ export const runs = mysqlTable(
     bySession: index("idx_runs_session").on(t.sessionId),
     byParent: index("idx_runs_parent").on(t.parentRunId),
   }),
-);
-
-export const artifacts = mysqlTable(
-  "artifacts",
-  {
-    id: varchar("id", { length: 36 }).primaryKey(),
-    sessionId: varchar("session_id", { length: 36 }).notNull(),
-    path: varchar("path", { length: 1024 }).notNull(),
-    mime: varchar("mime", { length: 128 }),
-    size: bigint("size", { mode: "number" }),
-    storageUrl: varchar("storage_url", { length: 1024 }),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-  },
-  (t) => ({ bySession: index("idx_artifacts_session").on(t.sessionId) }),
 );
 
 export const apiKeys = mysqlTable(

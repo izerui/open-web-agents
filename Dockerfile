@@ -25,9 +25,21 @@ FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
 
-# claude-agent-sdk 会 spawn Bash 子进程执行工具,基础镜像需要这些命令
+# claude-agent-sdk 会 spawn Bash 子进程执行工具,基础镜像需要这些命令。
+#
+# bubblewrap + socat:OS 内核沙箱(OWA_SANDBOX,默认开)在 Linux 下靠 bubblewrap
+# 建命名空间隔离、socat 转发网络。它是 Bash 的【唯一】围栏 —— 路径守卫只能管
+# Write/Edit/Read 这类参数里有结构化路径的工具;命令文本里的路径它管不了
+# (引号/变量/拼接都能绕)。接口调用又是无人值守、不走审批的 ——
+# 少了沙箱就等于给 agent 一个无限制的 shell。
+#
+# ⚠ bubblewrap 需要 user namespaces。若运行环境(k8s / 受限 seccomp / 无特权 userns)
+#   禁用了它,沙箱起不来 → 所有 agent 运行硬失败(failIfUnavailable: true,
+#   刻意没有“降级裸跑”这一档)。只有两条路:① 放开 userns 让沙箱能起(推荐);
+#   ② 显式 OWA_SANDBOX=0 彻底不用沙箱。部署后先跑一条任务确认沙箱真的生效。
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl git python3 \
+      bubblewrap socat \
     && rm -rf /var/lib/apt/lists/*
 
 # 非 root 运行。agent 在容器里跑任意命令,给它 root 等于放弃容器这层隔离

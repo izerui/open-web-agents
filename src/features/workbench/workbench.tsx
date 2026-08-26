@@ -104,6 +104,88 @@ function AttachmentsDisplay() {
 }
 
 /* ================================================================== */
+/*  运行事件流                                                       */
+/* ================================================================== */
+
+/** 断线重连上限。超过就如实报「结局未知」—— 无限重试只会把已经出问题的服务端捶得更惨。 */
+const MAX_RECONNECT = 5;
+
+/**
+ * 跟随一次运行的事件流,断线后按 Redis 游标续读。
+ *
+ * 【为什么要自己重连】fetch 不是 EventSource:它既不会自动重连,也不会自动带
+ * Last-Event-ID。网络抖一下 readEventStream 就返回了,而运行还在 worker 里继续跑 ——
+ * 界面却永远定格在断点,用户以为卡死,实际上后台早就跑完了。
+ *
+ * 【为什么不会重复渲染】服务端把 Redis Stream ID 写在 SSE 的 `id:` 字段里,
+ * 续读时带上它,只会拿到这条之后的事件。
+ *
+ * 【收不到终态时发 unknown 而不是 failed】连不上只说明看不到过程,
+ * 不代表运行失败 —— 运行不绑在这条 HTTP 上,它多半还在跑。
+ */
+async function followRun(args: {
+  sessionId: string;
+  runId: string;
+  push: (e: AgentEvent) => void;
+  signal: AbortSignal;
+  /** `/run` 返回的第一段流;重连场景不传。 */
+  initial?: ReadableStream<Uint8Array> | null;
+}): Promise<void> {
+  const { sessionId, runId, push, signal } = args;
+  let cursor = "0-0";
+  let done = false;
+
+  const onEvent = (e: AgentEvent) => {
+    if (e.kind === "result") done = true;
+    push(e);
+  };
+  const onCursor = (id: string) => {
+    cursor = id;
+  };
+
+  if (args.initial) {
+    try {
+      await readEventStream(args.initial, onEvent, onCursor);
+    } catch {
+      // 第一段断了不要紧,下面按游标续
+      if (signal.aborted) return;
+    }
+  }
+
+  let lastError: unknown;
+  for (let attempt = 0; !done && !signal.aborted && attempt <= MAX_RECONNECT; attempt++) {
+    if (attempt > 0) {
+      await new Promise((r) => setTimeout(r, Math.min(500 * 2 ** (attempt - 1), 4000)));
+      if (signal.aborted) return;
+    }
+    try {
+      const res = await fetch(
+        `/api/sessions/${sessionId}/events?runId=${encodeURIComponent(runId)}&cursor=${encodeURIComponent(cursor)}`,
+        { signal, cache: "no-store" },
+      );
+      // 运行记录已不在(会话被清理等)—— 再重连也没有意义
+      if (res.status === 404) return;
+      if (!res.body) throw new Error("无响应流");
+      await readEventStream(res.body, onEvent, onCursor);
+      lastError = undefined;
+    } catch (err) {
+      if (signal.aborted) return;
+      lastError = err;
+    }
+  }
+
+  if (!done && !signal.aborted) {
+    const why = lastError instanceof Error ? lastError.message : lastError ? String(lastError) : "";
+    push({
+      kind: "result",
+      status: "unknown",
+      summary: `连接中断${why ? `(${why})` : ""} —— 运行可能仍在后台继续,刷新页面可查看结果`,
+      runId,
+    });
+  }
+}
+
+/* ================================================================== */
 /*  Workbench                                                         */
 /* ================================================================== */
 
@@ -233,11 +315,7 @@ export function Workbench() {
     const push = (e: AgentEvent) => patch((t) => ({ ...t, events: [...t.events, e] }));
 
     try {
-      const stream = await fetch(
-        `/api/sessions/${id}/events?runId=${encodeURIComponent(activeRunId)}`,
-        { signal: abort.signal },
-      );
-      if (stream.body) await readEventStream(stream.body, push);
+      await followRun({ sessionId: id, runId: activeRunId, push, signal: abort.signal });
     } catch (err) {
       if (!abort.signal.aborted) {
         push({ kind: "result", status: "failed", summary: String(err) });
@@ -310,11 +388,22 @@ export function Workbench() {
         body: JSON.stringify({ prompt }),
         signal: abort.signal,
       });
-      // 运行 id 从响应头带回,分支重跑要用它当分叉点
+      // 运行 id 从响应头带回,分支重跑要用它当分叉点;断线续读也靠它定位
       const rid = res.headers.get("X-Run-Id");
       if (rid) patch((t) => ({ ...t, runId: rid }));
       if (!res.body) throw new Error("无响应流");
-      await readEventStream(res.body, push);
+      // 拿不到 runId 就只能读这一段:没有 runId 无法定位 Stream,断了也接不回来
+      if (rid) {
+        await followRun({
+          sessionId: id,
+          runId: rid,
+          push,
+          signal: abort.signal,
+          initial: res.body,
+        });
+      } else {
+        await readEventStream(res.body, push);
+      }
     } catch (err) {
       if (!abort.signal.aborted) {
         push({ kind: "result", status: "failed", summary: String(err) });
@@ -355,12 +444,8 @@ export function Workbench() {
       if (!res.ok || !d.runId) throw new Error(d.error ?? `HTTP ${res.status}`);
       patch((t) => ({ ...t, runId: d.runId }));
 
-      // 分支已入队,挂上会话事件流观察 worker 执行
-      const stream = await fetch(
-        `/api/sessions/${sessionId}/events?runId=${encodeURIComponent(d.runId)}`,
-        { signal: abort.signal },
-      );
-      if (stream.body) await readEventStream(stream.body, push);
+      // 分支已入队,挂上该运行的事件流观察 worker 执行
+      await followRun({ sessionId, runId: d.runId, push, signal: abort.signal });
     } catch (err) {
       if (!abort.signal.aborted) {
         push({ kind: "result", status: "failed", summary: String(err) });

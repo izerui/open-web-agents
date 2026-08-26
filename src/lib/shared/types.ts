@@ -125,6 +125,14 @@ export interface RunContext {
   prompt: string;
   /** 上一轮的 SDK session id,用于多轮 resume。 */
   resumeSessionId?: string;
+  /**
+   * 无人值守。
+   *
+   * 接口 invoke 是一次调用拿结果,没有人能在中途确认任何东西 ——
+   * 此时“等人”只会挂到超时,把本可以成功的任务拖成失败。故需要人确认的
+   * 关口一律直接放行;路径围栏与工具白名单不受影响(那是安全边界,不是“要不要问人”)。
+   */
+  unattended?: boolean;
   credentials: ResolvedCredentials;
   env: Record<string, string>;
 }
@@ -148,10 +156,11 @@ export type AgentEvent =
    * 而这恰恰是"网页对话"这条入口最该做好的交互:agent 已经把选项都列好了,
    * 白白退化成让用户自己打字。
    *
-   * 【为什么不在同一轮里作答】SDK 的 canUseTool 与 PreToolUse hook 都只能
-   * 放行/拒绝/改入参,【给不了工具结果】—— 无法替用户把答案塞回去。
-   * 所以走多轮:这一轮 SDK 记「用户未作答」,界面把选项渲染成按钮,
-   * 用户点了就作为下一轮消息发出去。agent 侧看到的就是一次正常的多轮对话。
+   * 【为什么当前走多轮作答】SDK 本身支持同轮作答:它把 AskUserQuestion 送到 canUseTool,
+   * 宿主收集答案后经 `updatedInput: { questions, answers }` 回传即可(见 sdk-docs/user-input.md)。
+   * 但平台目前把 canUseTool 写成了无条件放行(围栏改挂在 PreToolUse hook 上,而 hook 只能
+   * allow/deny、给不了 updatedInput),于是提问被直接放过。界面把选项渲染成按钮,
+   * 用户点了就作为下一轮消息发出去 —— agent 侧看到的是一次正常的多轮对话。
    */
   | {
       kind: "question";
@@ -164,7 +173,6 @@ export type AgentEvent =
       }[];
     }
   | { kind: "status"; label: string; state?: string }
-  | { kind: "artifact"; path: string; mime: string; url?: string }
   | { kind: "usage"; messageId?: string; input: number; output: number }
   /**
    * 终态事件。
@@ -190,15 +198,6 @@ export type AgentEvent =
        */
       runId?: string;
     };
-
-/** state 类事件在断线重连时需重放;noise 类可滚动淘汰。 */
-// question 归入 state 类:它是【等用户操作】的事件,断线重连后必须还在,
-// 否则刷新一下那几个选项就没了,用户只能干等一个永远不会再出现的提问。
-export const STATE_EVENT_KINDS = ["status", "artifact", "usage", "result", "question"] as const;
-
-export function isStateEvent(e: AgentEvent): boolean {
-  return (STATE_EVENT_KINDS as readonly string[]).includes(e.kind);
-}
 
 // ─────────────────────────── Run 状态 ───────────────────────────
 

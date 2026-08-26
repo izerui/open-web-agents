@@ -12,6 +12,8 @@ export interface Session {
   /** 上一轮 SDK session id,多轮 resume 用。 */
   sdkSessionId?: string;
   title?: string;
+  /** 无人值守(接口 invoke)。决定碰到需要人确认的关口时是等人还是直接放行。 */
+  unattended?: boolean;
   /** 会话级凭证覆盖(三级链的中间层)。 */
   baseUrl?: string;
   key?: string;
@@ -26,6 +28,8 @@ export interface NewSession {
   title?: string;
   ownerId?: string;
   callerApiKeyId?: string;
+  /** 无人值守(接口 invoke)。不传则默认有人。 */
+  unattended?: boolean;
 }
 
 export interface SessionRepo {

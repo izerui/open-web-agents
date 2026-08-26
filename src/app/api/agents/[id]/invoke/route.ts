@@ -102,6 +102,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     agentId,
     workspaceDir,
     title: "invoke",
+    // 接口调用无人值守:需要人确认的关口直接放行,否则任务挂到超时拿不到结果
+    unattended: true,
     callerApiKeyId: principal.type === "apiKey" ? principal.keyId : undefined,
     ownerId: principal.type === "web" ? principal.userId : undefined,
   });

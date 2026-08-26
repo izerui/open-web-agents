@@ -166,9 +166,9 @@ type QuestionEvent = Extract<AgentEvent, { kind: "question" }>;
 /**
  * agent 的提问 —— 渲染成可点的选项,而不是一坨 JSON。
  *
- * 【为什么点了要作为下一轮发出去】SDK 的 canUseTool / PreToolUse 都只能放行或拒绝,
- * 给不了工具结果,没法在同一轮里把答案塞回去(见 shared/types.ts)。
- * 所以这里把选择拼成一句话作为新一轮的输入 —— agent 侧看到的是一次正常的多轮对话。
+ * 【为什么点了要作为下一轮发出去】平台把围栏挂在 PreToolUse hook 上,而 hook 只能 allow/deny,
+ * 给不了 updatedInput;canUseTool 又被写成无条件放行。于是答案只能拼成一句话作为新一轮输入。
+ * (SDK 其实支持同轮作答 —— 见 sdk-docs/user-input.md,待后续改造。)
  *
  * 【为什么只有最新一轮可点】历史轮次的提问早就被后续对话回答过了,
  * 再摆着可点的按钮会让人以为还能改,点下去却是凭空多发一轮。
@@ -416,13 +416,6 @@ function renderItem(item: Rendered, itemIndex: number): React.ReactNode {
       return (
         <p key={`e-${itemIndex}-status`} className="text-xs text-muted-foreground">
           ● {e.label}
-        </p>
-      );
-
-    case "artifact":
-      return (
-        <p key={`e-${itemIndex}-artifact`} className="font-mono text-xs">
-          📦 {e.path}
         </p>
       );
 

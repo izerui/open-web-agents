@@ -57,6 +57,20 @@
       "when": 1787125618012,
       "tag": "0007_perfect_hemingway",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1787288056032,
+      "tag": "0008_marvelous_vargas",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1787290697652,
+      "tag": "0009_mean_cloak",
+      "breakpoints": true
     }
   ]
 }

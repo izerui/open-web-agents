@@ -119,6 +119,7 @@ export class RunOrchestrator {
       workspaceDir: session.workspaceDir,
       prompt: cmd.prompt,
       resumeSessionId,
+      unattended: session.unattended === true,
       credentials,
       env: this.deps.baseEnv ?? {},
     };
