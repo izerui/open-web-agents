@@ -1,0 +1,192 @@
+# 导航改造：把「我的智能体」从平级导航项改成独立子空间
+
+## 问题
+
+工作台侧栏的「导航」分组里并排着两项：`工作台` 和 `我的智能体`。点任意一项，侧栏下半部分整个被换掉 —— 工作台显示会话列表，我的智能体显示智能体列表。
+
+用户反馈这个切换容易弄混。拆开看有三个原因：
+
+1. **导航项和列表项长得一模一样**。`app-sidebar.tsx` 的 `NAV_ITEMS` 和下面的会话条目共用 `SidebarMenuButton`、同一根 brand 指示条、同一套图标配色。视觉上它们是同级兄弟，行为上一个是"换模式"、一个是"选内容"。
+
+2. **切换后顶部不变，加剧混淆**。切到「我的智能体」时，工作台专属的智能体选择器和「新会话」按钮仍留在侧栏顶部 —— 界面同时呈现着两个空间的控件，人分不清刚才是换了页面还是换了智能体。
+
+3. **智能体有两个入口，交互还不一样**。工作台顶部是下拉选择器（选一个来用），构建器里是左侧列表（选一个来改）。同一批对象、两种选法，语义没有分层。
+
+## 定性
+
+与用户确认的两条事实，它们决定了方案方向：
+
+- **「我的智能体」是资产维护**，不是"挑一个来用"。用户进去是为了改提示词、配工具、调 schema。
+- **工作台的会话才是真正干活的地方**。它是主场，日常几乎所有时间都在这里。
+- **在「我的智能体」页面不需要看到会话列表**。
+
+结论：这是一个主场 + 一个偶尔进去办事的房间，不是两个等重的并列区。当前设计把它们做成了导航里两个平级项，这是别扭的根源。
+
+## 关键发现：这个模式代码库里已经有了
+
+`settings-shell.tsx` 的注释记录着设置区的设计意图：
+
+> 进了设置区，侧栏整个换成设置导航，顶部给一条明确的回程 —— 这是 GitHub / Vercel / Linear 都在用的模式：设置是一个独立的地方，有去有回。
+
+**设置区早就是「下钻 + 显式返回」了，唯独「我的智能体」被留在平级导航上。** 这就是为什么只有它切起来别扭。
+
+同一个文件里也记录了当时排除它的理由：
+
+> 【为什么不含智能体】它是核心创作功能，已提到主导航
+
+那个判断没错 —— 智能体是企业的创作物，不该被埋进"设置"这种只在出问题时才点开的地方。但当时只看到两条路：塞进设置当一项，或放上主导航当平级项。第三条路没被考虑：
+
+> **智能体维护是一个和「账号设置」「平台管理」并列的独立子空间，而不是设置的子项。**
+
+这条路同时满足两边：它有自己的空间（不在设置里面，保留了"智能体不是配置"的判断），又复用了已验证的空间模式（不再是"点一下换半屏"）。
+
+## 目标架构
+
+```
+主场 ──  工作台 /                     侧栏：选择器 · 新会话 · 会话列表
+          │
+          ├─[⚙ 齿轮 / 下拉底部]──▸ 我的智能体   /agents        ← 返回工作台
+          │
+          └─[头像菜单]───────────▸ 账号设置     /settings/*    ← 返回工作台
+                                 平台管理     /admin/*       ← 返回工作台
+                                             （现状，不动）
+```
+
+三个子空间**外观与行为完全一致**：侧栏顶部是「← 返回工作台」+ 空间标识（图标 + 名称 + 一句话说明），下面是该空间自己的内容。用户学一次，三个地方都会用。
+
+工作台侧栏从此只剩会话 —— 主场不再被平级导航项抢走空间。
+
+### 入口设计
+
+「去维护智能体」有两个入口，都在工作台侧栏顶部、紧挨着智能体选择器：
+
+1. **选择器右侧的齿轮按钮** —— 一眼可见，一次点击到位
+2. **选择器下拉列表底部的「⚙ 管理智能体…」** —— 用户正在看智能体列表、想到要改它的那一刻，手就在这个下拉上
+
+两个入口指向同一个地方、物理上相邻，不构成"同一动作散落在两处"的问题。
+
+**头像菜单不加智能体入口。** 头像菜单承载的是"关于这个账号的配置"（账号设置、平台管理），智能体是创作物，不属于那儿。从设置区去智能体维护走「← 返回工作台」→ 齿轮，两步，路径直观。
+
+### 空间标识配色
+
+沿用设置区已有规则：`账号设置` 用 `User` + brand 色，`平台管理` 用 `ShieldCheck` + warning 色（改的是全平台的东西，警示色是唯一一眼可辨的差别）。`我的智能体` 用 `Bot` + brand 色 —— 它和账号设置一样只影响本账号。
+
+## 改动清单
+
+### 1. `src/components/settings-shell.tsx` → `src/components/space-shell.tsx`
+
+组件要承载「我的智能体」，`SettingsShell` 这个名字就不准了。
+
+- `SettingsShell` → `SpaceShell`，`SettingsArea` → `SpaceArea`
+- `AREAS` 增加 `agents` 项：
+
+```ts
+agents: {
+  label: "我的智能体",
+  hint: "企业自己的员工",
+  icon: Bot,
+  items: [],        // 没有子导航,列表通过 sidebarExtra 传入
+}
+```
+
+- `items` 为空时**不渲染**那个 `SidebarGroup`。现在的写法是 `<SidebarGroup>{renderItems(current.items)}</SidebarGroup>`，空数组会渲染出一个空 group，在返回按钮和智能体列表之间留下一段没有内容的间距。
+- **`Bot` 的 import 要从 `type Bot` 改成 `Bot`。** 现在它只被 `renderItems` 当类型用（`icon: typeof Bot`），加了 `agents` 区之后它要作为真正的图标值渲染。漏掉这一步的报错信息（"Bot 只指代类型"）不太容易一眼看懂。
+- `PERSONAL_NAV` / `ADMIN_NAV` 导出保持不变。
+- 更新文件顶部注释：说明这里现在是三个区，以及为什么智能体是独立区而不是设置的子项。
+
+### 2. `src/components/app-sidebar.tsx` → `src/components/workbench-sidebar.tsx`
+
+- 删除 `NAV_ITEMS` 常量和整个「导航」`SidebarGroup`
+- 随之删除不再使用的 import：`usePathname`、`Bot`、`LayoutDashboard`、`SidebarGroup`、`SidebarGroupLabel`、`SidebarMenu`、`SidebarMenuButton`、`SidebarMenuItem`、`cn`
+- **`Link` 要保留** —— 品牌行的 `<Link href="/">` 还在用它。
+- 组件改名 `AppSidebar` → `WorkbenchSidebar`。去掉导航后它只剩工作台一个使用者，`App-` 前缀会让人以为它还是全站共用的。
+- `headerExtra` / `children` 两个口子保留，但注释要改：它们不再是"给工作台留的口子"，而是这个组件的全部内容。
+- 重写顶部注释。现有注释论证的是"主区导航 = 企业日常要干的两件事"，这个前提已经不成立。
+
+### 3. `src/components/app-shell.tsx`
+
+**删除。** 唯一使用者是构建器，迁到 `SpaceShell` 后无人引用。
+
+`AppShell` 与 `SpaceShell` 的签名差别只有一个 `className`，构建器没有使用它，迁移无损。
+
+### 4. `src/features/builder/builder.tsx`
+
+- `AppShell` → `SpaceShell`，增加 `area="agents"`
+- `agentList` 里的 `<SidebarGroupLabel>智能体</SidebarGroupLabel>` 改为显示数量（如「共 3 个」）或直接去掉 —— 空间标识已经写着"我的智能体"，紧跟一个同名分组标签是重复。
+- `title` / `subtitle` / `actions` 保持不变，页头仍然显示「我的智能体」和那句说明。
+
+### 5. `src/features/workbench/workbench.tsx`
+
+选择器行改为两列布局：
+
+```tsx
+<div className="flex gap-1.5">
+  <ModelSelectorTrigger asChild>
+    <Button variant="outline" size="sm" className="min-w-0 flex-1 justify-between font-normal"
+            disabled={running} title={running ? "运行中不能切换智能体" : "切换智能体"}>
+      <span className="truncate">{triggerLabel}</span>
+      <ChevronsUpDown className="size-3.5 shrink-0 opacity-50" />
+    </Button>
+  </ModelSelectorTrigger>
+  {/* 【为什么不跟着 running 禁用】切换智能体会中断当前运行,所以选择器要禁;
+      但"去看一眼这个智能体怎么配的"不影响正在跑的会话,没有理由拦。 */}
+  <Button asChild variant="outline" size="sm" className="size-8 shrink-0 p-0" title="管理智能体">
+    <Link href="/agents"><Settings className="size-3.5" /></Link>
+  </Button>
+</div>
+```
+
+下拉列表底部追加分隔线和管理入口：
+
+```tsx
+<ModelSelectorSeparator />
+<ModelSelectorItem value="__manage__" onSelect={() => router.push("/agents")}>
+  <Settings className="size-3.5" />
+  <span>管理智能体…</span>
+</ModelSelectorItem>
+```
+
+若 `ModelSelector` 系列没有导出 `Separator`，用一个 `<div className="my-1 h-px bg-border" />` 代替。管理项必须排除在搜索过滤之外或给一个不会误命中的 `value`，避免用户搜索智能体名字时它跟着被筛掉又出现。
+
+### 6. 空账号兜底（顺带修的洞）
+
+现状：`agents` 为空时选择器显示 `current?.name ?? agentId`，落到字符串 `"default"` —— 看起来像存在一个叫 default 的智能体，实际上一个都没有。
+
+改为：
+
+- `agents.length === 0` 时，trigger 显示「还没有智能体」（`muted-foreground` 色）
+- 下拉列表在这种情况下只显示一条「+ 新建智能体」，指向 `/agents`
+- 不改变 `agentId` 的默认值和请求行为 —— 这只是显示层的修正
+
+## 边界情况
+
+| 情况 | 行为 |
+|---|---|
+| 侧栏折叠成图标条 | 工作台的 `headerExtra` 本来就带 `group-data-[collapsible=icon]:hidden`，齿轮随之隐藏；子空间的返回按钮沿用 `SpaceShell` 已有写法（`ArrowLeft` 常驻，文字隐藏） |
+| 会话运行中（`running`） | 选择器禁用，齿轮**不禁用** |
+| 直接访问 `/agents` | 侧栏直接呈现维护态，「← 返回工作台」可用。天然成立，无需特殊处理 |
+| 一个智能体都没有 | 见上节兜底 |
+| 从设置区去智能体维护 | 「← 返回工作台」→ 齿轮，两步。不提供直达 |
+
+## 测试策略
+
+这是纯前端布局重构：不新增/修改 API、不改路由语义、不动数据流。
+
+- 现有 e2e（`e2e/*.e2e.ts`，vitest + fetch 的服务端级测试）不受影响，改动后应全绿。`admin-area.e2e.ts` 覆盖的 `/admin/*` 守卫行为完全不变。
+- `pnpm build` 与 biome 检查保证重命名没有留下悬空引用。
+- 人工走查清单：
+  1. 工作台侧栏只剩「选择器 + 齿轮」「新会话」「会话列表」，没有「导航」分组
+  2. 齿轮进入 `/agents`，侧栏变为维护态，顶部是「← 返回工作台」
+  3. 下拉底部的「管理智能体…」进入同一个地方
+  4. 从 `/agents` 点返回回到工作台，会话列表恢复
+  5. `/settings/keys` 与 `/admin/accounts` 的侧栏外观与「我的智能体」一致
+  6. 侧栏折叠成图标条，三个空间的返回入口都还在
+  7. 运行中：选择器禁用、齿轮可点
+  8. 清空智能体：trigger 显示「还没有智能体」，下拉给「+ 新建智能体」
+
+## 不做的事
+
+- **不给头像菜单加智能体入口**。理由见「入口设计」。
+- **不改 `/agents` 这个 URL**。它已经是对的，改了只会破坏已有书签。
+- **不重构构建器的表单部分**。这次只动外壳和导航，表单内部与本次目标无关。
+- **不动设置区和管理区的导航项**。它们的模式是对的，只是被重命名。
