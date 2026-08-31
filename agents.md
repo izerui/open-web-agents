@@ -497,13 +497,62 @@ agent 实际使用的凭证解析顺序为:
 5. 授权显式校验
    - 路由层不信任前端传参
 
-### 13.2 当前边界
+### 13.2 共享 HOME 与隔离粒度
 
-1. `OWA_SANDBOX=0` 时不具备 OS 沙箱
+`dataDir/.agent-home` 是平台专门给 Claude Agent SDK / CLI 设的【共享 HOME】——
+CLI 原本要写用户 HOME 的内容全部落在这里。
+
+```text
+dataDir/
+├── .agent-home/              所有任务共用,不属于任何单个会话
+│   ├── .claude/              SDK 自己的运行时状态
+│   │   ├── projects/         各工作区的会话 JSONL
+│   │   ├── sessions/         会话状态 —— 续跑靠它
+│   │   └── shell-snapshots/  Shell 快照 —— Bash 靠它
+│   ├── .npm/  .cache/        工具缓存,跨任务复用
+│   └── ...
+└── workspaces/<sessionId>/   单会话工作区,GC 只清这里
+```
+
+【`.agent-home/.claude` 必须对 agent 可写】它不只是日志:sessions、shell-snapshots
+都在这棵树下。把它禁掉或拆出去,会连带弄坏续跑、子代理与 Bash ——
+曾经考虑过“把 transcript 移出共享区”,正是因为这个原因放弃。
+
+【会话隔离靠 SDK 自己的机制】共享 HOME 不会把会话串起来 —— Claude CLI 本来就是
+共用一个 `~/.claude`。每个任务的 cwd 不同(`workspaces/<sessionId>`),SDK 把 cwd 编码成
+不同的 projectKey,再用唯一 sessionId 区分会话:
+
+```text
+projects/<cwd-A 编码>/session-A.jsonl
+                     /session-A/subagents/*.jsonl
+projects/<cwd-B 编码>/session-B.jsonl
+```
+
+并发任务不会互相追写 JSONL,resume 按 sessionId 精确恢复,UI 回放先算 projectKey
+再找该目录下的 JSONL —— `transcriptPathFor()` 就是这套推导的镜像。
+
+【真正要分清的两件事】
+
+| 关注点 | 是什么 | 状态 |
+| --- | --- | --- |
+| 会话路由隔离 | A 的对话会不会串进 B | SDK 机制保证,没问题 |
+| 文件读取边界 | agent 能不能读到别的目录 | 共享 HOME 的固有属性 |
+
+后者是用缓存复用换来的代价:同一容器内,A 任务的 Bash 能读到 `projects/` 下
+其它任务的 JSONL(SDK 写的未脱敏原文)。单租户 / 内部使用可接受;
+对外多租户时官方给的路子是【按租户拆 `CLAUDE_CONFIG_DIR`】(见 sdk-docs/hosting.md 多租户一节),
+而不是拆 HOME —— 那样每个租户有自己完整的 `.claude/`,SDK 该有的状态不缺。
+
+### 13.3 当前边界
+
+1. `OWA_SANDBOX=0` 时不具备 OS 沙箱;macOS 本地必须关(SDK 在 26.3.1 上会让 Bash 静默失效)
 2. 开启 `OWA_ALLOW_STDIO_MCP=1` 后,智能体可在宿主机启动进程
-3. 共享 `.agent-home` 带来缓存复用,也提高宿主级污染风险
+3. 共享 `.agent-home` 带来缓存复用;会话路由由 SDK 的 projectKey/sessionId 机制隔离,
+   代价是同容器内文件读取不隔离(见 13.2)
 4. Redis Streams 只保留近期运行事件,永久历史依赖共享磁盘上的 SDK JSONL transcript
 5. 多 Worker 部署要求所有实例看到一致的 `workspaceDir` 与 `.agent-home` 绝对路径
+6. 容器里跑沙箱需 worker 放开 seccomp(bubblewrap 要 user namespaces),
+   否则所有任务硬失败 —— 部署后看 `/api/health` 的 `checks.sandbox` 确认
 
 ---
 

@@ -19,6 +19,7 @@ const SLOTS = { fable: "m-fable", opus: "m-opus", sonnet: "m-sonnet", haiku: "m-
 
 const deps = () => ({
   sharedHome: "/data/.agent-home",
+  hostHome: "/Users/operator",
   abort: new AbortController(),
   slots: SLOTS,
   sandboxEnabled: false,
@@ -187,6 +188,7 @@ describe("buildSdkOptions", () => {
 describe("执行隔离进入 SDK options", () => {
   const withSandbox = () => ({
     sharedHome: "/data/.agent-home",
+    hostHome: "/Users/operator",
     abort: new AbortController(),
     slots: SLOTS,
     sandboxEnabled: true,

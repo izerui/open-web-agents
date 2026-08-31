@@ -12,7 +12,13 @@ services:
     ports: ["3306:3306"]
     volumes: ["owa_mysql:/var/lib/mysql"]
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:-owa}"]
+      test:
+        - CMD
+        - mysqladmin
+        - ping
+        - -h
+        - localhost
+        - -p${MYSQL_ROOT_PASSWORD:-owa}
       interval: 5s
       retries: 10
 
@@ -27,25 +33,30 @@ services:
   # 迁移单独跑一次:让 web/worker 启动时数据库结构一定是就绪的,
   # 而不是每个实例各自尝试迁移(多实例并发迁移会打架)
   migrate:
-    build: { context: ., dockerfile: Dockerfile }
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: open-web-agents:latest
     command: ["pnpm", "db:migrate"]
     environment: &owa_env
       OWA_DATABASE_URL: mysql://root:${MYSQL_ROOT_PASSWORD:-owa}@mysql:3306/owa
       OWA_REDIS_URL: redis://redis:6379
       OWA_DATA_DIR: /app/data
-      OWA_ANTHROPIC_BASE_URL: ${OWA_ANTHROPIC_BASE_URL:-https://api.anthropic.com}
+      OWA_ANTHROPIC_BASE_URL: >-
+        ${OWA_ANTHROPIC_BASE_URL:-https://api.anthropic.com}
       OWA_ANTHROPIC_API_KEY: ${OWA_ANTHROPIC_API_KEY:-}
       OWA_MODEL: ${OWA_MODEL:-sonnet}
       # 生产必须显式设置,否则会话可被伪造、用户密钥可被解密
       OWA_SESSION_SECRET: ${OWA_SESSION_SECRET:?必须设置}
       OWA_SECRET_KEY: ${OWA_SECRET_KEY:?必须设置}
       OWA_AUTH_REQUIRED: "1"
-      # Linux 上用 bubblewrap,沙箱正常工作(macOS 的 seatbelt 会吞 stdout)
+      # Linux 下 SDK 内核沙箱走 bubblewrap,工作正常(macOS 的 seatbelt 有缺陷,本地需关)
+      # 注:worker 容器还需 security_opt 放开 seccomp,否则 bubblewrap 起不来(见下方)
       OWA_SANDBOX: "1"
       OWA_ALLOW_STDIO_MCP: ${OWA_ALLOW_STDIO_MCP:-0}
     depends_on:
-      mysql: { condition: service_healthy }
+      mysql:
+        condition: service_healthy
 
   web:
     image: open-web-agents:latest
@@ -56,8 +67,10 @@ services:
     ports: ["5678:5678"]
     volumes: ["owa_data:/app/data"]
     depends_on:
-      migrate: { condition: service_completed_successfully }
-      redis: { condition: service_healthy }
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
 
   worker:
     image: open-web-agents:latest
@@ -65,9 +78,29 @@ services:
     environment: *owa_env
     # 与 web 共享同一份工作空间 —— agent 写产物、web 读文件树
     volumes: ["owa_data:/app/data"]
+    #
+    # 【为什么 worker 需要这条,web 不需要】agent 只在 worker 里跑。
+    # SDK 的内核沙箱在 Linux 上靠 bubblewrap 建 user namespace 做隔离,
+    # 而 Docker 默认的 seccomp profile 会拦掉 unshare(CLONE_NEWUSER) ——
+    # bubblewrap 起不来,配合 failIfUnavailable: true 的结果是
+    # 【所有 agent 任务硬失败】,而不是静默降级裸跑。
+    #
+    # 这里放开 seccomp 是为了让【容器内再建一层沙箱】。净效果仍是收紧的:
+    # 没有它,agent 的 Bash 在容器内毫无隔离(能读写整个容器文件系统);
+    # 有了它,Bash 被 jail 在会话工作目录里。
+    #
+    # 【部署后必须验证】起来后先看 /api/health 的 checks.sandbox:
+    #   ok: true               → bubblewrap 正常,隔离生效
+    #   ok: false + hint       → 沙箱起不来,任务会失败,按 hint 处置
+    # 某些受限环境(部分 k8s、无特权 userns 的宿主)仍可能不行 ——
+    # 那时只有两条路:放开 userns,或显式 OWA_SANDBOX=0 并接受无 Bash 隔离。
+    security_opt:
+      - seccomp:unconfined
     depends_on:
-      migrate: { condition: service_completed_successfully }
-      redis: { condition: service_healthy }
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
 
 volumes:
   owa_mysql:

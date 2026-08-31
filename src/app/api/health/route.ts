@@ -1,5 +1,9 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { getContainer } from "@/lib/container";
 import { sql } from "drizzle-orm";
+
+const execFileAsync = promisify(execFile);
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,6 +42,36 @@ async function probe(fn: () => Promise<unknown>, timeoutMs = 2000): Promise<Prob
  *
  * `?probe=live` 只看进程;默认做完整就绪检查。
  */
+/**
+ * 沙箱开着时,确认内核隔离真的能起来。
+ *
+ * Linux 走 bubblewrap:直接跑一次最小隔离命令 —— 能起就是能起,不靠猜。
+ * 其他平台不在生产范围,只如实标注不可验证。
+ */
+async function probeSandbox(): Promise<Record<string, unknown>> {
+  if (process.platform !== "linux") {
+    return { ok: true, note: `非 Linux(${process.platform}),生产以容器为准,此处不验证` };
+  }
+  const start = Date.now();
+  try {
+    await execFileAsync(
+      "bwrap",
+      ["--unshare-user", "--unshare-pid", "--dev", "/dev", "--ro-bind", "/", "/", "true"],
+      { timeout: 3000 },
+    );
+    return { ok: true, ms: Date.now() - start, backend: "bubblewrap" };
+  } catch (err) {
+    return {
+      ok: false,
+      ms: Date.now() - start,
+      backend: "bubblewrap",
+      // 这条信息直接决定运维该怎么做,不能只说"失败"
+      hint: "bubblewrap 起不来→所有 agent 任务会硬失败。要么放开 user namespaces(推荐),要么显式设 OWA_SANDBOX=0",
+      error: err instanceof Error ? err.message.slice(0, 200) : String(err),
+    };
+  }
+}
+
 export async function GET(req: Request) {
   let mode: string | null;
   try {
@@ -70,6 +104,19 @@ export async function GET(req: Request) {
   const w = worker.health();
   const workerOk = !w.running || w.consecutiveFailures < 5;
 
+  /**
+   * 沙箱可用性。
+   *
+   * 【为什么要单独抢】沙箱配了 failIfUnavailable: true —— bubblewrap 起不来就
+   * 硬失败,没有“降级裸跑”这一档。而 bubblewrap 需要 user namespaces:
+   * k8s / 受限 seccomp / 无特权 userns 的环境会禁用它。不在这里抢,
+   * 就要等第一条真任务跑起来才发现 —— 而那时候已经在对外服务了。
+   *
+   * 【不计入 ready】沙箱不可用不影响接收流量(任务会失败但服务本身是活的),
+   * 但必须在响应里如实暴露,让部署后一眼就能看到。
+   */
+  const sandbox = env.sandbox ? await probeSandbox() : { ok: true, skipped: "已显式关闭" };
+
   const ready = database.ok && redis.ok && workerOk;
 
   return Response.json(
@@ -81,6 +128,7 @@ export async function GET(req: Request) {
         redis,
         // running=false 表示本进程没内嵌 worker(拆进程部署),不是故障
         worker: { ok: workerOk, ...w },
+        sandbox,
       },
       // 运维排查时最想先确认的几项配置(不含任何密钥)
       config: {

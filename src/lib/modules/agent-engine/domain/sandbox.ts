@@ -19,8 +19,18 @@ export interface SandboxPolicy {
   workspaceDir: string;
   /** agent 共享 HOME:工具缓存要可写,否则 matplotlib/pip 之类直接 EACCES。 */
   sharedHome: string;
-  /** 系统临时目录,latex/ffmpeg 等大量工具依赖。 */
+  /**
+   * 宿主真实 HOME —— denyReadDirs 里的 `~` 按它展开。
+   *
+   * 【必须与 sharedHome 分开】要护的是平台运维自己的 ~/.ssh、~/.claude 等;
+   * 而 agent 的 HOME 已被重定向,拿它展开会把 SDK 自己的 session 目录误伤。
+   * 纯逻辑不碰 IO,故由调用方传入而不是内部读 os.homedir()。
+   */
+  hostHome: string;
+  /** 系统临时目录,latex/ffmpeg 等大量工具依赖。不传则按平台取默认。 */
   tmpDirs?: string[];
+  /** 取默认临时目录时的平台;不传则用当前进程的。显式传入便于穷举单测。 */
+  platform?: NodeJS.Platform;
   /** 额外可写目录(业务按需放开)。 */
   extraWriteDirs?: string[];
   /** 内核级禁读目录(密钥所在)。 */
@@ -35,11 +45,41 @@ export interface MaterializedSandbox {
 }
 
 const DEFAULT_DENY_READ = ["~/.ssh", "~/.aws", "~/.gnupg", "~/.claude", "~/.config/gcloud"];
-const DEFAULT_TMP = ["/tmp", "/private/tmp", "/private/var/folders", "/var/tmp"];
 
-/** `~` 按 agent 实际 HOME(sharedHome)展开,与注入的 HOME 自洽。 */
-function expandHome(p: string, home: string): string {
-  return p.startsWith("~") ? path.join(home, p.slice(1)) : p;
+/**
+ * `~` 【按宿主真实 HOME 展开】,不是 agent 的 sharedHome。
+ *
+ * 【曾经按 sharedHome 展开,两头都错】agent 的 HOME 已重定向到 dataDir/.agent-home,
+ * 于是 `~/.claude` 展成了 .agent-home/.claude —— 而那正是 SDK 自己存 session 与
+ * shell snapshot 的地方,Bash wrapper 必须能读;同时宿主真实的 ~/.claude
+ * (里面是平台运维自己的凭证)反而没被拦。保护错了对象,还顺手弄坏了 SDK。
+ */
+function expandHome(p: string, hostHome: string): string {
+  return p.startsWith("~") ? path.join(hostHome, p.slice(1)) : p;
+}
+
+/**
+ * 系统临时目录【按平台取】—— /private/* 是 macOS 特有的,无差别放给 Linux
+ * 等于白白多几条可写路径。
+ *
+ * 【macOS 必须两种写法都给】/var 是 /private/var 的符号链接。os.tmpdir() 返回的是
+ * /var/folders/... 这一支,而沙箱按【字面路径】匹配 —— 只列 /private/var/folders
+ * 的话,SDK 写 shell snapshot 到 /var/folders/... 会被拦,表现是 Bash 工具整个起不来:
+ * 命令不执行、文件不生成,但 SDK 仍报 success —— agent 以为做完了,实际什么都没发生。
+ */
+function defaultTmpDirs(platform: NodeJS.Platform): string[] {
+  if (platform === "darwin") {
+    return [
+      "/tmp",
+      "/private/tmp",
+      // 同一个地方的两种写法,缺一不可(见上方说明)
+      "/var/folders",
+      "/private/var/folders",
+      "/var/tmp",
+      "/private/var/tmp",
+    ];
+  }
+  return ["/tmp", "/var/tmp"];
 }
 
 /**
@@ -51,7 +91,7 @@ function expandHome(p: string, home: string): string {
  */
 export function materializeSandbox(policy: SandboxPolicy): MaterializedSandbox {
   const denyRead = (policy.denyReadDirs ?? DEFAULT_DENY_READ).map((p) =>
-    expandHome(p, policy.sharedHome),
+    expandHome(p, policy.hostHome),
   );
 
   // 宿主进程侧的 Read/Edit/Write 不受内核沙箱管,按同一策略生成 deny 规则
@@ -78,7 +118,7 @@ export function materializeSandbox(policy: SandboxPolicy): MaterializedSandbox {
         allowWrite: [
           policy.workspaceDir,
           policy.sharedHome,
-          ...(policy.tmpDirs ?? DEFAULT_TMP),
+          ...(policy.tmpDirs ?? defaultTmpDirs(policy.platform ?? process.platform)),
           // 不少工具要写 /dev/null
           "/dev",
           ...(policy.extraWriteDirs ?? []),

@@ -165,10 +165,26 @@ function toMcpServers(
 export interface SdkOptionsDeps {
   /** agent 子进程的 HOME:固定共享目录,让工具缓存跨会话复用,且避开容器内不可写的 HOME。 */
   sharedHome: string;
+  /**
+   * 宿主真实 HOME。只用于把 denyReadDirs 里的 `~` 展开到【该护的那个家】——
+   * 平台运维的 ~/.ssh、~/.claude 在这里,而不是在 agent 的 sharedHome 下。
+   */
+  hostHome: string;
+  /**
+   * 当前平台。不传则用进程的。显式传入便于穷举单测。
+   */
+  platform?: NodeJS.Platform;
   abort: AbortController;
   /** 别名槽 → 真实 modelId。 */
   slots: ModelSlots;
-  /** 是否启用 OS 内核沙箱。 */
+  /**
+   * 是否启用 OS 内核沙箱。
+   *
+   * 【macOS 本地必须关】实测:seatbelt 沙箱下 Bash 工具【命令根本不执行】——
+   * 不只是吞 stdout:文件没写成、重定向也产不出日志,但 SDK 报告成功,
+   * 于是模型以为已经做完。这比没输出严重得多。
+   * 生产 Linux 走 bubblewrap,不受该缺陷影响 —— 默认开依然正确。
+   */
   sandboxEnabled: boolean;
   /** 是否允许在宿主机启动 stdio MCP 进程。 */
   allowStdioMcp: boolean;
@@ -268,6 +284,16 @@ export function buildSdkOptions(
       CLAUDE_CONFIG_DIR: claudeConfigDir(deps.sharedHome),
 
       /**
+       * PWD / INIT_CWD 必须跟着 cwd 走。
+       *
+       * 【不盖的后果】ctx.env 继承自平台进程,里面的 PWD 是服务进程的工作目录 ——
+       * 本地开发时那就是仓库根。模型会把它当成「当前工程」,于是主动把任务产物
+       * 写进源码目录 —— cwd 已经指对了也拦不住,因为它看的是环境变量。
+       */
+      PWD: ctx.workspaceDir,
+      INIT_CWD: ctx.workspaceDir,
+
+      /**
        * 关掉自动记忆。
        *
        * 文档明说它"在 ~/.claude/projects/<project>/memory/ 加载到系统提示中,
@@ -311,6 +337,7 @@ export function buildSdkOptions(
     enabled: deps.sandboxEnabled,
     workspaceDir: ctx.workspaceDir,
     sharedHome: deps.sharedHome,
+    hostHome: deps.hostHome,
   });
   if (sandbox) options.sandbox = sandbox;
 

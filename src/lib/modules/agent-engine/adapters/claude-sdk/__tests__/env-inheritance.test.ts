@@ -29,6 +29,7 @@ function ctxWith(env: Record<string, string>): RunContext {
 describe("agent 子进程环境", () => {
   const deps = () => ({
     sharedHome: "/data/.agent-home",
+    hostHome: "/Users/operator",
     abort: new AbortController(),
     slots: SLOTS,
     sandboxEnabled: false,

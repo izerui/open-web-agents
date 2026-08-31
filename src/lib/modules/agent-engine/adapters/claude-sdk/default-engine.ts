@@ -3,6 +3,7 @@
 // 换掉 SDK 只需重写本文件 + options/normalize 的翻译规则,域层与应用层零改动 —— 这是 ACL 的回报。
 // 注意:不要在测试里 import 本文件(会拉起真 SDK);测试用 ClaudeSdkEngine + 注入的 queryFn。
 
+import os from "node:os";
 import path from "node:path";
 import type { ModelGatewayPort } from "@/lib/modules/model-gateway/ports";
 import { query } from "@anthropic-ai/claude-agent-sdk";
@@ -27,6 +28,10 @@ export function createClaudeSdkEngine(
 ): ClaudeSdkEngine {
   return new ClaudeSdkEngine(sdkQuery, {
     sharedHome: path.join(dataDir, ".agent-home"),
+    // 宿主真实 HOME —— 禁读规则的 `~` 按它展开。不能用上面的 sharedHome:
+    // 那是 agent 自己的家,拿它展开会把 SDK 的 session 目录误伤,而真正该护的
+    // 平台运维凭证(~/.ssh、~/.claude)反而没拦。
+    hostHome: process.env.HOME ?? os.homedir(),
     gateway,
     sandboxEnabled,
     allowStdioMcp,

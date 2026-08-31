@@ -37,6 +37,7 @@ const gateway = {
 const engine = (q: QueryFn) =>
   new ClaudeSdkEngine(q, {
     sharedHome: "/data/.agent-home",
+    hostHome: "/Users/operator",
     gateway,
     sandboxEnabled: false,
     allowStdioMcp: false,

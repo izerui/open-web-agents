@@ -22,6 +22,8 @@ export type QueryFn = (args: {
 export interface EngineDeps {
   /** agent 子进程共享 HOME(工具缓存跨会话复用)。 */
   sharedHome: string;
+  /** 宿主真实 HOME。只用于把禁读目录里的 `~` 展开到平台运维自己的家。 */
+  hostHome: string;
   /** 别名 → 真实 modelId 的映射来源。 */
   gateway: ModelGatewayPort;
   /** 是否启用 OS 内核沙箱(macOS 本地开发常关:seatbelt 会吞 stdout)。 */
@@ -74,6 +76,7 @@ export class ClaudeSdkEngine implements EnginePort {
         prompt: ctx.prompt,
         options: buildSdkOptions(spec, ctx, {
           sharedHome: this.deps.sharedHome,
+          hostHome: this.deps.hostHome,
           abort,
           slots: this.deps.gateway.slots(),
           sandboxEnabled: this.deps.sandboxEnabled,
@@ -101,7 +104,8 @@ export class ClaudeSdkEngine implements EnginePort {
         } else {
           // 完整消息(assistant / user)。
           // 流式模式下:text / thinking 已经增量推过,只提取 tool_use / question / usage。
-          for (const e of normalizeSdkMessage(msg, { skipStreamed: hasStreamed })) onEvent(label(e));
+          for (const e of normalizeSdkMessage(msg, { skipStreamed: hasStreamed }))
+            onEvent(label(e));
           // assistant 消息处理完毕,重置标记 —— 下一条 assistant 消息重新计数
           if (m?.type === "assistant") hasStreamed = false;
         }
