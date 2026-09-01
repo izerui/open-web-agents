@@ -1,6 +1,6 @@
 "use client";
 
-import { AppShell } from "@/components/app-shell";
+import { SpaceShell } from "@/components/space-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -392,10 +392,15 @@ export function Builder() {
       .catch((e: unknown) => toast.error(`打开智能体失败:${errorText(e)}`));
   }
 
-  /** 智能体列表挂进全站侧栏 —— 再开一条自己的侧栏就成了两级导航,看着像两个产品 */
+  /** 智能体列表挂进子空间侧栏 —— 再开一条自己的侧栏就成了两级导航,看着像两个产品 */
   const agentList = (
     <SidebarGroup>
-      <SidebarGroupLabel>智能体</SidebarGroupLabel>
+      {/*
+        标签写数量而不是"智能体"。
+        【为什么】侧栏顶部的空间标识已经写着「我的智能体」,紧跟一个同名标签
+        等于把同一句话说两遍;数量是这个位置唯一还能提供新信息的东西。
+      */}
+      <SidebarGroupLabel>共 {list.length} 个</SidebarGroupLabel>
       <SidebarMenu>
         <SidebarMenuItem>
           <SidebarMenuButton onClick={() => setDraft(EMPTY)} tooltip="新建智能体">
@@ -441,7 +446,8 @@ export function Builder() {
   );
 
   return (
-    <AppShell
+    <SpaceShell
+      area="agents"
       title="我的智能体"
       subtitle={'定义一个只干特定某件事的"员工"。填了 outputSchema,它就能被企业系统当接口调用。'}
       sidebarExtra={agentList}
@@ -845,6 +851,6 @@ curl /api/agents/{taskId}/result
           </CardContent>
         </Card>
       )}
-    </AppShell>
+    </SpaceShell>
   );
 }

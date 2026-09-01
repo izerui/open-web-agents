@@ -1,6 +1,6 @@
 "use client";
 
-import { SettingsShell } from "@/components/settings-shell";
+import { SpaceShell } from "@/components/space-shell";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -79,7 +79,7 @@ export function UsageView({ scope = "self" }: { scope?: "self" | "all" }) {
   const successRate = t && t.runs > 0 ? Math.round((t.succeeded / t.runs) * 100) : null;
 
   return (
-    <SettingsShell
+    <SpaceShell
       area={scope === "all" ? "admin" : "personal"}
       title={scope === "all" ? "全平台用量" : "我的用量"}
       subtitle={`${scope === "all" ? "所有用户的会话" : "仅我的会话"} · 最近 ${data?.days ?? days} 天`}
@@ -170,6 +170,6 @@ export function UsageView({ scope = "self" }: { scope?: "self" | "all" }) {
           </Card>
         </>
       )}
-    </SettingsShell>
+    </SpaceShell>
   );
 }

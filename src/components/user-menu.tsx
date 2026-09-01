@@ -14,7 +14,7 @@ import {
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { clearMe, initialsOf, isAdminView, useMe } from "@/lib/use-me";
-import { ChevronsUpDown, LogIn, LogOut, Settings, ShieldCheck } from "lucide-react";
+import { Bot, ChevronsUpDown, LogIn, LogOut, Settings, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -141,12 +141,31 @@ export function UserMenu() {
 
             <DropdownMenuSeparator />
 
-            <DropdownMenuGroup>
-              {/*
-                这里只给一个入口,不把设置区的三项摊开。
-                摊开试过 —— 一个本来两三行的菜单被撑成两屏似的清单,
-                反而要在里面找;进设置区后侧栏本来就把它们列着。
+            {/*
+              这一组是【离开工作台能去的所有地方】,三个子空间一个不落。
 
+              【为什么智能体也在这儿】它有工作台选择器旁边的齿轮做就近入口,
+              但那个入口只在工作台上有 —— 人在设置区想去改智能体,得先返回
+              工作台再找齿轮。子空间之间没有互通的路,就只能靠记"哪个从哪进"。
+              头像菜单在三个空间的侧栏底部都在,把它当成统一的换区入口,
+              记一个地方就够了。
+
+              【那"智能体不是配置"还成立吗】成立 —— 这一组的语义是"去哪儿",
+              不是"配置项"。所以智能体排在最前:它是这里唯一一个日常会去的地方,
+              账号设置和平台管理都是出事才点开的。
+
+              每项只给一个入口,不把设置区的三项摊开。摊开试过 —— 一个本来
+              两三行的菜单被撑成两屏似的清单,反而要在里面找;进了设置区
+              侧栏本来就把它们列着。
+            */}
+            <DropdownMenuGroup>
+              <DropdownMenuItem asChild>
+                <Link href="/agents">
+                  <Bot />
+                  我的智能体
+                </Link>
+              </DropdownMenuItem>
+              {/*
                 落点必须和设置区侧栏的第一项一致,否则进去会看到一个
                 和高亮项对不上的页面。
               */}

@@ -1,6 +1,6 @@
 "use client";
 
-import { SettingsShell } from "@/components/settings-shell";
+import { SpaceShell } from "@/components/space-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -106,7 +106,7 @@ export function AccountsView() {
   const activeCount = accounts.filter((a) => !a.disabled).length;
 
   return (
-    <SettingsShell
+    <SpaceShell
       area="admin"
       title="账号管理"
       subtitle={`${accounts.length} 个账号 · ${activeCount} 个启用中 · 本月合计 ${formatUsd(totalCost)}`}
@@ -256,6 +256,6 @@ export function AccountsView() {
           );
         })}
       </div>
-    </SettingsShell>
+    </SpaceShell>
   );
 }

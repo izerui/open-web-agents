@@ -4,7 +4,7 @@ import type { AgentSummary } from "@/features/workbench/types";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
-import { SettingsShell } from "@/components/settings-shell";
+import { SpaceShell } from "@/components/space-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -80,7 +80,7 @@ export function ApiKeysView() {
   }
 
   return (
-    <SettingsShell title="对外 API Key" width="narrow">
+    <SpaceShell title="对外 API Key" width="narrow">
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">对外 API Key</CardTitle>
@@ -160,6 +160,6 @@ export function ApiKeysView() {
           </div>
         </CardContent>
       </Card>
-    </SettingsShell>
+    </SpaceShell>
   );
 }

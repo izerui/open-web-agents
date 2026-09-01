@@ -1,6 +1,6 @@
 "use client";
 
-import { AppSidebar } from "@/components/app-sidebar";
+import { WorkbenchSidebar } from "@/components/workbench-sidebar";
 import { readEventStream } from "@/features/chat/event-stream";
 import type { AgentEvent } from "@/lib/shared";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Search,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ApprovalBar } from "./approval-bar";
@@ -190,6 +191,7 @@ async function followRun(args: {
 /* ================================================================== */
 
 export function Workbench() {
+  const router = useRouter();
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [agentId, setAgentId] = useState("default");
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -459,6 +461,8 @@ export function Workbench() {
   }
 
   const current = agents.find((a) => a.id === agentId);
+  // 一个智能体都没有时,agentId 还是兜底的 "default",不能拿它当名字显示
+  const hasAgents = agents.length > 0;
   const sessionGroups = useMemo(() => groupSessions(sessions), [sessions]);
   const contextUsed = useMemo(() => contextTokens(turns), [turns]);
 
@@ -508,20 +512,32 @@ export function Workbench() {
         }}
       />
 
-      {/* 侧边栏与其余页面共用 AppSidebar,只把智能体选择器和会话列表插进去 */}
-      <AppSidebar
+      {/* 侧栏只装工作台自己的东西:选哪个智能体、开新会话、我干过的活 */}
+      <WorkbenchSidebar
         headerExtra={
           <div className="space-y-2 group-data-[collapsible=icon]:hidden">
+            {/*
+              这里只有"选哪个智能体",没有"去改智能体" —— 维护入口统一在
+              侧栏底部的头像菜单里。曾经在选择器旁边挂过一个齿轮,
+              头像菜单补上智能体入口后它就成了同一根侧栏里的第二个同去处。
+            */}
             <ModelSelector open={pickerOpen} onOpenChange={setPickerOpen}>
               <ModelSelectorTrigger asChild>
                 <Button
                   variant="outline"
                   size="sm"
-                  className="w-full justify-between font-normal"
+                  className="w-full min-w-0 justify-between font-normal"
                   disabled={running}
                   title={running ? "运行中不能切换智能体" : "切换智能体"}
                 >
-                  <span className="truncate">{current?.name ?? agentId}</span>
+                  {/*
+                    【为什么空了要单独说】agentId 的兜底值是 "default",一个智能体都
+                    没有时这里会原样显示 "default" —— 看着像真有一个叫 default 的
+                    智能体,而实际上一个都没建。
+                  */}
+                  <span className={cn("truncate", !hasAgents && "text-muted-foreground")}>
+                    {hasAgents ? (current?.name ?? agentId) : "还没有智能体"}
+                  </span>
                   <ChevronsUpDown className="size-3.5 shrink-0 opacity-50" />
                 </Button>
               </ModelSelectorTrigger>
@@ -553,6 +569,29 @@ export function Workbench() {
                       </ModelSelectorItem>
                     ))}
                   </ModelSelectorGroup>
+
+                  {/*
+                    【为什么一个都没有时要单独给条出路】新账号打开工作台,
+                    trigger 写着"还没有智能体",点开却是一份空列表 —— 去哪建
+                    全靠自己猜。有智能体之后这条就撤了:那时它只是头像菜单里
+                    「我的智能体」的重复。
+
+                    【为什么值里不含"智能体"三个字】搜索是按 value 过滤的 ——
+                    value 里带上常见词,用户搜某个智能体名字时这条会跟着被筛掉又出现,
+                    位置飘忽。给一个不会被正常输入命中的哨兵值。
+                  */}
+                  {!hasAgents && (
+                    <ModelSelectorItem
+                      value="__create__"
+                      onSelect={() => {
+                        setPickerOpen(false);
+                        router.push("/agents");
+                      }}
+                    >
+                      <Plus className="size-3.5 text-muted-foreground" />
+                      <span className="flex-1">新建第一个智能体…</span>
+                    </ModelSelectorItem>
+                  )}
                 </ModelSelectorList>
               </ModelSelectorContent>
             </ModelSelector>
@@ -564,7 +603,7 @@ export function Workbench() {
           </div>
         }
       >
-        {/* 以下作为 AppSidebar 的 children,挂在统一导航下面 */}
+        {/* 以下作为 WorkbenchSidebar 的 children —— 侧栏下半部分就是会话列表 */}
         <>
           {/* 【加载失败】与【一条都没有】必须分开:界面长得一样,含义完全相反 */}
           {sessionsError !== null && (
@@ -644,7 +683,7 @@ export function Workbench() {
             </SidebarGroup>
           ))}
         </>
-      </AppSidebar>
+      </WorkbenchSidebar>
 
       {/* 主区:对话 + 工作空间,可拖拽调宽并记忆 */}
       <SidebarInset className="min-w-0 overflow-hidden">

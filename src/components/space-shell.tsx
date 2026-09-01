@@ -20,7 +20,7 @@ import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
   BarChart3,
-  type Bot,
+  Bot,
   KeyRound,
   ShieldCheck,
   Terminal,
@@ -33,7 +33,8 @@ import { usePathname } from "next/navigation";
 /**
  * 企业账号自己的配置项 —— 都是低频动作。
  *
- * 【为什么不含智能体】它是核心创作功能,已提到主导航(app-sidebar.tsx)。
+ * 【为什么不含智能体】它是核心创作物,不是一项配置。它有自己的子空间
+ * (下面的 agents 区),和账号设置平级,而不是账号设置底下的一项。
  * 【为什么不含用户组】一个账号就是一家企业,内部不分人,组没有存在意义。
  */
 export const PERSONAL_NAV = [
@@ -53,17 +54,34 @@ export const ADMIN_NAV = [
   { href: "/admin/usage", label: "全平台用量", icon: BarChart3 },
 ] as const;
 
-export type SettingsArea = "personal" | "admin";
+export type SpaceArea = "agents" | "personal" | "admin";
 
 /**
- * 两个【互不重叠】的区域。
+ * 三个【互不重叠】的子空间。
  *
- * 【为什么不是一个侧栏里的两个分组】那样管理员无论从哪个入口进来,
+ * 【为什么不是一个侧栏里的三个分组】那样管理员无论从哪个入口进来,
  * 看到的都是同一份并排的清单 —— 分组标签只是给列表加了小标题,
  * "我现在在个人设置里"还是"在管理后台里"依旧无从判断。
- * 改成一次只显示一个区,顶部写清是哪个区;换区走头像菜单。
+ * 改成一次只显示一个区,顶部写清是哪个区。
+ *
+ * 【为什么智能体也在这里】它曾经是工作台侧栏里和"工作台"并排的一个导航项 ——
+ * 点一下,侧栏下半屏整个换掉,但顶部的智能体选择器还留在原地,人分不清
+ * 刚才是换了页面还是换了智能体。它和设置区其实是同一类东西:进得去、
+ * 出得来的独立房间。
+ *
+ * 【三个区怎么进】统一走头像菜单(三个空间的侧栏底部都有它),智能体额外
+ * 在工作台选择器旁边有个齿轮做就近入口。曾经只留齿轮 —— 理由是"智能体是
+ * 创作物,不该跟退出登录排在一起" —— 但那样人在设置区想改智能体,只能
+ * 先返回工作台再找齿轮,子空间之间没有互通的路。
  */
 const AREAS = {
+  agents: {
+    label: "我的智能体",
+    hint: "企业自己的员工",
+    icon: Bot,
+    // 没有子导航 —— 智能体列表由构建器通过 sidebarExtra 传进来
+    items: [],
+  },
   personal: {
     label: "账号设置",
     hint: "只影响本企业账号",
@@ -79,16 +97,18 @@ const AREAS = {
 } as const;
 
 /**
- * 设置区外壳。
+ * 子空间外壳 —— 离开工作台之后的所有地方都长这样。
  *
- * 【为什么不复用 AppShell】两者的侧栏内容是对立的:主区的侧栏是"去哪儿办事"
- * (工作台、会话),设置区的侧栏是"改哪项配置"。塞进同一个侧栏会让
- * 一条导航同时承担两种含义,项一多就谁也找不着。
+ * 【为什么工作台不用它】工作台的侧栏是"我干过的活"(会话),子空间的侧栏是
+ * "我在这个房间里能碰的东西"。塞进同一个侧栏会让一条导航同时承担两种含义,
+ * 项一多就谁也找不着 —— 这正是改造前"工作台/我的智能体"两个平级导航项
+ * 让人弄混的原因。
  *
- * 进了设置区,侧栏整个换成设置导航,顶部给一条明确的回程 —— 这是
- * GitHub / Vercel / Linear 都在用的模式:设置是一个独立的地方,有去有回。
+ * 进了子空间,侧栏整个换掉,顶部给一条明确的回程 —— 这是 GitHub / Vercel /
+ * Linear 都在用的模式:那是一个独立的地方,有去有回。三个子空间外观一致,
+ * 用户学一次,三个地方都会用。
  */
-export function SettingsShell({
+export function SpaceShell({
   title,
   subtitle,
   actions,
@@ -102,10 +122,10 @@ export function SettingsShell({
   actions?: React.ReactNode;
   children: React.ReactNode;
   width?: "narrow" | "wide";
-  /** 页面级条目挂在设置导航下方(如构建器的智能体列表),避免再开第二条侧栏。 */
+  /** 页面级条目挂在本区导航下方(如构建器的智能体列表),避免再开第二条侧栏。 */
   sidebarExtra?: React.ReactNode;
-  /** 当前页属于哪个区。一次只显示一个区的导航。 */
-  area?: SettingsArea;
+  /** 当前页属于哪个子空间。一次只显示一个区。 */
+  area?: SpaceArea;
 }) {
   const pathname = usePathname();
   const current = AREAS[area];
@@ -145,7 +165,7 @@ export function SettingsShell({
         <SidebarHeader className="gap-2 border-b border-sidebar-border">
           {/*
             回程入口放在侧栏最上方、品牌的位置上。
-            【为什么不是页头里的一个小箭头】设置区是个"进去就出不来"的地方 ——
+            【为什么不是页头里的一个小箭头】子空间是"进去就出不来"的地方 ——
             改造前从设置回工作台只能靠侧栏那条被淹没的导航项。回程要和
             "我在哪儿"处在同一个位置上,一眼能看到。
           */}
@@ -188,8 +208,12 @@ export function SettingsShell({
         </SidebarHeader>
 
         <SidebarContent>
-          {/* 只显示当前区的导航 —— 分组标签没了,因为整个侧栏就是这一个区 */}
-          <SidebarGroup>{renderItems(current.items)}</SidebarGroup>
+          {/*
+            只显示当前区的导航 —— 分组标签没了,因为整个侧栏就是这一个区。
+            【为什么要判空】智能体区没有子导航(它的内容全在 sidebarExtra 里),
+            照渲染会在回程按钮和智能体列表之间留一段空白的分组。
+          */}
+          {current.items.length > 0 && <SidebarGroup>{renderItems(current.items)}</SidebarGroup>}
 
           {/* 页面自己的条目(如构建器的智能体列表)紧跟其后 */}
           {sidebarExtra}
@@ -198,8 +222,8 @@ export function SettingsShell({
         <SidebarFooter className="border-t border-sidebar-border">
           {/*
             这里曾经有一条"前往另一个区"的按钮。去掉了 —— 头像菜单里
-            「账号设置」和「平台管理」两个入口本来就都在,再放一条只是
-            让同一个去处在一屏里出现两次。要换区从头像菜单走。
+            三个区的入口本来就都在,再放一条只是让同一个去处在一屏里
+            出现两次。要换区从头像菜单走。
           */}
           <UserMenu />
         </SidebarFooter>

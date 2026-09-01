@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
-import { SettingsShell } from "@/components/settings-shell";
+import { SpaceShell } from "@/components/space-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -60,7 +60,7 @@ export function CredentialsView() {
   }
 
   return (
-    <SettingsShell
+    <SpaceShell
       title="模型凭证"
       subtitle={me?.user ? `${me.user.email} · ${me.user.role}` : undefined}
       width="narrow"
@@ -113,6 +113,6 @@ export function CredentialsView() {
           </div>
         </CardContent>
       </Card>
-    </SettingsShell>
+    </SpaceShell>
   );
 }
