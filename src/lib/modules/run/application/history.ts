@@ -17,6 +17,8 @@ export interface HistoryTurn {
   events: AgentEvent[];
   running: boolean;
   runId: string;
+  /** 运行开始时间,用于刷新/重连后的运行计时。 */
+  startedAt?: string;
   /** 从哪一轮分叉而来,界面显示分支标记。 */
   branchedFrom?: string;
 }
@@ -97,6 +99,7 @@ export async function loadSessionHistory(
       events,
       running: active,
       runId: row.id,
+      startedAt: active ? new Date(row.createdAt).toISOString() : undefined,
       branchedFrom: row.parentRunId,
     });
   }

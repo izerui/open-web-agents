@@ -51,4 +51,6 @@ export interface Turn {
   runId?: string;
   /** 从哪一轮分叉而来,界面显示分支标记。 */
   branchedFrom?: string;
+  /** 该轮开始运行的时间(ISO 时间戳),用于计时标签。 */
+  startedAt?: string;
 }

@@ -4,24 +4,31 @@ import { WorkbenchSidebar } from "@/components/workbench-sidebar";
 import { readEventStream } from "@/features/chat/event-stream";
 import type { AgentEvent } from "@/lib/shared";
 import { cn } from "@/lib/utils";
+import type { FileUIPart } from "ai";
 import {
   AlertTriangle,
+  Bot,
   Check,
   ChevronsUpDown,
+  Command,
   MessageSquare,
   Plus,
   RefreshCw,
   Search,
+  X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ApprovalBar } from "./approval-bar";
 import { CommandPalette } from "./command-palette";
-import { ChatThread, contextTokens, formatTokens } from "./conversation";
+import { ContextWindowMeter } from "./context-window-meter";
+import { ChatThread, contextTokens, sumUsage } from "./conversation";
+import { createEventBatcher } from "./event-batcher";
 import { FilePanel } from "./file-panel";
 import { activityOf, groupSessions, relativeTime } from "./session-groups";
 import type { AgentSummary, SessionSummary, Turn } from "./types";
+import { makeWorkspaceFileDropHandlers } from "./workspace-file-drop";
 
 import {
   ModelSelector,
@@ -35,6 +42,7 @@ import {
 } from "@/components/ai-elements/model-selector";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
 import {
   ResizableHandle,
@@ -62,12 +70,6 @@ import {
   Attachments,
 } from "@/components/ai-elements/attachments";
 import {
-  Conversation,
-  ConversationContent,
-  ConversationEmptyState,
-  ConversationScrollButton,
-} from "@/components/ai-elements/conversation";
-import {
   PromptInput,
   PromptInputActionAddAttachments,
   PromptInputActionMenu,
@@ -84,9 +86,47 @@ import {
 } from "@/components/ai-elements/prompt-input";
 import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion";
 
-/* ------------------------------------------------------------------ */
-/*  附件展示子组件 — 在 PromptInput 内部使用 usePromptInputAttachments   */
-/* ------------------------------------------------------------------ */
+interface SlashCommand {
+  name: string;
+  label: string;
+  icon: React.ElementType;
+  disabled?: boolean;
+  run(): void;
+}
+
+function SlashCommandMenu({
+  commands,
+  activeIndex,
+  onSelect,
+}: {
+  commands: SlashCommand[];
+  activeIndex: number;
+  onSelect(command: SlashCommand): void;
+}) {
+  if (commands.length === 0) return null;
+  return (
+    <div className="mb-2 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg">
+      {commands.map((command, index) => (
+        <button
+          key={command.name}
+          type="button"
+          disabled={command.disabled}
+          className={cn(
+            "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm disabled:opacity-40",
+            index === activeIndex ? "bg-accent text-accent-foreground" : "hover:bg-accent/60",
+          )}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => onSelect(command)}
+        >
+          <command.icon className="size-4 text-muted-foreground" />
+          <span className="font-mono text-xs">/{command.name}</span>
+          <span className="text-xs text-muted-foreground">{command.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function AttachmentsDisplay() {
   const { files, remove } = usePromptInputAttachments();
 
@@ -186,9 +226,34 @@ async function followRun(args: {
   }
 }
 
-/* ================================================================== */
-/*  Workbench                                                         */
-/* ================================================================== */
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+function dataUrlToBlob(url: string): Blob {
+  const match = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(url);
+  if (!match) throw new Error("附件格式不受支持");
+  const mediaType = match[1] ?? "application/octet-stream";
+  const payload = match[3] ?? "";
+  if (!match[2]) return new Blob([decodeURIComponent(payload)], { type: mediaType });
+  const binary = atob(payload);
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  return new Blob([bytes], { type: mediaType });
+}
+
+async function uploadPromptFiles(sessionId: string, files: FileUIPart[]): Promise<string[]> {
+  if (files.length === 0) return [];
+  const form = new FormData();
+  for (const file of files) {
+    if (!file.url.startsWith("data:")) throw new Error("附件必须先转换为本地数据");
+    const blob = dataUrlToBlob(file.url);
+    const filename = file.filename ?? "attachment";
+    if (blob.size > MAX_UPLOAD_BYTES) throw new Error(`文件过大: ${filename}`);
+    form.append("files", blob, filename);
+  }
+  const res = await fetch(`/api/sessions/${sessionId}/files`, { method: "POST", body: form });
+  const body = (await res.json().catch(() => null)) as { files?: string[]; error?: string } | null;
+  if (!res.ok || !body?.files) throw new Error(body?.error ?? `上传文件失败(HTTP ${res.status})`);
+  return body.files;
+}
 
 export function Workbench() {
   const router = useRouter();
@@ -210,9 +275,15 @@ export function Workbench() {
    */
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [sessionQuery, setSessionQuery] = useState("");
+  const [slashIndex, setSlashIndex] = useState(0);
+  const [dragActive, setDragActive] = useState(false);
+  const [layoutReady, setLayoutReady] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   /** 打开会话的序号:用来丢弃"切走之后才回来"的过期响应。 */
   const openSeqRef = useRef(0);
+
+  useEffect(() => setLayoutReady(true), []);
 
   /**
    * 拉智能体与会话列表。
@@ -314,7 +385,10 @@ export function Workbench() {
     // 【按 runId 定位而不是下标】下标会在并发/快速切换时错位,把事件灌进别的轮次。
     const patch = (fn: (t: Turn) => Turn) =>
       setTurns((all) => all.map((t) => (t.runId === activeRunId ? fn(t) : t)));
-    const push = (e: AgentEvent) => patch((t) => ({ ...t, events: [...t.events, e] }));
+    const batcher = createEventBatcher((events) =>
+      patch((turn) => ({ ...turn, events: [...turn.events, ...events] })),
+    );
+    const push = batcher.push;
 
     try {
       await followRun({ sessionId: id, runId: activeRunId, push, signal: abort.signal });
@@ -323,6 +397,7 @@ export function Workbench() {
         push({ kind: "result", status: "failed", summary: String(err) });
       }
     } finally {
+      batcher.flush();
       // 已经切到别的会话了就别再动状态 —— 那些 setState 针对的是已经不在屏幕上的数据
       if (seq === openSeqRef.current) {
         patch((t) => ({ ...t, running: false }));
@@ -367,27 +442,37 @@ export function Workbench() {
    * 不走输入框是有意的:那些选项是 agent 给的,不该先塞进输入框再让用户按回车,
    * 也不该把用户正在打的字冲掉。
    */
-  async function send(text?: string) {
+  async function send(text?: string, files: FileUIPart[] = []) {
     const prompt = (text ?? input).trim();
     if (!prompt || running) return;
     if (text === undefined) setInput("");
     setRunning(true);
 
     const idx = turns.length;
-    setTurns((t) => [...t, { prompt, events: [], running: true }]);
+    setTurns((t) => [
+      ...t,
+      { prompt, events: [], running: true, startedAt: new Date().toISOString() },
+    ]);
     const patch = (fn: (t: Turn) => Turn) =>
       setTurns((all) => all.map((t, i) => (i === idx ? fn(t) : t)));
-    const push = (e: AgentEvent) => patch((t) => ({ ...t, events: [...t.events, e] }));
+    const batcher = createEventBatcher((events) =>
+      patch((turn) => ({ ...turn, events: [...turn.events, ...events] })),
+    );
+    const push = batcher.push;
 
     const abort = new AbortController();
     abortRef.current = abort;
 
     try {
       const id = await ensureSession();
+      const uploadedFiles = await uploadPromptFiles(id, files);
+      const runPrompt = uploadedFiles.length
+        ? `${prompt}\n\n已上传到当前工作区的附件:\n${uploadedFiles.map((name) => `- ${name}`).join("\n")}`
+        : prompt;
       const res = await fetch(`/api/sessions/${id}/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt: runPrompt }),
         signal: abort.signal,
       });
       // 运行 id 从响应头带回,分支重跑要用它当分叉点;断线续读也靠它定位
@@ -411,6 +496,7 @@ export function Workbench() {
         push({ kind: "result", status: "failed", summary: String(err) });
       }
     } finally {
+      batcher.flush();
       patch((t) => ({ ...t, running: false }));
       setRunning(false);
       abortRef.current = null;
@@ -428,10 +514,22 @@ export function Workbench() {
     setRunning(true);
 
     const idx = turns.length;
-    setTurns((t) => [...t, { prompt, events: [], running: true, branchedFrom: fromRunId }]);
+    setTurns((t) => [
+      ...t,
+      {
+        prompt,
+        events: [],
+        running: true,
+        branchedFrom: fromRunId,
+        startedAt: new Date().toISOString(),
+      },
+    ]);
     const patch = (fn: (t: Turn) => Turn) =>
       setTurns((all) => all.map((t, i) => (i === idx ? fn(t) : t)));
-    const push = (e: AgentEvent) => patch((t) => ({ ...t, events: [...t.events, e] }));
+    const batcher = createEventBatcher((events) =>
+      patch((turn) => ({ ...turn, events: [...turn.events, ...events] })),
+    );
+    const push = batcher.push;
 
     const abort = new AbortController();
     abortRef.current = abort;
@@ -453,6 +551,7 @@ export function Workbench() {
         push({ kind: "result", status: "failed", summary: String(err) });
       }
     } finally {
+      batcher.flush();
       patch((t) => ({ ...t, running: false }));
       setRunning(false);
       abortRef.current = null;
@@ -463,8 +562,31 @@ export function Workbench() {
   const current = agents.find((a) => a.id === agentId);
   // 一个智能体都没有时,agentId 还是兜底的 "default",不能拿它当名字显示
   const hasAgents = agents.length > 0;
-  const sessionGroups = useMemo(() => groupSessions(sessions), [sessions]);
+  const visibleSessions = useMemo(() => {
+    const query = sessionQuery.trim().toLocaleLowerCase();
+    if (!query) return sessions;
+    return sessions.filter((session) =>
+      `${session.title ?? ""} ${session.id}`.toLocaleLowerCase().includes(query),
+    );
+  }, [sessionQuery, sessions]);
+  const sessionGroups = useMemo(() => groupSessions(visibleSessions), [visibleSessions]);
   const contextUsed = useMemo(() => contextTokens(turns), [turns]);
+  const totalProcessed = useMemo(() => {
+    const all = turns.flatMap((t) => t.events);
+    const { input, output } = sumUsage(all);
+    return input + output > 0 ? input + output : null;
+  }, [turns]);
+
+  const dropHandlers = useMemo(
+    () =>
+      makeWorkspaceFileDropHandlers({
+        setDragActive,
+        addFiles() {
+          // PromptInput globalDrop owns attachment state and performs validation.
+        },
+      }),
+    [],
+  );
 
   // 记住用户拖出来的分栏宽度,下次进来还是这个宽度
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -478,9 +600,9 @@ export function Workbench() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally use the current send closure
   const handlePromptSubmit = useCallback(
     (message: PromptInputMessage) => {
-      const text = message.text.trim();
+      const text = message.text.trim() || (message.files.length > 0 ? "请查看附件。" : "");
       if (!text) return;
-      void send(text);
+      void send(text, message.files);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [running, cancelRun, input],
@@ -494,6 +616,42 @@ export function Workbench() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [running, input],
   );
+
+  const sendRef = useRef(send);
+  const rerunRef = useRef(rerun);
+  sendRef.current = send;
+  rerunRef.current = rerun;
+  const stableAnswerAction = useCallback((text: string) => void sendRef.current(text), []);
+  const stableRerunAction = useCallback(
+    (runId: string, prompt: string) => void rerunRef.current(runId, prompt),
+    [],
+  );
+  const slashCommands = useMemo<SlashCommand[]>(
+    () => [
+      { name: "new", label: "新建会话", icon: Plus, disabled: running, run: newSession },
+      { name: "search", label: "搜索会话和页面", icon: Command, run: () => setPaletteOpen(true) },
+      { name: "agents", label: "管理智能体", icon: Bot, run: () => router.push("/agents") },
+      {
+        name: "stop",
+        label: "停止当前运行",
+        icon: X,
+        disabled: !running,
+        run: () => void cancelRun(),
+      },
+    ],
+    [cancelRun, newSession, router, running],
+  );
+  const slashMenuOpen = /^\/[^\s]*$/.test(input);
+  const slashQuery = slashMenuOpen ? input.slice(1).toLocaleLowerCase() : "";
+  const matchingSlashCommands = slashMenuOpen
+    ? slashCommands.filter((command) => command.name.startsWith(slashQuery))
+    : [];
+  const selectSlashCommand = useCallback((command: SlashCommand) => {
+    if (command.disabled) return;
+    setInput("");
+    setSlashIndex(0);
+    command.run();
+  }, []);
 
   return (
     <SidebarProvider className="h-screen min-h-0">
@@ -605,6 +763,30 @@ export function Workbench() {
       >
         {/* 以下作为 WorkbenchSidebar 的 children —— 侧栏下半部分就是会话列表 */}
         <>
+          <SidebarGroup className="sticky top-0 z-10 bg-sidebar pb-1 group-data-[collapsible=icon]:hidden">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={sessionQuery}
+                onChange={(event) => setSessionQuery(event.target.value)}
+                placeholder="搜索会话"
+                aria-label="搜索会话"
+                className="h-8 bg-sidebar-accent/40 pl-8 pr-8 text-xs"
+              />
+              {sessionQuery && (
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="absolute right-0.5 top-0.5 size-7"
+                  aria-label="清除会话搜索"
+                  onClick={() => setSessionQuery("")}
+                >
+                  <X className="size-3.5" />
+                </Button>
+              )}
+            </div>
+          </SidebarGroup>
           {/* 【加载失败】与【一条都没有】必须分开:界面长得一样,含义完全相反 */}
           {sessionsError !== null && (
             <div className="flex flex-col items-center gap-2 px-3 py-8 text-center group-data-[collapsible=icon]:hidden">
@@ -625,6 +807,12 @@ export function Workbench() {
               <MessageSquare className="size-5 text-muted-foreground/30" />
               <p className="text-xs text-muted-foreground">还没有会话</p>
               <p className="text-[11px] text-muted-foreground/60">发一条消息就会创建一个</p>
+            </div>
+          )}
+
+          {sessionsError === null && sessions.length > 0 && visibleSessions.length === 0 && (
+            <div className="px-3 py-8 text-center text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
+              没有匹配的会话
             </div>
           )}
 
@@ -687,152 +875,230 @@ export function Workbench() {
 
       {/* 主区:对话 + 工作空间,可拖拽调宽并记忆 */}
       <SidebarInset className="min-w-0 overflow-hidden">
-        <ResizablePanelGroup defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
-          {/* 尺寸必须带单位:v4 把裸数字当像素 */}
-          <ResizablePanel
-            id="chat"
-            defaultSize="74%"
-            minSize="40%"
-            className="flex min-w-0 flex-col"
-          >
-            <div
-              className={cn(
-                "flex shrink-0 items-center gap-2.5 border-b border-border px-3 py-2.5 text-xs",
-                running && "run-line",
-              )}
+        {layoutReady ? (
+          <ResizablePanelGroup defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
+            {/* 尺寸必须带单位:v4 把裸数字当像素 */}
+            <ResizablePanel
+              id="chat"
+              defaultSize="74%"
+              minSize="40%"
+              className="flex min-w-0 flex-col"
             >
-              <SidebarTrigger className="-ml-1" />
-              <Separator orientation="vertical" className="h-4" />
-              <span className="font-medium text-foreground">{current?.name ?? agentId}</span>
-              {current?.config.outputSchema && (
-                <Badge variant="secondary" className="h-5 px-1.5 text-[10px] font-normal">
-                  结构化输出
-                </Badge>
-              )}
-              <Separator orientation="vertical" className="h-3" />
-              <span className="truncate font-mono text-muted-foreground">
-                {sessionId ? `${sessionId.slice(0, 8)}…` : "尚未创建会话"}
-              </span>
-              {/* 上下文占用 —— 长会话里最想知道的一个数,长到该开新会话时能提前察觉 */}
-              {contextUsed > 0 && (
-                <>
-                  <Separator orientation="vertical" className="h-3" />
-                  <span
-                    className="shrink-0 font-mono text-muted-foreground"
-                    title="最近一轮请求的输入 tokens ≈ 当前上下文装了多少内容"
-                  >
-                    上下文 {formatTokens(contextUsed)}
-                  </span>
-                </>
-              )}
-
-              {running && (
-                <span className="flex shrink-0 items-center gap-1.5 text-brand">
-                  <span className="size-1.5 animate-pulse rounded-full bg-brand" />
-                  运行中
-                </span>
-              )}
-
-              {/* 快捷键本身不可发现,得留一个看得见的入口 */}
-              <Button
-                variant="ghost"
-                size="sm"
-                className="ml-auto h-7 shrink-0 gap-2 text-muted-foreground"
-                onClick={() => setPaletteOpen(true)}
+              <div
+                className={cn(
+                  "flex shrink-0 items-center gap-2.5 border-b border-border px-3 py-2.5 text-xs",
+                  running && "run-line",
+                )}
               >
-                <Search className="size-3.5" />
-                <span className="hidden sm:inline">搜索</span>
-                <Kbd>⌘K</Kbd>
-              </Button>
-            </div>
-
-            <div
-              data-conversation-shell=""
-              className="relative flex min-h-0 flex-1 flex-col divide-y overflow-hidden"
-            >
-              <Conversation className="min-h-0 flex-1">
-                <ConversationContent className="px-4 py-4">
-                  {turns.length === 0 ? (
-                    <ConversationEmptyState
-                      title="开始对话"
-                      description="发一句话试试..."
-                      icon={<MessageSquare className="size-12" />}
+                <SidebarTrigger className="-ml-1" />
+                <Separator orientation="vertical" className="h-4" />
+                <span className="font-medium text-foreground">{current?.name ?? agentId}</span>
+                {current?.config.outputSchema && (
+                  <Badge variant="secondary" className="h-5 px-1.5 text-[10px] font-normal">
+                    结构化输出
+                  </Badge>
+                )}
+                <Separator orientation="vertical" className="h-3" />
+                <span className="truncate font-mono text-muted-foreground">
+                  {sessionId ? `${sessionId.slice(0, 8)}…` : "尚未创建会话"}
+                </span>
+                {contextUsed > 0 && (
+                  <>
+                    <Separator orientation="vertical" className="h-3" />
+                    <ContextWindowMeter
+                      usedTokens={contextUsed}
+                      maxTokens={null}
+                      totalProcessed={totalProcessed}
                     />
+                  </>
+                )}
+
+                {running && (
+                  <span className="flex shrink-0 items-center gap-1.5 text-brand">
+                    <span className="size-1.5 animate-pulse rounded-full bg-brand" />
+                    运行中
+                  </span>
+                )}
+
+                {/* 快捷键本身不可发现,得留一个看得见的入口 */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto h-7 shrink-0 gap-2 text-muted-foreground"
+                  onClick={() => setPaletteOpen(true)}
+                >
+                  <Search className="size-3.5" />
+                  <span className="hidden sm:inline">搜索</span>
+                  <Kbd>⌘K</Kbd>
+                </Button>
+              </div>
+
+              <div
+                data-conversation-shell=""
+                className="relative flex min-h-0 flex-1 flex-col overflow-x-hidden"
+                onDragEnter={dropHandlers.onDragEnter as React.DragEventHandler}
+                onDragOver={dropHandlers.onDragOver as React.DragEventHandler}
+                onDragLeave={dropHandlers.onDragLeave as React.DragEventHandler}
+                onDrop={dropHandlers.onDrop as React.DragEventHandler}
+              >
+                {/* 拖拽覆盖层 */}
+                {dragActive && (
+                  <div className="pointer-events-none absolute inset-2 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary/60 bg-primary/[0.035]">
+                    <div className="flex items-center gap-2 rounded-full border border-primary/25 bg-background/95 px-4 py-2.5 text-sm font-medium text-foreground shadow-lg">
+                      松手添加文件
+                    </div>
+                  </div>
+                )}
+
+                {/* 错误横幅 */}
+                {turns.length > 0 &&
+                  (() => {
+                    const last = turns[turns.length - 1];
+                    const resultEvt = last?.events.findLast((e) => e.kind === "result");
+                    if (!resultEvt || resultEvt.kind !== "result") return null;
+                    if (resultEvt.status === "success") return null;
+                    const isUnknown = resultEvt.status === "unknown";
+                    return (
+                      <div
+                        className={cn(
+                          "shrink-0 border-l-4 px-4 py-3 text-sm",
+                          isUnknown
+                            ? "border-warning bg-warning/10 text-warning"
+                            : "border-destructive bg-destructive/10 text-destructive",
+                        )}
+                      >
+                        {resultEvt.summary ?? (isUnknown ? "运行结局未知" : "运行失败")}
+                      </div>
+                    );
+                  })()}
+
+                {/* 对话区域 */}
+                <div className="relative flex min-h-0 flex-1 flex-col">
+                  {turns.length === 0 ? (
+                    <div className="flex min-h-0 flex-1 items-center justify-center">
+                      <div className="flex flex-col items-center gap-3 text-center">
+                        <MessageSquare className="size-12 text-muted-foreground/20" />
+                        <h2 className="text-xl font-medium text-foreground">开始对话</h2>
+                        <p className="text-sm text-muted-foreground">发一句话试试...</p>
+                      </div>
+                    </div>
                   ) : (
                     <ChatThread
                       turns={turns}
-                      onRerunAction={rerun}
-                      onAnswerAction={(text: string) => void send(text)}
+                      onRerunAction={stableRerunAction}
+                      onAnswerAction={stableAnswerAction}
                     />
                   )}
-                </ConversationContent>
-                <ConversationScrollButton />
-              </Conversation>
+                </div>
 
-              <ApprovalBar sessionId={sessionId} running={running} />
+                <ApprovalBar sessionId={sessionId} running={running} />
 
-              <div className="grid shrink-0 gap-4 pt-4">
-                {turns.length === 0 && (
-                  <Suggestions className="px-4">
-                    <Suggestion
-                      suggestion="在工作目录写一个 hello.py"
-                      onClick={handleSuggestionClick}
-                    />
-                    <Suggestion
-                      suggestion="帮我分析这个项目的架构"
-                      onClick={handleSuggestionClick}
-                    />
-                    <Suggestion
-                      suggestion="创建一个简单的 REST API"
-                      onClick={handleSuggestionClick}
-                    />
-                  </Suggestions>
-                )}
-                <div className="w-full px-4 pb-4">
-                  <PromptInput globalDrop multiple onSubmit={handlePromptSubmit}>
-                    <PromptInputHeader>
-                      <AttachmentsDisplay />
-                    </PromptInputHeader>
-                    <PromptInputBody>
-                      <PromptInputTextarea
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        placeholder={running ? "运行中…" : "说点什么"}
-                      />
-                    </PromptInputBody>
-                    <PromptInputFooter>
-                      <PromptInputTools>
-                        <PromptInputActionMenu>
-                          <PromptInputActionMenuTrigger tooltip="添加附件" />
-                          <PromptInputActionMenuContent>
-                            <PromptInputActionAddAttachments label="添加图片或文件" />
-                          </PromptInputActionMenuContent>
-                        </PromptInputActionMenu>
-                      </PromptInputTools>
-                      <PromptInputSubmit
-                        status={running ? "streaming" : "ready"}
-                        onStop={cancelRun}
-                      />
-                    </PromptInputFooter>
-                  </PromptInput>
+                {/* 输入区 — absolute 底部浮动（t3code 风格） */}
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20">
+                  <div className="w-full px-3 sm:px-5">
+                    <div className="pointer-events-auto mx-auto max-w-3xl">
+                      {turns.length === 0 && (
+                        <Suggestions className="pb-3">
+                          <Suggestion
+                            suggestion="在工作目录写一个 hello.py"
+                            onClick={handleSuggestionClick}
+                          />
+                          <Suggestion
+                            suggestion="帮我分析这个项目的架构"
+                            onClick={handleSuggestionClick}
+                          />
+                          <Suggestion
+                            suggestion="创建一个简单的 REST API"
+                            onClick={handleSuggestionClick}
+                          />
+                        </Suggestions>
+                      )}
+                      <div className="pb-4">
+                        {slashMenuOpen && (
+                          <SlashCommandMenu
+                            commands={matchingSlashCommands}
+                            activeIndex={Math.min(
+                              slashIndex,
+                              Math.max(0, matchingSlashCommands.length - 1),
+                            )}
+                            onSelect={selectSlashCommand}
+                          />
+                        )}
+                        <PromptInput globalDrop multiple onSubmit={handlePromptSubmit}>
+                          <PromptInputHeader>
+                            <AttachmentsDisplay />
+                          </PromptInputHeader>
+                          <PromptInputBody>
+                            <PromptInputTextarea
+                              value={input}
+                              onChange={(event) => {
+                                setInput(event.target.value);
+                                setSlashIndex(0);
+                              }}
+                              onKeyDown={(event) => {
+                                if (!slashMenuOpen || matchingSlashCommands.length === 0) return;
+                                if (event.key === "ArrowDown") {
+                                  event.preventDefault();
+                                  setSlashIndex(
+                                    (index) => (index + 1) % matchingSlashCommands.length,
+                                  );
+                                } else if (event.key === "ArrowUp") {
+                                  event.preventDefault();
+                                  setSlashIndex(
+                                    (index) =>
+                                      (index - 1 + matchingSlashCommands.length) %
+                                      matchingSlashCommands.length,
+                                  );
+                                } else if (event.key === "Enter" && !event.shiftKey) {
+                                  event.preventDefault();
+                                  const command = matchingSlashCommands[slashIndex];
+                                  if (command) selectSlashCommand(command);
+                                } else if (event.key === "Escape") {
+                                  event.preventDefault();
+                                  setInput("");
+                                }
+                              }}
+                              placeholder={running ? "运行中…" : "说点什么,或输入 /"}
+                            />
+                          </PromptInputBody>
+                          <PromptInputFooter>
+                            <PromptInputTools>
+                              <PromptInputActionMenu>
+                                <PromptInputActionMenuTrigger tooltip="添加附件" />
+                                <PromptInputActionMenuContent>
+                                  <PromptInputActionAddAttachments label="添加图片或文件" />
+                                </PromptInputActionMenuContent>
+                              </PromptInputActionMenu>
+                            </PromptInputTools>
+                            <PromptInputSubmit
+                              status={running ? "streaming" : "ready"}
+                              onStop={cancelRun}
+                            />
+                          </PromptInputFooter>
+                        </PromptInput>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
-          </ResizablePanel>
+            </ResizablePanel>
 
-          <ResizableHandle withHandle />
+            <ResizableHandle withHandle />
 
-          {/* 右栏:工作空间文件 */}
-          <ResizablePanel
-            id="files"
-            defaultSize="21%"
-            minSize="14%"
-            maxSize="45%"
-            className="panel-edge min-w-0 bg-card/40"
-          >
-            <FilePanel sessionId={sessionId} refreshKey={filesKey} />
-          </ResizablePanel>
-        </ResizablePanelGroup>
+            {/* 右栏:工作空间文件 */}
+            <ResizablePanel
+              id="files"
+              defaultSize="21%"
+              minSize="14%"
+              maxSize="45%"
+              className="panel-edge min-w-0 bg-card/40"
+            >
+              <FilePanel sessionId={sessionId} refreshKey={filesKey} />
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        ) : (
+          <div className="h-full w-full bg-background" aria-hidden="true" />
+        )}
       </SidebarInset>
     </SidebarProvider>
   );

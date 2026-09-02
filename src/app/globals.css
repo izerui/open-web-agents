@@ -255,3 +255,31 @@
     animation: none;
   }
 }
+
+/* ── t3code 风格：活动指示器扫描光效 ── */
+@keyframes live-activity-scan {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+.live-activity-focus {
+  overflow: hidden;
+}
+.live-activity-focus::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 4.5rem;
+  background: linear-gradient(90deg, transparent, oklch(1 0 0 / 6%), transparent);
+  animation: live-activity-scan 2.2s linear infinite;
+  pointer-events: none;
+}
+
+/* ── t3code 风格：消息气泡背景 ── */
+.bg-message {
+  background: var(--accent);
+}
+
+/* ── t3code 风格：滚动条间距 ── */
+.scrollbar-gutter-both {
+  scrollbar-gutter: stable both-edges;
+}

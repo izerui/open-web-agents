@@ -23,4 +23,6 @@ export interface StoragePort {
   preview(workspaceDir: string, relPath: string): Promise<FilePreview>;
   /** 读原始字节用于下载。 */
   read(workspaceDir: string, relPath: string): Promise<{ bytes: Buffer; mime: string }>;
+  /** 写入用户上传的工作区文件。 */
+  write(workspaceDir: string, relPath: string, bytes: Buffer): Promise<void>;
 }

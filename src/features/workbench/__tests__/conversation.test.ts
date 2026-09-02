@@ -2,7 +2,10 @@ import {
   contextTokens,
   foldEvents,
   formatTokens,
+  processBlocks,
+  scrollModeForDistance,
   sumUsage,
+  transitionScrollMode,
 } from "@/features/workbench/conversation";
 import type { Turn } from "@/features/workbench/types";
 import type { AgentEvent } from "@/lib/shared";
@@ -45,6 +48,15 @@ describe("foldEvents", () => {
     expect(out[0]).toMatchObject({ kind: "event" });
   });
 
+  it("合并没有 subagent 字段的连续流式文本", () => {
+    const out = foldEvents([
+      { kind: "text", text: "已创建 `" },
+      { kind: "text", text: "hello.py" },
+      { kind: "text", text: "`。" },
+    ]);
+    expect(out).toEqual([{ kind: "event", event: { kind: "text", text: "已创建 `hello.py`。" } }]);
+  });
+
   it("usage 事件不进正文(在页脚汇总)", () => {
     const out = foldEvents([
       { kind: "text", text: "hi" },
@@ -67,11 +79,71 @@ describe("foldEvents", () => {
     ]);
   });
 
+  it("保留过程顺序,只合并相邻工具调用", () => {
+    const blocks = processBlocks(
+      foldEvents([
+        { kind: "thinking", text: "先判断" },
+        { kind: "tool_use", tool: "Bash", input: { command: "ls" }, toolUseId: "t1" },
+        { kind: "tool_result", toolUseId: "t1", text: "a" },
+        { kind: "thinking", text: "再判断" },
+        { kind: "tool_use", tool: "Read", input: { file: "a" }, toolUseId: "t2" },
+      ]),
+    );
+    expect(blocks.map((block) => block.kind)).toEqual(["thinking", "tools", "thinking", "tools"]);
+    expect(blocks[1]).toMatchObject({ kind: "tools", calls: [{ tool: "Bash" }] });
+  });
+
+  it("过滤瞬时状态,保留诊断状态和孤立工具结果", () => {
+    const blocks = processBlocks(
+      foldEvents([
+        { kind: "status", label: "已入队", state: "pending" },
+        { kind: "status", label: "运行中", state: "running" },
+        { kind: "status", label: "已引用知识库资料", state: "knowledge" },
+        { kind: "tool_result", toolUseId: "missing", text: "orphan", isError: true },
+      ]),
+    );
+    expect(blocks).toEqual([
+      { kind: "status", label: "已引用知识库资料", state: "knowledge" },
+      { kind: "tool-result", text: "orphan", isError: true },
+    ]);
+  });
+
   it("保留子代理归属", () => {
     const out = foldEvents([
       { kind: "tool_use", tool: "X", input: {}, toolUseId: "t", subagent: "reviewer" },
     ]);
     expect((out[0] as { subagent?: string }).subagent).toBe("reviewer");
+  });
+});
+
+describe("scrollModeForDistance", () => {
+  it("在底部跟随,离开底部后进入锚定或自由浏览", () => {
+    expect(scrollModeForDistance(20)).toBe("following");
+    expect(scrollModeForDistance(120)).toBe("anchoring");
+    expect(scrollModeForDistance(500)).toBe("free");
+  });
+});
+
+describe("transitionScrollMode", () => {
+  it("新轮次从跟随模式进入锚定,不会打断自由浏览", () => {
+    expect(transitionScrollMode("following", { kind: "new-turn" })).toBe("anchoring");
+    expect(transitionScrollMode("free", { kind: "new-turn" })).toBe("free");
+  });
+
+  it("用户主动导航进入自由模式,回到底部恢复跟随", () => {
+    expect(transitionScrollMode("anchoring", { kind: "user-navigation" })).toBe("free");
+    expect(transitionScrollMode("free", { kind: "distance-change", distanceFromEnd: 20 })).toBe(
+      "following",
+    );
+  });
+
+  it("锚定中的运行结束后保持当前位置,除非已经回到底部", () => {
+    expect(transitionScrollMode("anchoring", { kind: "run-ended", distanceFromEnd: 200 })).toBe(
+      "free",
+    );
+    expect(transitionScrollMode("anchoring", { kind: "run-ended", distanceFromEnd: 20 })).toBe(
+      "following",
+    );
   });
 });
 

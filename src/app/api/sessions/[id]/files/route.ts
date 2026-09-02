@@ -19,6 +19,53 @@ const NO_STORE_HEADERS = { "Cache-Control": "no-store, max-age=0" };
  * 所有路径都经 resolveInWorkspace 收敛在会话工作目录内,穿越一律 400。
  * 访问前先过会话归属校验 —— 工作空间里可能有别人的敏感产物。
  */
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const { sessions, storage, auth } = getContainer();
+
+  try {
+    const principal = await auth.resolveWeb(req);
+    await auth.assertSessionAccess(principal, id);
+  } catch (err) {
+    const res = authErrorResponse(err);
+    if (res) return res;
+    throw err;
+  }
+
+  const session = await sessions.get(id);
+  if (!session) return Response.json({ error: "session not found" }, { status: 404 });
+
+  const form = await req.formData().catch(() => null);
+  const files = form?.getAll("files").filter((value): value is File => value instanceof File) ?? [];
+  if (files.length === 0) return Response.json({ error: "files are required" }, { status: 400 });
+  if (files.length > 20) return Response.json({ error: "too many files" }, { status: 413 });
+
+  const uploaded: string[] = [];
+  try {
+    for (const file of files) {
+      if (file.size > 10 * 1024 * 1024) {
+        return Response.json({ error: `file too large: ${file.name}` }, { status: 413 });
+      }
+      await storage.write(session.workspaceDir, file.name, Buffer.from(await file.arrayBuffer()));
+      uploaded.push(file.name);
+    }
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === "EEXIST") {
+      return Response.json({ error: "a file with the same name already exists" }, { status: 409 });
+    }
+    if (err instanceof PathEscapeError) {
+      return Response.json({ error: "invalid file name" }, { status: 400 });
+    }
+    return Response.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      { status: 500 },
+    );
+  }
+
+  return Response.json({ files: uploaded }, { headers: NO_STORE_HEADERS });
+}
+
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { sessions, storage, auth } = getContainer();

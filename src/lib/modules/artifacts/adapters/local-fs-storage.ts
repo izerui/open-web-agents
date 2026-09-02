@@ -96,6 +96,13 @@ export class LocalFsStorage implements StoragePort {
     }
   }
 
+  async write(workspaceDir: string, relPath: string, bytes: Buffer): Promise<void> {
+    const abs = resolveInWorkspace(workspaceDir, relPath);
+    await assertRealPathInside(workspaceDir, abs);
+    await fs.mkdir(path.dirname(abs), { recursive: true });
+    await fs.writeFile(abs, bytes, { flag: "wx" });
+  }
+
   async read(workspaceDir: string, relPath: string): Promise<{ bytes: Buffer; mime: string }> {
     const abs = resolveInWorkspace(workspaceDir, relPath);
     await assertRealPathInside(workspaceDir, abs);
