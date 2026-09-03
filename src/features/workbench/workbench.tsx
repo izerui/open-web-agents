@@ -1110,17 +1110,6 @@ export function Workbench() {
                 <span className="hidden truncate font-mono text-muted-foreground sm:block">
                   {sessionId ? `${sessionId.slice(0, 8)}…` : "尚未创建会话"}
                 </span>
-                {contextUsed > 0 && (
-                  <>
-                    <Separator orientation="vertical" className="hidden h-3 sm:block" />
-                    <ContextWindowMeter
-                      usedTokens={contextUsed}
-                      maxTokens={null}
-                      totalProcessed={totalProcessed}
-                    />
-                  </>
-                )}
-
                 {running && (
                   <span className="flex shrink-0 items-center gap-1.5 text-brand">
                     <span className="size-1.5 animate-pulse rounded-full bg-brand" />
@@ -1314,6 +1303,17 @@ export function Workbench() {
                             />
                           </PromptInputBody>
                           <PromptInputFooter>
+                            {contextUsed > 0 ? (
+                              <ContextWindowMeter
+                                usedTokens={contextUsed}
+                                // Claude's standard context window. Replace this
+                                // with provider model metadata when available.
+                                maxTokens={200_000}
+                                totalProcessed={totalProcessed}
+                              />
+                            ) : (
+                              <span />
+                            )}
                             <PromptInputTools>
                               <PromptInputActionMenu>
                                 <PromptInputActionMenuTrigger tooltip="添加附件" />

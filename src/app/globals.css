@@ -266,15 +266,18 @@
   }
 }
 .live-activity-focus {
+  position: relative;
+  display: block;
   overflow: hidden;
+  isolation: isolate;
 }
 .live-activity-focus::after {
   content: "";
   position: absolute;
   inset: 0;
   width: 4.5rem;
-  background: linear-gradient(90deg, transparent, oklch(1 0 0 / 6%), transparent);
-  animation: live-activity-scan 2.2s linear infinite;
+  background: linear-gradient(90deg, transparent, oklch(1 0 0 / 13%), transparent);
+  animation: live-activity-scan 1.8s linear infinite;
   pointer-events: none;
 }
 

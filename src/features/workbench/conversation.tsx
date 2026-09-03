@@ -442,6 +442,7 @@ const ToolCallRow = memo(function ToolCallRow({
           className={cn(
             "min-w-0 flex-1 truncate",
             call.result?.isError ? "text-destructive/80" : "text-muted-foreground",
+            running && !call.result && "live-activity-focus",
           )}
         >
           <span
@@ -459,9 +460,6 @@ const ToolCallRow = memo(function ToolCallRow({
           )}
           {call.result?.isError && <span className="ml-1 text-xs text-destructive">failed</span>}
         </span>
-        {running && !call.result && (
-          <span className="shrink-0 text-xs text-muted-foreground/60">running</span>
-        )}
       </button>
       {expanded && (
         <div className="ml-7 space-y-1">
@@ -546,11 +544,21 @@ const ActivitySection = memo(function ActivitySection({
   const calls = items.filter(
     (item): item is Extract<(typeof items)[number], { kind: "tool" }> => item.kind === "tool",
   );
-  const pendingCall = calls.find((item) => !item.call.result)?.call;
+  const pendingCall = calls.findLast((item) => !item.call.result)?.call;
   const failedCount = calls.filter((item) => item.call.result?.isError).length;
-  const failed = failedCount > 0;
+  const latestItem = items.at(-1);
+  const latestThinking = latestItem?.kind === "thinking" ? latestItem.text : "";
+  const latestThinkingSummary = summarizeThinking(latestThinking);
+  const runningLabel =
+    latestItem?.kind === "thinking"
+      ? latestThinkingSummary
+        ? `Thinking (${latestThinkingSummary})`
+        : "Thinking"
+      : pendingCall
+        ? `Running ${pendingCall.tool}`
+        : null;
   const summary = pendingCall
-    ? `Running ${pendingCall.tool}`
+    ? (runningLabel ?? `Running ${pendingCall.tool}`)
     : calls.length > 0
       ? calls.length === 1
         ? `Ran ${calls[0]?.call.tool ?? "tool"}${failedCount > 0 ? " · failed" : ""}`
@@ -558,13 +566,18 @@ const ActivitySection = memo(function ActivitySection({
             failedCount > 0 ? ` · ${failedCount} failed` : ""
           }`
       : "Thinking";
-  const SummaryIcon = pendingCall
-    ? toolIcon(pendingCall.tool)
-    : calls.length === 1
-      ? toolIcon(calls[0]?.call.tool ?? "")
-      : calls.length > 1
-        ? Wrench
-        : Brain;
+  const SummaryIcon =
+    latestItem?.kind === "thinking"
+      ? Brain
+      : latestItem?.kind === "tool"
+        ? toolIcon(latestItem.call.tool)
+        : pendingCall
+          ? toolIcon(pendingCall.tool)
+          : calls.length === 1
+            ? toolIcon(calls[0]?.call.tool ?? "")
+            : calls.length > 1
+              ? Wrench
+              : Brain;
 
   return (
     <div className="pb-1.5">
@@ -582,13 +595,7 @@ const ActivitySection = memo(function ActivitySection({
           )}
         </span>
         <SummaryIcon className="size-4 shrink-0 stroke-[1.8] text-muted-foreground/60" />
-        <span
-          className={cn(
-            "min-w-0 flex-1 truncate",
-            failed ? "text-destructive/80" : "text-muted-foreground",
-            running && "live-activity-focus",
-          )}
-        >
+        <span className={cn("min-w-0 flex-1 truncate", running && "live-activity-focus")}>
           {summary}
         </span>
       </button>
@@ -608,7 +615,7 @@ const ActivitySection = memo(function ActivitySection({
             return (
               // biome-ignore lint/suspicious/noArrayIndexKey: activity items are append-only during streaming
               <div key={`tool-${index}`} className="space-y-1">
-                <ToolCallRow call={item.call} running={running} />
+                <ToolCallRow call={item.call} running={running && item.call === pendingCall} />
               </div>
             );
           })}

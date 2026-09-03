@@ -154,10 +154,7 @@ export function normalizeStreamEvent(msg: unknown): AgentEvent[] {
  * `skipStreamed`:流式模式下,text 和 thinking 已经通过 normalizeStreamEvent 增量推送过了,
  * 完整 assistant 消息到来时只需提取 tool_use / question / usage,避免重复。
  */
-export function normalizeSdkMessage(
-  msg: unknown,
-  opts?: { skipStreamed?: boolean },
-): AgentEvent[] {
+export function normalizeSdkMessage(msg: unknown, opts?: { skipStreamed?: boolean }): AgentEvent[] {
   const out: AgentEvent[] = [];
   if (!msg || typeof msg !== "object") return out;
 

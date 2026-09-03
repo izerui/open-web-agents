@@ -79,13 +79,10 @@ export function ContextWindowMeter({
                 className="transition-[stroke-dashoffset,stroke] duration-500 ease-out motion-reduce:transition-none"
               />
             </svg>
-            <span className="absolute text-[7px] font-medium leading-none text-muted-foreground">
-              {formatContextWindowTokens(usedTokens)}
-            </span>
           </span>
         </Button>
       </PopoverTrigger>
-      <PopoverContent side="bottom" align="end" className="w-56 max-w-none p-0">
+      <PopoverContent side="top" align="end" className="w-64 max-w-none p-0">
         <div className="flex flex-col gap-2 p-3">
           <div className="flex items-center justify-between gap-3">
             <div className="text-xs font-medium text-muted-foreground">
