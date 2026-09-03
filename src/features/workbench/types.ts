@@ -44,6 +44,8 @@ export interface FilePreview {
 }
 
 export interface Turn {
+  /** 客户端创建的稳定标识；runId 回来前后、切换视图时都不能靠数组下标定位。 */
+  localId?: string;
   prompt: string;
   events: AgentEvent[];
   running: boolean;

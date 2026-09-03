@@ -258,8 +258,12 @@
 
 /* ── t3code 风格：活动指示器扫描光效 ── */
 @keyframes live-activity-scan {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(200%); }
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(200%);
+  }
 }
 .live-activity-focus {
   overflow: hidden;
@@ -272,6 +276,24 @@
   background: linear-gradient(90deg, transparent, oklch(1 0 0 / 6%), transparent);
   animation: live-activity-scan 2.2s linear infinite;
   pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-activity-focus::after {
+    animation: none;
+    display: none;
+  }
+}
+
+/* 小屏保留聊天主任务，工作空间通过顶部抽屉访问。 */
+@media (max-width: 767px) {
+  .workbench-chat-panel {
+    flex: 1 1 100% !important;
+  }
+  .workbench-files-panel,
+  .workbench-panel-handle {
+    display: none !important;
+  }
 }
 
 /* ── t3code 风格：消息气泡背景 ── */

@@ -3,6 +3,7 @@
 import type { AgentEvent } from "@/lib/shared";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
   type ProcessBlock,
   type ScrollMode,
@@ -86,6 +87,32 @@ function toolGroupSummary(calls: ToolCall[]): string {
   const parts = [...counts.entries()].map(([tool, n]) => (n > 1 ? `${tool} ×${n}` : tool));
   if (parts.length <= 3) return parts.join(", ");
   return `${parts.slice(0, 2).join(", ")} +${parts.length - 2}`;
+}
+
+function summarizeToolInput(tool: string, input: unknown): string {
+  if (!input || typeof input !== "object") return "";
+  const values = input as Record<string, unknown>;
+  const pick = (key: string) => (typeof values[key] === "string" ? values[key] : "");
+  const value =
+    tool === "Bash"
+      ? pick("command")
+      : ["Write", "Read", "Edit", "NotebookEdit"].includes(tool)
+        ? pick("file_path")
+        : pick("description") || Object.keys(values).join(", ");
+  const oneLine = value.replace(/\s+/g, " ").trim();
+  return oneLine.length > 100 ? `${oneLine.slice(0, 100)}...` : oneLine;
+}
+
+function summarizeThinking(text: string): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  return oneLine.length > 100 ? `${oneLine.slice(0, 100)}...` : oneLine;
+}
+
+function toolNameClass(tool: string): string {
+  if (tool === "Bash") return "text-amber-500";
+  if (["Write", "Edit", "NotebookEdit"].includes(tool)) return "text-emerald-500";
+  if (["Read", "Glob", "Grep"].includes(tool)) return "text-sky-500";
+  return "text-muted-foreground";
 }
 
 // ─────────────────────────── t3code 风格子组件 ───────────────────────────
@@ -364,6 +391,204 @@ const ToolGroupSection = memo(function ToolGroupSection({
   );
 });
 
+const ToolCallRow = memo(function ToolCallRow({
+  call,
+  running,
+}: {
+  call: ToolCall;
+  running: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const callLabel = call.subagent ? `[${call.subagent}] ${call.tool}` : call.tool;
+  const inputText = call.input != null ? JSON.stringify(call.input, null, 2) : null;
+  const inputSummary = summarizeToolInput(call.tool, call.input);
+  const CallIcon = toolIcon(call.tool);
+
+  return (
+    <div className="space-y-1">
+      <button
+        type="button"
+        className="flex min-h-6 w-full items-center gap-1.5 rounded-md px-0.5 text-left text-sm text-muted-foreground transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+        onClick={() => setExpanded((current) => !current)}
+        aria-expanded={expanded}
+      >
+        <span className="flex size-6 shrink-0 items-center justify-center text-muted-foreground/60">
+          {expanded ? (
+            <ChevronDown className="size-3.5 stroke-[1.8]" />
+          ) : (
+            <ChevronRight className="size-3.5 stroke-[1.8]" />
+          )}
+        </span>
+        <CallIcon className="size-4 shrink-0 stroke-[1.8] text-muted-foreground/60" />
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate",
+            call.result?.isError ? "text-destructive/80" : "text-muted-foreground",
+          )}
+        >
+          <span className={cn("font-medium", toolNameClass(call.tool))}>{callLabel}</span>
+          {inputSummary && (
+            <code className="ml-1 font-mono text-xs text-muted-foreground/80">
+              ({inputSummary})
+            </code>
+          )}
+        </span>
+        {running && !call.result && (
+          <span className="shrink-0 text-xs text-muted-foreground/60">running</span>
+        )}
+      </button>
+      {expanded && (
+        <div className="ml-7 space-y-1">
+          {inputText && (
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/20 p-2 font-mono text-[0.6875rem] leading-relaxed text-muted-foreground">
+              {inputText}
+            </pre>
+          )}
+          {call.result?.text && (
+            <pre
+              className={cn(
+                "max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/30 p-2 font-mono text-[0.6875rem] leading-relaxed",
+                call.result.isError ? "text-destructive" : "text-muted-foreground",
+              )}
+            >
+              <span className="mr-1 text-muted-foreground/50">⎿</span>
+              {call.result.text.slice(0, 2000)}
+            </pre>
+          )}
+          {!call.result && (
+            <p className="rounded bg-muted/20 p-2 text-xs text-muted-foreground">Running...</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+});
+
+const ThinkingRow = memo(function ThinkingRow({
+  text,
+  running,
+}: {
+  text: string;
+  running: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const summary = summarizeThinking(text);
+
+  return (
+    <div className="space-y-1">
+      <button
+        type="button"
+        className="flex min-h-6 w-full items-center gap-1.5 rounded-md px-0.5 text-left text-sm text-muted-foreground transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+        onClick={() => setExpanded((current) => !current)}
+        aria-expanded={expanded}
+      >
+        <span className="flex size-6 shrink-0 items-center justify-center text-muted-foreground/60">
+          {expanded ? (
+            <ChevronDown className="size-3.5 stroke-[1.8]" />
+          ) : (
+            <ChevronRight className="size-3.5 stroke-[1.8]" />
+          )}
+        </span>
+        <Brain className="size-4 shrink-0 stroke-[1.8] text-muted-foreground/60" />
+        <span className={cn("min-w-0 flex-1 truncate", running && "live-activity-focus")}>
+          Thinking
+          {summary && (
+            <code className="ml-1 font-mono text-xs text-muted-foreground/80">({summary})</code>
+          )}
+        </span>
+      </button>
+      {expanded && (
+        <div className="ml-7 max-h-64 whitespace-pre-wrap break-words border-l border-border/60 pl-3 text-xs leading-relaxed text-muted-foreground">
+          {text || (running ? "正在思考..." : "没有可显示的思考内容")}
+        </div>
+      )}
+    </div>
+  );
+});
+
+const ActivitySection = memo(function ActivitySection({
+  items,
+  running,
+  expanded,
+  onToggle,
+}: {
+  items: Extract<ProcessBlock, { kind: "activity" }>["items"];
+  running: boolean;
+  expanded: boolean;
+  onToggle(): void;
+}) {
+  const calls = items.filter(
+    (item): item is Extract<(typeof items)[number], { kind: "tool" }> => item.kind === "tool",
+  );
+  const pendingCall = calls.find((item) => !item.call.result)?.call;
+  const failed = calls.some((item) => item.call.result?.isError);
+  const summary = pendingCall
+    ? `Running ${pendingCall.tool}`
+    : calls.length > 0
+      ? calls.length === 1
+        ? `Ran ${calls[0]?.call.tool ?? "tool"}`
+        : `Ran ${calls.length} tools · ${toolGroupSummary(calls.map((item) => item.call))}`
+      : "Thinking";
+  const SummaryIcon = pendingCall
+    ? toolIcon(pendingCall.tool)
+    : calls.length === 1
+      ? toolIcon(calls[0]?.call.tool ?? "")
+      : calls.length > 1
+        ? Wrench
+        : Brain;
+
+  return (
+    <div className="pb-1.5">
+      <button
+        type="button"
+        className="group/activity flex min-h-9 w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-1 text-left text-sm leading-relaxed transition-colors duration-150 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+        onClick={onToggle}
+        aria-expanded={expanded}
+      >
+        <span className="flex size-6 shrink-0 items-center justify-center text-muted-foreground/60">
+          {expanded ? (
+            <ChevronDown className="size-3.5 stroke-[1.8]" />
+          ) : (
+            <ChevronRight className="size-3.5 stroke-[1.8]" />
+          )}
+        </span>
+        <SummaryIcon className="size-4 shrink-0 stroke-[1.8] text-muted-foreground/60" />
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate",
+            failed ? "text-destructive/80" : "text-muted-foreground",
+            running && "live-activity-focus",
+          )}
+        >
+          {summary}
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="mt-1 space-y-1 pl-1">
+          {items.map((item, index) => {
+            if (item.kind === "thinking") {
+              return (
+                // biome-ignore lint/suspicious/noArrayIndexKey: activity items are append-only during streaming
+                <div key={`thinking-${index}`}>
+                  <ThinkingRow text={item.text} running={running} />
+                </div>
+              );
+            }
+
+            return (
+              // biome-ignore lint/suspicious/noArrayIndexKey: activity items are append-only during streaming
+              <div key={`tool-${index}`} className="space-y-1">
+                <ToolCallRow call={item.call} running={running} />
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+});
+
 type QuestionEvent = Extract<AgentEvent, { kind: "question" }>;
 
 function QuestionBlock({
@@ -475,7 +700,7 @@ const TurnView = memo(function TurnView({
   onRerunAction?: (runId: string, prompt: string) => void;
   onAnswerAction?: (text: string) => void;
 }) {
-  const { usage, blocks, questions, resultEvent, lastThinkingBlockIndex, allText } = useMemo(() => {
+  const { usage, blocks, questions, resultEvent, allText } = useMemo(() => {
     const items = foldEvents(turn.events);
     const nextBlocks = processBlocks(items);
     const nextQuestions: QuestionEvent[] = [];
@@ -495,7 +720,6 @@ const TurnView = memo(function TurnView({
       blocks: nextBlocks,
       questions: nextQuestions,
       resultEvent: nextResultEvent,
-      lastThinkingBlockIndex: nextBlocks.findLastIndex((block) => block.kind === "thinking"),
       allText: nextBlocks
         .filter((block): block is Extract<ProcessBlock, { kind: "text" }> => block.kind === "text")
         .map((block) => block.text)
@@ -511,7 +735,7 @@ const TurnView = memo(function TurnView({
 
       {/* 用户消息 — t3code 风格右对齐圆角气泡 */}
       <div className="flex justify-end pb-4">
-        <div className="max-w-[80%] rounded-2xl bg-message px-4 py-2.5 text-sm text-foreground">
+        <div className="max-w-[80%] whitespace-pre-wrap break-words rounded-2xl bg-message px-4 py-2.5 text-sm text-foreground">
           {turn.prompt}
         </div>
       </div>
@@ -530,32 +754,36 @@ const TurnView = memo(function TurnView({
       {/* 过程按事件顺序渲染；只把相邻工具调用折成一组。 */}
       {blocks.map((block, blockIndex) => {
         const blockId = `${turnKey}:${blockIndex}:${block.kind}`;
-        if (block.kind === "tools") {
+        if (block.kind === "activity") {
+          if (block.items.length === 1) {
+            const item = block.items[0];
+            if (item?.kind === "thinking") {
+              return (
+                // biome-ignore lint/suspicious/noArrayIndexKey: process blocks append in event order
+                <div key={`thinking-${blockIndex}`} className="pb-1.5">
+                  <ThinkingRow text={item.text} running={turn.running} />
+                </div>
+              );
+            }
+            if (item?.kind === "tool") {
+              return (
+                // biome-ignore lint/suspicious/noArrayIndexKey: process blocks append in event order
+                <div key={`tool-${blockIndex}`} className="pb-1.5">
+                  <ToolCallRow call={item.call} running={turn.running} />
+                </div>
+              );
+            }
+          }
           return (
             // biome-ignore lint/suspicious/noArrayIndexKey: process blocks append in event order
-            <div key={`tools-${blockIndex}`} className="pb-1.5">
-              <ToolGroupSection
-                calls={block.calls}
+            <div key={`activity-${blockIndex}`}>
+              <ActivitySection
+                items={block.items}
                 running={turn.running}
                 expanded={expandedBlockIds.has(blockId)}
                 onToggle={() => onToggleBlock(blockId)}
               />
             </div>
-          );
-        }
-        if (block.kind === "thinking") {
-          if (turn.running && blockIndex !== lastThinkingBlockIndex) return null;
-          const label = block.subagent ? `[${block.subagent}] Thinking` : "Thinking";
-          return (
-            <ThinkingSection
-              // biome-ignore lint/suspicious/noArrayIndexKey: process blocks append in event order
-              key={`thinking-${blockIndex}`}
-              label={label}
-              text={block.text}
-              running={turn.running}
-              expanded={expandedBlockIds.has(blockId)}
-              onToggle={() => onToggleBlock(blockId)}
-            />
           );
         }
         if (block.kind === "status") {
@@ -594,16 +822,23 @@ const TurnView = memo(function TurnView({
         );
       })}
 
-      {allText && !turn.running && (
-        <div className="-mt-3 flex items-center gap-2 px-1 pb-3 text-xs opacity-0 transition-opacity duration-200 focus-within:opacity-100 hover:opacity-100">
-          <button
-            type="button"
-            className="flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-            onClick={() => navigator.clipboard.writeText(allText)}
-          >
-            <CopyIcon className="size-3" />
-            <span>复制</span>
-          </button>
+      {!turn.running && (allText || (turn.runId && onRerunAction)) && (
+        <div className="-mt-3 flex items-center gap-2 px-1 pb-3 text-xs opacity-100 transition-opacity duration-200 sm:opacity-0 sm:focus-within:opacity-100 sm:hover:opacity-100">
+          {allText && (
+            <button
+              type="button"
+              className="flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+              onClick={() => {
+                void navigator.clipboard.writeText(allText).then(
+                  () => toast.success("回复已复制"),
+                  () => toast.error("复制失败，请手动选择文本"),
+                );
+              }}
+            >
+              <CopyIcon className="size-3" />
+              <span>复制</span>
+            </button>
+          )}
           {turn.runId && onRerunAction && (
             <button
               type="button"
@@ -642,7 +877,9 @@ const TurnView = memo(function TurnView({
                     ? "success"
                     : resultEvent.status === "unknown"
                       ? "warning"
-                      : "destructive"
+                      : resultEvent.status === "cancelled"
+                        ? "secondary"
+                        : "destructive"
                 }
               >
                 {resultEvent.status === "success" ? (
@@ -652,6 +889,10 @@ const TurnView = memo(function TurnView({
                 ) : resultEvent.status === "unknown" ? (
                   <>
                     <AlertTriangle className="mr-1 inline-block h-3 w-3" /> 结局未知
+                  </>
+                ) : resultEvent.status === "cancelled" ? (
+                  <>
+                    <X className="mr-1 inline-block h-3 w-3" /> 已取消
                   </>
                 ) : (
                   <>
@@ -716,6 +957,7 @@ export function ChatThread({
   );
   const virtualizer = useVirtualizer({
     count: turns.length,
+    useFlushSync: false,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 280,
     overscan: 4,
@@ -725,7 +967,7 @@ export function ChatThread({
     anchorTo: "end",
     followOnAppend: scrollMode === "following" && !anchorAppendedTurn ? "auto" : false,
     scrollEndThreshold: 48,
-    getItemKey: (index) => turns[index]?.runId ?? `turn-${index}`,
+    getItemKey: (index) => turns[index]?.localId ?? turns[index]?.runId ?? `turn-${index}`,
   });
 
   const scrollToEnd = useCallback(
@@ -813,6 +1055,7 @@ export function ChatThread({
     <div className="relative h-full min-h-0">
       <div
         ref={scrollRef}
+        data-conversation-scroll=""
         onScroll={onScroll}
         onWheel={(event) => {
           if (event.deltaY < 0) enterFreeScrolling();
@@ -820,6 +1063,9 @@ export function ChatThread({
         onTouchMove={enterFreeScrolling}
         onPointerDown={(event) => {
           if (event.target === event.currentTarget) enterFreeScrolling();
+        }}
+        onKeyDown={(event) => {
+          if (["ArrowUp", "PageUp", "Home"].includes(event.key)) enterFreeScrolling();
         }}
         className="h-full min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
       >
@@ -866,7 +1112,7 @@ export function ChatThread({
               key={turn.runId ?? `turn-${index}`}
               type="button"
               className={cn(
-                "size-1.5 shrink-0 rounded-full bg-muted-foreground/30 transition-all hover:scale-150 hover:bg-foreground/70",
+                "size-1.5 shrink-0 rounded-full bg-muted-foreground/30 transition-[transform,background-color] hover:scale-150 hover:bg-foreground/70",
                 turn.running && "bg-brand",
               )}
               title={`第 ${index + 1} 轮: ${turn.prompt.slice(0, 40)}`}

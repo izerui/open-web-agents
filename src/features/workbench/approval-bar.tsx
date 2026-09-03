@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
-import { fetchJson } from "@/lib/fetch-json";
+import { errorText, fetchJson } from "@/lib/fetch-json";
 import { cn } from "@/lib/utils";
 import { CheckCircle2, Clock, ShieldAlert, Terminal, XCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -42,6 +42,7 @@ export function ApprovalBar({
   running: boolean;
 }) {
   const [pending, setPending] = useState<Pending[]>([]);
+  const [pollError, setPollError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   /**
    * 【为什么倒计时要自己的 tick】剩余时间原本是在渲染时用 Date.now() 算的,
@@ -55,24 +56,26 @@ export function ApprovalBar({
   const poll = useCallback(async () => {
     if (!sessionId) return;
     try {
-      const d = await fetchJson<{ pending?: Pending[] }>(`/api/sessions/${sessionId}/approvals`);
-      setPending(d.pending ?? []);
-    } catch {
-      // 轮询失败不打断界面
+      const data = await fetchJson<{ pending?: Pending[] }>(`/api/sessions/${sessionId}/approvals`);
+      setPending(data.pending ?? []);
+      setPollError(null);
+    } catch (error) {
+      setPollError(errorText(error));
     }
   }, [sessionId]);
 
   useEffect(() => {
     if (!sessionId) {
       setPending([]);
+      setPollError(null);
       return;
     }
     void poll();
-    // 只在运行中轮询;跑完就没有新的待审了
-    if (!running) return;
-    const t = setInterval(() => void poll(), 2000);
-    return () => clearInterval(t);
-  }, [sessionId, running, poll]);
+    // 本地流结束但待审仍在时也继续轮询，直到裁决或服务端超时移除。
+    if (!running && pending.length === 0) return;
+    const timer = setInterval(() => void poll(), 2000);
+    return () => clearInterval(timer);
+  }, [sessionId, running, pending.length, poll]);
 
   // 有待审时才每秒走一次,没有就不空转
   useEffect(() => {
@@ -87,12 +90,14 @@ export function ApprovalBar({
       if (!sessionId) return;
       setBusy(id);
       try {
-        await fetch(`/api/sessions/${sessionId}/approvals`, {
+        await fetchJson(`/api/sessions/${sessionId}/approvals`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ approvalId: id, decision }),
         });
         await poll();
+      } catch (error) {
+        toast.error(`提交审批失败:${errorText(error)}`);
       } finally {
         setBusy(null);
       }
@@ -141,11 +146,19 @@ export function ApprovalBar({
     [],
   );
 
-  if (pending.length === 0) return null;
+  if (pending.length === 0 && pollError === null) return null;
 
   return (
-    <Card className="mx-3 mb-2 border-[var(--warning)]/40 bg-[var(--warning)]/5">
+    <Card className="mx-3 mb-36 max-h-[50vh] overflow-y-auto border-[var(--warning)]/40 bg-[var(--warning)]/5">
       <CardContent className="space-y-3 p-3">
+        {pollError && (
+          <div className="flex items-center justify-between gap-3 text-xs text-destructive">
+            <span>审批状态读取失败:{pollError}</span>
+            <Button type="button" variant="outline" size="sm" onClick={() => void poll()}>
+              重试
+            </Button>
+          </div>
+        )}
         {pending.map((p, idx) => {
           const leftMs = Math.max(0, p.expiresAt - now);
           const windowMs = p.createdAt ? p.expiresAt - p.createdAt : FALLBACK_WINDOW_MS;

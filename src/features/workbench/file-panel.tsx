@@ -29,6 +29,7 @@ import {
   X,
 } from "lucide-react";
 import type { BundledLanguage } from "shiki";
+import { toast } from "sonner";
 
 /**
  * 扩展名 → shiki 语言。
@@ -112,10 +113,13 @@ export function FilePanel({
   const [selected, setSelected] = useState<string | undefined>();
   const [preview, setPreview] = useState<FilePreview | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   /** HTML 产物默认渲染出来看效果,可切回源码。非 HTML 文件用不到这个开关。 */
   const [showRendered, setShowRendered] = useState(true);
   /** 避免轮询、手动刷新和展开动作同时重复请求同一目录。 */
   const inFlightRef = useRef(new Set<string>());
+  /** 丢弃快速切换文件后才返回的旧预览请求。 */
+  const previewSeqRef = useRef(0);
   /** 丢弃切换会话后才返回的旧目录请求。 */
   const sessionRef = useRef(sessionId);
   sessionRef.current = sessionId;
@@ -174,12 +178,14 @@ export function FilePanel({
 
   // 换会话:清空整棵树,重新从根拉
   useEffect(() => {
+    previewSeqRef.current += 1;
     setDirs(new Map());
     setExpanded(new Set());
     setLoading(new Set());
     setSelected(undefined);
     setPreview(null);
     setError(null);
+    setPreviewError(null);
     if (sessionId) void loadDir(ROOT);
   }, [sessionId, loadDir]);
 
@@ -227,18 +233,26 @@ export function FilePanel({
   const openFile = useCallback(
     async (path: string) => {
       if (!sessionId) return;
+      const requestSession = sessionId;
+      const requestSeq = ++previewSeqRef.current;
       setSelected(path);
+      setPreview(null);
+      setPreviewError(null);
       setShowRendered(true);
       try {
         const res = await fetch(
-          `/api/sessions/${sessionId}/files?file=${encodeURIComponent(path)}`,
+          `/api/sessions/${requestSession}/files?file=${encodeURIComponent(path)}`,
           { cache: "no-store" },
         );
         const data = (await res.json()) as { preview?: FilePreview; error?: string };
-        if (data.preview) setPreview(data.preview);
-        else setError(data.error ?? "预览失败");
+        if (!res.ok || !data.preview) throw new Error(data.error ?? `HTTP ${res.status}`);
+        if (sessionRef.current !== requestSession || previewSeqRef.current !== requestSeq) return;
+        setPreview(data.preview);
+        setPreviewError(null);
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        if (sessionRef.current === requestSession && previewSeqRef.current === requestSeq) {
+          setPreviewError(e instanceof Error ? e.message : String(e));
+        }
       }
     },
     [sessionId],
@@ -313,6 +327,7 @@ export function FilePanel({
           className="ml-auto"
           onClick={refreshAll}
           title="刷新"
+          aria-label="刷新工作空间"
         >
           <RefreshCw />
         </Button>
@@ -364,6 +379,22 @@ export function FilePanel({
         )}
       </ScrollArea>
 
+      {/* 文件预览错误不能替换整棵文件树。用户仍可选择其它文件。 */}
+      {previewError && (
+        <div className="flex items-center justify-between gap-2 border-t border-border px-3 py-2 text-xs text-destructive">
+          <span className="min-w-0 flex-1 truncate">预览失败:{previewError}</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="关闭预览错误"
+            onClick={() => setPreviewError(null)}
+          >
+            <X />
+          </Button>
+        </div>
+      )}
+
       {/* 文件预览面板 */}
       {preview && (
         <div className="flex max-h-[45%] min-h-0 flex-col border-t border-border">
@@ -389,19 +420,32 @@ export function FilePanel({
                   variant="ghost"
                   size="icon-sm"
                   title="复制内容"
-                  onClick={() => void navigator.clipboard.writeText(preview.text ?? "")}
+                  aria-label="复制文件内容"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(preview.text ?? "").then(
+                      () => toast.success("文件内容已复制"),
+                      () => toast.error("复制失败，请手动选择内容"),
+                    );
+                  }}
                 >
                   <Copy />
                 </Button>
               )}
               <Button variant="ghost" size="icon-sm" asChild title="下载">
                 <a
+                  aria-label="下载文件"
                   href={`/api/sessions/${sessionId}/files?download=${encodeURIComponent(preview.path)}`}
                 >
                   <Download />
                 </a>
               </Button>
-              <Button variant="ghost" size="icon-sm" onClick={() => setPreview(null)} title="关闭">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => setPreview(null)}
+                title="关闭"
+                aria-label="关闭文件预览"
+              >
                 <X />
               </Button>
             </div>
@@ -415,7 +459,7 @@ export function FilePanel({
                 alt={preview.path}
                 className="mx-auto max-w-full rounded-md border border-border"
               />
-            ) : showRendered && preview.text !== null ? (
+            ) : isHtml && showRendered && preview.text !== null ? (
               /**
                * HTML 产物在隔离沙箱里渲染。
                *

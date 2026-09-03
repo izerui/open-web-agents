@@ -11,6 +11,7 @@ import {
   Check,
   ChevronsUpDown,
   Command,
+  FolderOpen,
   MessageSquare,
   Plus,
   RefreshCw,
@@ -28,6 +29,12 @@ import { createEventBatcher } from "./event-batcher";
 import { FilePanel } from "./file-panel";
 import { activityOf, groupSessions, relativeTime } from "./session-groups";
 import type { AgentSummary, SessionSummary, Turn } from "./types";
+import {
+  filterSessionsForAgent,
+  sessionIdFromSearch,
+  updateTurnByLocalId,
+  withSessionInUrl,
+} from "./workbench.logic";
 import { makeWorkspaceFileDropHandlers } from "./workspace-file-drop";
 
 import {
@@ -52,6 +59,13 @@ import {
   useDefaultLayout,
 } from "@/components/ui/resizable";
 import { Separator } from "@/components/ui/separator";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -204,8 +218,9 @@ async function followRun(args: {
         `/api/sessions/${sessionId}/events?runId=${encodeURIComponent(runId)}&cursor=${encodeURIComponent(cursor)}`,
         { signal, cache: "no-store" },
       );
-      // 运行记录已不在(会话被清理等)—— 再重连也没有意义
-      if (res.status === 404) return;
+      if (!res.ok) {
+        throw await responseError(res, "重新连接运行失败");
+      }
       if (!res.body) throw new Error("无响应流");
       await readEventStream(res.body, onEvent, onCursor);
       lastError = undefined;
@@ -239,7 +254,23 @@ function dataUrlToBlob(url: string): Blob {
   return new Blob([bytes], { type: mediaType });
 }
 
-async function uploadPromptFiles(sessionId: string, files: FileUIPart[]): Promise<string[]> {
+async function responseError(res: Response, prefix: string): Promise<Error> {
+  const body = (await res.json().catch(() => null)) as { error?: string } | null;
+  return new Error(body?.error ? `${prefix}:${body.error}` : `${prefix}(HTTP ${res.status})`);
+}
+
+function assertEventStreamResponse(res: Response): void {
+  const contentType = res.headers.get("Content-Type") ?? "";
+  if (!contentType.toLowerCase().includes("text/event-stream")) {
+    throw new Error(`运行接口返回了非事件流响应(${contentType || "未知类型"})`);
+  }
+}
+
+async function uploadPromptFiles(
+  sessionId: string,
+  files: FileUIPart[],
+  signal?: AbortSignal,
+): Promise<string[]> {
   if (files.length === 0) return [];
   const form = new FormData();
   for (const file of files) {
@@ -249,7 +280,11 @@ async function uploadPromptFiles(sessionId: string, files: FileUIPart[]): Promis
     if (blob.size > MAX_UPLOAD_BYTES) throw new Error(`文件过大: ${filename}`);
     form.append("files", blob, filename);
   }
-  const res = await fetch(`/api/sessions/${sessionId}/files`, { method: "POST", body: form });
+  const res = await fetch(`/api/sessions/${sessionId}/files`, {
+    method: "POST",
+    body: form,
+    signal,
+  });
   const body = (await res.json().catch(() => null)) as { files?: string[]; error?: string } | null;
   if (!res.ok || !body?.files) throw new Error(body?.error ?? `上传文件失败(HTTP ${res.status})`);
   return body.files;
@@ -274,16 +309,34 @@ export function Workbench() {
    * 光靠 toast 不够 —— 它几秒就消失,用户回头看到的还是"还没有会话"。
    */
   const [sessionsError, setSessionsError] = useState<string | null>(null);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [sessionQuery, setSessionQuery] = useState("");
   const [slashIndex, setSlashIndex] = useState(0);
   const [dragActive, setDragActive] = useState(false);
   const [layoutReady, setLayoutReady] = useState(false);
+  const [mobileLayout, setMobileLayout] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const activeRunRef = useRef<{ abort: AbortController; runId?: string } | null>(null);
   /** 打开会话的序号:用来丢弃"切走之后才回来"的过期响应。 */
   const openSeqRef = useRef(0);
+  const initialSessionAppliedRef = useRef(false);
 
-  useEffect(() => setLayoutReady(true), []);
+  const syncSessionUrl = useCallback((nextSessionId: string | null) => {
+    const nextUrl = withSessionInUrl(window.location.href, nextSessionId);
+    window.history.replaceState(window.history.state, "", nextUrl);
+  }, []);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 767px)");
+    const update = () => setMobileLayout(media.matches);
+    update();
+    setLayoutReady(true);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
 
   /**
    * 拉智能体与会话列表。
@@ -302,6 +355,8 @@ export function Workbench() {
       setSessions(d.sessions ?? []);
     } catch (e) {
       setSessionsError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSessionsLoaded(true);
     }
   }, []);
 
@@ -311,7 +366,15 @@ export function Workbench() {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return (await r.json()) as { agents?: AgentSummary[] };
       })
-      .then((d) => setAgents(d.agents ?? []))
+      .then((d) => {
+        const nextAgents = d.agents ?? [];
+        setAgents(nextAgents);
+        setAgentId((currentId) =>
+          nextAgents.some((agent) => agent.id === currentId)
+            ? currentId
+            : (nextAgents[0]?.id ?? ""),
+        );
+      })
       .catch((e: unknown) => {
         // 智能体拉不到不该连累会话列表 —— 原来两条链共用一个 effect 且都没 catch,
         // 任一失败都变成 unhandledRejection,两边一起空掉
@@ -321,9 +384,17 @@ export function Workbench() {
   }, [loadSessions]);
 
   const newSession = useCallback(() => {
+    if (running) return;
+    openSeqRef.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    activeRunRef.current = null;
     setSessionId(null);
+    syncSessionUrl(null);
     setTurns([]);
-  }, []);
+    setHistoryLoading(false);
+    setHistoryError(null);
+  }, [running, syncSessionUrl]);
 
   /**
    * 中断 = 先告诉服务端取消,再断开本地流。
@@ -333,10 +404,55 @@ export function Workbench() {
    * 继续产生副作用与费用,直到 30 分钟墙钟上限。用户以为停了,其实没停。
    */
   const cancelRun = useCallback(async () => {
-    if (sessionId) {
-      await fetch(`/api/sessions/${sessionId}/cancel`, { method: "POST" }).catch(() => {});
+    const markLocalCancelled = (summary: string) => {
+      setTurns((all) =>
+        all.map((turn) =>
+          turn.running
+            ? {
+                ...turn,
+                running: false,
+                events: turn.events.some(
+                  (event) => event.kind === "result" && event.status === "cancelled",
+                )
+                  ? turn.events
+                  : [
+                      ...turn.events,
+                      { kind: "result" as const, status: "cancelled" as const, summary },
+                    ],
+              }
+            : turn,
+        ),
+      );
+      setRunning(false);
+    };
+
+    const activeRun = activeRunRef.current;
+    // 会话或 run 尚在创建、附件仍在上传时，服务端还没有可取消记录。
+    if (!sessionId || !activeRun?.runId) {
+      activeRun?.abort.abort();
+      activeRunRef.current = null;
+      markLocalCancelled("已取消发送");
+      return;
     }
-    abortRef.current?.abort();
+
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runId: activeRun.runId }),
+      });
+      if (!res.ok) throw await responseError(res, "停止运行失败");
+      const body = (await res.json()) as { cancelled?: string[]; note?: string };
+      if ((body.cancelled?.length ?? 0) === 0) {
+        toast.info(body.note ?? "运行已经结束");
+      } else {
+        markLocalCancelled(body.note ?? "已请求停止");
+        activeRun.abort.abort();
+        if (activeRunRef.current === activeRun) activeRunRef.current = null;
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
   }, [sessionId]);
 
   /**
@@ -354,21 +470,31 @@ export function Workbench() {
     // 切走之前必须断掉上一条流,否则旧会话的事件会继续灌进来 —— 而界面已经是新会话了
     abortRef.current?.abort();
     abortRef.current = null;
+    activeRunRef.current = null;
     setRunning(false);
 
     const seq = ++openSeqRef.current;
+    const targetSession = sessions.find((session) => session.id === id);
+    if (targetSession) setAgentId(targetSession.agentId);
     setSessionId(id);
+    syncSessionUrl(id);
     setTurns([]);
+    setHistoryLoading(true);
+    setHistoryError(null);
     setFilesKey((k) => k + 1);
 
     let history: { turns?: Turn[]; activeRunId?: string };
     try {
       const res = await fetch(`/api/sessions/${id}/history`);
-      if (!res.ok) return;
+      if (!res.ok) throw await responseError(res, "读取会话历史失败");
       history = (await res.json()) as typeof history;
-    } catch {
-      // 历史拉不到就退回空白 —— 不该挡住用户接着发新的一轮
+    } catch (error) {
+      if (seq === openSeqRef.current) {
+        setHistoryError(error instanceof Error ? error.message : String(error));
+      }
       return;
+    } finally {
+      if (seq === openSeqRef.current) setHistoryLoading(false);
     }
 
     // 拉取期间用户可能又切走了。丢弃过期响应,否则上一个会话的历史会画到当前界面上。
@@ -381,8 +507,9 @@ export function Workbench() {
     setRunning(true);
     const abort = new AbortController();
     abortRef.current = abort;
+    activeRunRef.current = { abort, runId: activeRunId };
 
-    // 【按 runId 定位而不是下标】下标会在并发/快速切换时错位,把事件灌进别的轮次。
+    // 用 runId 定位当前历史轮，避免快速切换时把事件写入其它轮次。
     const patch = (fn: (t: Turn) => Turn) =>
       setTurns((all) => all.map((t) => (t.runId === activeRunId ? fn(t) : t)));
     const batcher = createEventBatcher((events) =>
@@ -403,10 +530,24 @@ export function Workbench() {
         patch((t) => ({ ...t, running: false }));
         setRunning(false);
         abortRef.current = null;
+        if (activeRunRef.current?.abort === abort) activeRunRef.current = null;
         setFilesKey((k) => k + 1);
       }
     }
   }
+
+  // URL 只在会话列表首次成功加载后恢复一次；openSession 必须使用这一轮的 sessions 快照。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: one-time URL restoration
+  useEffect(() => {
+    if (!sessionsLoaded || sessionsError !== null || initialSessionAppliedRef.current) return;
+    initialSessionAppliedRef.current = true;
+    const requestedSessionId = sessionIdFromSearch(window.location.search);
+    if (requestedSessionId && sessions.some((session) => session.id === requestedSessionId)) {
+      void openSession(requestedSessionId);
+    } else if (requestedSessionId) {
+      syncSessionUrl(null);
+    }
+  }, [sessions, sessionsError, sessionsLoaded, syncSessionUrl]);
 
   /**
    * 拿到可用的会话 id,没有就现建一个。
@@ -431,6 +572,7 @@ export function Workbench() {
     }
     const session = body.session;
     setSessionId(session.id);
+    syncSessionUrl(session.id);
     setSessions((s) => [session, ...s]);
     return session.id;
   }
@@ -442,19 +584,19 @@ export function Workbench() {
    * 不走输入框是有意的:那些选项是 agent 给的,不该先塞进输入框再让用户按回车,
    * 也不该把用户正在打的字冲掉。
    */
-  async function send(text?: string, files: FileUIPart[] = []) {
+  async function send(text?: string, files: FileUIPart[] = [], clearComposer = false) {
     const prompt = (text ?? input).trim();
-    if (!prompt || running) return;
-    if (text === undefined) setInput("");
+    if (!prompt || running || historyLoading || historyError !== null) return;
     setRunning(true);
 
-    const idx = turns.length;
-    setTurns((t) => [
-      ...t,
-      { prompt, events: [], running: true, startedAt: new Date().toISOString() },
+    const localId = crypto.randomUUID();
+    const seq = openSeqRef.current;
+    setTurns((currentTurns) => [
+      ...currentTurns,
+      { localId, prompt, events: [], running: true, startedAt: new Date().toISOString() },
     ]);
-    const patch = (fn: (t: Turn) => Turn) =>
-      setTurns((all) => all.map((t, i) => (i === idx ? fn(t) : t)));
+    const patch = (fn: (turn: Turn) => Turn) =>
+      setTurns((all) => updateTurnByLocalId(all, localId, fn));
     const batcher = createEventBatcher((events) =>
       patch((turn) => ({ ...turn, events: [...turn.events, ...events] })),
     );
@@ -462,10 +604,15 @@ export function Workbench() {
 
     const abort = new AbortController();
     abortRef.current = abort;
+    const sendHandle: { abort: AbortController; runId?: string } = { abort };
+    activeRunRef.current = sendHandle;
 
     try {
       const id = await ensureSession();
-      const uploadedFiles = await uploadPromptFiles(id, files);
+      abort.signal.throwIfAborted();
+      if (seq !== openSeqRef.current) throw new Error("会话已经切换");
+      const uploadedFiles = await uploadPromptFiles(id, files, abort.signal);
+      abort.signal.throwIfAborted();
       const runPrompt = uploadedFiles.length
         ? `${prompt}\n\n已上传到当前工作区的附件:\n${uploadedFiles.map((name) => `- ${name}`).join("\n")}`
         : prompt;
@@ -475,33 +622,56 @@ export function Workbench() {
         body: JSON.stringify({ prompt: runPrompt }),
         signal: abort.signal,
       });
-      // 运行 id 从响应头带回,分支重跑要用它当分叉点;断线续读也靠它定位
-      const rid = res.headers.get("X-Run-Id");
-      if (rid) patch((t) => ({ ...t, runId: rid }));
-      if (!res.body) throw new Error("无响应流");
-      // 拿不到 runId 就只能读这一段:没有 runId 无法定位 Stream,断了也接不回来
-      if (rid) {
-        await followRun({
-          sessionId: id,
-          runId: rid,
-          push,
-          signal: abort.signal,
-          initial: res.body,
-        });
-      } else {
-        await readEventStream(res.body, push);
-      }
-    } catch (err) {
+      if (!res.ok) throw await responseError(res, "发起运行失败");
+      assertEventStreamResponse(res);
+      if (!res.body) throw new Error("运行接口没有返回事件流");
+
+      // runId 是重连和分支的身份，缺失时不能假装已经可靠入队。
+      const runId = res.headers.get("X-Run-Id");
+      if (!runId) throw new Error("运行接口没有返回 runId");
+      sendHandle.runId = runId;
+      patch((turn) => ({ ...turn, runId }));
+      if (clearComposer) setInput("");
+
+      // 提交 Promise 在“可靠入队”后就完成，让 PromptInput 此时清附件；
+      // 长时间的 SSE 消费留在后台，失败则继续写回同一个稳定 localId 的轮次。
+      void (async () => {
+        try {
+          await followRun({
+            sessionId: id,
+            runId,
+            push,
+            signal: abort.signal,
+            initial: res.body,
+          });
+        } catch (error) {
+          if (!abort.signal.aborted) {
+            push({ kind: "result", status: "failed", summary: String(error), runId });
+          }
+        } finally {
+          batcher.flush();
+          if (seq === openSeqRef.current) {
+            patch((turn) => ({ ...turn, running: false }));
+            setRunning(false);
+            if (abortRef.current === abort) abortRef.current = null;
+            if (activeRunRef.current === sendHandle) activeRunRef.current = null;
+            setFilesKey((key) => key + 1);
+            void loadSessions();
+          }
+        }
+      })();
+    } catch (error) {
       if (!abort.signal.aborted) {
-        push({ kind: "result", status: "failed", summary: String(err) });
+        push({ kind: "result", status: "failed", summary: String(error) });
       }
-    } finally {
       batcher.flush();
-      patch((t) => ({ ...t, running: false }));
-      setRunning(false);
-      abortRef.current = null;
-      // 运行结束刷新文件面板,新产物立刻可见
-      setFilesKey((k) => k + 1);
+      if (seq === openSeqRef.current) {
+        patch((turn) => ({ ...turn, running: false }));
+        setRunning(false);
+        if (abortRef.current === abort) abortRef.current = null;
+        if (activeRunRef.current === sendHandle) activeRunRef.current = null;
+      }
+      throw error;
     }
   }
 
@@ -513,10 +683,13 @@ export function Workbench() {
     if (!sessionId || running) return;
     setRunning(true);
 
-    const idx = turns.length;
-    setTurns((t) => [
-      ...t,
+    const localId = crypto.randomUUID();
+    const seq = openSeqRef.current;
+    const targetSessionId = sessionId;
+    setTurns((currentTurns) => [
+      ...currentTurns,
       {
+        localId,
         prompt,
         events: [],
         running: true,
@@ -524,8 +697,8 @@ export function Workbench() {
         startedAt: new Date().toISOString(),
       },
     ]);
-    const patch = (fn: (t: Turn) => Turn) =>
-      setTurns((all) => all.map((t, i) => (i === idx ? fn(t) : t)));
+    const patch = (fn: (turn: Turn) => Turn) =>
+      setTurns((all) => updateTurnByLocalId(all, localId, fn));
     const batcher = createEventBatcher((events) =>
       patch((turn) => ({ ...turn, events: [...turn.events, ...events] })),
     );
@@ -533,42 +706,60 @@ export function Workbench() {
 
     const abort = new AbortController();
     abortRef.current = abort;
+    const rerunHandle: { abort: AbortController; runId?: string } = { abort };
+    activeRunRef.current = rerunHandle;
 
     try {
-      const res = await fetch(`/api/sessions/${sessionId}/branch`, {
+      const res = await fetch(`/api/sessions/${targetSessionId}/branch`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fromRunId, mode: "fresh", prompt }),
+        signal: abort.signal,
       });
-      const d = (await res.json()) as { runId?: string; error?: string };
-      if (!res.ok || !d.runId) throw new Error(d.error ?? `HTTP ${res.status}`);
-      patch((t) => ({ ...t, runId: d.runId }));
+      const data = (await res.json().catch(() => null)) as {
+        runId?: string;
+        error?: string;
+      } | null;
+      if (!res.ok || !data?.runId) {
+        throw new Error(data?.error ?? `重跑失败(HTTP ${res.status})`);
+      }
+      rerunHandle.runId = data.runId;
+      patch((turn) => ({ ...turn, runId: data.runId }));
 
-      // 分支已入队,挂上该运行的事件流观察 worker 执行
-      await followRun({ sessionId, runId: d.runId, push, signal: abort.signal });
-    } catch (err) {
+      await followRun({
+        sessionId: targetSessionId,
+        runId: data.runId,
+        push,
+        signal: abort.signal,
+      });
+    } catch (error) {
       if (!abort.signal.aborted) {
-        push({ kind: "result", status: "failed", summary: String(err) });
+        push({ kind: "result", status: "failed", summary: String(error) });
       }
     } finally {
       batcher.flush();
-      patch((t) => ({ ...t, running: false }));
-      setRunning(false);
-      abortRef.current = null;
-      setFilesKey((k) => k + 1);
+      if (seq === openSeqRef.current) {
+        patch((turn) => ({ ...turn, running: false }));
+        setRunning(false);
+        if (abortRef.current === abort) abortRef.current = null;
+        if (activeRunRef.current === rerunHandle) activeRunRef.current = null;
+        setFilesKey((key) => key + 1);
+        void loadSessions();
+      }
     }
   }
 
   const current = agents.find((a) => a.id === agentId);
   // 一个智能体都没有时,agentId 还是兜底的 "default",不能拿它当名字显示
   const hasAgents = agents.length > 0;
-  const visibleSessions = useMemo(() => {
-    const query = sessionQuery.trim().toLocaleLowerCase();
-    if (!query) return sessions;
-    return sessions.filter((session) =>
-      `${session.title ?? ""} ${session.id}`.toLocaleLowerCase().includes(query),
-    );
-  }, [sessionQuery, sessions]);
+  const sessionsForAgent = useMemo(
+    () => filterSessionsForAgent(sessions, agentId, ""),
+    [agentId, sessions],
+  );
+  const visibleSessions = useMemo(
+    () => filterSessionsForAgent(sessions, agentId, sessionQuery),
+    [agentId, sessionQuery, sessions],
+  );
   const sessionGroups = useMemo(() => groupSessions(visibleSessions), [visibleSessions]);
   const contextUsed = useMemo(() => contextTokens(turns), [turns]);
   const totalProcessed = useMemo(() => {
@@ -602,7 +793,7 @@ export function Workbench() {
     (message: PromptInputMessage) => {
       const text = message.text.trim() || (message.files.length > 0 ? "请查看附件。" : "");
       if (!text) return;
-      void send(text, message.files);
+      return send(text, message.files, true);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [running, cancelRun, input],
@@ -611,7 +802,7 @@ export function Workbench() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally use the current send closure
   const handleSuggestionClick = useCallback(
     (suggestion: string) => {
-      void send(suggestion);
+      void send(suggestion).catch(() => {});
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [running, input],
@@ -621,7 +812,10 @@ export function Workbench() {
   const rerunRef = useRef(rerun);
   sendRef.current = send;
   rerunRef.current = rerun;
-  const stableAnswerAction = useCallback((text: string) => void sendRef.current(text), []);
+  const stableAnswerAction = useCallback(
+    (text: string) => void sendRef.current(text).catch(() => {}),
+    [],
+  );
   const stableRerunAction = useCallback(
     (runId: string, prompt: string) => void rerunRef.current(runId, prompt),
     [],
@@ -657,14 +851,14 @@ export function Workbench() {
     <SidebarProvider className="h-screen min-h-0">
       <CommandPalette
         open={paletteOpen}
-        onOpenChange={setPaletteOpen}
-        sessions={sessions}
+        onOpenChangeAction={setPaletteOpen}
+        sessions={visibleSessions}
         agents={agents}
         currentAgentId={agentId}
         running={running}
-        onOpenSession={(id) => void openSession(id)}
-        onNewSession={newSession}
-        onPickAgent={(id) => {
+        onOpenSessionAction={(id) => void openSession(id)}
+        onNewSessionAction={newSession}
+        onPickAgentAction={(id) => {
           setAgentId(id);
           newSession();
         }}
@@ -754,7 +948,14 @@ export function Workbench() {
               </ModelSelectorContent>
             </ModelSelector>
 
-            <Button variant="outline" size="sm" className="w-full" onClick={newSession}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full"
+              onClick={newSession}
+              disabled={running}
+              title={running ? "运行中不能新建会话" : "新建会话"}
+            >
               <Plus className="size-3.5" />
               新会话
             </Button>
@@ -802,7 +1003,7 @@ export function Workbench() {
             </div>
           )}
 
-          {sessionsError === null && sessions.length === 0 && (
+          {sessionsError === null && sessionsForAgent.length === 0 && (
             <div className="flex flex-col items-center gap-1.5 px-3 py-10 text-center group-data-[collapsible=icon]:hidden">
               <MessageSquare className="size-5 text-muted-foreground/30" />
               <p className="text-xs text-muted-foreground">还没有会话</p>
@@ -810,11 +1011,13 @@ export function Workbench() {
             </div>
           )}
 
-          {sessionsError === null && sessions.length > 0 && visibleSessions.length === 0 && (
-            <div className="px-3 py-8 text-center text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
-              没有匹配的会话
-            </div>
-          )}
+          {sessionsError === null &&
+            sessionsForAgent.length > 0 &&
+            visibleSessions.length === 0 && (
+              <div className="px-3 py-8 text-center text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
+                没有匹配的会话
+              </div>
+            )}
 
           {/* 按时间分档 —— 一列没有层次的标题里,人找不到"刚才那条" */}
           {sessionGroups.map(({ bucket, sessions: group }) => (
@@ -882,7 +1085,7 @@ export function Workbench() {
               id="chat"
               defaultSize="74%"
               minSize="40%"
-              className="flex min-w-0 flex-col"
+              className="workbench-chat-panel flex min-w-0 flex-col"
             >
               <div
                 className={cn(
@@ -891,20 +1094,25 @@ export function Workbench() {
                 )}
               >
                 <SidebarTrigger className="-ml-1" />
-                <Separator orientation="vertical" className="h-4" />
-                <span className="font-medium text-foreground">{current?.name ?? agentId}</span>
+                <Separator orientation="vertical" className="hidden h-4 sm:block" />
+                <span className="hidden min-w-0 truncate font-medium text-foreground sm:block">
+                  {current?.name ?? agentId}
+                </span>
                 {current?.config.outputSchema && (
-                  <Badge variant="secondary" className="h-5 px-1.5 text-[10px] font-normal">
+                  <Badge
+                    variant="secondary"
+                    className="hidden h-5 px-1.5 text-[10px] font-normal sm:inline-flex"
+                  >
                     结构化输出
                   </Badge>
                 )}
-                <Separator orientation="vertical" className="h-3" />
-                <span className="truncate font-mono text-muted-foreground">
+                <Separator orientation="vertical" className="hidden h-3 sm:block" />
+                <span className="hidden truncate font-mono text-muted-foreground sm:block">
                   {sessionId ? `${sessionId.slice(0, 8)}…` : "尚未创建会话"}
                 </span>
                 {contextUsed > 0 && (
                   <>
-                    <Separator orientation="vertical" className="h-3" />
+                    <Separator orientation="vertical" className="hidden h-3 sm:block" />
                     <ContextWindowMeter
                       usedTokens={contextUsed}
                       maxTokens={null}
@@ -916,15 +1124,36 @@ export function Workbench() {
                 {running && (
                   <span className="flex shrink-0 items-center gap-1.5 text-brand">
                     <span className="size-1.5 animate-pulse rounded-full bg-brand" />
-                    运行中
+                    <span className="hidden sm:inline">运行中</span>
                   </span>
                 )}
+
+                <Sheet>
+                  <SheetTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="ml-auto md:hidden"
+                      aria-label="打开工作空间"
+                    >
+                      <FolderOpen className="size-4" />
+                    </Button>
+                  </SheetTrigger>
+                  <SheetContent className="w-[92vw] gap-0 p-0" side="right">
+                    <SheetTitle className="sr-only">工作空间</SheetTitle>
+                    <SheetDescription className="sr-only">
+                      浏览、预览和下载当前会话文件
+                    </SheetDescription>
+                    <FilePanel sessionId={sessionId} refreshKey={filesKey} />
+                  </SheetContent>
+                </Sheet>
 
                 {/* 快捷键本身不可发现,得留一个看得见的入口 */}
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="ml-auto h-7 shrink-0 gap-2 text-muted-foreground"
+                  className="h-7 shrink-0 gap-2 text-muted-foreground md:ml-auto"
                   onClick={() => setPaletteOpen(true)}
                 >
                   <Search className="size-3.5" />
@@ -956,7 +1185,9 @@ export function Workbench() {
                     const last = turns[turns.length - 1];
                     const resultEvt = last?.events.findLast((e) => e.kind === "result");
                     if (!resultEvt || resultEvt.kind !== "result") return null;
-                    if (resultEvt.status === "success") return null;
+                    if (resultEvt.status === "success" || resultEvt.status === "cancelled") {
+                      return null;
+                    }
                     const isUnknown = resultEvt.status === "unknown";
                     return (
                       <div
@@ -974,7 +1205,26 @@ export function Workbench() {
 
                 {/* 对话区域 */}
                 <div className="relative flex min-h-0 flex-1 flex-col">
-                  {turns.length === 0 ? (
+                  {historyLoading ? (
+                    <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
+                      正在读取会话历史…
+                    </div>
+                  ) : historyError ? (
+                    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+                      <AlertTriangle className="size-6 text-destructive" />
+                      <p className="text-sm text-destructive">{historyError}</p>
+                      {sessionId && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void openSession(sessionId)}
+                        >
+                          <RefreshCw className="size-3.5" />
+                          重试
+                        </Button>
+                      )}
+                    </div>
+                  ) : turns.length === 0 ? (
                     <div className="flex min-h-0 flex-1 items-center justify-center">
                       <div className="flex flex-col items-center gap-3 text-center">
                         <MessageSquare className="size-12 text-muted-foreground/20" />
@@ -984,6 +1234,7 @@ export function Workbench() {
                     </div>
                   ) : (
                     <ChatThread
+                      key={sessionId ?? "new-session"}
                       turns={turns}
                       onRerunAction={stableRerunAction}
                       onAnswerAction={stableAnswerAction}
@@ -1058,6 +1309,7 @@ export function Workbench() {
                                   setInput("");
                                 }
                               }}
+                              disabled={historyLoading || historyError !== null || !hasAgents}
                               placeholder={running ? "运行中…" : "说点什么,或输入 /"}
                             />
                           </PromptInputBody>
@@ -1073,6 +1325,9 @@ export function Workbench() {
                             <PromptInputSubmit
                               status={running ? "streaming" : "ready"}
                               onStop={cancelRun}
+                              disabled={
+                                !running && (historyLoading || historyError !== null || !hasAgents)
+                              }
                             />
                           </PromptInputFooter>
                         </PromptInput>
@@ -1083,7 +1338,7 @@ export function Workbench() {
               </div>
             </ResizablePanel>
 
-            <ResizableHandle withHandle />
+            <ResizableHandle withHandle className="workbench-panel-handle" />
 
             {/* 右栏:工作空间文件 */}
             <ResizablePanel
@@ -1091,9 +1346,9 @@ export function Workbench() {
               defaultSize="21%"
               minSize="14%"
               maxSize="45%"
-              className="panel-edge min-w-0 bg-card/40"
+              className="workbench-files-panel panel-edge min-w-0 bg-card/40"
             >
-              <FilePanel sessionId={sessionId} refreshKey={filesKey} />
+              <FilePanel sessionId={mobileLayout ? null : sessionId} refreshKey={filesKey} />
             </ResizablePanel>
           </ResizablePanelGroup>
         ) : (

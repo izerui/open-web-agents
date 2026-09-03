@@ -1,5 +1,7 @@
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
+import { topicOf } from "@/lib/modules/run/application/orchestrator";
+import { cancellableRunIds } from "@/lib/modules/run/domain/cancel";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,7 +22,7 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { runs, auth } = getContainer();
+  const { runs, auth, bus } = getContainer();
 
   try {
     const principal = await auth.resolveWeb(req);
@@ -32,17 +34,33 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   const body = (await req.json().catch(() => ({}))) as { runId?: string };
-
-  // 指定 runId 就只取消那一个;否则取消该会话里所有未完成的运行
-  const targets = body.runId
-    ? [body.runId]
-    : (await runs.listBySession(id))
-        .filter((r) => r.status === "pending" || r.status === "running")
-        .map((r) => r.id);
+  let sessionRuns = await runs.listBySession(id);
+  // `/run` 的响应头可能在 ReadableStream.start 完成入队前到达。用户立即点停止时，
+  // 给明确的 runId 一个短等待窗口，避免第一次查询为空后任务反而继续运行。
+  for (
+    let attempt = 0;
+    body.runId && !sessionRuns.some((run) => run.id === body.runId) && attempt < 20;
+    attempt++
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    sessionRuns = await runs.listBySession(id);
+  }
+  const targets = cancellableRunIds(sessionRuns, body.runId);
 
   const cancelled: string[] = [];
   for (const runId of targets) {
-    if (await runs.cancel(runId)) cancelled.push(runId);
+    if (!(await runs.cancel(runId))) continue;
+    cancelled.push(runId);
+    // 取消是数据库里的真实终态，也要进入事件流。否则当前页面只能靠 abort 猜测，
+    // 刷新后 transcript 又没有取消事件，最终只剩一条没有回答的用户消息。
+    await bus
+      .publish(topicOf(id, runId), {
+        kind: "result",
+        status: "cancelled",
+        summary: "已请求停止；正在执行的工具会在下一次心跳时中止",
+        runId,
+      })
+      .catch(() => {});
   }
 
   return Response.json({

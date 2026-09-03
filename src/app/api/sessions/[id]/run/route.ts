@@ -221,7 +221,14 @@ function handleBlocking(req: Request, ctx: RunRouteContext): Promise<Response> {
         if (e.kind === "result") {
           settle(
             Response.json(assembleBlockingResponse(runId, events), {
-              status: e.status === "success" ? 200 : e.status === "unknown" ? 202 : 500,
+              status:
+                e.status === "success"
+                  ? 200
+                  : e.status === "unknown"
+                    ? 202
+                    : e.status === "cancelled"
+                      ? 409
+                      : 500,
               headers: { "X-Run-Id": runId },
             }),
           );

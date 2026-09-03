@@ -89,8 +89,16 @@ describe("foldEvents", () => {
         { kind: "tool_use", tool: "Read", input: { file: "a" }, toolUseId: "t2" },
       ]),
     );
-    expect(blocks.map((block) => block.kind)).toEqual(["thinking", "tools", "thinking", "tools"]);
-    expect(blocks[1]).toMatchObject({ kind: "tools", calls: [{ tool: "Bash" }] });
+    expect(blocks.map((block) => block.kind)).toEqual(["activity"]);
+    expect(blocks[0]).toMatchObject({
+      kind: "activity",
+      items: [
+        { kind: "thinking", text: "先判断" },
+        { kind: "tool", call: { tool: "Bash" } },
+        { kind: "thinking", text: "再判断" },
+        { kind: "tool", call: { tool: "Read" } },
+      ],
+    });
   });
 
   it("过滤瞬时状态,保留诊断状态和孤立工具结果", () => {

@@ -107,6 +107,9 @@ function Line({ e }: { e: AgentEvent }) {
       if (e.status === "failed") {
         return <p className="text-sm text-destructive">出错了:{e.summary ?? "请稍后再试"}</p>;
       }
+      if (e.status === "cancelled") {
+        return <p className="text-sm text-muted-foreground">{e.summary ?? "运行已取消"}</p>;
+      }
       // unknown 不能什么都不显示 —— 用户会以为消息发丢了。如实说明结局未知。
       if (e.status === "unknown") {
         return (

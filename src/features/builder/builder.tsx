@@ -21,7 +21,7 @@ import { errorText, fetchJson } from "@/lib/fetch-json";
 import { PERMISSION_MODES, type PermissionMode } from "@/lib/shared";
 import { cn } from "@/lib/utils";
 import { Bot, FileCode, Plus, Save, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 const SCHEMA_EXAMPLE = `{
@@ -175,6 +175,20 @@ export function Builder() {
   const [allowStdioMcp, setAllowStdioMcp] = useState(false);
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [saving, setSaving] = useState(false);
+  const cleanDraftRef = useRef(JSON.stringify(EMPTY));
+  const editSeqRef = useRef(0);
+  const allowNavigationRef = useRef(false);
+  const dirty = useMemo(() => JSON.stringify(draft) !== cleanDraftRef.current, [draft]);
+
+  const setCleanDraft = useCallback((next: Draft) => {
+    cleanDraftRef.current = JSON.stringify(next);
+    setDraft(next);
+  }, []);
+
+  const confirmDiscard = useCallback(
+    () => !dirty || window.confirm("当前智能体有未保存修改，确定放弃这些修改？"),
+    [dirty],
+  );
 
   const reload = useCallback(
     () =>
@@ -190,6 +204,34 @@ export function Builder() {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (allowNavigationRef.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    const guardInternalLink = (event: MouseEvent) => {
+      if (allowNavigationRef.current || event.defaultPrevented || event.button !== 0) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const target = event.target;
+      const link = target instanceof Element ? target.closest<HTMLAnchorElement>("a[href]") : null;
+      if (!link || link.target === "_blank") return;
+      if (!window.confirm("当前智能体有未保存修改，确定离开并放弃这些修改？")) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      allowNavigationRef.current = true;
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    document.addEventListener("click", guardInternalLink, true);
+    return () => {
+      window.removeEventListener("beforeunload", warnBeforeUnload);
+      document.removeEventListener("click", guardInternalLink, true);
+    };
+  }, [dirty]);
 
   // outputSchema 的合法性即时反馈 —— 它是对外接口契约,写错了整个智能体就不可用
   const schemaText = draft.outputSchemaText.trim();
@@ -221,8 +263,16 @@ export function Builder() {
     }
   }
 
+  const selectedAgent = list.find((agent) => agent.id === draft.id);
+  const canWrite = selectedAgent?.canWrite !== false;
   const canSave =
-    draft.name.trim() && draft.systemPrompt.trim() && !schemaError && !inputSchemaError && !saving;
+    canWrite &&
+    dirty &&
+    draft.name.trim() &&
+    draft.systemPrompt.trim() &&
+    !schemaError &&
+    !inputSchemaError &&
+    !saving;
 
   async function save() {
     if (!canSave) return;
@@ -303,8 +353,13 @@ export function Builder() {
         }),
       });
       const data = (await res.json()) as { agent?: AgentSummary; error?: string };
-      if (!res.ok || data.error) throw new Error(data.error ?? `HTTP ${res.status}`);
-      toast.success(`已保存:${data.agent?.id}`);
+      if (!res.ok || data.error || !data.agent) {
+        throw new Error(data.error ?? `HTTP ${res.status}`);
+      }
+      const savedDraft = { ...draft, id: data.agent.id };
+      cleanDraftRef.current = JSON.stringify(savedDraft);
+      setDraft((current) => ({ ...current, id: data.agent?.id ?? current.id }));
+      toast.success(`已保存:${data.agent.id}`);
       await reload();
     } catch (e) {
       toast.error(`保存失败:${e instanceof Error ? e.message : String(e)}`);
@@ -314,13 +369,16 @@ export function Builder() {
   }
 
   function edit(a: AgentSummary) {
+    if (a.id !== draft.id && !confirmDiscard()) return;
+    const seq = ++editSeqRef.current;
     void fetchJson<AgentsResponse>("/api/agents")
       .then((d) => {
+        if (seq !== editSeqRef.current) return;
         setAllowStdioMcp(d.capabilities?.stdioMcp === true);
         const full = d.agents?.find((x) => x.id === a.id);
         if (!full) return;
         const cfg = full.config as Record<string, unknown>;
-        setDraft({
+        const nextDraft: Draft = {
           id: full.id,
           name: full.name,
           description: full.description ?? "",
@@ -386,10 +444,13 @@ export function Builder() {
                 }),
               )
             : [],
-        });
+        };
+        setCleanDraft(nextDraft);
       })
       // 点了智能体却没反应最让人困惑 —— 至少说清楚是没读到,而不是这个智能体本身是空的
-      .catch((e: unknown) => toast.error(`打开智能体失败:${errorText(e)}`));
+      .catch((error: unknown) => {
+        if (seq === editSeqRef.current) toast.error(`打开智能体失败:${errorText(error)}`);
+      });
   }
 
   /** 智能体列表挂进子空间侧栏 —— 再开一条自己的侧栏就成了两级导航,看着像两个产品 */
@@ -403,7 +464,14 @@ export function Builder() {
       <SidebarGroupLabel>共 {list.length} 个</SidebarGroupLabel>
       <SidebarMenu>
         <SidebarMenuItem>
-          <SidebarMenuButton onClick={() => setDraft(EMPTY)} tooltip="新建智能体">
+          <SidebarMenuButton
+            onClick={() => {
+              if (!confirmDiscard()) return;
+              editSeqRef.current += 1;
+              setCleanDraft(EMPTY);
+            }}
+            tooltip="新建智能体"
+          >
             <Plus className="text-muted-foreground/60" />
             <span className="text-xs">新建智能体</span>
           </SidebarMenuButton>
@@ -445,6 +513,35 @@ export function Builder() {
     </SidebarGroup>
   );
 
+  if (selectedAgent && !canWrite) {
+    return (
+      <SpaceShell
+        area="agents"
+        title={selectedAgent.name}
+        subtitle="只读智能体配置"
+        sidebarExtra={agentList}
+      >
+        <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          这是只读智能体。配置仅供查看，需要修改时请联系所有者。
+        </p>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">配置</CardTitle>
+            {selectedAgent.description && (
+              <CardDescription>{selectedAgent.description}</CardDescription>
+            )}
+          </CardHeader>
+          <CardContent>
+            <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">
+              {JSON.stringify((selectedAgent as BuilderAgent).config, null, 2)}
+            </pre>
+          </CardContent>
+        </Card>
+        <KnowledgePanel agentId={selectedAgent.id} canWrite={false} />
+      </SpaceShell>
+    );
+  }
+
   return (
     <SpaceShell
       area="agents"
@@ -473,6 +570,7 @@ export function Builder() {
             value={draft.id}
             onChange={(e) => setDraft({ ...draft, id: e.target.value })}
             placeholder="code-reviewer"
+            disabled={Boolean(selectedAgent)}
           />
         </label>
       </div>
@@ -585,6 +683,7 @@ export function Builder() {
                   variant="ghost"
                   size="icon"
                   className="shrink-0 text-destructive hover:text-destructive"
+                  aria-label={`删除 MCP 服务 ${m.name || i + 1}`}
                   onClick={() =>
                     setDraft({ ...draft, mcpServers: draft.mcpServers.filter((_, j) => j !== i) })
                   }
@@ -705,6 +804,7 @@ export function Builder() {
                 variant="ghost"
                 size="icon"
                 className="shrink-0 text-destructive hover:text-destructive"
+                aria-label={`删除子代理 ${s.name || i + 1}`}
                 onClick={() =>
                   setDraft({ ...draft, subagents: draft.subagents.filter((_, j) => j !== i) })
                 }
@@ -825,12 +925,7 @@ export function Builder() {
         {!schemaError && schemaText && <Badge variant="success">schema 合法 · 接口型智能体</Badge>}
       </div>
 
-      {draft.id && (
-        <KnowledgePanel
-          agentId={draft.id}
-          canWrite={list.find((a) => a.id === draft.id)?.canWrite !== false}
-        />
-      )}
+      {draft.id && <KnowledgePanel agentId={draft.id} canWrite={canWrite} />}
 
       {draft.id && <SharePanel agentId={draft.id} />}
 

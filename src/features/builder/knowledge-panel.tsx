@@ -3,8 +3,9 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { errorText, fetchJson } from "@/lib/fetch-json";
 import { FileText, Plus, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 interface Doc {
   id: string;
@@ -30,19 +31,35 @@ export function KnowledgePanel({
   const [msg, setMsg] = useState<string | null>(null);
   const [denied, setDenied] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const reloadSeqRef = useRef(0);
 
   const reload = useCallback(async () => {
-    const res = await fetch(`/api/agents/${agentId}/knowledge`);
-    if (res.status === 403 || res.status === 404) {
-      setDenied(true);
-      return;
+    const seq = ++reloadSeqRef.current;
+    try {
+      const res = await fetch(`/api/agents/${agentId}/knowledge`);
+      if (res.status === 403 || res.status === 404) {
+        if (seq === reloadSeqRef.current) setDenied(true);
+        return;
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as { docs?: Doc[] };
+      if (seq !== reloadSeqRef.current) return;
+      setDenied(false);
+      setDocs(data.docs ?? []);
+      setMsg(null);
+    } catch (error) {
+      if (seq === reloadSeqRef.current) setMsg(`知识库加载失败:${errorText(error)}`);
     }
-    const d = (await res.json()) as { docs?: Doc[] };
-    setDenied(false);
-    setDocs(d.docs ?? []);
   }, [agentId]);
 
   useEffect(() => {
+    reloadSeqRef.current += 1;
+    setDocs([]);
+    setTitle("");
+    setContent("");
+    setMsg(null);
+    setDenied(false);
     void reload();
   }, [reload]);
 
@@ -51,29 +68,35 @@ export function KnowledgePanel({
     setBusy(true);
     setMsg(null);
     try {
-      const res = await fetch(`/api/agents/${agentId}/knowledge`, {
+      await fetchJson(`/api/agents/${agentId}/knowledge`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: title.trim(), content: content.trim() }),
       });
-      const d = (await res.json()) as { error?: string };
-      if (!res.ok) {
-        setMsg(d.error ?? `HTTP ${res.status}`);
-        return;
-      }
       setTitle("");
       setContent("");
       await reload();
+    } catch (error) {
+      setMsg(`添加失败:${errorText(error)}`);
     } finally {
       setBusy(false);
     }
   }
 
   async function remove(docId: string) {
-    await fetch(`/api/agents/${agentId}/knowledge?docId=${encodeURIComponent(docId)}`, {
-      method: "DELETE",
-    });
-    await reload();
+    if (!window.confirm("确定删除这份知识文档？删除后无法恢复。")) return;
+    setDeletingId(docId);
+    setMsg(null);
+    try {
+      await fetchJson(`/api/agents/${agentId}/knowledge?docId=${encodeURIComponent(docId)}`, {
+        method: "DELETE",
+      });
+      await reload();
+    } catch (error) {
+      setMsg(`删除失败:${errorText(error)}`);
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   if (denied) return null;
@@ -116,10 +139,11 @@ export function KnowledgePanel({
               <Plus className="size-3.5" />
               {busy ? "添加中…" : "添加文档"}
             </Button>
-            {msg && <span className="text-xs text-destructive">{msg}</span>}
           </div>
         </>
       )}
+
+      {msg && <p className="text-xs text-destructive">{msg}</p>}
 
       {docs.length === 0 && <p className="text-xs opacity-40">还没有知识文档</p>}
       {docs.map((d) => (
@@ -135,8 +159,10 @@ export function KnowledgePanel({
               variant="ghost"
               size="icon-sm"
               title="删除"
+              aria-label={`删除知识文档 ${d.title}`}
               className="text-muted-foreground hover:text-destructive"
-              onClick={() => remove(d.id)}
+              disabled={deletingId === d.id}
+              onClick={() => void remove(d.id)}
             >
               <Trash2 />
             </Button>

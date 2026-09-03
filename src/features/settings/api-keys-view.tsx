@@ -1,6 +1,7 @@
 "use client";
 
 import type { AgentSummary } from "@/features/workbench/types";
+import { Copy } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -28,7 +29,8 @@ export function ApiKeysView() {
   const [keyName, setKeyName] = useState("");
   const [keyAgent, setKeyAgent] = useState("");
   /** 新签发的明文,只在本次会话内显示一次 */
-  const [issued, setIssued] = useState<string | null>(null);
+  const [issued, setIssued] = useState<{ id: string; plaintext: string } | null>(null);
+  const [busy, setBusy] = useState<"issue" | string | null>(null);
 
   /**
    * 两块数据各拉各的。
@@ -55,28 +57,55 @@ export function ApiKeysView() {
   }, [reload]);
 
   async function issueKey() {
-    const res = await fetch("/api/keys", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: keyName.trim() || undefined,
-        agentId: keyAgent || undefined,
-      }),
-    });
-    const data = (await res.json()) as { plaintext?: string; error?: string };
-    if (data.plaintext) {
-      setIssued(data.plaintext);
+    if (busy) return;
+    setBusy("issue");
+    try {
+      const data = await fetchJson<{
+        plaintext?: string;
+        key?: { id?: string };
+      }>("/api/keys", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: keyName.trim() || undefined,
+          agentId: keyAgent || undefined,
+        }),
+      });
+      if (!data.plaintext || !data.key?.id) throw new Error("接口没有返回新密钥");
+      setIssued({ id: data.key.id, plaintext: data.plaintext });
       setKeyName("");
       await reload();
-    } else {
-      setIssued(null);
-      toast.error(`签发失败:${data.error}`);
+    } catch (error) {
+      toast.error(`签发失败:${errorText(error)}`);
+    } finally {
+      setBusy(null);
     }
   }
 
   async function revokeKey(id: string) {
-    await fetch(`/api/keys?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-    await reload();
+    if (!window.confirm("确定吊销这把 API Key？正在使用它的系统会立即调用失败。")) return;
+    if (busy) return;
+    setBusy(id);
+    try {
+      await fetchJson(`/api/keys?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      await reload();
+      if (issued?.id === id) setIssued(null);
+      toast.success("API Key 已吊销");
+    } catch (error) {
+      toast.error(`吊销失败:${errorText(error)}`);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function copyIssuedKey() {
+    if (!issued) return;
+    try {
+      await navigator.clipboard.writeText(issued.plaintext);
+      toast.success("API Key 已复制");
+    } catch (error) {
+      toast.error(`复制失败:${errorText(error)}`);
+    }
   }
 
   return (
@@ -103,23 +132,39 @@ export function ApiKeysView() {
                 </option>
               ))}
             </Select>
-            <Button size="sm" className="shrink-0" onClick={issueKey}>
-              签发
+            <Button
+              size="sm"
+              className="shrink-0"
+              onClick={() => void issueKey()}
+              disabled={busy !== null}
+            >
+              {busy === "issue" ? "签发中…" : "签发"}
             </Button>
           </div>
 
           {issued && (
             <div className="space-y-1 rounded-md border border-[var(--warning)]/40 bg-[var(--warning)]/10 p-3">
               <p className="font-medium text-xs">请立刻保存 —— 关闭后无法再次显示:</p>
-              <code className="block break-all font-mono text-xs">{issued}</code>
-              <Button
-                variant="link"
-                size="sm"
-                className="h-auto p-0"
-                onClick={() => setIssued(null)}
-              >
-                我已保存
-              </Button>
+              <code className="block break-all font-mono text-xs">{issued.plaintext}</code>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7"
+                  onClick={() => void copyIssuedKey()}
+                >
+                  <Copy className="size-3.5" />
+                  复制
+                </Button>
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="h-auto p-0"
+                  onClick={() => setIssued(null)}
+                >
+                  我已保存
+                </Button>
+              </div>
             </div>
           )}
 
@@ -151,7 +196,8 @@ export function ApiKeysView() {
                   variant="link"
                   size="sm"
                   className="h-8 shrink-0 px-2 text-destructive"
-                  onClick={() => revokeKey(k.id)}
+                  disabled={busy !== null}
+                  onClick={() => void revokeKey(k.id)}
                 >
                   吊销
                 </Button>

@@ -1,7 +1,7 @@
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { canRenderInline } from "@/lib/modules/artifacts/domain/mime";
-import { PathEscapeError } from "@/lib/modules/artifacts/domain/safe-path";
+import { PathEscapeError, resolveInWorkspace } from "@/lib/modules/artifacts/domain/safe-path";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,15 +40,30 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (files.length === 0) return Response.json({ error: "files are required" }, { status: 400 });
   if (files.length > 20) return Response.json({ error: "too many files" }, { status: 413 });
 
-  const uploaded: string[] = [];
+  const names = new Set<string>();
   try {
+    // 先把整批可预见错误验完，再开始写。否则第 1 个文件已经落盘，
+    // 第 2 个才因过大、重名或越界失败，用户重试时又会撞上残留文件。
     for (const file of files) {
       if (file.size > 10 * 1024 * 1024) {
         return Response.json({ error: `file too large: ${file.name}` }, { status: 413 });
       }
-      await storage.write(session.workspaceDir, file.name, Buffer.from(await file.arrayBuffer()));
+      if (names.has(file.name)) {
+        return Response.json({ error: `duplicate file name: ${file.name}` }, { status: 409 });
+      }
+      names.add(file.name);
+      resolveInWorkspace(session.workspaceDir, file.name);
+    }
+
+    const prepared = await Promise.all(
+      files.map(async (file) => ({ file, bytes: Buffer.from(await file.arrayBuffer()) })),
+    );
+    const uploaded: string[] = [];
+    for (const { file, bytes } of prepared) {
+      await storage.write(session.workspaceDir, file.name, bytes);
       uploaded.push(file.name);
     }
+    return Response.json({ files: uploaded }, { headers: NO_STORE_HEADERS });
   } catch (err) {
     const code = (err as { code?: string }).code;
     if (code === "EEXIST") {
@@ -62,8 +77,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       { status: 500 },
     );
   }
-
-  return Response.json({ files: uploaded }, { headers: NO_STORE_HEADERS });
 }
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {

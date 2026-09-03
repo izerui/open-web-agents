@@ -94,6 +94,25 @@ export async function loadSessionHistory(
       }
     }
 
+    // cancelled 是数据库权威终态，SDK transcript 可能在取消信号生效前又写入 failed result。
+    // 回放时必须移除那条过时结局，统一以数据库状态展示取消。
+    if (!active && row.status === "cancelled") {
+      events = events.filter((event) => event.kind !== "result");
+      events.push({ kind: "result", status: "cancelled", summary: "运行已取消", runId: row.id });
+    } else if (
+      !active &&
+      row.status === "failed" &&
+      !events.some((event) => event.kind === "result")
+    ) {
+      // 引擎启动前失败可能根本没有 transcript，仍要给历史一条明确终态。
+      events.push({
+        kind: "result",
+        status: "failed",
+        summary: "运行失败，未生成可回放的过程",
+        runId: row.id,
+      });
+    }
+
     turns.push({
       prompt: row.prompt,
       events,

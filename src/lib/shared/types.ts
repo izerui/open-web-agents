@@ -185,7 +185,7 @@ export type AgentEvent =
    */
   | {
       kind: "result";
-      status: "success" | "failed" | "unknown";
+      status: "success" | "failed" | "cancelled" | "unknown";
       structured?: unknown;
       summary?: string;
       /**

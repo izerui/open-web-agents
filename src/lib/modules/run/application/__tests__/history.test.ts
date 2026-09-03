@@ -116,9 +116,9 @@ describe("loadSessionHistory", () => {
     expect(h?.activeRunId).toBeUndefined();
   });
 
-  it("运行没有 sdkSessionId 时给出空过程,不去读盘", async () => {
-    // 引擎还没起来就失败的运行没有 transcript。这一轮该显示提示词 + 空过程,
-    // 而不是让整个历史崩掉。
+  it("运行没有 sdkSessionId 时仍给出失败终态,不去读盘", async () => {
+    // 引擎还没起来就失败的运行没有 transcript。历史仍要说清楚失败了，
+    // 不能只显示提示词，让用户误以为回答丢了。
     const reads: string[] = [];
     const h = await loadSessionHistory(
       deps({
@@ -129,7 +129,47 @@ describe("loadSessionHistory", () => {
     );
     expect(reads).toEqual([]);
     expect(h?.turns[0]).toMatchObject({ prompt: "起不来", running: false });
-    expect(h?.turns[0]?.events).toEqual([]);
+    expect(h?.turns[0]?.events).toEqual([
+      {
+        kind: "result",
+        status: "failed",
+        summary: "运行失败，未生成可回放的过程",
+        runId: "r1",
+      },
+    ]);
+  });
+
+  it("取消的运行在历史里保留明确终态", async () => {
+    const h = await loadSessionHistory(
+      deps({
+        runs: [{ id: "r1", status: "cancelled", prompt: "停下来", createdAt: 1 }],
+      }),
+      "s1",
+    );
+    expect(h?.turns[0]?.events).toEqual([
+      { kind: "result", status: "cancelled", summary: "运行已取消", runId: "r1" },
+    ]);
+  });
+
+  it("数据库已取消时覆盖 transcript 里稍后写入的失败结局", async () => {
+    const h = await loadSessionHistory(
+      deps({
+        runs: [
+          { id: "r1", status: "cancelled", prompt: "停下来", sdkSessionId: "sdk1", createdAt: 1 },
+        ],
+        byTranscript: {
+          sdk1: [
+            textEvent("已开始"),
+            { kind: "result", status: "failed", summary: "aborted", runId: "r1" },
+          ],
+        },
+      }),
+      "s1",
+    );
+    expect(h?.turns[0]?.events).toEqual([
+      textEvent("已开始"),
+      { kind: "result", status: "cancelled", summary: "运行已取消", runId: "r1" },
+    ]);
   });
 
   it("带上分支来源,界面才画得出分叉标记", async () => {

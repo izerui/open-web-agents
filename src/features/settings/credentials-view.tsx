@@ -7,6 +7,7 @@ import { SpaceShell } from "@/components/space-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { errorText, fetchJson } from "@/lib/fetch-json";
 import { refreshMe, useMe } from "@/lib/use-me";
 
 /** 我的模型凭证:base URL 与自带 API Key。 */
@@ -33,30 +34,39 @@ export function CredentialsView() {
       const body: Record<string, string> = { baseUrl };
       // 只有真填了才提交 key,避免空提交把已存的 key 清掉
       if (apiKey.trim()) body.apiKey = apiKey.trim();
-      const res = await fetch("/api/me/credentials", {
+      await fetchJson("/api/me/credentials", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = (await res.json()) as { error?: string };
-      if (res.ok) toast.success("已保存");
-      else toast.error(`保存失败:${data.error}`);
+      toast.success("已保存");
       setApiKey("");
       // 掩码变了,连侧栏用户菜单一起刷新
       await refreshMe();
+    } catch (error) {
+      toast.error(`保存失败:${errorText(error)}`);
     } finally {
       setSaving(false);
     }
   }
 
   async function clearKey() {
-    await fetch("/api/me/credentials", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ apiKey: "" }),
-    });
-    toast.success("已清除自带密钥,将回落到平台默认");
-    await refreshMe();
+    if (!window.confirm("确定清除自带 API Key？后续运行将改用平台默认凭证。")) return;
+    if (saving) return;
+    setSaving(true);
+    try {
+      await fetchJson("/api/me/credentials", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: "" }),
+      });
+      toast.success("已清除自带密钥,将回落到平台默认");
+      await refreshMe();
+    } catch (error) {
+      toast.error(`清除失败:${errorText(error)}`);
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -106,7 +116,7 @@ export function CredentialsView() {
               {saving ? "保存中…" : "保存"}
             </Button>
             {me?.user?.anthropicKeyMask && (
-              <Button variant="link" size="sm" onClick={clearKey}>
+              <Button variant="link" size="sm" onClick={() => void clearKey()} disabled={saving}>
                 清除自带密钥
               </Button>
             )}

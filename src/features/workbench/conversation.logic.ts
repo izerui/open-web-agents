@@ -12,9 +12,13 @@ export interface ToolCall {
 export type Rendered = ToolCall | { kind: "event"; event: AgentEvent };
 
 export type ProcessBlock =
-  | { kind: "tools"; calls: ToolCall[] }
+  | {
+      kind: "activity";
+      items: Array<
+        { kind: "thinking"; text: string; subagent?: string } | { kind: "tool"; call: ToolCall }
+      >;
+    }
   | { kind: "text"; text: string }
-  | { kind: "thinking"; text: string; subagent?: string }
   | { kind: "status"; label: string; state?: string }
   | { kind: "tool-result"; text: string; isError: boolean };
 
@@ -94,23 +98,24 @@ function shouldDisplayStatus(label: string, state?: string): boolean {
 
 export function processBlocks(items: Rendered[]): ProcessBlock[] {
   const blocks: ProcessBlock[] = [];
-  let tools: ToolCall[] = [];
-  const flushTools = () => {
-    if (tools.length === 0) return;
-    blocks.push({ kind: "tools", calls: tools });
-    tools = [];
+  const activityItems: Array<
+    { kind: "thinking"; text: string; subagent?: string } | { kind: "tool"; call: ToolCall }
+  > = [];
+  const flushActivity = () => {
+    if (activityItems.length === 0) return;
+    blocks.push({ kind: "activity", items: activityItems.splice(0) });
   };
 
   for (const item of items) {
     if (item.kind === "tool") {
-      tools.push(item);
+      activityItems.push({ kind: "tool", call: item });
       continue;
     }
-    flushTools();
     if (item.event.kind === "text") {
+      flushActivity();
       blocks.push({ kind: "text", text: item.event.text });
     } else if (item.event.kind === "thinking") {
-      blocks.push({
+      activityItems.push({
         kind: "thinking",
         text: item.event.text,
         subagent: item.event.subagent,
@@ -119,8 +124,10 @@ export function processBlocks(items: Rendered[]): ProcessBlock[] {
       item.event.kind === "status" &&
       shouldDisplayStatus(item.event.label, item.event.state)
     ) {
+      flushActivity();
       blocks.push({ kind: "status", label: item.event.label, state: item.event.state });
     } else if (item.event.kind === "tool_result") {
+      flushActivity();
       blocks.push({
         kind: "tool-result",
         text: item.event.text,
@@ -128,7 +135,7 @@ export function processBlocks(items: Rendered[]): ProcessBlock[] {
       });
     }
   }
-  flushTools();
+  flushActivity();
   return blocks;
 }
 

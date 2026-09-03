@@ -38,46 +38,46 @@ const PAGES = [
  */
 export function CommandPalette({
   open,
-  onOpenChange,
+  onOpenChangeAction,
   sessions,
   agents,
   currentAgentId,
   running,
-  onOpenSession,
-  onNewSession,
-  onPickAgent,
+  onOpenSessionAction,
+  onNewSessionAction,
+  onPickAgentAction,
 }: {
   open: boolean;
-  onOpenChange: (open: boolean) => void;
+  onOpenChangeAction: (open: boolean) => void;
   sessions: SessionSummary[];
   agents: AgentSummary[];
   currentAgentId: string;
   running: boolean;
-  onOpenSession: (id: string) => void;
-  onNewSession: () => void;
-  onPickAgent: (id: string) => void;
+  onOpenSessionAction: (id: string) => void;
+  onNewSessionAction: () => void;
+  onPickAgentAction: (id: string) => void;
 }) {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        onOpenChange(!open);
+        onOpenChangeAction(!open);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open, onOpenChange]);
+  }, [open, onOpenChangeAction]);
 
   /** 选中即关闭 —— 面板是过路的,不该在动作之后还挡着结果。 */
   const run = (fn: () => void) => {
     fn();
-    onOpenChange(false);
+    onOpenChangeAction(false);
   };
 
   return (
     <CommandDialog
       open={open}
-      onOpenChange={onOpenChange}
+      onOpenChange={onOpenChangeAction}
       title="命令面板"
       description="搜索会话、切换智能体或跳转页面"
     >
@@ -86,7 +86,11 @@ export function CommandPalette({
         <CommandEmpty>没有匹配项</CommandEmpty>
 
         <CommandGroup heading="操作">
-          <CommandItem value="新建会话 new session" onSelect={() => run(onNewSession)}>
+          <CommandItem
+            value="新建会话 new session"
+            disabled={running}
+            onSelect={() => run(onNewSessionAction)}
+          >
             <Plus />
             <span>新会话</span>
           </CommandItem>
@@ -100,7 +104,7 @@ export function CommandPalette({
                 <CommandItem
                   key={s.id}
                   value={`${s.title ?? ""} ${s.id}`}
-                  onSelect={() => run(() => onOpenSession(s.id))}
+                  onSelect={() => run(() => onOpenSessionAction(s.id))}
                 >
                   <MessageSquare />
                   <span className="flex-1 truncate">{s.title || s.id.slice(0, 12)}</span>
@@ -125,7 +129,7 @@ export function CommandPalette({
                 <CommandItem
                   key={a.id}
                   value={`智能体 ${a.name} ${a.id}`}
-                  onSelect={() => run(() => onPickAgent(a.id))}
+                  onSelect={() => run(() => onPickAgentAction(a.id))}
                 >
                   {/* 智能体不能跟"前往构建器"共用扳手图标,一列看下来分不清哪行是什么 */}
                   <Bot className={cn(a.id === currentAgentId && "text-brand")} />

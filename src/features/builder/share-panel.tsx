@@ -1,10 +1,11 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { errorText, fetchJson } from "@/lib/fetch-json";
 import { PUBLIC_PRINCIPAL } from "@/lib/modules/access/domain/grants";
 import { isAdminView, useMe } from "@/lib/use-me";
 import { Globe, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 interface Grant {
   id: string;
@@ -31,52 +32,74 @@ export function SharePanel({ agentId }: { agentId: string }) {
   const [grants, setGrants] = useState<Grant[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const [denied, setDenied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const reloadSeqRef = useRef(0);
 
   const reload = useCallback(async () => {
+    const seq = ++reloadSeqRef.current;
     const res = await fetch(`/api/agents/${agentId}/share`);
     // 403 是"没权限管这个智能体"，属于正常状态,单独渲染而不是当错误
     if (res.status === 403) {
-      setDenied(true);
+      if (seq === reloadSeqRef.current) setDenied(true);
       return;
     }
     if (!res.ok) {
-      setMsg(`发布状态加载失败:HTTP ${res.status}`);
+      if (seq === reloadSeqRef.current) setMsg(`发布状态加载失败:HTTP ${res.status}`);
       return;
     }
-    const d = (await res.json()) as { grants?: Grant[] };
+    const data = (await res.json()) as { grants?: Grant[] };
+    if (seq !== reloadSeqRef.current) return;
     setDenied(false);
-    setGrants(d.grants ?? []);
+    setGrants(data.grants ?? []);
   }, [agentId]);
 
   const isAdmin = isAdminView(me);
 
   useEffect(() => {
-    if (isAdmin) void reload();
+    reloadSeqRef.current += 1;
+    setGrants([]);
+    setMsg(null);
+    setDenied(false);
+    if (!isAdmin) return;
+    void reload().catch((error: unknown) => setMsg(`发布状态加载失败:${errorText(error)}`));
   }, [reload, isAdmin]);
 
   // 发布是平台运营动作,企业账号看不到这一块
   if (!isAdmin) return null;
 
   async function publish() {
+    if (busy) return;
+    setBusy(true);
     setMsg(null);
-    const res = await fetch(`/api/agents/${agentId}/share`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ target: "public", permission: "read" }),
-    });
-    const d = (await res.json()) as { error?: string };
-    if (!res.ok) {
-      setMsg(d.error ?? `HTTP ${res.status}`);
-      return;
+    try {
+      await fetchJson(`/api/agents/${agentId}/share`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target: "public", permission: "read" }),
+      });
+      await reload();
+    } catch (error) {
+      setMsg(`公开失败:${errorText(error)}`);
+    } finally {
+      setBusy(false);
     }
-    await reload();
   }
 
   async function revoke(grantId: string) {
-    await fetch(`/api/agents/${agentId}/share?grantId=${encodeURIComponent(grantId)}`, {
-      method: "DELETE",
-    });
-    await reload();
+    if (!window.confirm("确定撤销这条授权？现有使用方将立即失去访问权限。")) return;
+    if (busy) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      await fetchJson(`/api/agents/${agentId}/share?grantId=${encodeURIComponent(grantId)}`, {
+        method: "DELETE",
+      });
+      await reload();
+    } catch (error) {
+      setMsg(`撤销失败:${errorText(error)}`);
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (denied) {
@@ -109,13 +132,21 @@ export function SharePanel({ agentId }: { agentId: string }) {
             variant="outline"
             size="sm"
             className="shrink-0"
-            onClick={() => revoke(publicGrant.id)}
+            disabled={busy}
+            onClick={() => void revoke(publicGrant.id)}
           >
             <Globe className="size-3.5" />
             取消公开
           </Button>
         ) : (
-          <Button type="button" variant="ghost" size="sm" className="shrink-0" onClick={publish}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="shrink-0"
+            disabled={busy}
+            onClick={() => void publish()}
+          >
             <Globe className="size-3.5" />
             公开给所有账号
           </Button>
@@ -143,8 +174,10 @@ export function SharePanel({ agentId }: { agentId: string }) {
                 variant="ghost"
                 size="icon-sm"
                 title="撤销"
+                aria-label={`撤销对 ${g.principalId} 的授权`}
                 className="text-muted-foreground hover:text-destructive"
-                onClick={() => revoke(g.id)}
+                disabled={busy}
+                onClick={() => void revoke(g.id)}
               >
                 <Trash2 />
               </Button>
