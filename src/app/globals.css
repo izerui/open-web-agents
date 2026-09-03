@@ -259,32 +259,51 @@
 /* ── t3code 风格：活动指示器扫描光效 ── */
 @keyframes live-activity-scan {
   0% {
-    transform: translateX(-100%);
+    background-position: 180% 0;
   }
   100% {
-    transform: translateX(200%);
+    background-position: -80% 0;
   }
 }
-.live-activity-focus {
-  position: relative;
-  display: block;
-  overflow: hidden;
-  isolation: isolate;
+
+@keyframes activity-status-dot-toggle {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+  50% {
+    background-color: var(--brand);
+  }
 }
-.live-activity-focus::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  width: 4.5rem;
-  background: linear-gradient(90deg, transparent, oklch(1 0 0 / 13%), transparent);
-  animation: live-activity-scan 1.8s linear infinite;
-  pointer-events: none;
+
+.activity-status-dot-running {
+  animation: activity-status-dot-toggle 1.2s ease-in-out infinite;
+}
+
+.live-activity-focus {
+  display: block;
+  background-image: linear-gradient(
+    90deg,
+    currentColor 0%,
+    currentColor 38%,
+    color-mix(in oklch, currentColor 45%, white) 50%,
+    currentColor 62%,
+    currentColor 100%
+  );
+  background-size: 280% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: live-activity-scan 3.2s linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .live-activity-focus::after {
+  .activity-status-dot-running {
     animation: none;
-    display: none;
+  }
+  .live-activity-focus {
+    animation: none;
+    background-position: 50% 0;
   }
 }
 

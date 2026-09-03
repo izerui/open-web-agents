@@ -416,6 +416,13 @@ const ToolCallRow = memo(function ToolCallRow({
   const resultSummary = isModeTool ? summarizeThinking(call.result?.text ?? "") : "";
   const CallIcon = toolIcon(call.tool);
   const hasDetails = inputText != null || call.result?.text != null || !call.result;
+  const statusDotClass = call.result?.isError
+    ? "bg-destructive/70"
+    : !call.result && running
+      ? "border border-brand/70 bg-transparent activity-status-dot-running"
+      : call.result
+        ? "bg-muted-foreground/50"
+        : "border border-muted-foreground/40 bg-transparent";
 
   return (
     <div className="space-y-1">
@@ -430,12 +437,8 @@ const ToolCallRow = memo(function ToolCallRow({
         }}
         aria-expanded={hasDetails ? expanded : undefined}
       >
-        <span className="flex size-6 shrink-0 items-center justify-center text-muted-foreground/60">
-          {hasDetails && expanded ? (
-            <ChevronDown className="size-3.5 stroke-[1.8]" />
-          ) : hasDetails ? (
-            <ChevronRight className="size-3.5 stroke-[1.8]" />
-          ) : null}
+        <span className="flex size-6 shrink-0 items-center justify-center">
+          <span aria-hidden className={cn("size-1 rounded-full opacity-80", statusDotClass)} />
         </span>
         <CallIcon className="size-4 shrink-0 stroke-[1.8] text-muted-foreground/60" />
         <span
@@ -449,12 +452,18 @@ const ToolCallRow = memo(function ToolCallRow({
             className={cn(
               "font-medium",
               call.result?.isError ? "text-destructive" : toolNameClass(call.tool),
+              running && !call.result && "live-activity-focus",
             )}
           >
             {isModeTool ? modeToolLabel(call.tool) : callLabel}
           </span>
           {(inputSummary || resultSummary) && (
-            <code className="ml-1 font-mono text-xs text-muted-foreground/80">
+            <code
+              className={cn(
+                "ml-1 font-mono text-xs text-muted-foreground/80",
+                running && !call.result && "live-activity-focus",
+              )}
+            >
               ({inputSummary || resultSummary})
             </code>
           )}
@@ -506,12 +515,16 @@ const ThinkingRow = memo(function ThinkingRow({
         onClick={() => setExpanded((current) => !current)}
         aria-expanded={expanded}
       >
-        <span className="flex size-6 shrink-0 items-center justify-center text-muted-foreground/60">
-          {expanded ? (
-            <ChevronDown className="size-3.5 stroke-[1.8]" />
-          ) : (
-            <ChevronRight className="size-3.5 stroke-[1.8]" />
-          )}
+        <span className="flex size-6 shrink-0 items-center justify-center">
+          <span
+            aria-hidden
+            className={cn(
+              "size-1 rounded-full opacity-80",
+              running
+                ? "border border-brand/70 bg-transparent activity-status-dot-running"
+                : "bg-muted-foreground/50",
+            )}
+          />
         </span>
         <Brain className="size-4 shrink-0 stroke-[1.8] text-muted-foreground/60" />
         <span className={cn("min-w-0 flex-1 truncate", running && "live-activity-focus")}>
@@ -549,6 +562,11 @@ const ActivitySection = memo(function ActivitySection({
   const latestItem = items.at(-1);
   const latestThinking = latestItem?.kind === "thinking" ? latestItem.text : "";
   const latestThinkingSummary = summarizeThinking(latestThinking);
+  const live =
+    running &&
+    (latestItem?.kind === "thinking" ||
+      (latestItem?.kind === "tool" && !latestItem.call.result) ||
+      pendingCall !== undefined);
   const runningLabel =
     latestItem?.kind === "thinking"
       ? latestThinkingSummary
@@ -595,7 +613,7 @@ const ActivitySection = memo(function ActivitySection({
           )}
         </span>
         <SummaryIcon className="size-4 shrink-0 stroke-[1.8] text-muted-foreground/60" />
-        <span className={cn("min-w-0 flex-1 truncate", running && "live-activity-focus")}>
+        <span className={cn("min-w-0 flex-1 truncate", live && "live-activity-focus")}>
           {summary}
         </span>
       </button>
@@ -607,7 +625,7 @@ const ActivitySection = memo(function ActivitySection({
               return (
                 // biome-ignore lint/suspicious/noArrayIndexKey: activity items are append-only during streaming
                 <div key={`thinking-${index}`}>
-                  <ThinkingRow text={item.text} running={running} />
+                  <ThinkingRow text={item.text} running={live && item === latestItem} />
                 </div>
               );
             }
@@ -615,7 +633,7 @@ const ActivitySection = memo(function ActivitySection({
             return (
               // biome-ignore lint/suspicious/noArrayIndexKey: activity items are append-only during streaming
               <div key={`tool-${index}`} className="space-y-1">
-                <ToolCallRow call={item.call} running={running && item.call === pendingCall} />
+                <ToolCallRow call={item.call} running={live && item.call === pendingCall} />
               </div>
             );
           })}
@@ -851,8 +869,16 @@ const TurnView = memo(function TurnView({
         return (
           // biome-ignore lint/suspicious/noArrayIndexKey: process blocks append in event order
           <div key={`text-${blockIndex}`} className="group/assistant pb-4">
-            <div className="relative min-w-0 px-1 py-0.5">
-              <MessageResponse isAnimating={turn.running}>{block.text}</MessageResponse>
+            <div className="flex min-w-0 items-start gap-1.5 px-0.5">
+              <span className="flex size-6 shrink-0 items-center justify-center">
+                <span
+                  aria-hidden
+                  className="size-1 rounded-full bg-muted-foreground/50 opacity-80"
+                />
+              </span>
+              <div className="relative min-w-0 flex-1 py-0.5">
+                <MessageResponse isAnimating={turn.running}>{block.text}</MessageResponse>
+              </div>
             </div>
           </div>
         );
