@@ -12,6 +12,7 @@ import {
   formatTokens,
   processBlocks,
   sumUsage,
+  totalUsageTokens,
   transitionScrollMode,
 } from "./conversation.logic";
 import type { Turn } from "./types";
@@ -22,6 +23,7 @@ export {
   formatTokens,
   processBlocks,
   sumUsage,
+  totalUsageTokens,
   transitionScrollMode,
 } from "./conversation.logic";
 
@@ -421,7 +423,7 @@ const ToolCallRow = memo(function ToolCallRow({
         type="button"
         className={cn(
           "flex min-h-6 w-full items-center gap-1.5 rounded-md px-0.5 text-left text-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
-          hasDetails && "transition-colors hover:bg-accent/40",
+          hasDetails && "cursor-pointer transition-colors hover:bg-accent/40",
         )}
         onClick={() => {
           if (hasDetails) setExpanded((current) => !current);
@@ -502,7 +504,7 @@ const ThinkingRow = memo(function ThinkingRow({
     <div className="space-y-1">
       <button
         type="button"
-        className="flex min-h-6 w-full items-center gap-1.5 rounded-md px-0.5 text-left text-sm text-muted-foreground transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+        className="flex min-h-6 w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 text-left text-sm text-muted-foreground transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
         onClick={() => setExpanded((current) => !current)}
         aria-expanded={expanded}
       >
@@ -568,7 +570,7 @@ const ActivitySection = memo(function ActivitySection({
     <div className="pb-1.5">
       <button
         type="button"
-        className="group/activity flex min-h-9 w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-1 text-left text-sm leading-relaxed transition-colors duration-150 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+        className="group/activity flex min-h-6 w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 text-left text-sm transition-colors duration-150 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
         onClick={onToggle}
         aria-expanded={expanded}
       >

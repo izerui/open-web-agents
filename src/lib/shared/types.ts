@@ -173,7 +173,14 @@ export type AgentEvent =
       }[];
     }
   | { kind: "status"; label: string; state?: string }
-  | { kind: "usage"; messageId?: string; input: number; output: number }
+  | {
+      kind: "usage";
+      messageId?: string;
+      input: number;
+      output: number;
+      cacheRead?: number;
+      cacheCreation?: number;
+    }
   /**
    * 终态事件。
    *

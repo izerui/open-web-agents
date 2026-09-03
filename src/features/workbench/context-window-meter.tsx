@@ -88,7 +88,9 @@ export function ContextWindowMeter({
       <PopoverContent side="bottom" align="end" className="w-56 max-w-none p-0">
         <div className="flex flex-col gap-2 p-3">
           <div className="flex items-center justify-between gap-3">
-            <div className="text-xs font-medium text-muted-foreground">上下文窗口</div>
+            <div className="text-xs font-medium text-muted-foreground">
+              {maxTokens !== null ? "上下文窗口" : "当前处理量"}
+            </div>
             {maxTokens !== null && percentageStr ? (
               <div className="text-[11px] tabular-nums text-muted-foreground">
                 {percentageStr} · {formatContextWindowTokens(usedTokens)}/

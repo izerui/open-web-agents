@@ -145,33 +145,62 @@ export function formatTokens(value: number): string {
   return `${(value / 1_000_000).toFixed(2)}M`;
 }
 
-export function sumUsage(events: AgentEvent[]): { input: number; output: number } {
-  const latest = new Map<string, { input: number; output: number }>();
+export interface UsageTotals {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheCreation: number;
+}
+
+function usageTotals(event: Extract<AgentEvent, { kind: "usage" }>): UsageTotals {
+  return {
+    input: event.input,
+    output: event.output,
+    cacheRead: event.cacheRead ?? 0,
+    cacheCreation: event.cacheCreation ?? 0,
+  };
+}
+
+export function sumUsage(events: AgentEvent[]): UsageTotals {
+  const latest = new Map<string, UsageTotals>();
   let anonymousInput = 0;
   let anonymousOutput = 0;
+  let anonymousCacheRead = 0;
+  let anonymousCacheCreation = 0;
   for (const event of events) {
     if (event.kind !== "usage") continue;
-    if (event.messageId) latest.set(event.messageId, { input: event.input, output: event.output });
+    if (event.messageId) latest.set(event.messageId, usageTotals(event));
     else {
       anonymousInput += event.input;
       anonymousOutput += event.output;
+      anonymousCacheRead += event.cacheRead ?? 0;
+      anonymousCacheCreation += event.cacheCreation ?? 0;
     }
   }
   let input = anonymousInput;
   let output = anonymousOutput;
+  let cacheRead = anonymousCacheRead;
+  let cacheCreation = anonymousCacheCreation;
   for (const usage of latest.values()) {
     input += usage.input;
     output += usage.output;
+    cacheRead += usage.cacheRead;
+    cacheCreation += usage.cacheCreation;
   }
-  return { input, output };
+  return { input, output, cacheRead, cacheCreation };
+}
+
+export function totalUsageTokens(usage: UsageTotals): number {
+  return usage.input + usage.output + usage.cacheRead + usage.cacheCreation;
 }
 
 export function contextTokens(turns: Turn[]): number {
   for (let index = turns.length - 1; index >= 0; index--) {
     const turn = turns[index];
     if (!turn) continue;
-    const { input } = sumUsage(turn.events);
-    if (input > 0) return input;
+    const usage = sumUsage(turn.events);
+    const total = totalUsageTokens(usage);
+    if (total > 0) return total;
   }
   return 0;
 }

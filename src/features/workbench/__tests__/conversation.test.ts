@@ -159,9 +159,21 @@ describe("sumUsage", () => {
   it("同一 messageId 只取最新一份,避免流式重复上报被双算", () => {
     const events: AgentEvent[] = [
       { kind: "usage", messageId: "m1", input: 100, output: 0 },
-      { kind: "usage", messageId: "m1", input: 100, output: 50 },
+      {
+        kind: "usage",
+        messageId: "m1",
+        input: 100,
+        output: 50,
+        cacheRead: 20,
+        cacheCreation: 10,
+      },
     ];
-    expect(sumUsage(events)).toEqual({ input: 100, output: 50 });
+    expect(sumUsage(events)).toEqual({
+      input: 100,
+      output: 50,
+      cacheRead: 20,
+      cacheCreation: 10,
+    });
   });
 
   it("不同消息相加", () => {
@@ -170,7 +182,7 @@ describe("sumUsage", () => {
         { kind: "usage", messageId: "m1", input: 10, output: 1 },
         { kind: "usage", messageId: "m2", input: 20, output: 2 },
       ]),
-    ).toEqual({ input: 30, output: 3 });
+    ).toEqual({ input: 30, output: 3, cacheRead: 0, cacheCreation: 0 });
   });
 
   it("无 messageId 的用量直接累加", () => {
@@ -179,11 +191,16 @@ describe("sumUsage", () => {
         { kind: "usage", input: 5, output: 1 },
         { kind: "usage", input: 5, output: 1 },
       ]),
-    ).toEqual({ input: 10, output: 2 });
+    ).toEqual({ input: 10, output: 2, cacheRead: 0, cacheCreation: 0 });
   });
 
   it("没有用量事件时为零", () => {
-    expect(sumUsage([{ kind: "text", text: "hi" }])).toEqual({ input: 0, output: 0 });
+    expect(sumUsage([{ kind: "text", text: "hi" }])).toEqual({
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheCreation: 0,
+    });
   });
 });
 

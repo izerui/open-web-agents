@@ -80,7 +80,14 @@ describe("normalizeSdkMessage / assistant", () => {
       }),
     ).toEqual([
       { kind: "text", text: "x", subagent: undefined },
-      { kind: "usage", messageId: "msg_1", input: 10, output: 5 },
+      {
+        kind: "usage",
+        messageId: "msg_1",
+        input: 10,
+        output: 5,
+        cacheRead: 0,
+        cacheCreation: 0,
+      },
     ]);
   });
 

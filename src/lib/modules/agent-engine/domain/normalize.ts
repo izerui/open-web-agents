@@ -212,13 +212,22 @@ export function normalizeSdkMessage(
     // 该条 assistant 消息的 token 用量,带 messageId 供前端按消息去重:
     // 流式下同一条消息(id 相同)会来多份 —— 装配态陆续来、最终态才带完整 output。
     // 前端按 messageId 保留最新一份再求和,input 不双算。
-    const usage = message?.usage as { input_tokens?: number; output_tokens?: number } | undefined;
+    const usage = message?.usage as
+      | {
+          input_tokens?: number;
+          output_tokens?: number;
+          cache_read_input_tokens?: number;
+          cache_creation_input_tokens?: number;
+        }
+      | undefined;
     if (usage) {
       out.push({
         kind: "usage",
         messageId: typeof message?.id === "string" ? message.id : undefined,
         input: usage.input_tokens ?? 0,
         output: usage.output_tokens ?? 0,
+        cacheRead: usage.cache_read_input_tokens ?? 0,
+        cacheCreation: usage.cache_creation_input_tokens ?? 0,
       });
     }
     return out;

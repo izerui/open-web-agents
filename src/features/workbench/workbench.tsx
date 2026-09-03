@@ -24,7 +24,7 @@ import { toast } from "sonner";
 import { ApprovalBar } from "./approval-bar";
 import { CommandPalette } from "./command-palette";
 import { ContextWindowMeter } from "./context-window-meter";
-import { ChatThread, contextTokens, sumUsage } from "./conversation";
+import { ChatThread, contextTokens, sumUsage, totalUsageTokens } from "./conversation";
 import { createEventBatcher } from "./event-batcher";
 import { FilePanel } from "./file-panel";
 import { activityOf, groupSessions, relativeTime } from "./session-groups";
@@ -764,8 +764,8 @@ export function Workbench() {
   const contextUsed = useMemo(() => contextTokens(turns), [turns]);
   const totalProcessed = useMemo(() => {
     const all = turns.flatMap((t) => t.events);
-    const { input, output } = sumUsage(all);
-    return input + output > 0 ? input + output : null;
+    const total = totalUsageTokens(sumUsage(all));
+    return total > 0 ? total : null;
   }, [turns]);
 
   const dropHandlers = useMemo(
