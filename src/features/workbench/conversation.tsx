@@ -112,6 +112,9 @@ function toolNameClass(tool: string): string {
   if (tool === "Bash") return "text-amber-500";
   if (["Write", "Edit", "NotebookEdit"].includes(tool)) return "text-emerald-500";
   if (["Read", "Glob", "Grep"].includes(tool)) return "text-sky-500";
+  if (["Agent", "Task"].includes(tool)) return "text-cyan-500";
+  if (["EnterPlanMode", "ExitPlanMode"].includes(tool)) return "text-violet-500";
+  if (tool === "AskUserQuestion") return "text-yellow-500";
   return "text-muted-foreground";
 }
 
@@ -426,12 +429,20 @@ const ToolCallRow = memo(function ToolCallRow({
             call.result?.isError ? "text-destructive/80" : "text-muted-foreground",
           )}
         >
-          <span className={cn("font-medium", toolNameClass(call.tool))}>{callLabel}</span>
+          <span
+            className={cn(
+              "font-medium",
+              call.result?.isError ? "text-destructive" : toolNameClass(call.tool),
+            )}
+          >
+            {callLabel}
+          </span>
           {inputSummary && (
             <code className="ml-1 font-mono text-xs text-muted-foreground/80">
               ({inputSummary})
             </code>
           )}
+          {call.result?.isError && <span className="ml-1 text-xs text-destructive">failed</span>}
         </span>
         {running && !call.result && (
           <span className="shrink-0 text-xs text-muted-foreground/60">running</span>
@@ -521,13 +532,16 @@ const ActivitySection = memo(function ActivitySection({
     (item): item is Extract<(typeof items)[number], { kind: "tool" }> => item.kind === "tool",
   );
   const pendingCall = calls.find((item) => !item.call.result)?.call;
-  const failed = calls.some((item) => item.call.result?.isError);
+  const failedCount = calls.filter((item) => item.call.result?.isError).length;
+  const failed = failedCount > 0;
   const summary = pendingCall
     ? `Running ${pendingCall.tool}`
     : calls.length > 0
       ? calls.length === 1
-        ? `Ran ${calls[0]?.call.tool ?? "tool"}`
-        : `Ran ${calls.length} tools · ${toolGroupSummary(calls.map((item) => item.call))}`
+        ? `Ran ${calls[0]?.call.tool ?? "tool"}${failedCount > 0 ? " · failed" : ""}`
+        : `Ran ${calls.length} tools · ${toolGroupSummary(calls.map((item) => item.call))}${
+            failedCount > 0 ? ` · ${failedCount} failed` : ""
+          }`
       : "Thinking";
   const SummaryIcon = pendingCall
     ? toolIcon(pendingCall.tool)
