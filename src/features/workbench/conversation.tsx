@@ -90,6 +90,7 @@ function toolGroupSummary(calls: ToolCall[]): string {
 }
 
 function summarizeToolInput(tool: string, input: unknown): string {
+  if (["EnterPlanMode", "ExitPlanMode"].includes(tool)) return "";
   if (!input || typeof input !== "object") return "";
   const values = input as Record<string, unknown>;
   const pick = (key: string) => (typeof values[key] === "string" ? values[key] : "");
@@ -116,6 +117,10 @@ function toolNameClass(tool: string): string {
   if (["EnterPlanMode", "ExitPlanMode"].includes(tool)) return "text-violet-500";
   if (tool === "AskUserQuestion") return "text-yellow-500";
   return "text-muted-foreground";
+}
+
+function modeToolLabel(tool: string): string {
+  return tool;
 }
 
 // ─────────────────────────── t3code 风格子组件 ───────────────────────────
@@ -402,25 +407,33 @@ const ToolCallRow = memo(function ToolCallRow({
   running: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const isModeTool = ["EnterPlanMode", "ExitPlanMode"].includes(call.tool);
   const callLabel = call.subagent ? `[${call.subagent}] ${call.tool}` : call.tool;
-  const inputText = call.input != null ? JSON.stringify(call.input, null, 2) : null;
+  const inputText = !isModeTool && call.input != null ? JSON.stringify(call.input, null, 2) : null;
   const inputSummary = summarizeToolInput(call.tool, call.input);
+  const resultSummary = isModeTool ? summarizeThinking(call.result?.text ?? "") : "";
   const CallIcon = toolIcon(call.tool);
+  const hasDetails = inputText != null || call.result?.text != null || !call.result;
 
   return (
     <div className="space-y-1">
       <button
         type="button"
-        className="flex min-h-6 w-full items-center gap-1.5 rounded-md px-0.5 text-left text-sm text-muted-foreground transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-        onClick={() => setExpanded((current) => !current)}
-        aria-expanded={expanded}
+        className={cn(
+          "flex min-h-6 w-full items-center gap-1.5 rounded-md px-0.5 text-left text-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+          hasDetails && "transition-colors hover:bg-accent/40",
+        )}
+        onClick={() => {
+          if (hasDetails) setExpanded((current) => !current);
+        }}
+        aria-expanded={hasDetails ? expanded : undefined}
       >
         <span className="flex size-6 shrink-0 items-center justify-center text-muted-foreground/60">
-          {expanded ? (
+          {hasDetails && expanded ? (
             <ChevronDown className="size-3.5 stroke-[1.8]" />
-          ) : (
+          ) : hasDetails ? (
             <ChevronRight className="size-3.5 stroke-[1.8]" />
-          )}
+          ) : null}
         </span>
         <CallIcon className="size-4 shrink-0 stroke-[1.8] text-muted-foreground/60" />
         <span
@@ -435,11 +448,11 @@ const ToolCallRow = memo(function ToolCallRow({
               call.result?.isError ? "text-destructive" : toolNameClass(call.tool),
             )}
           >
-            {callLabel}
+            {isModeTool ? modeToolLabel(call.tool) : callLabel}
           </span>
-          {inputSummary && (
+          {(inputSummary || resultSummary) && (
             <code className="ml-1 font-mono text-xs text-muted-foreground/80">
-              ({inputSummary})
+              ({inputSummary || resultSummary})
             </code>
           )}
           {call.result?.isError && <span className="ml-1 text-xs text-destructive">failed</span>}
