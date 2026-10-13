@@ -35,6 +35,16 @@ export class InMemorySessionRepo implements SessionRepo {
     return next;
   }
 
+  async withWorkspaceLock<T>(
+    id: string,
+    fn: (state: { workspacePurgedAt?: number } | null) => Promise<T>,
+  ): Promise<T> {
+    return this.withLock(id, async () => {
+      const s = this.sessions.get(id);
+      return fn(s ? { workspacePurgedAt: s.workspacePurgedAt } : null);
+    });
+  }
+
   async prepareWorkspace(
     id: string,
     opts: { nowMs: number },
@@ -67,7 +77,7 @@ export class InMemorySessionRepo implements SessionRepo {
       try {
         await op();
       } catch (err) {
-        s.workspacePurgedAt = prev; // 与事务回滚一致
+        s.workspacePurgedAt = prev; // 与事务回滚一致:只回滚标记,不管文件
         throw err;
       }
       return true;

@@ -7,7 +7,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createDb } from "@/lib/db/client";
-import { WorkspaceGc } from "@/lib/modules/artifacts/application/gc";
+import { ORPHANED_DIR, TRASH_DIR, WorkspaceGc } from "@/lib/modules/artifacts/application/gc";
 import { MysqlRunRepo } from "@/lib/modules/run/adapters/mysql-run-repo";
 import { MysqlSessionRepo } from "@/lib/modules/session/adapters/mysql-session-repo";
 import { sql } from "drizzle-orm";
@@ -182,5 +182,166 @@ if (!TEST_DB_URL) {
       expect(await fs.readFile(path.join(dir, "旧产出.md"), "utf8")).toBe("上周的");
       expect(await fs.readFile(path.join(dir, "本轮产出.md"), "utf8")).toBe("刚写的");
     });
+  });
+
+  describe("半完成状态:改名成功但清理没提交", () => {
+    const gcFor = (reclaimWrap?: (op: () => Promise<void>) => () => Promise<void>) =>
+      new WorkspaceGc({
+        workspacesRoot: root,
+        listWorkspaces: () => runs.listSessionActivity(),
+        reclaim: (id, o, op) =>
+          sessions.reclaimWorkspace(id, o, reclaimWrap ? reclaimWrap(op) : op),
+        lockSession: (id, fn) => sessions.withWorkspaceLock(id, (st) => fn(st?.workspacePurgedAt)),
+      });
+    const trash = () => path.join(root, TRASH_DIR);
+
+    it("真实改名成功后再抛错(事务回滚):目录挪回原处,库里无清理时刻,回收站不留,并报错", async () => {
+      const { id, dir } = await oldSession();
+      const report = await gcFor((op) => async () => {
+        await op(); // 真的把目录挪进了回收站
+        expect(await fs.stat(dir).catch(() => null)).toBeNull();
+        throw new Error("commit failed");
+      }).run();
+      expect(report.purged).toBe(0);
+      expect(report.errors.join("\n")).toMatch(/commit failed/);
+      expect(report.errors.join("\n")).toMatch(/挪回原处/);
+      expect(await fs.readFile(path.join(dir, "旧产出.md"), "utf8")).toBe("上周的");
+      expect((await sessions.get(id))?.workspacePurgedAt).toBeUndefined();
+      expect(await fs.readdir(trash()).catch(() => [])).toEqual([]);
+    });
+
+    async function leftover(id: string, at: number) {
+      const bin = path.join(trash(), `purge-${id}-${at}`);
+      await fs.mkdir(bin, { recursive: true });
+      await fs.writeFile(path.join(bin, "旧产出.md"), "上周的");
+      return bin;
+    }
+    // 只核对回收站、不扫描任何会话的 GC
+    const reconcileOnly = () =>
+      new WorkspaceGc({
+        workspacesRoot: root,
+        listWorkspaces: async () => [],
+        lockSession: (id, fn) => sessions.withWorkspaceLock(id, (st) => fn(st?.workspacePurgedAt)),
+      });
+
+    it("进程中途退出留下的批次:未确认提交且原处为空 —— 下一轮挪回原处,而不是清空", async () => {
+      const { id, dir } = await oldSession();
+      await fs.rm(dir, { recursive: true, force: true });
+      await leftover(id, 12345);
+      await reconcileOnly().run();
+      expect(await fs.readFile(path.join(dir, "旧产出.md"), "utf8")).toBe("上周的");
+      expect(await fs.readdir(trash())).toEqual([]);
+    });
+
+    it("确已提交的批次(库里清理时刻与批次时刻一致):删除", async () => {
+      const { id, dir } = await oldSession();
+      await fs.rm(dir, { recursive: true, force: true });
+      await db.execute(sql`UPDATE sessions SET workspace_purged_at = 777 WHERE id = ${id}`);
+      await leftover(id, 777);
+      await reconcileOnly().run();
+      expect(await fs.readdir(trash())).toEqual([]);
+      expect(await fs.stat(dir).catch(() => null)).toBeNull();
+    });
+
+    it("未确认提交、原处已被重建(失败后又有人写了):留存到 .orphaned 并报错,新目录不动", async () => {
+      const { id, dir } = await oldSession();
+      await fs.writeFile(path.join(dir, "新写的.md"), "失败之后写的");
+      await leftover(id, 999);
+      const report = await reconcileOnly().run();
+      expect(report.errors.join("\n")).toMatch(/需人工处理/);
+      expect(await fs.readFile(path.join(dir, "新写的.md"), "utf8")).toBe("失败之后写的");
+      expect(
+        await fs.readFile(path.join(root, ORPHANED_DIR, `purge-${id}-999`, "旧产出.md"), "utf8"),
+      ).toBe("上周的");
+      expect(await fs.readdir(trash())).toEqual([]);
+    });
+
+    it("认不出的批次名:不动,报错", async () => {
+      await fs.mkdir(path.join(trash(), "某个旧格式-1"), { recursive: true });
+      const report = await reconcileOnly().run();
+      expect(report.errors.join("\n")).toMatch(/认不出/);
+      expect(await fs.readdir(trash())).toEqual(["某个旧格式-1"]);
+    });
+  });
+
+  describe("两个 GC 同时跑(Redis 锁失效):B 不能把 A 正在提交的批次当成遗留", () => {
+    const lockSession = <T>(id: string, fn: (p: number | undefined) => Promise<T>) =>
+      sessions.withWorkspaceLock(id, (st) => fn(st?.workspacePurgedAt));
+
+    async function race(outcome: "commit" | "rollback") {
+      const { id, dir } = await oldSession();
+      let moved!: () => void;
+      let release!: () => void;
+      const atMoved = new Promise<void>((r) => {
+        moved = r;
+      });
+      const gate = new Promise<void>((r) => {
+        release = r;
+      });
+      // A:真实改名之后、提交之前停住(仍持有会话行锁)
+      const gcA = new WorkspaceGc({
+        workspacesRoot: root,
+        listWorkspaces: async () => [{ sessionId: id, lastActiveAt: 0, finished: true }],
+        reclaim: (sid2, o, op) =>
+          sessions.reclaimWorkspace(sid2, o, async () => {
+            await op();
+            moved();
+            await gate;
+            if (outcome === "rollback") throw new Error("A 提交失败");
+          }),
+        lockSession,
+      });
+      // B:只核对回收站
+      const gcB = new WorkspaceGc({
+        workspacesRoot: root,
+        listWorkspaces: async () => [],
+        lockSession,
+      });
+
+      const aDone = gcA.run();
+      await atMoved;
+      expect(await fs.stat(dir).catch(() => null)).toBeNull();
+      const batches = await fs.readdir(path.join(root, TRASH_DIR));
+      expect(batches).toHaveLength(1);
+
+      let bFinished = false;
+      const bDone = gcB.run().then((r) => {
+        bFinished = true;
+        return r;
+      });
+      await new Promise((r) => setTimeout(r, 500));
+      expect(bFinished).toBe(false); // B 在等 A 的行锁
+      expect(await fs.stat(dir).catch(() => null)).toBeNull(); // 没被 B 挪回去
+      expect(await fs.readdir(path.join(root, TRASH_DIR))).toEqual(batches);
+
+      release();
+      const [ra, rb] = await Promise.all([aDone, bDone]);
+      return { id, dir, ra, rb };
+    }
+
+    it(
+      "A 提交:最终目录已清、库里有清理时刻、回收站为空,B 没有把目录挪回",
+      { timeout: 30_000 },
+      async () => {
+        const { id, dir, ra, rb } = await race("commit");
+        expect(ra.purged).toBe(1);
+        expect(await fs.stat(dir).catch(() => null)).toBeNull();
+        expect((await sessions.get(id))?.workspacePurgedAt).toBeGreaterThan(0);
+        expect(await fs.readdir(path.join(root, TRASH_DIR))).toEqual([]);
+        expect(rb.errors.join("\n")).not.toMatch(/挪回原处/);
+      },
+    );
+
+    it(
+      "A 回滚:最终目录与旧文件回到原处、库里无清理时刻、回收站为空",
+      { timeout: 30_000 },
+      async () => {
+        const { id, dir, ra } = await race("rollback");
+        expect(ra.purged).toBe(0);
+        expect(await fs.readFile(path.join(dir, "旧产出.md"), "utf8")).toBe("上周的");
+        expect((await sessions.get(id))?.workspacePurgedAt).toBeUndefined();
+        expect(await fs.readdir(path.join(root, TRASH_DIR))).toEqual([]);
+      },
+    );
   });
 }

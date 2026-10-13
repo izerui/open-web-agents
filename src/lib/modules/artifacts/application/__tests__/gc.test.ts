@@ -214,11 +214,14 @@ describe("WorkspaceGc / 走会话行锁协议(reclaim)", () => {
     expect(await fs.readFile(path.join(dir, "report.md"), "utf8")).toBe("重要产出");
   });
 
-  it("上一轮没删完的回收站残余,本轮开始时清掉", async () => {
-    await fs.mkdir(path.join(root, TRASH_DIR, "s9-123", "deep"), { recursive: true });
-    await fs.writeFile(path.join(root, TRASH_DIR, "s9-123", "deep", "x"), "x");
+  it("回收站残余按批次核对:clean 批次删除;purge 批次在无法确认提交时挪回,不删", async () => {
+    await fs.mkdir(path.join(root, TRASH_DIR, "clean-s8-1", "node_modules"), { recursive: true });
+    await fs.mkdir(path.join(root, TRASH_DIR, "purge-s9-123"), { recursive: true });
+    await fs.writeFile(path.join(root, TRASH_DIR, "purge-s9-123", "x.md"), "x");
+    // 没提供 lockSession:清理时刻未知,一律视为未确认 —— 宁可多留,不丢文件
     await gcOf([]).run();
-    expect(await fs.stat(path.join(root, TRASH_DIR)).catch(() => null)).toBeNull();
+    expect(await fs.readdir(path.join(root, TRASH_DIR))).toEqual([]);
+    expect(await fs.readFile(path.join(root, "s9", "x.md"), "utf8")).toBe("x");
   });
 });
 

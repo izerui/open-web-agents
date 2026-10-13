@@ -460,6 +460,7 @@ function build(): Container {
     workspacesRoot: path.join(env.dataDir, "workspaces"),
     listWorkspaces: () => runs.listSessionActivity(),
     reclaim: (id, opts, op) => sessions.reclaimWorkspace(id, opts, op),
+    lockSession: (id, fn) => sessions.withWorkspaceLock(id, (st) => fn(st?.workspacePurgedAt)),
     acquireLock: () => gcLock.acquire(),
   });
   const gcTimer = setInterval(() => {

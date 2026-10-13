@@ -164,6 +164,20 @@ export class MysqlSessionRepo implements SessionRepo {
     });
   }
 
+  async withWorkspaceLock<T>(
+    id: string,
+    fn: (state: { workspacePurgedAt?: number } | null) => Promise<T>,
+  ): Promise<T> {
+    return this.db.transaction(async (tx) => {
+      const locked = await tx.execute(
+        sql`SELECT workspace_purged_at AS purgedAt FROM sessions WHERE id = ${id} FOR UPDATE`,
+      );
+      const row = ((locked as unknown as [Record<string, unknown>[]])[0] ?? [])[0];
+      if (!row) return fn(null);
+      return fn({ workspacePurgedAt: row.purgedAt === null ? undefined : Number(row.purgedAt) });
+    });
+  }
+
   async reclaimWorkspace(
     id: string,
     opts: { quietSinceMs: number; nowMs: number; kind: "purge" | "clean" },

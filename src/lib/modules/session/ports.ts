@@ -101,13 +101,23 @@ export interface SessionRepo {
    * - 会话创建于 quietSinceMs 之前,且 workspaceTouchedAt 为空或早于它;
    * - 没有在 quietSinceMs 之后有过活动的运行,没有租约有效的运行;
    * - kind = "clean"(清中间产物)还要求没有未结束的运行。
-   * 返回是否执行了 op。op 抛错则整体回滚(不记清理时刻)。
+   * 返回是否执行了 op。op 或提交失败时【只有数据库标记回滚】,op 里已经完成的文件操作
+   * (改名)不会自动撤回 —— 由 GC 核对回收站批次后挪回或留存(见 artifacts/application/gc.ts)。
    */
   reclaimWorkspace(
     id: string,
     opts: { quietSinceMs: number; nowMs: number; kind: "purge" | "clean" },
     op: () => Promise<void>,
   ): Promise<boolean>;
+  /**
+   * 锁住会话行,把库里记下的清理时刻交给 fn,在锁内执行。GC 核对回收站批次用:
+   * 另一个 GC 正在 reclaimWorkspace(改名之后、提交之前)时,这里会等它的事务结束,
+   * 读到的清理时刻因此是确定的 —— 不会把正在处理的批次误判为"未提交的遗留"。
+   */
+  withWorkspaceLock<T>(
+    id: string,
+    fn: (state: { workspacePurgedAt?: number } | null) => Promise<T>,
+  ): Promise<T>;
   /** 删除一条还没有任何运行的会话(入队失败或幂等冲突时回滚刚建的会话)。 */
   delete(id: string): Promise<void>;
   /** 改标题 / 归档 / 软删除。只改传进来的字段。 */
