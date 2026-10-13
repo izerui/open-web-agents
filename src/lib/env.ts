@@ -70,6 +70,16 @@ const schema = z.object({
     (v) => (v === undefined || v === "" ? undefined : Number(v)),
     z.number().int().min(0).default(30),
   ),
+  // invoke 每把 API Key 每分钟的新调用上限(Key 可单独设更低的值);0 关闭
+  OWA_INVOKE_RATE_LIMIT_PER_KEY: z.preprocess(
+    (v) => (v === undefined || v === "" ? undefined : Number(v)),
+    z.number().int().min(0).default(60),
+  ),
+  // invoke 每个智能体每分钟的新调用上限(所有 Key 合计);0 关闭
+  OWA_INVOKE_RATE_LIMIT_PER_AGENT: z.preprocess(
+    (v) => (v === undefined || v === "" ? undefined : Number(v)),
+    z.number().int().min(0).default(600),
+  ),
   // 单个 worker 进程同时执行的运行数
   OWA_WORKER_CONCURRENCY: z.preprocess(
     (v) => (v === undefined || v === "" ? undefined : Number(v)),
@@ -104,6 +114,10 @@ export interface Env {
   allowSignup: boolean;
   /** 同一来源地址的登录/注册次数上限;0 = 不按地址限流。 */
   authIpRateLimit: number;
+  /** invoke 每把 Key 每分钟新调用的默认上限;0 = 不限。 */
+  invokeRateLimitPerKey: number;
+  /** invoke 每个智能体每分钟新调用上限(所有 Key 合计);0 = 不限。 */
+  invokeRateLimitPerAgent: number;
 }
 
 export function parseEnv(raw: Record<string, string | undefined>): Env {
@@ -131,6 +145,8 @@ export function parseEnv(raw: Record<string, string | undefined>): Env {
     workerConcurrency: p.OWA_WORKER_CONCURRENCY,
     allowSignup: p.OWA_ALLOW_SIGNUP,
     authIpRateLimit: p.OWA_AUTH_IP_RATE_LIMIT,
+    invokeRateLimitPerKey: p.OWA_INVOKE_RATE_LIMIT_PER_KEY,
+    invokeRateLimitPerAgent: p.OWA_INVOKE_RATE_LIMIT_PER_AGENT,
   };
 }
 

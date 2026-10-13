@@ -10,7 +10,14 @@ import {
 /** 谁在调用。web = 平台内人类(当前单用户);apiKey = 第三方系统。 */
 export type Principal =
   | { type: "web"; userId: string; role?: "admin" | "user" }
-  | { type: "apiKey"; keyId: string; ownerId: string; agentId?: string };
+  | {
+      type: "apiKey";
+      keyId: string;
+      ownerId: string;
+      agentId?: string;
+      /** 这把 Key 单独设的每分钟上限;undefined = 平台默认。 */
+      rateLimitPerMinute?: number;
+    };
 
 /** 资源的归属信息(从库里读出后传入)。 */
 export interface SessionOwnership {

@@ -113,7 +113,15 @@ export function buildAgentOpenApi(agent: OpenApiAgent, origin: string): Record<s
           },
           responses: {
             "202": {
-              description: "已受理",
+              description: "已受理。X-RateLimit-* 头给出这把 Key 本分钟的剩余次数",
+              headers: {
+                "X-RateLimit-Limit": { schema: { type: "integer" } },
+                "X-RateLimit-Remaining": { schema: { type: "integer" } },
+                "X-RateLimit-Reset": {
+                  schema: { type: "integer" },
+                  description: "距本窗口重置的秒数",
+                },
+              },
               content: {
                 "application/json": {
                   schema: {
@@ -138,7 +146,31 @@ export function buildAgentOpenApi(agent: OpenApiAgent, origin: string): Record<s
             "402": errorResponse("超出月度额度"),
             "413": errorResponse("输入过长"),
             "422": errorResponse("同一 Idempotency-Key 用于了不同的请求体"),
-            "429": errorResponse("调用过于频繁"),
+            "429": {
+              description:
+                "新调用超出每分钟上限(scope=key:这把 Key;scope=agent:该智能体所有调用方合计)。" +
+                "按 Retry-After 等待后重试;同一个 Idempotency-Key 的重放不计入",
+              headers: {
+                "Retry-After": { schema: { type: "integer" }, description: "需要等待的秒数" },
+              },
+              content: {
+                "application/json": {
+                  schema: {
+                    allOf: [
+                      { $ref: "#/components/schemas/Error" },
+                      {
+                        type: "object",
+                        properties: {
+                          scope: { type: "string", enum: ["key", "agent"] },
+                          limit: { type: "integer" },
+                          retryAfterSeconds: { type: "integer" },
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
           },
         },
       },

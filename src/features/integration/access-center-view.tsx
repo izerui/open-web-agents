@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect as Select } from "@/components/ui/native-select";
 import { Separator } from "@/components/ui/separator";
 import { InvokeSnippetTabs } from "@/features/integration/invoke-snippet";
+import { KeyRateLimit, type PlatformRateLimits } from "@/features/integration/key-rate-limit";
 import { WebhookSecretCard } from "@/features/integration/webhook-secret-card";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 
@@ -21,6 +22,7 @@ interface KeyRecord {
   id: string;
   name?: string;
   agentId?: string;
+  rateLimitPerMinute?: number;
   createdAt: number;
   lastUsedAt?: number;
 }
@@ -36,6 +38,11 @@ export function AccessCenterView() {
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [keyName, setKeyName] = useState("");
   const [keyAgent, setKeyAgent] = useState("");
+  const [keyLimit, setKeyLimit] = useState("");
+  const [limits, setLimits] = useState<PlatformRateLimits>({
+    perKeyPerMinute: 0,
+    perAgentPerMinute: 0,
+  });
   /** 新签发的明文,只在本次会话内显示一次 */
   const [issued, setIssued] = useState<{ id: string; plaintext: string } | null>(null);
   const [busy, setBusy] = useState<"issue" | string | null>(null);
@@ -55,12 +62,14 @@ export function AccessCenterView() {
    */
   const reload = useCallback(async () => {
     const [k, a] = await Promise.allSettled([
-      fetchJson<{ keys?: KeyRecord[] }>("/api/keys"),
+      fetchJson<{ keys?: KeyRecord[]; rateLimits?: PlatformRateLimits }>("/api/keys"),
       fetchJson<{ agents?: AgentSummary[] }>("/api/agents"),
     ]);
 
-    if (k.status === "fulfilled") setKeys(k.value.keys ?? []);
-    else toast.error(`API Key 列表加载失败:${errorText(k.reason)}`);
+    if (k.status === "fulfilled") {
+      setKeys(k.value.keys ?? []);
+      if (k.value.rateLimits) setLimits(k.value.rateLimits);
+    } else toast.error(`API Key 列表加载失败:${errorText(k.reason)}`);
     setKeysLoaded(true);
 
     if (a.status === "fulfilled") setAgents(a.value.agents ?? []);
@@ -84,11 +93,13 @@ export function AccessCenterView() {
         body: JSON.stringify({
           name: keyName.trim() || undefined,
           agentId: keyAgent || undefined,
+          rateLimitPerMinute: keyLimit.trim() ? Number(keyLimit) : undefined,
         }),
       });
       if (!data.plaintext || !data.key?.id) throw new Error("接口没有返回新密钥");
       setIssued({ id: data.key.id, plaintext: data.plaintext });
       setKeyName("");
+      setKeyLimit("");
       await reload();
     } catch (error) {
       toast.error(`签发失败:${errorText(error)}`);
@@ -135,6 +146,14 @@ export function AccessCenterView() {
           <CardDescription>
             从你的后端调用智能体时使用,不要放进浏览器。明文只在签发时显示一次,服务端只存哈希。
           </CardDescription>
+          <CardDescription>
+            {limits.perKeyPerMinute > 0
+              ? `调用限流:每把 Key 默认每分钟最多 ${limits.perKeyPerMinute} 次新调用(可单独调低)`
+              : "调用限流:每把 Key 默认不限(可单独设置)"}
+            {limits.perAgentPerMinute > 0 &&
+              `,每个智能体所有 Key 合计每分钟最多 ${limits.perAgentPerMinute} 次`}
+            ;超出返回 429 并带 Retry-After。用同一个 Idempotency-Key 重试已受理的请求不计入。
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex gap-2">
@@ -142,6 +161,15 @@ export function AccessCenterView() {
               value={keyName}
               onChange={(e) => setKeyName(e.target.value)}
               placeholder="用途备注,如「订单系统」"
+            />
+            <Input
+              type="number"
+              min={1}
+              value={keyLimit}
+              onChange={(e) => setKeyLimit(e.target.value)}
+              placeholder={`每分钟上限(默认 ${limits.perKeyPerMinute || "不限"})`}
+              aria-label="每分钟调用上限"
+              className="w-52 shrink-0"
             />
             <Select value={keyAgent} onChange={(e) => setKeyAgent(e.target.value)}>
               <option value="">不限智能体</option>
@@ -204,6 +232,12 @@ export function AccessCenterView() {
                     </Badge>
                   )}
                 </span>
+                <KeyRateLimit
+                  keyId={k.id}
+                  value={k.rateLimitPerMinute}
+                  platform={limits.perKeyPerMinute}
+                  onSaved={reload}
+                />
                 <span className="text-muted-foreground">
                   {k.lastUsedAt
                     ? `最近使用 ${new Date(k.lastUsedAt).toLocaleDateString()}`

@@ -8,6 +8,8 @@ const BASE = process.env.OWA_E2E_BASE_URL ?? "http://localhost:5678";
 export interface Res<T = unknown> {
   status: number;
   body: T;
+  /** 响应头(限流等用例要断言 Retry-After / X-RateLimit-*) */
+  headers: Headers;
 }
 
 /** 一个独立的浏览器身份:自带 cookie 罐,互不串味。 */
@@ -56,7 +58,7 @@ export class Client {
     } catch {
       // 非 JSON 响应(如嵌入脚本)保持原文
     }
-    return { status: res.status, body: body as T };
+    return { status: res.status, body: body as T, headers: res.headers };
   }
 
   get<T = unknown>(p: string, h?: Record<string, string>) {
@@ -67,6 +69,9 @@ export class Client {
   }
   put<T = unknown>(p: string, body?: unknown) {
     return this.req<T>("PUT", p, { body });
+  }
+  patch<T = unknown>(p: string, body?: unknown, h?: Record<string, string>) {
+    return this.req<T>("PATCH", p, { body, headers: h });
   }
   del<T = unknown>(p: string, h?: Record<string, string>) {
     return this.req<T>("DELETE", p, { headers: h });

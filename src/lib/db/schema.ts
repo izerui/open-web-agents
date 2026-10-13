@@ -254,6 +254,8 @@ export const apiKeys = mysqlTable(
     hashedKey: varchar("hashed_key", { length: 128 }).notNull().unique(),
     name: varchar("name", { length: 255 }),
     quota: json("quota"),
+    /** 这把 Key 每分钟的新调用上限;NULL = 用平台默认(OWA_INVOKE_RATE_LIMIT_PER_KEY) */
+    rateLimitPerMinute: int("rate_limit_per_minute"),
     lastUsedAt: timestamp("last_used_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },

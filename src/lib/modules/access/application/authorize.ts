@@ -75,6 +75,7 @@ export class Authorizer {
       keyId: record.id,
       ownerId: record.ownerId,
       agentId: record.agentId,
+      rateLimitPerMinute: record.rateLimitPerMinute,
     };
   }
 
@@ -95,6 +96,7 @@ export class Authorizer {
       keyId: record.id,
       ownerId: record.ownerId,
       agentId: record.agentId,
+      rateLimitPerMinute: record.rateLimitPerMinute,
     };
     await this.assertCanInvoke(principal, claims.agentId);
     return principal;

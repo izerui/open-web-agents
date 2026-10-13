@@ -264,7 +264,7 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 | GET/POST/DELETE | `/api/agents/{id}/share`                   | cookie(write)          | 分享给用户 / 组 / 公开      |
 | GET/POST/DELETE | `/api/agents/{id}/knowledge`               | cookie(读 read、写 write) | 知识文档                |
 | GET/POST        | `/api/groups` · `/api/groups/{id}/members` | cookie                 | 用户组与成员              |
-| GET/POST/DELETE | `/api/keys`                                | cookie                 | API Key(明文仅签发时返回一次) |
+| GET/POST/DELETE/PATCH | `/api/keys`                          | cookie                 | API Key(明文仅签发时返回一次);PATCH 调整每分钟调用上限 |
 | GET/POST        | `/api/sessions`                            | cookie / key           | 会话列表与创建             |
 | POST            | `/api/sessions/{id}/run`                   | cookie / key           | 发起一轮,SSE 流式返回       |
 | GET             | `/api/sessions/{id}/events`                | cookie / key           | joinStream 断线重连     |
@@ -292,6 +292,18 @@ SSE 传输是裸 `data: <AgentEvent JSON>\n\n`。前端用 `fetch + getReader` �
 那条事件若丢失,SSE 与 `stream:false` 阻塞请求会从数据库读到终态收尾,不会一直挂着。
 
 输入(`prompt` / `invoke` 的 `input`)上限 200,000 字符,超出返回 413。
+
+### 调用限流
+
+`invoke` 对**新调用**限流(用同一个 `Idempotency-Key` 重放已受理的任务不计入),两层固定窗口:
+
+- 每把 API Key 每分钟 `OWA_INVOKE_RATE_LIMIT_PER_KEY` 次(默认 60)。签发时或在接入中心可单独调低;只有管理员能调高。
+- 每个智能体每分钟 `OWA_INVOKE_RATE_LIMIT_PER_AGENT` 次(默认 600,所有 Key 合计)。
+
+超出返回 `429 rate_limited`,body 里 `scope` 为 `key` 或 `agent`,带 `Retry-After`;
+`202` 响应带 `X-RateLimit-Limit / Remaining / Reset`,调用方可据此自我节流。
+检查顺序:鉴权 → 幂等重放 → 限流 → 额度 → 版本与契约校验 → 入队。
+Redis 不可用时限流放行(花费仍受月度额度约束)。固定窗口在窗口交界处最多可能放过两倍的突发。
 
 ### Webhook
 

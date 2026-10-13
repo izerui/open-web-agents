@@ -8,6 +8,7 @@ interface Row {
   ownerId: string;
   agentId: string | null;
   name: string | null;
+  rateLimitPerMinute: number | null;
   createdAt: Date;
   lastUsedAt: Date | null;
 }
@@ -17,6 +18,7 @@ const COLUMNS = {
   ownerId: apiKeys.ownerId,
   agentId: apiKeys.agentId,
   name: apiKeys.name,
+  rateLimitPerMinute: apiKeys.rateLimitPerMinute,
   createdAt: apiKeys.createdAt,
   lastUsedAt: apiKeys.lastUsedAt,
 };
@@ -27,6 +29,7 @@ function toRecord(r: Row): ApiKeyRecord {
     ownerId: r.ownerId,
     agentId: r.agentId ?? undefined,
     name: r.name ?? undefined,
+    rateLimitPerMinute: r.rateLimitPerMinute ?? undefined,
     createdAt: r.createdAt.getTime(),
     lastUsedAt: r.lastUsedAt?.getTime(),
   };
@@ -41,6 +44,7 @@ export class MysqlApiKeyRepo implements ApiKeyRepo {
       ownerId: k.ownerId,
       agentId: k.agentId,
       name: k.name,
+      rateLimitPerMinute: k.rateLimitPerMinute ?? null,
       hashedKey: k.hashedKey,
     });
     const rows = await this.db.select(COLUMNS).from(apiKeys).where(eq(apiKeys.id, k.id)).limit(1);
@@ -77,6 +81,10 @@ export class MysqlApiKeyRepo implements ApiKeyRepo {
 
   async revoke(id: string): Promise<void> {
     await this.db.delete(apiKeys).where(eq(apiKeys.id, id));
+  }
+
+  async setRateLimit(id: string, perMinute: number | null): Promise<void> {
+    await this.db.update(apiKeys).set({ rateLimitPerMinute: perMinute }).where(eq(apiKeys.id, id));
   }
 
   async touch(id: string, at: number): Promise<void> {

@@ -6,6 +6,10 @@ import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { VersionNotFound } from "@/lib/modules/agent/application/releases";
 import { parseVersion } from "@/lib/modules/agent/domain/release";
 import { validateInput } from "@/lib/modules/agent/domain/validate-output";
+import {
+  checkInvokeRate,
+  rateLimitHeaders,
+} from "@/lib/modules/identity/application/invoke-rate-limit";
 import { PromptTooLarge, assertPromptSize } from "@/lib/modules/run/application/enqueue";
 import { isValidIdempotencyKey } from "@/lib/modules/run/domain/limits";
 import { DuplicateIdempotencyKey } from "@/lib/modules/run/ports";
@@ -38,7 +42,8 @@ interface InvokeBody {
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id: agentId } = await params;
-  const { agents, sessions, runs, env, auth, users, usage, enqueuer, releases } = getContainer();
+  const { agents, sessions, runs, env, auth, users, usage, enqueuer, releases, rateLimiter } =
+    getContainer();
 
   /*
    * 关卡顺序:
@@ -117,7 +122,36 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (existing) return replayed(existing, requestHash, agent.config.outputSchema !== undefined);
   }
 
-  // ── 第三步:新请求 —— 额度,再解析这次跑哪一版、按那一版校验契约 ───────────────────
+  // ── 第三步:新请求 —— 限流、额度,再解析这次跑哪一版、按那一版校验契约 ─────────────
+  /*
+   * 调用限流:每把 Key、每个智能体各一个每分钟窗口(见 invoke-rate-limit.ts)。
+   * 排在额度前面:它只查 Redis,比聚合花费便宜;被拒的请求也不必再碰数据库。
+   */
+  const rate = await checkInvokeRate(rateLimiter, {
+    keyId: principal.type === "apiKey" ? principal.keyId : `user:${principal.userId}`,
+    keyLimit: principal.type === "apiKey" ? principal.rateLimitPerMinute : undefined,
+    agentId,
+    defaultKeyLimit: env.invokeRateLimitPerKey,
+    agentLimit: env.invokeRateLimitPerAgent,
+  });
+  if (!rate.allowed) {
+    const retryAfter = Math.max(1, Math.ceil(rate.retryAfterMs / 1000));
+    return apiError(
+      429,
+      "rate_limited",
+      rate.scope === "key"
+        ? `这把 API Key 每分钟最多发起 ${rate.limit} 次新调用,请 ${retryAfter} 秒后再试`
+        : `该智能体每分钟最多受理 ${rate.limit} 次新调用(所有调用方合计),请 ${retryAfter} 秒后再试`,
+      { scope: rate.scope, limit: rate.limit, retryAfterSeconds: retryAfter },
+      {
+        "Retry-After": String(retryAfter),
+        ...(rate.scope === "key"
+          ? rateLimitHeaders({ limit: rate.limit, remaining: 0, resetMs: rate.retryAfterMs })
+          : {}),
+      },
+    );
+  }
+
   /*
    * 额度关卡 —— 对外接口尤其需要:invoke 是给第三方系统轮询调用的,
    * 对方的一个死循环就能在几分钟内烧掉整月预算,而且没有人盯着屏幕。
@@ -230,7 +264,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       /** 实际执行的版本;null = 草稿(该智能体从未发布) */
       agentVersion: release.version,
     },
-    { status: 202 },
+    { status: 202, headers: rate.key ? rateLimitHeaders(rate.key) : undefined },
   );
 }
 
