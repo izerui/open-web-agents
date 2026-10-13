@@ -15,6 +15,7 @@ export type ApiErrorCode =
   | "idempotency_key_invalid"
   | "idempotency_conflict"
   | "nothing_to_publish"
+  | "limit_exceeded"
   | "service_unavailable";
 
 export function apiError(

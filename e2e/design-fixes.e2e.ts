@@ -443,3 +443,45 @@ describe("接入中心:按智能体的 OpenAPI 文档", () => {
     expect([403, 404]).toContain((await other.get(`/api/agents/${agentId}/openapi.json`)).status);
   });
 });
+
+describe("知识库容量:列表带用量与可检索标记,超限明确拒绝", () => {
+  type Listing = {
+    docs?: { id: string; chars: number; searchable: boolean }[];
+    usage?: { docs: number; chars: number };
+    limits?: { maxDocs: number; maxDocChars: number; maxTotalChars: number };
+  };
+
+  it("新增后列表给出字数、用量与上限;单篇超长返回 409 limit_exceeded", async () => {
+    if (!(await serverUp())) throw new Error("e2e 需要一个跑着的服务");
+    const owner = await newUser("kb-cap");
+    const agentId =
+      (
+        await owner.post<AgentRes>("/api/agents", {
+          name: `kb-${Date.now()}`,
+          config: { systemPrompt: "p", model: "sonnet" },
+        })
+      ).body.agent?.id ?? "";
+    expect(
+      (
+        await owner.post(`/api/agents/${agentId}/knowledge`, {
+          title: "制度",
+          content: "报销上限五千",
+        })
+      ).status,
+    ).toBe(201);
+
+    const l = await owner.get<Listing>(`/api/agents/${agentId}/knowledge`);
+    expect(l.body.usage).toEqual({ docs: 1, chars: 6 });
+    expect(l.body.limits?.maxDocs).toBe(500);
+    expect(l.body.docs?.[0]).toMatchObject({ chars: 6, searchable: true });
+
+    const max = l.body.limits?.maxDocChars ?? 200_000;
+    const tooLong = await owner.post<{ code?: string }>(`/api/agents/${agentId}/knowledge`, {
+      title: "超长",
+      content: "字".repeat(max + 1),
+    });
+    expect(tooLong.status).toBe(409);
+    expect(tooLong.body.code).toBe("limit_exceeded");
+    expect((await owner.get<Listing>(`/api/agents/${agentId}/knowledge`)).body.usage?.docs).toBe(1);
+  });
+});

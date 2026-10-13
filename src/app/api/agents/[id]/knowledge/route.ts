@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { apiError } from "@/lib/api-error";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { agentAccessLevel } from "@/lib/modules/access/domain/principal";
+import { KnowledgeLimitExceeded } from "@/lib/modules/knowledge/domain/limits";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,10 +43,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const { id } = await params;
   const { knowledge } = getContainer();
   try {
-    // 列表只回标题与时间(不含正文),read 权限即可
+    // 列表只回标题、时间、字数与是否参与检索(不含正文),read 权限即可
     const r = await requirePermission(req, id, "read");
     if (r.error) return r.error;
-    return Response.json({ docs: await knowledge.list(id) });
+    return Response.json(await knowledge.list(id));
   } catch (err) {
     const res = authErrorResponse(err);
     if (res) return res;
@@ -65,17 +67,21 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const content = body.content?.trim();
     if (!title) return Response.json({ error: "title is required" }, { status: 400 });
     if (!content) return Response.json({ error: "content is required" }, { status: 400 });
-    // 单篇上限:再大就该拆分或换带持久索引的实现,而不是硬塞
-    if (content.length > 200_000) {
-      return Response.json({ error: "单篇文档过长(上限 20 万字),请拆分" }, { status: 400 });
+    // 单篇、篇数、总字数的上限在仓储里与插入同一事务判定(见 knowledge/domain/limits.ts)
+    let doc: Awaited<ReturnType<typeof knowledge.create>>;
+    try {
+      doc = await knowledge.create({
+        id: randomUUID().replace(/-/g, "").slice(0, 24),
+        agentId: id,
+        title,
+        content,
+      });
+    } catch (err) {
+      if (err instanceof KnowledgeLimitExceeded) {
+        return apiError(409, "limit_exceeded", err.message);
+      }
+      throw err;
     }
-
-    const doc = await knowledge.create({
-      id: randomUUID().replace(/-/g, "").slice(0, 24),
-      agentId: id,
-      title,
-      content,
-    });
     await getContainer().audit.record({
       actor: r.principal,
       action: "knowledge.add",
