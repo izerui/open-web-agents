@@ -1,4 +1,9 @@
 // 工作空间回收执行器。策略判定在 domain,这里只负责按判定动手。
+//
+// 【和新运行、上传的并发】判定基于扫描时的活动快照;扫描之后有人发起新运行或上传文件,
+// 若此时再删目录,正在运行的任务会丢文件。所以动手一律走会话行锁协议(reclaim):
+// 在锁内重新判定、在锁内把目标改名挪进回收站,放锁之后再慢慢删。写方(运行启动、上传)
+// 动手前也要拿同一把锁记下"刚用过"(见 SessionRepo.prepareWorkspace)。
 
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -15,7 +20,7 @@ export interface GcReport {
   scanned: number;
   cleaned: number;
   purged: number;
-  /** 判定要整体清理、但动手前发现又有活动(或有运行正在执行)而放弃的 */
+  /** 判定要清理、但在锁内发现又有人用过(或有运行在执行)而放弃的 */
   spared: number;
   freedBytes: number;
   errors: string[];
@@ -40,22 +45,19 @@ async function dirSize(dir: string): Promise<number> {
   return total;
 }
 
-/**
- * 清掉工作空间里的中间产物(保留业务产出)。
- * 每个待删项都过一次 resolveInWorkspace —— 即便 readdir 返回了异常名字,也不会删到目录外。
- */
-async function cleanIntermediate(workspaceDir: string): Promise<number> {
-  let freed = 0;
-  const entries = await fs.readdir(workspaceDir, { withFileTypes: true }).catch(() => []);
-  for (const e of entries) {
-    if (!isIntermediate(e.name)) continue;
-    const target = resolveInWorkspace(workspaceDir, e.name);
-    freed += e.isDirectory()
-      ? await dirSize(target)
-      : ((await fs.stat(target).catch(() => null))?.size ?? 0);
-    await fs.rm(target, { recursive: true, force: true });
+async function sizeOf(p: string): Promise<number> {
+  const st = await fs.stat(p).catch(() => null);
+  if (!st) return 0;
+  return st.isDirectory() ? dirSize(p) : st.size;
+}
+
+/** 改名挪走;源已不在(另一轮已挪走)视为完成。 */
+async function moveAway(from: string, to: string): Promise<void> {
+  try {
+    await fs.rename(from, to);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   }
-  return freed;
 }
 
 export interface GcDeps {
@@ -66,12 +68,20 @@ export interface GcDeps {
   policy?: GcPolicy;
   now?: () => number;
   /**
-   * 整体清理前的条件标记(见 SessionRepo.markWorkspacePurged)。返回 false 表示扫描之后
-   * 又有了活动或有运行正在执行 —— 这次不删。不提供则不做这道检查(仅测试用)。
+   * 在会话行锁内重新判定条件并执行 op(见 SessionRepo.reclaimWorkspace)。
+   * 返回 false = 扫描之后又有人用了这个目录(新运行、上传)或有运行在执行 —— 这次不动。
+   * 不提供则直接执行(仅测试用)。
    */
-  markPurged?(sessionId: string, opts: { cutoffMs: number; nowMs: number }): Promise<boolean>;
+  reclaim?(
+    sessionId: string,
+    opts: { quietSinceMs: number; nowMs: number; kind: "purge" | "clean" },
+    op: () => Promise<void>,
+  ): Promise<boolean>;
+  /** 测试用:在锁内、改名之前暂停,用来确定性地制造"判定之后有人要写"的并发。 */
+  beforeMove?(sessionId: string): Promise<void>;
   /**
-   * 多进程互斥:每个进程都会定时触发 GC,同一时刻只让一个真正去扫。
+   * 多进程互斥:每个进程都会定时触发 GC,同一时刻只让一个真正去扫 —— 只为省掉重复扫描。
+   * 正确性不靠它(拿锁失败或 Redis 故障时照常跑):防误删靠 reclaim 的会话行锁协议。
    * 返回 null = 别人正在跑,本轮跳过。不提供则不加锁。
    */
   acquireLock?(): Promise<{ release(): Promise<void> } | null>;
@@ -99,6 +109,14 @@ export class WorkspaceGc {
     return report;
   }
 
+  private reclaim(
+    sessionId: string,
+    opts: { quietSinceMs: number; nowMs: number; kind: "purge" | "clean" },
+    op: () => Promise<void>,
+  ): Promise<boolean> {
+    return this.deps.reclaim ? this.deps.reclaim(sessionId, opts, op) : op().then(() => true);
+  }
+
   private async scan(report: GcReport): Promise<void> {
     const policy = this.deps.policy ?? DEFAULT_GC_POLICY;
     const now = (this.deps.now ?? (() => Date.now()))();
@@ -123,8 +141,7 @@ export class WorkspaceGc {
       //
       // 【只能吞 ENOENT】—— 曾经是无类型的 .catch(() => null),把 EACCES / EIO /
       // ELOOP / ENOTDIR 一并吸收了。部署后 workspaces 卷只读或属主不对时,GC 会跳过
-      // 每一个工作空间、report.errors 保持为空,而外层只在 cleaned||purged 非零时才
-      // 打日志 —— 整轮 GC 静默无输出,磁盘无界增长,唯一的信号是磁盘写满。
+      // 每一个工作空间、report.errors 保持为空 —— 整轮 GC 静默无输出,磁盘无界增长。
       try {
         await fs.stat(dir);
       } catch (err) {
@@ -136,29 +153,49 @@ export class WorkspaceGc {
       }
 
       const action = decideGc(ws, policy, now);
+      if (action === "keep") continue;
+      // 本次要挪走的东西统一放到回收站里的这个目录下
+      const bin = path.join(trash, `${ws.sessionId}-${now}`);
       try {
         if (action === "purge") {
           const size = await dirSize(dir);
-          // 先在库里带条件地记下"已清理":扫描之后若有人发起了新一轮,这里返回 false,不删
-          if (
-            this.deps.markPurged &&
-            !(await this.deps.markPurged(ws.sessionId, {
-              cutoffMs: now - policy.purgeAfterMs,
-              nowMs: now,
-            }))
-          ) {
+          const done = await this.reclaim(
+            ws.sessionId,
+            { quietSinceMs: now - policy.purgeAfterMs, nowMs: now, kind: "purge" },
+            async () => {
+              await this.deps.beforeMove?.(ws.sessionId);
+              await fs.mkdir(trash, { recursive: true });
+              await moveAway(dir, bin);
+            },
+          );
+          if (!done) {
             report.spared++;
             continue;
           }
-          // 原子改名挪走,再慢慢删:目录不会处在"删了一半"的状态
-          await fs.mkdir(trash, { recursive: true });
-          const moved = path.join(trash, `${ws.sessionId}-${now}`);
-          await fs.rename(dir, moved);
-          await fs.rm(moved, { recursive: true, force: true });
+          await fs.rm(bin, { recursive: true, force: true });
           report.freedBytes += size;
           report.purged++;
-        } else if (action === "clean-intermediate") {
-          report.freedBytes += await cleanIntermediate(dir);
+        } else {
+          const names = await intermediateNames(dir);
+          if (names.length === 0) continue;
+          let size = 0;
+          for (const n of names) size += await sizeOf(resolveInWorkspace(dir, n));
+          const done = await this.reclaim(
+            ws.sessionId,
+            { quietSinceMs: now - policy.intermediateAfterMs, nowMs: now, kind: "clean" },
+            async () => {
+              await this.deps.beforeMove?.(ws.sessionId);
+              await fs.mkdir(bin, { recursive: true });
+              // 每一项都过 resolveInWorkspace,异常名字也删不到目录外
+              for (const n of names) await moveAway(resolveInWorkspace(dir, n), path.join(bin, n));
+            },
+          );
+          if (!done) {
+            report.spared++;
+            continue;
+          }
+          await fs.rm(bin, { recursive: true, force: true });
+          report.freedBytes += size;
           report.cleaned++;
         }
       } catch (err) {
@@ -166,4 +203,10 @@ export class WorkspaceGc {
       }
     }
   }
+}
+
+/** 工作空间里属于中间产物的条目(只认明确的临时物,不动业务产出)。 */
+async function intermediateNames(workspaceDir: string): Promise<string[]> {
+  const entries = await fs.readdir(workspaceDir, { withFileTypes: true }).catch(() => []);
+  return entries.filter((e) => isIntermediate(e.name)).map((e) => e.name);
 }

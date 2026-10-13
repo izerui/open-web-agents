@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { canRenderInline } from "@/lib/modules/artifacts/domain/mime";
@@ -60,6 +61,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const prepared = await Promise.all(
       files.map(async (file) => ({ file, bytes: Buffer.from(await file.arrayBuffer()) })),
     );
+    /*
+     * 写之前先走工作目录协议:在会话行锁内记下"刚用过"并确保目录存在。
+     * 上传不产生运行 —— 不记这一笔,GC 只看运行时间,长期未活动的会话里刚上传的文件
+     * 可能马上被清掉;GC 正在改名挪走目录时,这里会等它挪完再建新目录。
+     */
+    await sessions.prepareWorkspace(id, { nowMs: Date.now() }, async () => {
+      await fs.mkdir(session.workspaceDir, { recursive: true });
+    });
     const uploaded: string[] = [];
     for (const { file, bytes } of prepared) {
       await storage.write(session.workspaceDir, file.name, bytes, { overwrite });

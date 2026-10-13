@@ -147,41 +147,71 @@ describe("WorkspaceGc / 健壮性", () => {
   });
 });
 
-describe("WorkspaceGc / 删除前的条件标记", () => {
+describe("WorkspaceGc / 走会话行锁协议(reclaim)", () => {
   const old = [{ sessionId: "s1", lastActiveAt: NOW - 20_000, finished: true }];
 
-  it("标记失败(扫描之后又有了活动):目录一个文件都不动,计入 spared", async () => {
+  it("reclaim 拒绝(锁内发现又有人用过):目录一个文件都不动,计入 spared", async () => {
     const dir = await makeWorkspace("s1");
     const gc = new WorkspaceGc({
       workspacesRoot: root,
       listWorkspaces: async () => old,
       policy,
       now: () => NOW,
-      markPurged: async () => false,
+      reclaim: async () => false,
     });
     const r = await gc.run();
     expect(r).toMatchObject({ purged: 0, spared: 1 });
     expect(await fs.readFile(path.join(dir, "report.md"), "utf8")).toBe("重要产出");
+    expect(await fs.stat(path.join(dir, "node_modules"))).toBeTruthy();
   });
 
-  it("标记成功:用保留期截止时刻作条件,目录经回收站整体删除,回收站不留残余", async () => {
+  it("整体清理:用保留期截止时刻作条件,改名在 reclaim 的 op 里完成,回收站不留残余", async () => {
     const dir = await makeWorkspace("s1");
-    const calls: unknown[] = [];
+    const calls: { id: string; existedInOp: boolean; opts: unknown }[] = [];
     const gc = new WorkspaceGc({
       workspacesRoot: root,
       listWorkspaces: async () => old,
       policy,
       now: () => NOW,
-      markPurged: async (id, opts) => {
-        calls.push({ id, ...opts });
+      reclaim: async (id, opts, op) => {
+        const before = (await fs.stat(dir).catch(() => null)) !== null;
+        await op();
+        const after = (await fs.stat(dir).catch(() => null)) !== null;
+        calls.push({ id, existedInOp: before && !after, opts });
         return true;
       },
     });
     const r = await gc.run();
-    expect(calls).toEqual([{ id: "s1", cutoffMs: NOW - policy.purgeAfterMs, nowMs: NOW }]);
+    expect(calls).toEqual([
+      {
+        id: "s1",
+        existedInOp: true, // 改名发生在 op 里(也就是锁内)
+        opts: { quietSinceMs: NOW - policy.purgeAfterMs, nowMs: NOW, kind: "purge" },
+      },
+    ]);
     expect(r.purged).toBe(1);
-    expect(await fs.stat(dir).catch(() => null)).toBeNull();
     expect(await fs.readdir(path.join(root, TRASH_DIR))).toEqual([]);
+  });
+
+  it("清中间产物同样走 reclaim(kind=clean),业务产出保留", async () => {
+    const dir = await makeWorkspace("s1");
+    const kinds: string[] = [];
+    const gc = new WorkspaceGc({
+      workspacesRoot: root,
+      listWorkspaces: async () => [{ sessionId: "s1", lastActiveAt: NOW - 2000, finished: true }],
+      policy,
+      now: () => NOW,
+      reclaim: async (_id, opts, op) => {
+        kinds.push(opts.kind);
+        await op();
+        return true;
+      },
+    });
+    const r = await gc.run();
+    expect(kinds).toEqual(["clean"]);
+    expect(r.cleaned).toBe(1);
+    expect(await fs.stat(path.join(dir, "node_modules")).catch(() => null)).toBeNull();
+    expect(await fs.readFile(path.join(dir, "report.md"), "utf8")).toBe("重要产出");
   });
 
   it("上一轮没删完的回收站残余,本轮开始时清掉", async () => {

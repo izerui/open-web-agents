@@ -543,12 +543,14 @@ export class MysqlRunRepo implements RunRepo {
       SELECT s.id AS sessionId,
              GREATEST(
                UNIX_TIMESTAMP(s.created_at) * 1000,
-               COALESCE(MAX(UNIX_TIMESTAMP(COALESCE(r.ended_at, r.created_at)) * 1000), 0)
+               COALESCE(MAX(UNIX_TIMESTAMP(COALESCE(r.ended_at, r.created_at)) * 1000), 0),
+               -- 上传文件、运行启动也算活动(工作目录协议在会话行锁内记下的)
+               COALESCE(s.workspace_touched_at, 0)
              ) AS lastActiveAt,
              SUM(CASE WHEN r.status IN ('pending','running') THEN 1 ELSE 0 END) AS openRuns
       FROM sessions s
       LEFT JOIN runs r ON r.session_id = s.id
-      GROUP BY s.id, s.created_at
+      GROUP BY s.id, s.created_at, s.workspace_touched_at
     `);
     const list = (Array.isArray(rows) ? rows[0] : rows) as unknown as Array<{
       sessionId: string;

@@ -149,6 +149,12 @@ export const sessions = mysqlTable(
      * 再次运行会在同一路径重建空目录继续。
      */
     workspacePurgedAt: bigint("workspace_purged_at", { mode: "number" }),
+    /**
+     * 最近一次"有人要写工作目录"的时刻(ms):运行启动、文件上传。
+     * 在会话行锁内写入;GC 在同一把锁里看到它比保留期新,就不动这个目录。
+     * 上传文件不产生运行 —— 没有它,GC 只看运行时间,刚上传的文件可能马上被清掉。
+     */
+    workspaceTouchedAt: bigint("workspace_touched_at", { mode: "number" }),
     status: varchar("status", { length: 16 }).notNull().default("active"),
     /** 会话级凭证覆盖(三级链中间层) */
     baseUrl: varchar("base_url", { length: 512 }),

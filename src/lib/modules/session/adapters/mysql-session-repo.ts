@@ -26,6 +26,7 @@ interface Row {
   designTargetAgentId: string | null;
   agentVersion: number | null;
   workspacePurgedAt: number | null;
+  workspaceTouchedAt: number | null;
   baseUrl: string | null;
   model: string | null;
   createdAt: Date;
@@ -47,6 +48,7 @@ function toSession(r: Row): Session {
     designTargetAgentId: r.designTargetAgentId ?? undefined,
     agentVersion: r.agentVersion ?? undefined,
     workspacePurgedAt: r.workspacePurgedAt ?? undefined,
+    workspaceTouchedAt: r.workspaceTouchedAt ?? undefined,
     baseUrl: r.baseUrl ?? undefined,
     model: (r.model as ModelAlias | null) ?? undefined,
     createdAt: r.createdAt.getTime(),
@@ -68,6 +70,7 @@ const COLUMNS = {
   designTargetAgentId: sessions.designTargetAgentId,
   agentVersion: sessions.agentVersion,
   workspacePurgedAt: sessions.workspacePurgedAt,
+  workspaceTouchedAt: sessions.workspaceTouchedAt,
   baseUrl: sessions.baseUrl,
   model: sessions.model,
   createdAt: sessions.createdAt,
@@ -148,27 +151,54 @@ export class MysqlSessionRepo implements SessionRepo {
     await this.db.delete(sessions).where(eq(sessions.id, id));
   }
 
-  async markWorkspacePurged(
+  async prepareWorkspace(
     id: string,
-    opts: { cutoffMs: number; nowMs: number },
+    opts: { nowMs: number },
+    ensure: () => Promise<void>,
+  ): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      // 与 GC 的 reclaimWorkspace 抢同一把行锁:GC 正在改名挪走时,这里等它挪完
+      await tx.execute(sql`SELECT id FROM sessions WHERE id = ${id} FOR UPDATE`);
+      await tx.update(sessions).set({ workspaceTouchedAt: opts.nowMs }).where(eq(sessions.id, id));
+      await ensure();
+    });
+  }
+
+  async reclaimWorkspace(
+    id: string,
+    opts: { quietSinceMs: number; nowMs: number; kind: "purge" | "clean" },
+    op: () => Promise<void>,
   ): Promise<boolean> {
-    // 时间一律按 UNIX_TIMESTAMP 换成毫秒比较,与 listSessionActivity 的口径一致
-    const res = await this.db.execute(sql`
-      UPDATE sessions s
-      SET s.workspace_purged_at = ${opts.nowMs}
-      WHERE s.id = ${id}
-        AND UNIX_TIMESTAMP(s.created_at) * 1000 < ${opts.cutoffMs}
-        AND NOT EXISTS (
-          SELECT 1 FROM runs r
-          WHERE r.session_id = s.id
-            AND (
-              UNIX_TIMESTAMP(COALESCE(r.ended_at, r.created_at)) * 1000 >= ${opts.cutoffMs}
-              OR (r.status = 'running' AND r.lease_until > ${opts.nowMs})
-            )
-        )
-    `);
-    const affected = (res as unknown as [{ affectedRows: number }])[0]?.affectedRows ?? 0;
-    return affected > 0;
+    return this.db.transaction(async (tx) => {
+      // 时间一律按 UNIX_TIMESTAMP 换成毫秒比较,与 listSessionActivity 的口径一致
+      const locked = await tx.execute(sql`
+        SELECT UNIX_TIMESTAMP(created_at) * 1000 AS createdMs, workspace_touched_at AS touchedMs
+        FROM sessions WHERE id = ${id} FOR UPDATE
+      `);
+      const row = ((locked as unknown as [Record<string, unknown>[]])[0] ?? [])[0];
+      if (!row) return false;
+      if (Number(row.createdMs) >= opts.quietSinceMs) return false;
+      if (row.touchedMs !== null && Number(row.touchedMs) >= opts.quietSinceMs) return false;
+
+      const busy = await tx.execute(sql`
+        SELECT 1 AS hit FROM runs r
+        WHERE r.session_id = ${id}
+          AND (
+            UNIX_TIMESTAMP(COALESCE(r.ended_at, r.created_at)) * 1000 >= ${opts.quietSinceMs}
+            OR (r.status = 'running' AND r.lease_until > ${opts.nowMs})
+            OR (${opts.kind} = 'clean' AND r.status IN ('pending', 'running'))
+          )
+        LIMIT 1
+      `);
+      if (((busy as unknown as [unknown[]])[0] ?? []).length > 0) return false;
+
+      if (opts.kind === "purge") {
+        await tx.update(sessions).set({ workspacePurgedAt: opts.nowMs }).where(eq(sessions.id, id));
+      }
+      // 在锁内完成改名:写方此刻在等这把锁,改名之后它才会建新的空目录
+      await op();
+      return true;
+    });
   }
 
   async update(

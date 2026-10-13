@@ -22,18 +22,56 @@ export class InMemorySessionRepo implements SessionRepo {
     return { ...session };
   }
 
-  /**
-   * 内存实现不知道运行(没有 runs 表),只按会话创建时间判定;
-   * "有活动 / 在执行的运行挡住清理"由 MySQL 实现与其契约测试保证。
-   */
-  async markWorkspacePurged(
+  /** 每个会话一条 Promise 链,模拟 MySQL 的行锁(同一会话的协议操作串行)。 */
+  private locks = new Map<string, Promise<unknown>>();
+
+  private async withLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.locks.get(id) ?? Promise.resolve();
+    const next = prev.then(fn, fn);
+    this.locks.set(
+      id,
+      next.catch(() => {}),
+    );
+    return next;
+  }
+
+  async prepareWorkspace(
     id: string,
-    opts: { cutoffMs: number; nowMs: number },
+    opts: { nowMs: number },
+    ensure: () => Promise<void>,
+  ): Promise<void> {
+    await this.withLock(id, async () => {
+      const s = this.sessions.get(id);
+      if (s) s.workspaceTouchedAt = opts.nowMs;
+      await ensure();
+    });
+  }
+
+  /**
+   * 内存实现没有 runs 表,只判定会话创建时间与最近使用时刻;
+   * "有活动 / 在执行的运行挡住清理"由 MySQL 实现与其测试保证。
+   */
+  async reclaimWorkspace(
+    id: string,
+    opts: { quietSinceMs: number; nowMs: number; kind: "purge" | "clean" },
+    op: () => Promise<void>,
   ): Promise<boolean> {
-    const s = this.sessions.get(id);
-    if (!s || s.createdAt >= opts.cutoffMs) return false;
-    s.workspacePurgedAt = opts.nowMs;
-    return true;
+    return this.withLock(id, async () => {
+      const s = this.sessions.get(id);
+      if (!s || s.createdAt >= opts.quietSinceMs) return false;
+      if (s.workspaceTouchedAt !== undefined && s.workspaceTouchedAt >= opts.quietSinceMs) {
+        return false;
+      }
+      const prev = s.workspacePurgedAt;
+      if (opts.kind === "purge") s.workspacePurgedAt = opts.nowMs;
+      try {
+        await op();
+      } catch (err) {
+        s.workspacePurgedAt = prev; // 与事务回滚一致
+        throw err;
+      }
+      return true;
+    });
   }
 
   async get(id: string): Promise<Session | null> {

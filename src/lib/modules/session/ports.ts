@@ -33,6 +33,8 @@ export interface Session {
   agentVersion?: number;
   /** 工作目录被 GC 整体清理的时刻(ms);之前生成的文件已不在。 */
   workspacePurgedAt?: number;
+  /** 最近一次有人要写工作目录的时刻(运行启动、文件上传)。 */
+  workspaceTouchedAt?: number;
   /** 会话级凭证覆盖(三级链的中间层)。 */
   baseUrl?: string;
   key?: string;
@@ -83,11 +85,29 @@ export interface SessionRepo {
   /** 每轮结束后记下 SDK session id,供下一轮 resume。 */
   setSdkSessionId(id: string, sdkSessionId: string): Promise<void>;
   /**
-   * GC 删目录前的条件标记:只有在【保留期截止时刻之后没有任何活动】且【没有正在执行的
-   * 运行】时才记下清理时刻并返回 true。判定与写入在同一条 UPDATE 里 ——
-   * GC 扫描之后、动手之前若有人发起了新一轮,这里返回 false,目录不会被删。
+   * 工作目录的会话级互斥协议(防止 GC 与新运行 / 上传赛跑而丢文件)。
+   *
+   * 写工作目录的一方(运行启动、文件上传)在动手前调用 prepareWorkspace:锁住会话行,
+   * 记下 workspaceTouchedAt = 现在,并在锁内确保目录存在。
+   * GC 动手时调用 reclaimWorkspace:锁住同一行,在锁内重新判定条件,成立才执行 op
+   * (把目录或中间产物【改名挪走】),purge 时同时记下 workspacePurgedAt;op 完成后才放锁。
+   *
+   * 两边在同一把行锁上串行:写方在前,GC 在锁内看到刚记下的使用时刻而放弃;
+   * GC 在前,写方等改名完成后再建空目录。没有"判定之后、动手之前"的窗口。
    */
-  markWorkspacePurged(id: string, opts: { cutoffMs: number; nowMs: number }): Promise<boolean>;
+  prepareWorkspace(id: string, opts: { nowMs: number }, ensure: () => Promise<void>): Promise<void>;
+  /**
+   * 条件(全部在会话行锁内判定):
+   * - 会话创建于 quietSinceMs 之前,且 workspaceTouchedAt 为空或早于它;
+   * - 没有在 quietSinceMs 之后有过活动的运行,没有租约有效的运行;
+   * - kind = "clean"(清中间产物)还要求没有未结束的运行。
+   * 返回是否执行了 op。op 抛错则整体回滚(不记清理时刻)。
+   */
+  reclaimWorkspace(
+    id: string,
+    opts: { quietSinceMs: number; nowMs: number; kind: "purge" | "clean" },
+    op: () => Promise<void>,
+  ): Promise<boolean>;
   /** 删除一条还没有任何运行的会话(入队失败或幂等冲突时回滚刚建的会话)。 */
   delete(id: string): Promise<void>;
   /** 改标题 / 归档 / 软删除。只改传进来的字段。 */

@@ -359,7 +359,7 @@ describe("RunOrchestrator:工作目录已被清理", () => {
       engine,
       bus: new InMemoryBus(),
       platformCredentials: PLATFORM,
-      ensureWorkspace: async (d) => {
+      ensureWorkspace: async (_sid, d) => {
         await fs.mkdir(d, { recursive: true });
       },
     });

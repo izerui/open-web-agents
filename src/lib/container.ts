@@ -335,9 +335,11 @@ function build(): Container {
     runAnchor: (runId) => runs.getResumeAnchor(runId),
     recordRunSession: (runId, sdkSessionId) => runs.setSdkSessionId(runId, sdkSessionId),
     recordRunAnchor: (runId, anchor) => runs.setResumeAnchor(runId, anchor),
-    ensureWorkspace: async (dir) => {
-      await fs.mkdir(dir, { recursive: true });
-    },
+    // 与 GC 共用会话行锁:记下"刚用过"并确保目录存在(见 SessionRepo.prepareWorkspace)
+    ensureWorkspace: (sessionId, dir) =>
+      sessions.prepareWorkspace(sessionId, { nowMs: Date.now() }, async () => {
+        await fs.mkdir(dir, { recursive: true });
+      }),
     // 知识检索:没有文档或没命中都返回空串,上层据此决定不注入
     retrieveKnowledge: async (agentId, query) => {
       const chunks = await knowledgeChunks.chunksOf(agentId);
@@ -457,7 +459,7 @@ function build(): Container {
   const gc = new WorkspaceGc({
     workspacesRoot: path.join(env.dataDir, "workspaces"),
     listWorkspaces: () => runs.listSessionActivity(),
-    markPurged: (id, opts) => sessions.markWorkspacePurged(id, opts),
+    reclaim: (id, opts, op) => sessions.reclaimWorkspace(id, opts, op),
     acquireLock: () => gcLock.acquire(),
   });
   const gcTimer = setInterval(() => {

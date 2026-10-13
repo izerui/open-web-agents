@@ -141,6 +141,13 @@
       "when": 1791903224517,
       "tag": "0019_workspace_purged",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "5",
+      "when": 1791904571290,
+      "tag": "0020_workspace_touched",
+      "breakpoints": true
     }
   ]
 }
