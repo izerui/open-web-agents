@@ -82,6 +82,8 @@ else
   # 少数用例需要直接改服务端库里【自己刚建的】账号(如把额度设为 0 模拟耗尽 —— e2e 建不出管理员)。
   # 只有库地址来自环境变量时才导出:没设的话服务读的是 .env 文件,测试无从确知是哪个库,宁可跳过
   if [ -n "${OWA_DATABASE_URL:-}" ]; then export OWA_E2E_DATABASE_URL="$OWA_DATABASE_URL"; fi
+  # 同理:审批用例要以 worker 的身份往服务用的 Redis 里发起一条待审请求
+  if [ -n "${OWA_REDIS_URL:-}" ]; then export OWA_E2E_REDIS_URL="$OWA_REDIS_URL"; fi
   echo "[e2e] 就绪:$BASE"
 fi
 

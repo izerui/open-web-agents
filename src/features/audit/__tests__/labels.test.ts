@@ -29,10 +29,8 @@ describe("审计展示", () => {
       ),
     ).toBe("「视频」:改动 systemPrompt、skillPackages");
     expect(
-      describeAudit(
-        item("approval.decide", { decision: "denied", tool: "Bash", summary: "rm -rf /" }),
-      ),
-    ).toBe("拒绝 Bash:rm -rf /");
+      describeAudit(item("approval.decide", { decision: "denied", tool: "Bash", runId: "r1" })),
+    ).toBe("拒绝 Bash(运行 r1)");
     expect(describeAudit(item("api_key.rate_limit", { name: "订单", from: null, to: 10 }))).toBe(
       "「订单」每分钟上限 默认 → 10",
     );

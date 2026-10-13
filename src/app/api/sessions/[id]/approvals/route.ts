@@ -89,7 +89,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
   if (!ok) return Response.json({ error: "该待审请求已失效" }, { status: 409 });
 
-  // 批准了哪个危险操作、谁批的 —— 审批最需要事后能追溯
+  /*
+   * 谁、在哪次运行里、对哪个工具做了什么裁决 —— 审批最需要事后能追溯。
+   *
+   * 【只记这几个字段】待审请求的摘要是工具调用的原文(Bash 就是截断后的命令,
+   * 其它工具是入参 JSON),里面可能有令牌、密码:`curl -H 'Authorization: Bearer …'`。
+   * 审批人的备注也是自由文本。按字段名打码管不到字符串内容,所以干脆不记。
+   * 需要看原文时去运行详情里看 —— 那里有访问控制,审计日志的可见范围更宽。
+   */
   const { sessions, audit } = getContainer();
   const session = await sessions.get(id).catch(() => null);
   await audit.record({
@@ -101,10 +108,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       approvalId: body.approvalId,
       runId: target?.runId,
       tool: target?.toolName,
-      summary: target?.summary,
-      reason: target?.reason,
       decision: body.decision,
-      message: body.message,
     },
     req,
   });

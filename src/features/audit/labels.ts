@@ -96,7 +96,7 @@ export function describeAudit(e: AuditItem): string {
     case "api_key.rate_limit":
       return `「${s(d.name) || "未命名"}」每分钟上限 ${d.from ?? "默认"} → ${d.to ?? "默认"}`;
     case "approval.decide":
-      return `${d.decision === "approved" ? "批准" : "拒绝"} ${s(d.tool)}${d.summary ? `:${s(d.summary)}` : ""}`;
+      return `${d.decision === "approved" ? "批准" : "拒绝"} ${s(d.tool)}${d.runId ? `(运行 ${s(d.runId)})` : ""}`;
     case "account.create":
       return `${s(d.email)}(${s(d.role)})`;
     case "account.update": {

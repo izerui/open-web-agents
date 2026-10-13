@@ -1,5 +1,5 @@
 import { InMemoryAuditRepo } from "@/lib/modules/audit/adapters/in-memory-audit-repo";
-import { AuditLog } from "@/lib/modules/audit/application/audit-log";
+import { AuditLog, AuditTimeout } from "@/lib/modules/audit/application/audit-log";
 import { describe, expect, it } from "vitest";
 
 describe("AuditLog.record", () => {
@@ -54,5 +54,46 @@ describe("AuditLog.record", () => {
       }),
     ).resolves.toBeUndefined();
     expect(errors).toHaveLength(1);
+  });
+});
+
+describe("AuditLog.record:有界返回", () => {
+  const never = <T>() => new Promise<T>(() => {});
+
+  it("查邮箱永不返回:在总上限内返回,并报告超时", async () => {
+    const errors: unknown[] = [];
+    const repo = new InMemoryAuditRepo();
+    const log = new AuditLog({
+      repo,
+      emailOf: never,
+      timeoutMs: 100,
+      onError: (e) => errors.push(e),
+    });
+    const t0 = Date.now();
+    await log.record({
+      actor: { type: "web", userId: "u1" },
+      action: "auth.login",
+      resource: { type: "account" },
+    });
+    expect(Date.now() - t0).toBeLessThan(500);
+    expect(errors[0]).toBeInstanceOf(AuditTimeout);
+    expect(repo.events).toHaveLength(0);
+  });
+
+  it("写入永不返回:同样有界返回", async () => {
+    const errors: unknown[] = [];
+    const log = new AuditLog({
+      repo: { append: never, list: async () => ({ items: [] }) },
+      timeoutMs: 100,
+      onError: (e) => errors.push(e),
+    });
+    const t0 = Date.now();
+    await log.record({
+      actor: { type: "anonymous" },
+      action: "auth.login_failed",
+      resource: { type: "account" },
+    });
+    expect(Date.now() - t0).toBeLessThan(500);
+    expect(errors[0]).toBeInstanceOf(AuditTimeout);
   });
 });

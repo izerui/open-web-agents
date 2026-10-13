@@ -121,7 +121,11 @@ export async function POST(req: Request) {
           action: "auth.login_failed",
           resource: { type: "account", id: target?.id },
           ownerId: target?.id,
-          details: { email, reason: err.message },
+          /*
+           * 只在账号确实存在时记邮箱。用户常把密码误输进邮箱框,
+           * 不存在的"邮箱"可能就是一个密码 —— 那种情况什么输入都不记。
+           */
+          details: target ? { email: target.email, reason: err.message } : { reason: err.message },
           req,
         });
       }

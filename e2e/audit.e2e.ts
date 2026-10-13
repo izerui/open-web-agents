@@ -132,3 +132,101 @@ describe("审计日志", () => {
     expect((await new Client("anon").get("/api/audit")).status).toBe(401);
   });
 });
+
+describe("审批审计不落工具调用原文(真实服务 + Redis + 审计表)", () => {
+  const redisUrl = process.env.OWA_E2E_REDIS_URL;
+  if (!redisUrl) {
+    console.warn("[skip] 审批审计用例未运行 —— 需由 scripts/e2e.sh 起服务并设置 OWA_REDIS_URL");
+  }
+  const TOKEN = "sk-live-TOPSECRET42";
+
+  it.skipIf(!redisUrl)("摘要与审批备注里的令牌,审计查询拿不到", async () => {
+    if (!(await serverUp())) throw new Error("e2e 需要一个跑着的服务");
+    const { RedisApproval } = await import("@/lib/modules/approval/adapters/redis-approval");
+    const owner = await newUser("approval-audit");
+    const sessionId =
+      (await owner.post<{ session?: { id: string } }>("/api/sessions", { agentId: "default" })).body
+        .session?.id ?? "";
+    expect(sessionId).toBeTruthy();
+
+    // 以 worker 的身份发起一条待审请求:摘要就是 Bash 命令原文,带着令牌
+    const approval = new RedisApproval(redisUrl as string);
+    const approvalId = `ap-${Date.now()}`;
+    const outcome = approval.request({
+      id: approvalId,
+      sessionId,
+      runId: "run-e2e",
+      toolName: "Bash",
+      summary: `curl -H 'Authorization: Bearer ${TOKEN}' https://api.example.com/v1/charge`,
+      reason: "Bash 命令需要人工审批",
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 60_000,
+    });
+    try {
+      // 等它出现在待审列表里(经由服务)
+      let seen = false;
+      for (let i = 0; i < 50 && !seen; i++) {
+        const p = await owner.get<{ pending?: { id: string; summary: string }[] }>(
+          `/api/sessions/${sessionId}/approvals`,
+        );
+        seen = (p.body.pending ?? []).some((x) => x.id === approvalId);
+        if (!seen) await new Promise((r) => setTimeout(r, 100));
+      }
+      expect(seen).toBe(true);
+
+      const decided = await owner.post(`/api/sessions/${sessionId}/approvals`, {
+        approvalId,
+        decision: "approved",
+        message: `备注里也贴了 ${TOKEN}`,
+      });
+      expect(decided.status).toBe(200);
+      expect((await outcome).decision).toBe("approved");
+
+      const audit = await owner.get<Audit>("/api/audit?action=approval.decide&limit=200");
+      const mine = (audit.body.items ?? []).find((e) => e.details?.approvalId === approvalId);
+      expect(mine?.details).toEqual({
+        approvalId,
+        runId: "run-e2e",
+        tool: "Bash",
+        decision: "approved",
+      });
+      expect(JSON.stringify(audit.body)).not.toContain("TOPSECRET42");
+    } finally {
+      await approval.close();
+    }
+  });
+});
+
+describe("登录失败:不存在的账号不记输入", () => {
+  it("把密码误输进邮箱框时,审计里查不到那串输入", async () => {
+    if (!(await serverUp())) throw new Error("e2e 需要一个跑着的服务");
+    const typo = `Hunter2-pass-${Date.now()}@not-a-user.test`;
+    const r = await new Client("typo").post("/api/auth", {
+      action: "login",
+      email: typo,
+      password: "whatever-123",
+    });
+    expect(r.status).toBe(401);
+    // 不存在的账号没有归属人,普通用户本来就看不到;这里断言存储本身不含输入
+    const dbUrl = process.env.OWA_E2E_DATABASE_URL;
+    if (!dbUrl) return;
+    const mysql = await import("mysql2/promise");
+    const conn = await mysql.createConnection(dbUrl);
+    try {
+      const [rows] = await conn.query(
+        // 不区分大小写的子串匹配:服务端会把邮箱转成小写再处理,按原样精确匹配会漏判
+        "SELECT COUNT(*) AS n FROM audit_logs WHERE action = 'auth.login_failed' AND LOWER(CAST(details AS CHAR)) LIKE CONCAT('%', LOWER(?), '%')",
+        [typo.split("@")[0]],
+      );
+      expect(Number((rows as { n: number }[])[0]?.n)).toBe(0);
+      const [recent] = await conn.query(
+        "SELECT COUNT(*) AS n FROM audit_logs WHERE action = 'auth.login_failed' AND owner_id IS NULL AND at_ms > ?",
+        [Date.now() - 60_000],
+      );
+      // 失败本身仍记了一条(管理员能看到"有失败尝试"),只是不带输入
+      expect(Number((recent as { n: number }[])[0]?.n)).toBeGreaterThan(0);
+    } finally {
+      await conn.end();
+    }
+  });
+});
