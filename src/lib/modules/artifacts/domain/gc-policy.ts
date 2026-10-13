@@ -30,7 +30,11 @@ export const DEFAULT_GC_POLICY: GcPolicy = {
 
 /**
  * 判定某个工作空间该怎么处理。
- * 未结束的会话一律 keep —— 正在跑的任务绝不能被回收掉工作目录。
+ *
+ * - 未结束的会话不清中间产物(正在跑的任务可能要用);
+ * - 超过保留期则整体清理,【即使未结束】—— 兜底卡在 pending 的僵尸会话占盘。
+ *   真正在执行的运行(租约有效)不会被误删:执行器在删目录之前先做一次带条件的
+ *   标记(见 GcDeps.markPurged),有在执行的运行或保留期内有活动就不动。
  */
 export function decideGc(ws: WorkspaceInfo, policy: GcPolicy, now: number): GcAction {
   const age = now - ws.lastActiveAt;

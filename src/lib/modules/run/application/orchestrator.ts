@@ -55,6 +55,12 @@ export interface OrchestratorDeps {
   /** 记录本轮实际使用的起跑锚点,供审计。 */
   recordRunAnchor?: (runId: string, anchor: string | null) => Promise<void>;
   /**
+   * 运行前确保工作目录存在。目录可能已被 GC 整体清理(会话超过保留期未活动):
+   * 会话与对话历史还在,只是文件没了 —— 在同一路径重建空目录继续,而不是让这一轮
+   * 因为 cwd 不存在而失败。
+   */
+  ensureWorkspace?: (dir: string) => Promise<void>;
+  /**
    * 按本轮输入检索智能体知识库,返回可直接注入提示词的文本(无命中则空串)。
    * 检索失败不该让整轮运行失败 —— 降级成"没有知识库"继续跑。
    */
@@ -139,6 +145,8 @@ export class RunOrchestrator {
     if (cmd.runId) {
       await this.deps.recordRunAnchor?.(cmd.runId, resumeSessionId ?? null).catch(() => {});
     }
+
+    await this.deps.ensureWorkspace?.(session.workspaceDir);
 
     const ctx = {
       sessionId: cmd.sessionId,

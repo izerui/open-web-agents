@@ -31,6 +31,8 @@ export interface Session {
   designTargetAgentId?: string;
   /** 锁定的智能体版本;undefined = 跟随草稿。建会话时定下,整个会话不变。 */
   agentVersion?: number;
+  /** 工作目录被 GC 整体清理的时刻(ms);之前生成的文件已不在。 */
+  workspacePurgedAt?: number;
   /** 会话级凭证覆盖(三级链的中间层)。 */
   baseUrl?: string;
   key?: string;
@@ -80,6 +82,12 @@ export interface SessionRepo {
   list(filter?: SessionListFilter): Promise<Session[]>;
   /** 每轮结束后记下 SDK session id,供下一轮 resume。 */
   setSdkSessionId(id: string, sdkSessionId: string): Promise<void>;
+  /**
+   * GC 删目录前的条件标记:只有在【保留期截止时刻之后没有任何活动】且【没有正在执行的
+   * 运行】时才记下清理时刻并返回 true。判定与写入在同一条 UPDATE 里 ——
+   * GC 扫描之后、动手之前若有人发起了新一轮,这里返回 false,目录不会被删。
+   */
+  markWorkspacePurged(id: string, opts: { cutoffMs: number; nowMs: number }): Promise<boolean>;
   /** 删除一条还没有任何运行的会话(入队失败或幂等冲突时回滚刚建的会话)。 */
   delete(id: string): Promise<void>;
   /** 改标题 / 归档 / 软删除。只改传进来的字段。 */

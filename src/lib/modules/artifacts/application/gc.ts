@@ -15,9 +15,16 @@ export interface GcReport {
   scanned: number;
   cleaned: number;
   purged: number;
+  /** 判定要整体清理、但动手前发现又有活动(或有运行正在执行)而放弃的 */
+  spared: number;
   freedBytes: number;
   errors: string[];
+  /** 另一个进程正在跑这一轮,本进程跳过 */
+  skippedLocked?: boolean;
 }
+
+/** 删除前先挪到这里:改名是原子的,目录要么还在原处、要么已整体移走,不会删到一半。 */
+export const TRASH_DIR = ".trash";
 
 async function dirSize(dir: string): Promise<number> {
   let total = 0;
@@ -58,15 +65,48 @@ export interface GcDeps {
   listWorkspaces(): Promise<WorkspaceInfo[]>;
   policy?: GcPolicy;
   now?: () => number;
+  /**
+   * 整体清理前的条件标记(见 SessionRepo.markWorkspacePurged)。返回 false 表示扫描之后
+   * 又有了活动或有运行正在执行 —— 这次不删。不提供则不做这道检查(仅测试用)。
+   */
+  markPurged?(sessionId: string, opts: { cutoffMs: number; nowMs: number }): Promise<boolean>;
+  /**
+   * 多进程互斥:每个进程都会定时触发 GC,同一时刻只让一个真正去扫。
+   * 返回 null = 别人正在跑,本轮跳过。不提供则不加锁。
+   */
+  acquireLock?(): Promise<{ release(): Promise<void> } | null>;
 }
 
 export class WorkspaceGc {
   constructor(private readonly deps: GcDeps) {}
 
   async run(): Promise<GcReport> {
+    const report: GcReport = {
+      scanned: 0,
+      cleaned: 0,
+      purged: 0,
+      spared: 0,
+      freedBytes: 0,
+      errors: [],
+    };
+    const lock = this.deps.acquireLock ? await this.deps.acquireLock() : undefined;
+    if (lock === null) return { ...report, skippedLocked: true };
+    try {
+      await this.scan(report);
+    } finally {
+      await lock?.release().catch(() => {});
+    }
+    return report;
+  }
+
+  private async scan(report: GcReport): Promise<void> {
     const policy = this.deps.policy ?? DEFAULT_GC_POLICY;
     const now = (this.deps.now ?? (() => Date.now()))();
-    const report: GcReport = { scanned: 0, cleaned: 0, purged: 0, freedBytes: 0, errors: [] };
+    const trash = path.join(this.deps.workspacesRoot, TRASH_DIR);
+    // 上一轮挪进回收站、但没来得及删完的(进程中途退出)
+    await fs.rm(trash, { recursive: true, force: true }).catch((err) => {
+      report.errors.push(`回收站清理失败:${err instanceof Error ? err.message : String(err)}`);
+    });
 
     for (const ws of await this.deps.listWorkspaces()) {
       report.scanned++;
@@ -98,8 +138,24 @@ export class WorkspaceGc {
       const action = decideGc(ws, policy, now);
       try {
         if (action === "purge") {
-          report.freedBytes += await dirSize(dir);
-          await fs.rm(dir, { recursive: true, force: true });
+          const size = await dirSize(dir);
+          // 先在库里带条件地记下"已清理":扫描之后若有人发起了新一轮,这里返回 false,不删
+          if (
+            this.deps.markPurged &&
+            !(await this.deps.markPurged(ws.sessionId, {
+              cutoffMs: now - policy.purgeAfterMs,
+              nowMs: now,
+            }))
+          ) {
+            report.spared++;
+            continue;
+          }
+          // 原子改名挪走,再慢慢删:目录不会处在"删了一半"的状态
+          await fs.mkdir(trash, { recursive: true });
+          const moved = path.join(trash, `${ws.sessionId}-${now}`);
+          await fs.rename(dir, moved);
+          await fs.rm(moved, { recursive: true, force: true });
+          report.freedBytes += size;
           report.purged++;
         } else if (action === "clean-intermediate") {
           report.freedBytes += await cleanIntermediate(dir);
@@ -109,7 +165,5 @@ export class WorkspaceGc {
         report.errors.push(`${ws.sessionId}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
-
-    return report;
   }
 }

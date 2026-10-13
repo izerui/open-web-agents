@@ -143,6 +143,12 @@ export const sessions = mysqlTable(
      * 前后轮的提示词与契约对不上。
      */
     agentVersion: int("agent_version"),
+    /**
+     * 工作目录被 GC 整体清理的时刻(ms);NULL = 没被清过。
+     * 会话本身(对话历史)还在,只是之前生成的文件没了 —— 界面据此提示用户;
+     * 再次运行会在同一路径重建空目录继续。
+     */
+    workspacePurgedAt: bigint("workspace_purged_at", { mode: "number" }),
     status: varchar("status", { length: 16 }).notNull().default("active"),
     /** 会话级凭证覆盖(三级链中间层) */
     baseUrl: varchar("base_url", { length: 512 }),

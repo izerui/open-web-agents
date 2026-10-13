@@ -3,6 +3,7 @@
 // 这是全工程唯一决定"用哪个实现"的地方 —— 换 DB / 换总线 / 换引擎都只改这里。
 
 import { createHmac, randomUUID } from "node:crypto";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { type Db, createDb } from "@/lib/db/client";
 import { type Env, loadEnv } from "@/lib/env";
@@ -25,6 +26,7 @@ import type { AgentRepo } from "@/lib/modules/agent/ports";
 import { RedisApproval } from "@/lib/modules/approval/adapters/redis-approval";
 import { type ApprovalPort, ApprovalUnavailable } from "@/lib/modules/approval/ports";
 import { LocalFsStorage } from "@/lib/modules/artifacts/adapters/local-fs-storage";
+import { RedisGcLock } from "@/lib/modules/artifacts/adapters/redis-gc-lock";
 import { WorkspaceGc } from "@/lib/modules/artifacts/application/gc";
 import type { StoragePort } from "@/lib/modules/artifacts/ports";
 import { MysqlAuditRepo } from "@/lib/modules/audit/adapters/mysql-audit-repo";
@@ -328,6 +330,9 @@ function build(): Container {
     runAnchor: (runId) => runs.getResumeAnchor(runId),
     recordRunSession: (runId, sdkSessionId) => runs.setSdkSessionId(runId, sdkSessionId),
     recordRunAnchor: (runId, anchor) => runs.setResumeAnchor(runId, anchor),
+    ensureWorkspace: async (dir) => {
+      await fs.mkdir(dir, { recursive: true });
+    },
     // 知识检索:没有文档或没命中都返回空串,上层据此决定不注入
     retrieveKnowledge: async (agentId, query) => {
       const chunks = await knowledgeChunks.chunksOf(agentId);
@@ -443,9 +448,12 @@ function build(): Container {
   }
 
   // 工作空间 GC:定期两层回收,防磁盘无界增长。失败只记日志,绝不影响主流程。
+  const gcLock = new RedisGcLock(env.redisUrl);
   const gc = new WorkspaceGc({
     workspacesRoot: path.join(env.dataDir, "workspaces"),
     listWorkspaces: () => runs.listSessionActivity(),
+    markPurged: (id, opts) => sessions.markWorkspacePurged(id, opts),
+    acquireLock: () => gcLock.acquire(),
   });
   const gcTimer = setInterval(() => {
     void gc

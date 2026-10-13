@@ -25,6 +25,7 @@ interface Row {
   status: string;
   designTargetAgentId: string | null;
   agentVersion: number | null;
+  workspacePurgedAt: number | null;
   baseUrl: string | null;
   model: string | null;
   createdAt: Date;
@@ -45,6 +46,7 @@ function toSession(r: Row): Session {
     status: r.status as SessionStatus,
     designTargetAgentId: r.designTargetAgentId ?? undefined,
     agentVersion: r.agentVersion ?? undefined,
+    workspacePurgedAt: r.workspacePurgedAt ?? undefined,
     baseUrl: r.baseUrl ?? undefined,
     model: (r.model as ModelAlias | null) ?? undefined,
     createdAt: r.createdAt.getTime(),
@@ -65,6 +67,7 @@ const COLUMNS = {
   status: sessions.status,
   designTargetAgentId: sessions.designTargetAgentId,
   agentVersion: sessions.agentVersion,
+  workspacePurgedAt: sessions.workspacePurgedAt,
   baseUrl: sessions.baseUrl,
   model: sessions.model,
   createdAt: sessions.createdAt,
@@ -143,6 +146,29 @@ export class MysqlSessionRepo implements SessionRepo {
 
   async delete(id: string): Promise<void> {
     await this.db.delete(sessions).where(eq(sessions.id, id));
+  }
+
+  async markWorkspacePurged(
+    id: string,
+    opts: { cutoffMs: number; nowMs: number },
+  ): Promise<boolean> {
+    // 时间一律按 UNIX_TIMESTAMP 换成毫秒比较,与 listSessionActivity 的口径一致
+    const res = await this.db.execute(sql`
+      UPDATE sessions s
+      SET s.workspace_purged_at = ${opts.nowMs}
+      WHERE s.id = ${id}
+        AND UNIX_TIMESTAMP(s.created_at) * 1000 < ${opts.cutoffMs}
+        AND NOT EXISTS (
+          SELECT 1 FROM runs r
+          WHERE r.session_id = s.id
+            AND (
+              UNIX_TIMESTAMP(COALESCE(r.ended_at, r.created_at)) * 1000 >= ${opts.cutoffMs}
+              OR (r.status = 'running' AND r.lease_until > ${opts.nowMs})
+            )
+        )
+    `);
+    const affected = (res as unknown as [{ affectedRows: number }])[0]?.affectedRows ?? 0;
+    return affected > 0;
   }
 
   async update(

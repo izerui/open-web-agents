@@ -22,6 +22,20 @@ export class InMemorySessionRepo implements SessionRepo {
     return { ...session };
   }
 
+  /**
+   * 内存实现不知道运行(没有 runs 表),只按会话创建时间判定;
+   * "有活动 / 在执行的运行挡住清理"由 MySQL 实现与其契约测试保证。
+   */
+  async markWorkspacePurged(
+    id: string,
+    opts: { cutoffMs: number; nowMs: number },
+  ): Promise<boolean> {
+    const s = this.sessions.get(id);
+    if (!s || s.createdAt >= opts.cutoffMs) return false;
+    s.workspacePurgedAt = opts.nowMs;
+    return true;
+  }
+
   async get(id: string): Promise<Session | null> {
     const s = this.sessions.get(id);
     return s ? { ...s } : null;

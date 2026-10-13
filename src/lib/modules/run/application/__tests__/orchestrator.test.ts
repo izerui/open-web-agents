@@ -334,3 +334,38 @@ describe("计费账号", () => {
     );
   });
 });
+
+describe("RunOrchestrator:工作目录已被清理", () => {
+  it("运行前在原路径重建工作目录,引擎拿到的 cwd 是存在的", async () => {
+    const fs = await import("node:fs/promises");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "owa-ws-"));
+    const dir = path.join(root, "s-purged"); // 不存在:模拟被 GC 整体清理
+    let existedAtRun = false;
+    const engine: EnginePort = {
+      async run(_spec, ctx) {
+        existedAtRun = (await fs.stat(ctx.workspaceDir).catch(() => null))?.isDirectory() === true;
+        return { status: "success", summary: "ok", sessionId: "sdk" };
+      },
+    };
+    const sessions = new InMemorySessionRepo();
+    await sessions.create({ id: "s1", agentId: "a1", workspaceDir: dir });
+    const orch = new RunOrchestrator({
+      sessions,
+      agents: new InMemoryAgentRepo([
+        { id: "a1", ownerId: "u1", name: "a", config: { systemPrompt: "p", model: "sonnet" } },
+      ]),
+      engine,
+      bus: new InMemoryBus(),
+      platformCredentials: PLATFORM,
+      ensureWorkspace: async (d) => {
+        await fs.mkdir(d, { recursive: true });
+      },
+    });
+    const r = await orch.execute({ sessionId: "s1", prompt: "继续" }, new AbortController().signal);
+    expect(r.status).toBe("success");
+    expect(existedAtRun).toBe(true);
+    await fs.rm(root, { recursive: true, force: true });
+  });
+});

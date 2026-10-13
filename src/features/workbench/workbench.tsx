@@ -1255,6 +1255,16 @@ export function Workbench() {
                   />
                 )}
 
+                {(() => {
+                  const purgedAt = sessions.find((s) => s.id === sessionId)?.workspacePurgedAt;
+                  return purgedAt ? (
+                    <output className="mx-4 mt-3 block rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs">
+                      这个会话长期未活动,工作目录已于 {new Date(purgedAt).toLocaleString()}{" "}
+                      自动清理,之前生成的文件已不在。对话记录还在;继续对话会在新的空目录里进行。
+                    </output>
+                  ) : null;
+                })()}
+
                 {/*
                   失败与"结局未知"由该轮自己的结果卡片展示。曾经顶部还有一条横幅显示同一段话,
                   同一个失败出现两遍。

@@ -13,6 +13,8 @@ export interface SessionSummary {
   runCount?: number;
   /** 最后一次发起运行的时间;一轮都没跑过时等于创建时间。 */
   lastActiveAt?: number;
+  /** 工作目录被自动清理的时刻(长期未活动);之前生成的文件已不在 */
+  workspacePurgedAt?: number;
 }
 
 export interface AgentSummary {
