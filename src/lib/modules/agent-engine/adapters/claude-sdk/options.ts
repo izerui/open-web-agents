@@ -189,6 +189,8 @@ export interface SdkOptionsDeps {
   sandboxEnabled: boolean;
   /** 是否允许在宿主机启动 stdio MCP 进程。 */
   allowStdioMcp: boolean;
+  /** 已写好的技能插件目录(由 runner 生成)。 */
+  skillPluginPath?: string;
   /**
    * 人工审批钩子(HITL)。给了才启用审批;不给则审批规则被忽略。
    * 返回 true 放行、false 拒绝 —— 实现方负责超时兜底。
@@ -244,7 +246,6 @@ export function buildSdkOptions(
     // ② spec 一等公民字段
     model: spec.model.alias,
     systemPrompt: spec.systemPrompt,
-    skills: spec.skills,
     mcpServers: toMcpServers(spec, deps.allowStdioMcp),
     agents: toAgents(spec),
     maxTurns: spec.limits.maxTurns,
@@ -352,6 +353,11 @@ export function buildSdkOptions(
    * 平台只负责把“没人可问”这个运行时事实通过 permissionMode 传给 SDK。
    */
   if (disallowedTools.length) options.disallowedTools = disallowedTools;
+
+  // 智能体自带的技能:平台写好的只读插件目录(见 skill-plugin.ts)
+  if (deps.skillPluginPath) {
+    options.plugins = [{ type: "local", path: deps.skillPluginPath }];
+  }
 
   // 执行隔离第二道:宿主侧文件工具按路径拦截。
   // 它【不依赖内核沙箱】,故本地开发关掉沙箱时依然生效 —— 正是之前两次

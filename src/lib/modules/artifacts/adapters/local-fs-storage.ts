@@ -1,3 +1,4 @@
+import { constants as fsConstants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { isTextMime, mimeOf } from "@/lib/modules/artifacts/domain/mime";
@@ -96,11 +97,30 @@ export class LocalFsStorage implements StoragePort {
     }
   }
 
-  async write(workspaceDir: string, relPath: string, bytes: Buffer): Promise<void> {
+  async write(
+    workspaceDir: string,
+    relPath: string,
+    bytes: Buffer,
+    opts: { overwrite?: boolean } = {},
+  ): Promise<void> {
     const abs = resolveInWorkspace(workspaceDir, relPath);
     await assertRealPathInside(workspaceDir, abs);
     await fs.mkdir(path.dirname(abs), { recursive: true });
-    await fs.writeFile(abs, bytes, { flag: "wx" });
+    // 文件还不存在时,上面那次检查拿不到 realpath 就放行了 —— 但父目录可能是指向工作目录
+    // 之外的符号链接(agent 能在自己的工作目录里建链接),写入会顺着它逃出去。再查一次父目录。
+    await assertRealPathInside(workspaceDir, path.dirname(abs));
+    if (!opts.overwrite) {
+      await fs.writeFile(abs, bytes, { flag: "wx" });
+      return;
+    }
+    // 覆盖写:O_NOFOLLOW 拒绝最后一段是符号链接(否则会顺着链接改掉它指向的文件)
+    const { O_WRONLY, O_CREAT, O_TRUNC, O_NOFOLLOW } = fsConstants;
+    const handle = await fs.open(abs, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0o644);
+    try {
+      await handle.writeFile(bytes);
+    } finally {
+      await handle.close();
+    }
   }
 
   async read(workspaceDir: string, relPath: string): Promise<{ bytes: Buffer; mime: string }> {

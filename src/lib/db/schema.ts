@@ -101,6 +101,12 @@ export const sessions = mysqlTable(
      * 曾经只能靠 unattended / callerApiKeyId / title 拼凑判断,embed 与 API 会话分不开。
      */
     source: varchar("source", { length: 16 }).notNull().default("web"),
+    /**
+     * 设计会话要修改的目标智能体(由"AI 智能体设计师"驱动的会话才有)。
+     * 存在库里而不是工作目录里:工作目录是设计师自己能写的,目标不能被它改指向。
+     * 新建智能体的设计会话一开始为空,第一次"应用"后填上。
+     */
+    designTargetAgentId: varchar("design_target_agent_id", { length: 36 }),
     status: varchar("status", { length: 16 }).notNull().default("active"),
     /** 会话级凭证覆盖(三级链中间层) */
     baseUrl: varchar("base_url", { length: 512 }),

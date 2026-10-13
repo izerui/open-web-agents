@@ -20,7 +20,8 @@ import type { AgentSummary } from "@/features/workbench/types";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { PERMISSION_MODES, type PermissionMode } from "@/lib/shared";
 import { cn } from "@/lib/utils";
-import { Bot, FileCode, Plus, Save, Trash2 } from "lucide-react";
+import { Bot, FileCode, Play, Plus, Save, Sparkles, Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -289,6 +290,30 @@ export function Builder() {
     !schemaError &&
     !inputSchemaError &&
     !saving;
+
+  const router = useRouter();
+  const [designing, setDesigning] = useState(false);
+
+  /**
+   * 开一个"AI 智能体设计师"会话并跳到工作台。
+   * 修改已有智能体时,它当前的定义会先导出到设计会话的工作目录里。
+   */
+  async function startDesign(agentId?: string) {
+    if (dirty && !window.confirm("当前有未保存的修改,设计会话看不到它们。仍然继续?")) return;
+    setDesigning(true);
+    try {
+      const d = await fetchJson<{ sessionId: string }>("/api/agents/design", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(agentId ? { agentId } : {}),
+      });
+      allowNavigationRef.current = true;
+      router.push(`/?session=${encodeURIComponent(d.sessionId)}`);
+    } catch (e) {
+      toast.error(`无法开始设计:${errorText(e)}`);
+      setDesigning(false);
+    }
+  }
 
   async function save() {
     if (!canSave) return;
@@ -587,10 +612,32 @@ export function Builder() {
       subtitle={'定义一个只干特定某件事的"员工"。填了 outputSchema,它就能被企业系统当接口调用。'}
       sidebarExtra={agentList}
       actions={
-        <Button size="sm" onClick={save} disabled={!canSave}>
-          <Save className="size-3.5" />
-          {saving ? "保存中…" : "保存智能体"}
-        </Button>
+        <>
+          {openedId && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => window.open(`/?agent=${encodeURIComponent(openedId)}`, "_blank")}
+            >
+              <Play className="size-3.5" />
+              试运行
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={designing || (Boolean(openedId) && !canWrite)}
+            onClick={() => void startDesign(openedId ?? undefined)}
+            title="和 AI 对话来设计:提示词、技能、MCP、输入输出契约"
+          >
+            <Sparkles className="size-3.5" />
+            {designing ? "准备中…" : openedId ? "用 AI 修改" : "用 AI 设计"}
+          </Button>
+          <Button size="sm" onClick={save} disabled={!canSave}>
+            <Save className="size-3.5" />
+            {saving ? "保存中…" : "保存智能体"}
+          </Button>
+        </>
       }
     >
       <div className="grid grid-cols-2 gap-3">

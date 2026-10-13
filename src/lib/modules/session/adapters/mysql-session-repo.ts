@@ -23,6 +23,7 @@ interface Row {
   unattended: number;
   source: string;
   status: string;
+  designTargetAgentId: string | null;
   baseUrl: string | null;
   model: string | null;
   createdAt: Date;
@@ -41,6 +42,7 @@ function toSession(r: Row): Session {
     unattended: r.unattended === 1,
     source: r.source as SessionSource,
     status: r.status as SessionStatus,
+    designTargetAgentId: r.designTargetAgentId ?? undefined,
     baseUrl: r.baseUrl ?? undefined,
     model: (r.model as ModelAlias | null) ?? undefined,
     createdAt: r.createdAt.getTime(),
@@ -59,6 +61,7 @@ const COLUMNS = {
   unattended: sessions.unattended,
   source: sessions.source,
   status: sessions.status,
+  designTargetAgentId: sessions.designTargetAgentId,
   baseUrl: sessions.baseUrl,
   model: sessions.model,
   createdAt: sessions.createdAt,
@@ -94,6 +97,7 @@ export class MysqlSessionRepo implements SessionRepo {
       title: s.title,
       unattended: s.unattended ? 1 : 0,
       source: s.source ?? (s.unattended ? "invoke" : "web"),
+      designTargetAgentId: s.designTargetAgentId,
       status: "active",
     });
     const created = await this.get(s.id);
@@ -137,8 +141,13 @@ export class MysqlSessionRepo implements SessionRepo {
     await this.db.delete(sessions).where(eq(sessions.id, id));
   }
 
-  async update(id: string, patch: { title?: string; status?: SessionStatus }): Promise<void> {
+  async update(
+    id: string,
+    patch: { title?: string; status?: SessionStatus; designTargetAgentId?: string },
+  ): Promise<void> {
     const set: Record<string, string> = {};
+    if (patch.designTargetAgentId !== undefined)
+      set.designTargetAgentId = patch.designTargetAgentId;
     if (patch.title !== undefined) set.title = patch.title;
     if (patch.status !== undefined) set.status = patch.status;
     if (Object.keys(set).length === 0) return;

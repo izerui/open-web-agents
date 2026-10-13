@@ -19,7 +19,7 @@ export function buildSpec(
   const knowledge = overrides?.knowledgeContext?.trim();
   return {
     systemPrompt: knowledge ? `${cfg.systemPrompt}\n\n${knowledge}` : cfg.systemPrompt,
-    skills: cfg.skills,
+    skillPackages: cfg.skillPackages,
     mcpServers: cfg.mcpServers,
     tools: cfg.tools,
     // 平台强制子代理同步执行,保证过程全程可监控

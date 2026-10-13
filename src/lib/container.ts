@@ -16,7 +16,9 @@ import { createClaudeSdkEngine } from "@/lib/modules/agent-engine/adapters/claud
 import { JsonlTranscript } from "@/lib/modules/agent-engine/adapters/claude-sdk/jsonl-transcript";
 import type { EngineDeps } from "@/lib/modules/agent-engine/adapters/claude-sdk/runner";
 import type { EnginePort, TranscriptPort } from "@/lib/modules/agent-engine/ports";
+import { readBundle, writeBundle } from "@/lib/modules/agent/adapters/fs-bundle-store";
 import { MysqlAgentRepo } from "@/lib/modules/agent/adapters/mysql-agent-repo";
+import { ARCHITECT_AGENT_ID, ARCHITECT_CONFIG } from "@/lib/modules/agent/domain/architect";
 import type { AgentRepo } from "@/lib/modules/agent/ports";
 import { RedisApproval } from "@/lib/modules/approval/adapters/redis-approval";
 import { type ApprovalPort, ApprovalUnavailable } from "@/lib/modules/approval/ports";
@@ -97,6 +99,11 @@ export interface Container {
   cancelSignal: CancelSignal;
   /** 登录、注册等入口的限流。 */
   rateLimiter: RateLimiter;
+  /** 设计会话工作目录里的智能体包读写。 */
+  bundles: {
+    read(workspaceDir: string): Promise<Record<string, string>>;
+    write(workspaceDir: string, files: Record<string, string>): Promise<void>;
+  };
 }
 
 /** 人工审批的等待上限。到点自动拒绝,避免 worker 被无人值守的审批永久占住。 */
@@ -162,6 +169,26 @@ function build(): Container {
         id: "grant-default-public",
         resourceType: "agent",
         resourceId: DEFAULT_AGENT.id,
+        principalType: "*",
+        principalId: PUBLIC_PRINCIPAL,
+        permission: "read",
+      }),
+    )
+    .catch(() => {});
+  // 内置"AI 智能体设计师":所有人可用,通过对话设计其它智能体(见 agent/domain/architect.ts)
+  void agents
+    .upsert({
+      id: ARCHITECT_AGENT_ID,
+      ownerId: "system",
+      name: "AI 智能体设计师",
+      description: "通过对话设计、完善你的智能体:提示词、技能、MCP、契约",
+      config: ARCHITECT_CONFIG,
+    })
+    .then(() =>
+      grants.grant({
+        id: "grant-architect-public",
+        resourceType: "agent",
+        resourceId: ARCHITECT_AGENT_ID,
         principalType: "*",
         principalId: PUBLIC_PRINCIPAL,
         permission: "read",
@@ -451,6 +478,7 @@ function build(): Container {
     webhooks,
     cancelSignal,
     rateLimiter,
+    bundles: { read: readBundle, write: writeBundle },
   };
 }
 

@@ -8,6 +8,7 @@ import {
   PERMISSION_MODES,
   isModelAlias,
   protectedEscapeHatchKeys,
+  validateSkillPackages,
 } from "@/lib/shared";
 import type { AgentConfig } from "./config";
 
@@ -124,6 +125,8 @@ export function validateAgentConfig(
       seenSkill.add(s);
     }
   }
+
+  issues.push(...validateSkillPackages(cfg.skillPackages));
 
   const seenSub = new Set<string>();
   for (const [i, sa] of (cfg.subagents ?? []).entries()) {

@@ -709,3 +709,20 @@ describe("没有审批人时的审批策略", () => {
     expect(r.decision).not.toBe("deny");
   });
 });
+
+describe("技能插件进入 SDK options", () => {
+  it("有技能插件目录时以本地插件加载,且不放开 settingSources", () => {
+    const o = buildSdkOptions(specOf({}), ctx, { ...deps(), skillPluginPath: "/data/.skills/abc" });
+    expect(o.plugins).toEqual([{ type: "local", path: "/data/.skills/abc" }]);
+    expect(o.settingSources).toEqual([]);
+  });
+
+  it("逃生舱塞不进别的插件", () => {
+    const o = buildSdkOptions(
+      specOf({ escapeHatch: { plugins: [{ type: "local", path: "/tmp/evil" }] } }),
+      ctx,
+      deps(),
+    );
+    expect(o.plugins).toBeUndefined();
+  });
+});

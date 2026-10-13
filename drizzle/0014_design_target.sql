@@ -1,0 +1,1 @@
+ALTER TABLE `sessions` ADD `design_target_agent_id` varchar(36);

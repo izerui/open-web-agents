@@ -27,6 +27,8 @@ export interface Session {
   unattended?: boolean;
   source: SessionSource;
   status: SessionStatus;
+  /** 设计会话的目标智能体。 */
+  designTargetAgentId?: string;
   /** 会话级凭证覆盖(三级链的中间层)。 */
   baseUrl?: string;
   key?: string;
@@ -47,6 +49,7 @@ export interface NewSession {
   unattended?: boolean;
   /** 不传:无人值守即 invoke,否则 web。 */
   source?: SessionSource;
+  designTargetAgentId?: string;
 }
 
 export interface SessionListFilter {
@@ -76,5 +79,8 @@ export interface SessionRepo {
   /** 删除一条还没有任何运行的会话(入队失败或幂等冲突时回滚刚建的会话)。 */
   delete(id: string): Promise<void>;
   /** 改标题 / 归档 / 软删除。只改传进来的字段。 */
-  update(id: string, patch: { title?: string; status?: SessionStatus }): Promise<void>;
+  update(
+    id: string,
+    patch: { title?: string; status?: SessionStatus; designTargetAgentId?: string },
+  ): Promise<void>;
 }

@@ -54,9 +54,13 @@ export class InMemorySessionRepo implements SessionRepo {
     this.sessions.delete(id);
   }
 
-  async update(id: string, patch: { title?: string; status?: SessionStatus }): Promise<void> {
+  async update(
+    id: string,
+    patch: { title?: string; status?: SessionStatus; designTargetAgentId?: string },
+  ): Promise<void> {
     const s = this.sessions.get(id);
     if (!s) return;
+    if (patch.designTargetAgentId !== undefined) s.designTargetAgentId = patch.designTargetAgentId;
     if (patch.title !== undefined) s.title = patch.title;
     if (patch.status !== undefined) s.status = patch.status;
   }

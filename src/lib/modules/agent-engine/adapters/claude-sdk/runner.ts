@@ -13,6 +13,7 @@ import type { EnginePort, RunResult } from "@/lib/modules/agent-engine/ports";
 import type { ModelGatewayPort } from "@/lib/modules/model-gateway/ports";
 import type { AgentEvent, AgentSpec, RunContext } from "@/lib/shared";
 import { buildSdkOptions } from "./options";
+import { materializeSkillPlugin } from "./skill-plugin";
 
 export type QueryFn = (args: {
   prompt: string;
@@ -30,6 +31,8 @@ export interface EngineDeps {
   sandboxEnabled: boolean;
   /** 是否允许在宿主机启动 stdio MCP 进程。 */
   allowStdioMcp: boolean;
+  /** 技能插件的根目录(平台控制、agent 不可写)。不给则不加载技能包。 */
+  skillsRoot?: string;
   /**
    * 人工审批钩子(HITL);不给则不启用审批。
    * signal 是本轮的中止信号 —— 运行被取消时挂着的审批必须跟着收场,
@@ -96,6 +99,9 @@ export class ClaudeSdkEngine implements EnginePort {
     };
 
     try {
+      const skillPluginPath = this.deps.skillsRoot
+        ? await materializeSkillPlugin(this.deps.skillsRoot, spec.skillPackages)
+        : undefined;
       const stream = this.queryFn({
         prompt: ctx.prompt,
         options: buildSdkOptions(spec, ctx, {
@@ -106,6 +112,7 @@ export class ClaudeSdkEngine implements EnginePort {
           sandboxEnabled: this.deps.sandboxEnabled,
           allowStdioMcp: this.deps.allowStdioMcp,
           requestApproval: this.deps.requestApproval,
+          skillPluginPath,
         }),
       });
 

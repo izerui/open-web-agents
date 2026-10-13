@@ -25,12 +25,14 @@ import { ApprovalBar } from "./approval-bar";
 import { CommandPalette } from "./command-palette";
 import { ContextWindowMeter } from "./context-window-meter";
 import { ChatThread, contextTokens, sumUsage, totalUsageTokens } from "./conversation";
+import { DesignBar } from "./design-bar";
 import { createEventBatcher } from "./event-batcher";
 import { FilePanel } from "./file-panel";
 import { SessionActions } from "./session-actions";
 import { activityOf, groupSessions, relativeTime } from "./session-groups";
 import type { AgentSummary, SessionSummary, Turn } from "./types";
 import {
+  agentIdFromSearch,
   filterSessionsForAgent,
   sessionIdFromSearch,
   updateTurnByLocalId,
@@ -292,6 +294,9 @@ async function uploadPromptFiles(
   return body.files;
 }
 
+/** 内置"AI 智能体设计师"的 id(与 agent/domain/architect.ts 一致;前端不引服务端模块)。 */
+const ARCHITECT_AGENT_ID = "agent-architect";
+
 /** 内置通用智能体的开场建议(它没有配置自己的)。 */
 const DEFAULT_AGENT_STARTERS = [
   "在工作目录写一个 hello.py",
@@ -392,11 +397,16 @@ export function Workbench() {
         setAgentsState("ok");
         const nextAgents = d.agents ?? [];
         setAgents(nextAgents);
-        setAgentId((currentId) =>
-          nextAgents.some((agent) => agent.id === currentId)
+        setAgentId((currentId) => {
+          // 从构建器"试运行"跳过来时 URL 带着 ?agent=,优先选中它
+          const wanted = agentIdFromSearch(window.location.search);
+          if (!currentId && wanted && nextAgents.some((agent) => agent.id === wanted)) {
+            return wanted;
+          }
+          return nextAgents.some((agent) => agent.id === currentId)
             ? currentId
-            : (nextAgents[0]?.id ?? ""),
-        );
+            : (nextAgents[0]?.id ?? "");
+        });
       })
       .catch((e: unknown) => {
         // 智能体拉不到不该连累会话列表 —— 原来两条链共用一个 effect 且都没 catch,
@@ -1234,6 +1244,15 @@ export function Workbench() {
                       松手添加文件
                     </div>
                   </div>
+                )}
+
+                {sessionId && agentId === ARCHITECT_AGENT_ID && (
+                  <DesignBar
+                    key={sessionId}
+                    sessionId={sessionId}
+                    disabled={running}
+                    onAskFix={stableAnswerAction}
+                  />
                 )}
 
                 {/*

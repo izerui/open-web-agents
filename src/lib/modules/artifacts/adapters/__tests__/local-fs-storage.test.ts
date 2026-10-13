@@ -136,3 +136,36 @@ describe("LocalFsStorage / 【符号链接回归】真实路径必须仍在工�
     expect(nodes.map((n) => n.name)).toContain("nested.txt");
   });
 });
+
+describe("LocalFsStorage.write 的符号链接与覆盖", () => {
+  it("父目录是指向工作目录之外的符号链接:拒绝写入,外部目录里不出现文件", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "owa-ws-"));
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), "owa-out-"));
+    await fs.symlink(outside, path.join(dir, "linked"));
+    const store = new LocalFsStorage();
+    await expect(store.write(dir, "linked/evil.txt", Buffer.from("x"))).rejects.toBeTruthy();
+    expect(await fs.readdir(outside)).toEqual([]);
+  });
+
+  it("默认不覆盖已存在的文件;overwrite 时覆盖", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "owa-ws-"));
+    const store = new LocalFsStorage();
+    await store.write(dir, "a/b.txt", Buffer.from("1"));
+    await expect(store.write(dir, "a/b.txt", Buffer.from("2"))).rejects.toMatchObject({
+      code: "EEXIST",
+    });
+    await store.write(dir, "a/b.txt", Buffer.from("2"), { overwrite: true });
+    expect(await fs.readFile(path.join(dir, "a/b.txt"), "utf8")).toBe("2");
+  });
+
+  it("覆盖写不顺着文件本身的符号链接去改它指向的文件", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "owa-ws-"));
+    await fs.writeFile(path.join(dir, "real.txt"), "keep");
+    await fs.symlink(path.join(dir, "real.txt"), path.join(dir, "link.txt"));
+    const store = new LocalFsStorage();
+    await expect(
+      store.write(dir, "link.txt", Buffer.from("changed"), { overwrite: true }),
+    ).rejects.toBeTruthy();
+    expect(await fs.readFile(path.join(dir, "real.txt"), "utf8")).toBe("keep");
+  });
+});

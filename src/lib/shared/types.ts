@@ -102,7 +102,8 @@ export type PermissionMode = (typeof PERMISSION_MODES)[number];
 /** 运行契约:域内的 agent 规格,不含任何 SDK 类型。 */
 export interface AgentSpec {
   systemPrompt: string;
-  skills?: string[];
+  /** 智能体自带的技能包,运行时作为本地插件加载。 */
+  skillPackages?: import("./skill-package").SkillPackage[];
   mcpServers?: McpDef[];
   tools?: ToolDef[];
   subagents?: SubagentDef[];

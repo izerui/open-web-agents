@@ -6,6 +6,7 @@ import type {
   McpDef,
   ModelAlias,
   PermissionMode,
+  SkillPackage,
   SubagentDef,
   ToolDef,
   VerifyRule,
@@ -17,7 +18,13 @@ import type {
  */
 export interface AgentConfig {
   systemPrompt: string;
+  /**
+   * 【已废弃,不生效】早期只存技能名,运行时从未真正加载(settingSources 为空时 SDK 不发现技能)。
+   * 保留字段只为读回旧数据;技能请用 skillPackages。
+   */
   skills?: string[];
+  /** 智能体自带的技能包(SKILL.md + 可选文件),运行时作为本地插件加载。 */
+  skillPackages?: SkillPackage[];
   mcpServers?: McpDef[];
   tools?: ToolDef[];
   subagents?: SubagentDef[];
@@ -66,6 +73,7 @@ export interface AgentConfig {
 const AGENT_CONFIG_KEYS: Record<keyof AgentConfig, true> = {
   systemPrompt: true,
   skills: true,
+  skillPackages: true,
   mcpServers: true,
   tools: true,
   subagents: true,
