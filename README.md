@@ -32,7 +32,7 @@ pnpm dev                          # http://localhost:5678
 
 1. `/builder` 建一个智能体,填提示词;想让它能被系统调用就再填 `outputSchema`
 2. `/` 工作台里跟它对话,右侧看它在独立工作目录里生成的文件
-3. `/settings` 签发 API Key,然后:
+3. 「设置 → 接入中心」(`/settings/keys`)签发 API Key,并按智能体复制 curl / Python / Node / 嵌入代码;或者直接:
 
 ```bash
 curl -X POST localhost:5678/api/agents/<智能体id>/invoke \
@@ -257,6 +257,7 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 | POST            | `/api/sessions/{id}/cancel`                | cookie / key           | 取消未完成的运行(见下方延迟说明)   |
 | POST            | `/api/agents/{id}/invoke`                  | **key**                | 对外触发,返回 taskId;支持 `Idempotency-Key` |
 | GET             | `/api/agents/{id}/result`                  | **key**                | 轮询结构化结果             |
+| GET             | `/api/agents/{id}/openapi.json`            | cookie / key           | 该智能体的 OpenAPI 3.1 文档(含入参与结果契约) |
 | POST            | `/api/embed/token`                         | **key**                | 换短时效嵌入令牌(服务端调)      |
 | POST            | `/api/embed/run`                           | **embed token**        | widget 发起运行         |
 | GET             | `/api/embed/script`                        | —                      | 嵌入脚本                |

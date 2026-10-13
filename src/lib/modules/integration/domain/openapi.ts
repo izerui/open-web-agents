@@ -1,0 +1,204 @@
+// 按智能体生成 OpenAPI 3.1 文档。纯逻辑,零 IO。
+//
+// 【为什么按智能体生成】每个接口型智能体的入参与结果契约不同(inputSchema / outputSchema)。
+// 一份通用文档只能写 "input: any / structured: any",集成方还是得来问"到底传什么、回什么"。
+// 按智能体把契约嵌进去,可以直接导入 Postman / 生成客户端代码。
+
+import type { JsonSchema } from "@/lib/shared";
+
+export interface OpenApiAgent {
+  id: string;
+  name: string;
+  description?: string;
+  inputSchema?: JsonSchema;
+  outputSchema?: JsonSchema;
+}
+
+const ERROR = {
+  type: "object",
+  required: ["error", "code"],
+  properties: {
+    error: { type: "string", description: "人读的说明,措辞可能调整" },
+    code: {
+      type: "string",
+      description: "机读的稳定错误码",
+      enum: [
+        "unauthorized",
+        "forbidden",
+        "not_found",
+        "invalid_request",
+        "input_invalid",
+        "prompt_too_large",
+        "quota_exceeded",
+        "rate_limited",
+        "idempotency_key_invalid",
+        "idempotency_conflict",
+        "service_unavailable",
+      ],
+    },
+  },
+};
+
+const errorResponse = (description: string) => ({
+  description,
+  content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
+});
+
+export function buildAgentOpenApi(agent: OpenApiAgent, origin: string): Record<string, unknown> {
+  const input: Record<string, unknown> = agent.inputSchema
+    ? { ...agent.inputSchema, description: "须符合该智能体声明的 inputSchema" }
+    : { type: "string", description: "自然语言输入" };
+  const structured: Record<string, unknown> = agent.outputSchema
+    ? {
+        ...agent.outputSchema,
+        description: "符合该智能体声明的 outputSchema;仅 status=success 时存在",
+      }
+    : { type: "null", description: "该智能体未声明 outputSchema,结果见 text" };
+
+  return {
+    openapi: "3.1.0",
+    info: {
+      title: `${agent.name} —— Open Web Agents`,
+      description: agent.description ?? "",
+      version: "1.0.0",
+    },
+    servers: [{ url: origin }],
+    security: [{ ApiKey: [] }],
+    paths: {
+      [`/api/agents/${agent.id}/invoke`]: {
+        post: {
+          operationId: "invoke",
+          summary: "发起一次运行(异步),返回 taskId",
+          parameters: [
+            {
+              name: "Idempotency-Key",
+              in: "header",
+              required: false,
+              description: "重试同一个请求时带同一个键,拿回第一次受理的任务,不会重复执行与计费",
+              schema: { type: "string", maxLength: 128 },
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["input"],
+                  properties: {
+                    input,
+                    override: {
+                      type: "object",
+                      description: "请求级模型凭证;自定义 baseUrl 必须同时给 key",
+                      properties: {
+                        baseUrl: { type: "string", format: "uri" },
+                        key: { type: "string" },
+                        model: { type: "string", enum: ["fable", "opus", "sonnet", "haiku"] },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "202": {
+              description: "已受理",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      taskId: { type: "string" },
+                      sessionId: { type: "string" },
+                      structured: { type: "boolean", description: "结果是否带结构化输出" },
+                    },
+                  },
+                },
+              },
+            },
+            "200": { description: "同一 Idempotency-Key 的重放,返回第一次受理的任务" },
+            "400": errorResponse("入参不合法"),
+            "401": errorResponse("缺少或无效的 API Key"),
+            "402": errorResponse("超出月度额度"),
+            "413": errorResponse("输入过长"),
+            "422": errorResponse("同一 Idempotency-Key 用于了不同的请求体"),
+            "429": errorResponse("调用过于频繁"),
+          },
+        },
+      },
+      "/api/agents/{taskId}/result": {
+        get: {
+          operationId: "getResult",
+          summary: "查询结果(轮询直到 done=true)",
+          parameters: [{ name: "taskId", in: "path", required: true, schema: { type: "string" } }],
+          responses: {
+            "200": {
+              description: "当前状态与结果",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      taskId: { type: "string" },
+                      status: {
+                        type: "string",
+                        enum: ["pending", "running", "success", "failed", "cancelled"],
+                      },
+                      done: { type: "boolean" },
+                      structured,
+                      text: { type: ["string", "null"] },
+                      cost: { type: ["object", "null"] },
+                      error: {
+                        type: ["object", "null"],
+                        properties: { kind: { type: "string" }, message: { type: "string" } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "404": errorResponse("任务不存在或无权查看"),
+          },
+        },
+      },
+      "/api/runs": {
+        get: {
+          operationId: "listRuns",
+          summary: "列出这把 Key 发起的运行",
+          parameters: [
+            { name: "agentId", in: "query", schema: { type: "string" } },
+            { name: "status", in: "query", description: "逗号分隔", schema: { type: "string" } },
+            {
+              name: "since",
+              in: "query",
+              description: "ISO 时间或毫秒",
+              schema: { type: "string" },
+            },
+            { name: "until", in: "query", schema: { type: "string" } },
+            { name: "cursor", in: "query", schema: { type: "string" } },
+            { name: "limit", in: "query", schema: { type: "integer", maximum: 100 } },
+          ],
+          responses: { "200": { description: "{ items, nextCursor }" } },
+        },
+      },
+      "/api/runs/{taskId}/cancel": {
+        post: {
+          operationId: "cancelRun",
+          summary: "取消一个未结束的运行",
+          parameters: [{ name: "taskId", in: "path", required: true, schema: { type: "string" } }],
+          responses: {
+            "200": { description: "{ cancelled: boolean }" },
+            "404": errorResponse("任务不存在或无权操作"),
+          },
+        },
+      },
+    },
+    components: {
+      securitySchemes: {
+        ApiKey: { type: "apiKey", in: "header", name: "X-Api-Key" },
+      },
+      schemas: { Error: ERROR },
+    },
+  };
+}

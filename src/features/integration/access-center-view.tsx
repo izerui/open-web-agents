@@ -1,8 +1,9 @@
 "use client";
 
 import type { AgentSummary } from "@/features/workbench/types";
-import { Copy } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { Copy, ExternalLink } from "lucide-react";
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { SpaceShell } from "@/components/space-shell";
@@ -12,6 +13,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { NativeSelect as Select } from "@/components/ui/native-select";
 import { Separator } from "@/components/ui/separator";
+import { InvokeSnippetTabs } from "@/features/integration/invoke-snippet";
+import { WebhookSecretCard } from "@/features/integration/webhook-secret-card";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 
 interface KeyRecord {
@@ -22,8 +25,13 @@ interface KeyRecord {
   lastUsedAt?: number;
 }
 
-/** 对外 API Key:给第三方系统调用智能体用。 */
-export function ApiKeysView() {
+/**
+ * 接入中心:第三方系统接入智能体需要的东西都在这一页。
+ *
+ * 【为什么合并】以前集成方要跑四个地方:这里签 Key、构建器底部翻 curl、
+ * 「模型凭证」页设回调签名密钥,嵌入组件则根本没有界面入口。
+ */
+export function AccessCenterView() {
   const [keys, setKeys] = useState<KeyRecord[]>([]);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [keyName, setKeyName] = useState("");
@@ -32,6 +40,9 @@ export function ApiKeysView() {
   const [issued, setIssued] = useState<{ id: string; plaintext: string } | null>(null);
   const [busy, setBusy] = useState<"issue" | string | null>(null);
   const [keysLoaded, setKeysLoaded] = useState(false);
+  const [docAgentId, setDocAgentId] = useState("");
+  const agentName = useMemo(() => new Map(agents.map((a) => [a.id, a.name])), [agents]);
+  const docAgent = agents.find((a) => a.id === docAgentId) ?? agents[0];
 
   /**
    * 两块数据各拉各的。
@@ -111,12 +122,16 @@ export function ApiKeysView() {
   }
 
   return (
-    <SpaceShell title="对外 API Key" width="narrow">
+    <SpaceShell
+      title="接入中心"
+      subtitle="把智能体当接口用:签发 Key → 复制调用代码 → 接收回调或嵌入页面"
+      width="narrow"
+    >
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">对外 API Key</CardTitle>
+          <CardTitle className="text-sm">API Key</CardTitle>
           <CardDescription>
-            给第三方系统调用智能体用。明文只在签发时显示一次,服务端只存哈希。
+            从你的后端调用智能体时使用,不要放进浏览器。明文只在签发时显示一次,服务端只存哈希。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -145,7 +160,7 @@ export function ApiKeysView() {
           </div>
 
           {issued && (
-            <div className="space-y-1 rounded-md border border-[var(--warning)]/40 bg-[var(--warning)]/10 p-3">
+            <div className="space-y-1 rounded-md border border-warning/40 bg-warning/10 p-3">
               <p className="font-medium text-xs">请立刻保存 —— 关闭后无法再次显示:</p>
               <code className="block break-all font-mono text-xs">{issued.plaintext}</code>
               <div className="flex items-center gap-2">
@@ -183,7 +198,7 @@ export function ApiKeysView() {
                   {k.name || "(未命名)"}
                   {k.agentId && (
                     <Badge variant="secondary" className="ml-1.5 text-[10px]">
-                      仅 {k.agentId}
+                      仅 {agentName.get(k.agentId) ?? k.agentId}
                     </Badge>
                   )}
                 </span>
@@ -211,6 +226,94 @@ export function ApiKeysView() {
           </div>
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">接口文档与调用代码</CardTitle>
+          <CardDescription>
+            按智能体生成:入参示例来自它的输入契约(inputSchema),复制即可运行。 调用是异步的 —— 提交拿
+            taskId,轮询结果或等 Webhook 回调。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {agents.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              还没有可调用的智能体,先去{" "}
+              <Link href="/agents" className="underline">
+                智能体
+              </Link>{" "}
+              建一个。
+            </p>
+          ) : (
+            docAgent && (
+              <>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Select
+                    aria-label="选择智能体"
+                    value={docAgent.id}
+                    onChange={(e) => setDocAgentId(e.target.value)}
+                  >
+                    {agents.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                      </option>
+                    ))}
+                  </Select>
+                  <Badge variant="secondary" className="text-[11px]">
+                    {docAgent.config.inputSchema ? "结构化入参" : "文本入参"}
+                  </Badge>
+                  <Badge variant="secondary" className="text-[11px]">
+                    {docAgent.config.outputSchema ? "结构化结果 structured" : "文本结果 text"}
+                  </Badge>
+                  <Button variant="link" size="sm" className="ml-auto h-8 px-2" asChild>
+                    <a
+                      href={`/api/agents/${encodeURIComponent(docAgent.id)}/openapi.json`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      OpenAPI 文档
+                      <ExternalLink className="size-3.5" />
+                    </a>
+                  </Button>
+                </div>
+                <InvokeSnippetTabs
+                  key={docAgent.id}
+                  agentId={docAgent.id}
+                  inputSchema={docAgent.config.inputSchema}
+                  hasOutputSchema={Boolean(docAgent.config.outputSchema)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  结果回调:
+                  {docAgent.canManageWebhook ? (
+                    docAgent.webhookUrl ? (
+                      <code className="mx-1 break-all">{docAgent.webhookUrl}</code>
+                    ) : (
+                      "未配置,"
+                    )
+                  ) : (
+                    "由智能体所有者配置,"
+                  )}
+                  {docAgent.canWrite && (
+                    <Link
+                      href={`/agents?id=${encodeURIComponent(docAgent.id)}`}
+                      className="underline"
+                    >
+                      在构建器里修改
+                    </Link>
+                  )}
+                  。运行记录见{" "}
+                  <Link href="/settings/runs" className="underline">
+                    运行记录
+                  </Link>
+                  。
+                </p>
+              </>
+            )
+          )}
+        </CardContent>
+      </Card>
+
+      <WebhookSecretCard />
     </SpaceShell>
   );
 }

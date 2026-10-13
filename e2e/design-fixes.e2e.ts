@@ -402,3 +402,44 @@ describe("运行记录", () => {
     expect((await owner.get("/api/runs?status=bogus")).status).toBe(400);
   });
 });
+
+describe("接入中心:按智能体的 OpenAPI 文档", () => {
+  type Doc = { openapi?: string; paths?: Record<string, unknown>; servers?: { url: string }[] };
+  let owner: Client;
+  let other: Client;
+  let agentId = "";
+  let key = "";
+
+  beforeAll(async () => {
+    if (!(await serverUp())) throw new Error("e2e 需要一个跑着的服务");
+    owner = await newUser("oas-owner");
+    other = await newUser("oas-other");
+    const a = await owner.post<AgentRes>("/api/agents", {
+      name: `oas-${Date.now()}`,
+      config: {
+        systemPrompt: "p",
+        model: "sonnet",
+        inputSchema: { type: "object", properties: { topic: { type: "string" } } },
+        outputSchema: { type: "object", properties: { url: { type: "string" } } },
+      },
+    });
+    agentId = a.body.agent?.id ?? "";
+    key = (await owner.post<KeyRes>("/api/keys", { name: "oas", agentId })).body.plaintext ?? "";
+  });
+
+  it("所有者(登录态)与该智能体的 Key 都能取到,契约嵌在文档里", async () => {
+    const web = await owner.get<Doc>(`/api/agents/${agentId}/openapi.json`);
+    expect(web.status).toBe(200);
+    expect(web.body.openapi).toBe("3.1.0");
+    expect(JSON.stringify(web.body.paths)).toContain('"topic"');
+    const byKey = await new Client("anon").get<Doc>(`/api/agents/${agentId}/openapi.json`, {
+      "X-Api-Key": key,
+    });
+    expect(byKey.status).toBe(200);
+  });
+
+  it("未登录 401;无权调用的人拿不到", async () => {
+    expect((await new Client("anon").get(`/api/agents/${agentId}/openapi.json`)).status).toBe(401);
+    expect([403, 404]).toContain((await other.get(`/api/agents/${agentId}/openapi.json`)).status);
+  });
+});

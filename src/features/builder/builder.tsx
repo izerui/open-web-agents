@@ -16,6 +16,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { KnowledgePanel } from "@/features/builder/knowledge-panel";
 import { SharePanel } from "@/features/builder/share-panel";
+import { InvokeSnippetTabs } from "@/features/integration/invoke-snippet";
 import type { AgentSummary } from "@/features/workbench/types";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { PERMISSION_MODES, type PermissionMode } from "@/lib/shared";
@@ -573,6 +574,20 @@ export function Builder() {
         if (seq === editSeqRef.current) toast.error(`打开智能体失败:${errorText(error)}`);
       });
   }
+
+  /**
+   * 深链:/agents?id=xxx 直接打开该智能体(接入中心、运行记录等处跳过来)。
+   * 只在列表第一次到手时处理一次,之后用户在侧栏里切换不受它干扰。
+   */
+  const deepLinkDoneRef = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 只响应列表到手;edit 每次渲染都是新引用
+  useEffect(() => {
+    if (deepLinkDoneRef.current || list.length === 0) return;
+    deepLinkDoneRef.current = true;
+    const id = new URLSearchParams(window.location.search).get("id");
+    const target = id ? list.find((a) => a.id === id) : undefined;
+    if (target) edit(target);
+  }, [list]);
 
   /** 智能体列表挂进子空间侧栏 —— 再开一条自己的侧栏就成了两级导航,看着像两个产品 */
   const agentList = (
@@ -1184,38 +1199,6 @@ export function Builder() {
   );
 }
 
-/** 按 JSON Schema 生成一份示例值:给调用示例用,让复制下来的请求能直接通过入参校验。 */
-function sampleFromSchema(schema: unknown, depth = 0): unknown {
-  const sch = (schema ?? {}) as {
-    type?: string | string[];
-    properties?: Record<string, unknown>;
-    items?: unknown;
-    enum?: unknown[];
-    example?: unknown;
-    default?: unknown;
-  };
-  if (sch.example !== undefined) return sch.example;
-  if (sch.default !== undefined) return sch.default;
-  if (Array.isArray(sch.enum) && sch.enum.length > 0) return sch.enum[0];
-  const type = Array.isArray(sch.type) ? sch.type[0] : sch.type;
-  if (depth > 4) return null;
-  switch (type) {
-    case "object":
-      return Object.fromEntries(
-        Object.entries(sch.properties ?? {}).map(([k, v]) => [k, sampleFromSchema(v, depth + 1)]),
-      );
-    case "array":
-      return [sampleFromSchema(sch.items, depth + 1)];
-    case "integer":
-    case "number":
-      return 0;
-    case "boolean":
-      return false;
-    default:
-      return "…";
-  }
-}
-
 /**
  * 接口调用示例。
  *
@@ -1231,46 +1214,23 @@ function InvokeSnippet({
   inputSchema?: Record<string, unknown> | null;
   hasOutputSchema: boolean;
 }) {
-  const origin = typeof window === "undefined" ? "" : window.location.origin;
-  const input = inputSchema ? sampleFromSchema(inputSchema) : "你的输入";
-  const body = JSON.stringify({ input }, null, 2);
-  const curl = `curl -X POST ${origin}/api/agents/${agentId}/invoke \\
-  -H "X-Api-Key: $OWA_API_KEY" \\
-  -H "Idempotency-Key: $(uuidgen)" \\
-  -H "Content-Type: application/json" \\
-  -d '${body.replaceAll("'", "'\\''")}'
-# → 202 { "taskId": "…" }
-
-curl ${origin}/api/agents/<taskId>/result -H "X-Api-Key: $OWA_API_KEY"
-# → { "status": "success", ${hasOutputSchema ? '"structured": { … }' : '"text": "…"'} }`;
-
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-sm">接口调用</CardTitle>
         <CardDescription>
-          在「设置 → 接入与 API Key」签发 Key 后,从你的后端调用(Key 不要放进浏览器)。
+          在「接入中心」签发 Key 后,从你的后端调用(Key 不要放进浏览器)。
           {hasOutputSchema
             ? "已声明输出契约,结果在 structured 字段里。"
             : "未声明输出契约,结果是文本;要拿结构化 JSON 请填写输出 schema。"}
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-2">
-        <pre className="overflow-x-auto whitespace-pre font-mono text-xs text-muted-foreground">
-          {curl}
-        </pre>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() =>
-            void navigator.clipboard
-              .writeText(curl)
-              .then(() => toast.success("已复制调用示例"))
-              .catch(() => toast.error("复制失败,请手动选择文本"))
-          }
-        >
-          复制
-        </Button>
+      <CardContent>
+        <InvokeSnippetTabs
+          agentId={agentId}
+          inputSchema={inputSchema}
+          hasOutputSchema={hasOutputSchema}
+        />
       </CardContent>
     </Card>
   );
