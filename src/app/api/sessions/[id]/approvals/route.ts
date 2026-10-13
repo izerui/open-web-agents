@@ -97,20 +97,24 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
    * 审批人的备注也是自由文本。按字段名打码管不到字符串内容,所以干脆不记。
    * 需要看原文时去运行详情里看 —— 那里有访问控制,审计日志的可见范围更宽。
    */
+  // 归属查询只为审计服务,放进 record 的构造函数里,与写入一起受总上限约束 ——
+  // 裁决已经落地,数据库再慢也不能让批准请求挂住
   const { sessions, audit } = getContainer();
-  const session = await sessions.get(id).catch(() => null);
-  await audit.record({
-    actor: principal,
-    action: "approval.decide",
-    resource: { type: "session", id },
-    ownerId: session?.billingUserId ?? session?.ownerId,
-    details: {
-      approvalId: body.approvalId,
-      runId: target?.runId,
-      tool: target?.toolName,
-      decision: body.decision,
-    },
-    req,
+  await audit.record(async () => {
+    const session = await sessions.get(id).catch(() => null);
+    return {
+      actor: principal,
+      action: "approval.decide",
+      resource: { type: "session", id },
+      ownerId: session?.billingUserId ?? session?.ownerId,
+      details: {
+        approvalId: body.approvalId,
+        runId: target?.runId,
+        tool: target?.toolName,
+        decision: body.decision,
+      },
+      req,
+    };
   });
 
   return Response.json({ resolved: body.approvalId, decision: body.decision });

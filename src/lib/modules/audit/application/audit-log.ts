@@ -55,8 +55,14 @@ const DEFAULT_TIMEOUT_MS = 1000;
 export class AuditLog {
   constructor(private readonly deps: AuditLogDeps) {}
 
-  /** 永不抛错,且有界返回(见文件头)。 */
-  async record(input: AuditInput): Promise<void> {
+  /**
+   * 永不抛错,且有界返回(见文件头)。
+   *
+   * 可以传一个"构造记录的函数":只为审计才需要的查询(资源归属、展示用的名称)放进去,
+   * 和写入一起受总上限约束。【不要】在路由里先 await 这类查询再调 record —— 那一步
+   * 不在上限之内,数据库不返回时,已完成的业务照样挂住。
+   */
+  async record(input: AuditInput | (() => Promise<AuditInput>)): Promise<void> {
     const ms = this.deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -73,7 +79,8 @@ export class AuditLog {
     }
   }
 
-  private async write(input: AuditInput): Promise<void> {
+  private async write(given: AuditInput | (() => Promise<AuditInput>)): Promise<void> {
+    const input = typeof given === "function" ? await given() : given;
     const actor = await this.actorOf(input.actor);
     await this.deps.repo.append({
       id: randomUUID(),

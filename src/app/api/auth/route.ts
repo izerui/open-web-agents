@@ -115,18 +115,23 @@ export async function POST(req: Request) {
          * 登录失败也记:账号存在时记在该账号名下,本人能看到"有人在试我的密码";
          * 账号不存在的只有管理员看得到(撞库排查)。尝试的密码当然不记。
          */
-        const target = await users.findByEmail(email).catch(() => null);
-        await audit.record({
-          actor: { type: "anonymous" },
-          action: "auth.login_failed",
-          resource: { type: "account", id: target?.id },
-          ownerId: target?.id,
-          /*
-           * 只在账号确实存在时记邮箱。用户常把密码误输进邮箱框,
-           * 不存在的"邮箱"可能就是一个密码 —— 那种情况什么输入都不记。
-           */
-          details: target ? { email: target.email, reason: err.message } : { reason: err.message },
-          req,
+        // 归属查询只为审计服务,放进构造函数,受审计总上限约束(登录结果已经确定)
+        await audit.record(async () => {
+          const target = await users.findByEmail(email).catch(() => null);
+          return {
+            actor: { type: "anonymous" },
+            action: "auth.login_failed",
+            resource: { type: "account", id: target?.id },
+            ownerId: target?.id,
+            /*
+             * 只在账号确实存在时记邮箱。用户常把密码误输进邮箱框,
+             * 不存在的"邮箱"可能就是一个密码 —— 那种情况什么输入都不记。
+             */
+            details: target
+              ? { email: target.email, reason: err.message }
+              : { reason: err.message },
+            req,
+          };
         });
       }
       return Response.json({ error: err.message }, { status: err.status });
