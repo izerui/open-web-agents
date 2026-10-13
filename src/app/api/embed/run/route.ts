@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { getContainer } from "@/lib/container";
+import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { extractEmbedToken, verifyEmbedToken } from "@/lib/modules/integration/domain/embed-token";
 import { PromptTooLarge, assertPromptSize } from "@/lib/modules/run/application/enqueue";
 import { topicOf } from "@/lib/modules/run/application/orchestrator";
@@ -17,12 +18,20 @@ export const dynamic = "force-dynamic";
  * 所以拿到令牌也换不到别人的会话。
  */
 export async function POST(req: Request) {
-  const { runs, bus, env, sessions, users, usage, enqueuer } = getContainer();
+  const { runs, bus, sessions, users, usage, enqueuer, embedSecret, auth } = getContainer();
 
   const token = extractEmbedToken(req.headers);
-  const claims = token ? verifyEmbedToken(env.sessionSecret, token) : null;
+  const claims = token ? verifyEmbedToken(embedSecret, token) : null;
   if (!claims) {
     return Response.json({ error: "invalid or expired embed token" }, { status: 401 });
+  }
+  // 令牌签名有效还不够:签发它的 key 被吊销、签发人被停用、分享被撤销,都必须立即失效
+  try {
+    await auth.resolveEmbed(claims);
+  } catch (err) {
+    const res = authErrorResponse(err);
+    if (res) return res;
+    throw err;
   }
 
   const body = (await req.json().catch(() => ({}))) as { prompt?: string };

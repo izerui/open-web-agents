@@ -139,6 +139,12 @@ export interface RunContext {
    * 关口一律直接放行;路径围栏与工具白名单不受影响(那是安全边界,不是“要不要问人”)。
    */
   unattended?: boolean;
+  /**
+   * 命中审批规则时怎么办:ask 等人批 / allow 直接放行 / deny 直接拒绝。
+   * 不传时按 unattended 推断(无人值守放行,否则等人)。
+   * 嵌入组件里有人但不是审批人(终端访客不该替运营方批准危险操作),只能 allow 或 deny。
+   */
+  approvalPolicy?: "ask" | "allow" | "deny";
   credentials: ResolvedCredentials;
   env: Record<string, string>;
 }

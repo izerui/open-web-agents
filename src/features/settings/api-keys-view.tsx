@@ -31,6 +31,7 @@ export function ApiKeysView() {
   /** 新签发的明文,只在本次会话内显示一次 */
   const [issued, setIssued] = useState<{ id: string; plaintext: string } | null>(null);
   const [busy, setBusy] = useState<"issue" | string | null>(null);
+  const [keysLoaded, setKeysLoaded] = useState(false);
 
   /**
    * 两块数据各拉各的。
@@ -47,6 +48,7 @@ export function ApiKeysView() {
 
     if (k.status === "fulfilled") setKeys(k.value.keys ?? []);
     else toast.error(`API Key 列表加载失败:${errorText(k.reason)}`);
+    setKeysLoaded(true);
 
     if (a.status === "fulfilled") setAgents(a.value.agents ?? []);
     else toast.error(`智能体列表加载失败:${errorText(a.reason)}`);
@@ -171,7 +173,10 @@ export function ApiKeysView() {
           <Separator />
 
           <div className="divide-y divide-border rounded border">
-            {keys.length === 0 && <p className="p-3 text-xs text-muted-foreground">暂无 key</p>}
+            {!keysLoaded && <p className="p-3 text-xs text-muted-foreground">载入中…</p>}
+            {keysLoaded && keys.length === 0 && (
+              <p className="p-3 text-xs text-muted-foreground">暂无 key</p>
+            )}
             {keys.map((k) => (
               <div key={k.id} className="flex items-center gap-3 p-2 text-xs">
                 <span className="flex-1 truncate">

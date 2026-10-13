@@ -55,7 +55,9 @@ curl localhost:5678/api/agents/<taskId>/result -H "X-Api-Key: <key>"
 | 入参契约       | 定义了 `inputSchema` 则 `invoke` 的入参必须符合它,否则 400 并指出是哪个字段                                    |
 | 工作空间       | 每会话一个独立目录,文件树 / 预览 / 下载                                                                  |
 | 执行隔离       | OS 内核沙箱(Bash)+ 路径守卫(文件工具),见下文限制                                                          |
-| 人工审批(HITL) | 按工具名或命令模式挂起等人确认,超时自动拒绝;审批服务不可用时按故障拒绝并如实标注,不记为超时                                                                   |
+| 人工审批(HITL) | 按工具名或命令模式挂起等人确认,超时自动拒绝;审批服务不可用时按故障拒绝并如实标注,不记为超时。接口调用、嵌入组件没有审批人,按智能体配置直接放行或拒绝 |
+| 会话管理       | 重命名 / 归档 / 删除;签发 Key 的人能在"接口调用"视图里看到自己 Key 发起的会话                           |
+| 账号安全       | 注册开关、登录限流、管理员建号与重置密码、自助改密码                                                    |
 | 知识库        | 智能体级文档,运行时按问题检索片段注入提示词(BM25)                                                              |
 | 权限         | 登录 / 每用户凭证 / API Key / 智能体分享 / 用户组                                                        |
 | 可嵌入 widget | 一行 `<script>` 挂到企业页面;**API Key 不下发浏览器**                                                  |
@@ -125,6 +127,8 @@ const bus = new RedisBus(env.redisUrl); // 曾是 InMemoryBus
 | `OWA_SHUTDOWN_GRACE_MS`                             | worker 收到 SIGTERM 后等在途任务的上限,默认 60000       |
 | `OWA_WORKER_CONCURRENCY`                            | 单个 worker 进程同时执行的运行数,默认 4(同一会话仍串行)     |
 | `OWA_WEBHOOK_ALLOW_PRIVATE`                         | webhook 允许投递到内网私有网段,默认 0;回环与云元数据地址始终禁止 |
+| `OWA_ALLOW_SIGNUP`                                  | 是否开放自助注册,默认 1;第一个账号始终可注册并成为管理员       |
+| `OWA_AUTH_IP_RATE_LIMIT`                            | 同一地址每 15 分钟的登录/注册上限,默认 30,0 关闭;按账号限流始终开启 |
 
 ### 凭证三级覆盖
 
@@ -134,6 +138,13 @@ const bus = new RedisBus(env.redisUrl); // 曾是 InMemoryBus
 
 请求级 override(`invoke` 的 `override` 字段)整体加密后随任务入队,只在 worker 执行时解密;
 解不开就让这一轮失败,不会悄悄回落到平台凭证。
+
+**同层绑定**:`baseUrl` 取最高优先的那一层,`key` 必须来自同一层或更高优先的层。
+只覆盖 key、沿用平台网关是允许的;**自定义了 baseUrl 却不给 key,会被拒绝** ——
+否则平台 key 会被发往调用方指定的地址。
+
+**逃生舱(`escapeHatch`)** 只有平台管理员能设置;沙箱、hooks、cwd、env、权限模式等
+安全边界字段不能通过它覆盖(保存时拒绝,运行时也强制以平台为准)。
 
 **计费账号**:每个会话有一个计费账号(`sessions.billing_user_id`)—— 网页会话是它的所有者,
 API Key / embed 会话是签发那把 key 的账号。花费记在它头上、额度按它算、"用户自带"这一层
@@ -206,6 +217,11 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 | GET             | `/api/auth`                                | cookie                 | 当前登录态(key 只回掩码)     |
 | PUT             | `/api/me/credentials`                      | cookie                 | 设置自带 base_url / key |
 | POST/DELETE     | `/api/me/webhook-secret`                   | cookie                 | 设置或生成 / 清除 webhook 签名密钥 |
+| PUT             | `/api/me/password`                         | cookie                 | 修改自己的登录密码          |
+| PATCH/DELETE    | `/api/sessions/{id}`                       | cookie / key           | 重命名、归档 / 删除会话      |
+| GET             | `/api/sessions?view=integrations`          | cookie                 | 用自己 Key 发起的接口调用会话 |
+| POST            | `/api/embed/cancel`                        | **embed token**        | 停止嵌入会话里的运行         |
+| POST/PATCH      | `/api/admin/accounts`                      | cookie(admin)          | 建号、改角色/停用/额度、重置密码 |
 | GET/POST        | `/api/agents`                              | cookie                 | 列出可见智能体 / 创建更新       |
 | GET/POST/DELETE | `/api/agents/{id}/share`                   | cookie(write)          | 分享给用户 / 组 / 公开      |
 | GET/POST/DELETE | `/api/agents/{id}/knowledge`               | cookie(读 read、写 write) | 知识文档                |
@@ -329,11 +345,11 @@ Bash 或 Read 工具都能读到其它会话的 transcript。`OWA_SANDBOX=0` 时
 规模漂移,实测 50 篇文档时命中直接归零,也就是「知识库越完善越检索不到」。
 中文分词过滤了虚词单字,否则一个「的」就能让任意两段中文匹配上。
 
-### 取消有最多 15 秒延迟
+### 取消:通常立即生效,最坏 15 秒
 
-`POST /cancel` 把运行标记为 cancelled,正在执行的那个 worker 要到下一次心跳
-(默认 15 秒)才发现自己已被取消并中止。接口的响应里如实写了这一点 ——
-界面不应在点下去的瞬间就宣称「已停止」。
+`POST /cancel` 把运行标记为 cancelled 后,通过 Redis 通知正在执行它的 worker 立即中止。
+通知是"尽力而为"的(pub/sub 最多一次):丢了的话,worker 在下一次续租心跳(默认 15 秒)
+时也会发现并中止。被取消的运行已消耗的 token 照样入账(美元金额未知时只记 token)。
 
 取消时 SSE 末帧是 `status:"cancelled"`,与数据库一致。(曾经报 `failed`:result 事件由编排层
 在落库前发布,分不清中止来自取消还是故障。现在由真正写入终态的一方发布。)

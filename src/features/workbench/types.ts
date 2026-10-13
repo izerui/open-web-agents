@@ -20,7 +20,7 @@ export interface AgentSummary {
   name: string;
   icon?: string;
   description?: string;
-  config: { outputSchema?: Record<string, unknown> };
+  config: { outputSchema?: Record<string, unknown>; starters?: string[] };
   /** 是否已公开分享 */
   isPublic?: boolean;
   /** 当前用户能否修改 */

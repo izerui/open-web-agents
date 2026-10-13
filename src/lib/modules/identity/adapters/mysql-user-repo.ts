@@ -113,6 +113,20 @@ export class MysqlUserRepo implements UserRepo {
     return Number(rows[0]?.n ?? 0);
   }
 
+  async setPasswordHash(id: string, passwordHash: string): Promise<void> {
+    await this.db.update(users).set({ passwordHash }).where(eq(users.id, id));
+  }
+
+  async getWithPassword(id: string): Promise<(User & { passwordHash: string }) | null> {
+    const rows = await this.db
+      .select({ ...COLUMNS, passwordHash: users.passwordHash })
+      .from(users)
+      .where(eq(users.id, id))
+      .limit(1);
+    const row = rows[0];
+    return row ? { ...toUser(row), passwordHash: row.passwordHash } : null;
+  }
+
   async setCredentials(
     id: string,
     v: {

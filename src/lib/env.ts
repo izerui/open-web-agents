@@ -55,6 +55,21 @@ const schema = z.object({
       z.boolean(),
     )
     .default(false),
+  // 是否开放自助注册(第一个账号始终可以注册,成为平台管理员)
+  OWA_ALLOW_SIGNUP: z
+    .preprocess(
+      (v) =>
+        v === undefined || v === ""
+          ? true
+          : !["0", "false", "off", "no"].includes(String(v).toLowerCase()),
+      z.boolean(),
+    )
+    .default(true),
+  // 同一来源地址的登录/注册次数上限(每窗口);0 关闭。按账号的登录限流始终开启
+  OWA_AUTH_IP_RATE_LIMIT: z.preprocess(
+    (v) => (v === undefined || v === "" ? undefined : Number(v)),
+    z.number().int().min(0).default(30),
+  ),
   // 单个 worker 进程同时执行的运行数
   OWA_WORKER_CONCURRENCY: z.preprocess(
     (v) => (v === undefined || v === "" ? undefined : Number(v)),
@@ -85,6 +100,10 @@ export interface Env {
   webhookAllowPrivate: boolean;
   /** 单个 worker 进程的并发运行数。 */
   workerConcurrency: number;
+  /** 是否开放自助注册。 */
+  allowSignup: boolean;
+  /** 同一来源地址的登录/注册次数上限;0 = 不按地址限流。 */
+  authIpRateLimit: number;
 }
 
 export function parseEnv(raw: Record<string, string | undefined>): Env {
@@ -110,6 +129,8 @@ export function parseEnv(raw: Record<string, string | undefined>): Env {
     allowStdioMcp: p.OWA_ALLOW_STDIO_MCP,
     webhookAllowPrivate: p.OWA_WEBHOOK_ALLOW_PRIVATE,
     workerConcurrency: p.OWA_WORKER_CONCURRENCY,
+    allowSignup: p.OWA_ALLOW_SIGNUP,
+    authIpRateLimit: p.OWA_AUTH_IP_RATE_LIMIT,
   };
 }
 

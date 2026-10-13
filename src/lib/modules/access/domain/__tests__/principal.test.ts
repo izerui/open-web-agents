@@ -40,6 +40,19 @@ describe("canAccessSession / web 用户", () => {
     expect(d.allowed === false && d.reason).toMatch(/no owner/);
   });
 
+  it("签发 key 的人能看用自己 key 发起的接口会话(没有人用归属)", () => {
+    const invoke = sess({ callerApiKeyId: "k1", billingUserId: "u1" });
+    expect(canAccessSession(webA, invoke).allowed).toBe(true);
+    // 别人用自己的 key 发起的,看不到
+    expect(canAccessSession(webB, invoke).allowed).toBe(false);
+  });
+
+  it("计费归属不能用来读别人工作台里的会话", () => {
+    expect(canAccessSession(webB, sess({ ownerId: "u1", billingUserId: "u2" })).allowed).toBe(
+      false,
+    );
+  });
+
   it("admin 也不能越权读别人【有明确归属】的会话", () => {
     expect(canAccessSession(admin, sess({ ownerId: "u1" })).allowed).toBe(false);
   });

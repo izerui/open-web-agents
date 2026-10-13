@@ -18,6 +18,8 @@ export interface SessionOwnership {
   agentId: string;
   ownerId?: string;
   callerApiKeyId?: string;
+  /** 计费账号。API Key / 嵌入会话没有 owner,签发 key 的人凭它查看用自己 key 发起的运行。 */
+  billingUserId?: string;
 }
 
 export type Decision = { allowed: true } | { allowed: false; reason: string };
@@ -37,6 +39,9 @@ const deny = (reason: string): Decision => ({ allowed: false, reason });
 export function canAccessSession(p: Principal, s: SessionOwnership): Decision {
   if (p.type === "web") {
     if (!s.ownerId) {
+      // 用自己的 key 发起的接口调用 / 嵌入会话:签发人能看到全过程。
+      // 曾经只有管理员看得到 —— 集成方对自己调用的"全程过程监控"实际不可用
+      if (s.billingUserId && s.billingUserId === p.userId) return ALLOW;
       // 无归属的历史数据(单用户时期创建)。开了登录之后若一律放行,任何新用户都能
       // 读到这些会话 —— 故只对 admin 开放:既不丢旧数据,也不构成跨用户泄露。
       return p.role === "admin" ? ALLOW : deny("session has no owner");

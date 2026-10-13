@@ -25,11 +25,28 @@ export async function PUT(req: Request) {
 
   const patch: { defaultBaseUrl?: string | null; anthropicKeyEnc?: string | null } = {};
   if (body.baseUrl !== undefined) {
-    patch.defaultBaseUrl = body.baseUrl.trim() || null;
+    const url = body.baseUrl.trim();
+    const protocol = url && URL.canParse(url) ? new URL(url).protocol : "";
+    if (url && protocol !== "https:" && protocol !== "http:") {
+      return Response.json({ error: "Base URL 须为 http/https 地址" }, { status: 400 });
+    }
+    patch.defaultBaseUrl = url || null;
   }
   if (body.apiKey !== undefined) {
     const plain = body.apiKey.trim();
     patch.anthropicKeyEnc = plain ? secrets.encrypt(plain) : null;
+  }
+
+  // 自定义网关必须配自己的 key:运行时凭证链不会把平台 key 发往用户自定义的地址,
+  // 在这里就拦住,免得保存成功、每次运行才失败
+  const nextBase = patch.defaultBaseUrl !== undefined ? patch.defaultBaseUrl : user.defaultBaseUrl;
+  const nextKey =
+    patch.anthropicKeyEnc !== undefined ? patch.anthropicKeyEnc : user.anthropicKeyEnc;
+  if (nextBase && !nextKey) {
+    return Response.json(
+      { error: "设置自定义 Base URL 时必须同时配置自己的 API Key" },
+      { status: 400 },
+    );
   }
 
   await users.setCredentials(user.id, patch);

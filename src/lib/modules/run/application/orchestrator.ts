@@ -147,6 +147,13 @@ export class RunOrchestrator {
       prompt: cmd.prompt,
       resumeSessionId,
       unattended: session.unattended === true,
+      // 有没有人能审批取决于入口:接口调用没人;嵌入组件里的访客不是审批人
+      approvalPolicy:
+        session.source === "invoke"
+          ? (config.unattendedApproval ?? "allow")
+          : session.source === "embed"
+            ? (config.unattendedApproval ?? "deny")
+            : ("ask" as const),
       credentials,
       env: this.deps.baseEnv ?? {},
     };

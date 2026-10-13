@@ -49,7 +49,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     await auth.assertSessionAccess(principal, id);
     // 重跑同样花钱 —— 这条入口曾经绕过了额度关卡
     const session = await sessions.get(id);
-    if (session?.billingUserId) await assertWithinQuota({ users, usage }, session.billingUserId);
+    if (!session) return Response.json({ error: "session not found" }, { status: 404 });
+    // 分享被撤销后不能借原会话继续跑
+    await auth.assertCanInvoke(principal, session.agentId);
+    if (session.billingUserId) await assertWithinQuota({ users, usage }, session.billingUserId);
   } catch (err) {
     const quota = quotaErrorResponse(err);
     if (quota) return quota;

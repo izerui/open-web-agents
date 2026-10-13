@@ -95,6 +95,12 @@ export const sessions = mysqlTable(
      * 这个字段只表达一件事:出事时有没有人能回答。
      */
     unattended: int("unattended").notNull().default(0),
+    /**
+     * 会话从哪个入口来:web(工作台)/ api(API Key 建的会话)/ invoke(接口调用)/ embed(嵌入组件)。
+     * 决定审批怎么走(有没有人能批)、结果是否推 webhook、在哪个列表里展示、用量怎么拆分。
+     * 曾经只能靠 unattended / callerApiKeyId / title 拼凑判断,embed 与 API 会话分不开。
+     */
+    source: varchar("source", { length: 16 }).notNull().default("web"),
     status: varchar("status", { length: 16 }).notNull().default("active"),
     /** 会话级凭证覆盖(三级链中间层) */
     baseUrl: varchar("base_url", { length: 512 }),
@@ -160,8 +166,11 @@ export const runs = mysqlTable(
     /** 被认领的次数,用于识别反复崩溃的任务 */
     attempts: int("attempts").notNull().default(0),
     structuredResult: json("structured_result"),
-    /** 本轮最终 Assistant 文本的查询投影;完整过程仍以 SDK jsonl 为准。 */
-    finalText: text("final_text"),
+    /**
+     * 本轮最终 Assistant 文本的查询投影;完整过程仍以 SDK jsonl 为准。
+     * MEDIUMTEXT:TEXT 只有 64KB,长回答写不进去会让一次成功的运行在落库时失败。
+     */
+    finalText: mediumtext("final_text"),
     cost: json("cost"),
     errorInfo: json("error_info"),
     startedAt: timestamp("started_at"),
@@ -226,8 +235,11 @@ export const knowledgeDocs = mysqlTable(
     id: varchar("id", { length: 36 }).primaryKey(),
     agentId: varchar("agent_id", { length: 36 }).notNull(),
     title: varchar("title", { length: 255 }).notNull(),
-    /** 原文。切块与索引在读取时算 —— 文档量级不大时省掉一层一致性维护。 */
-    content: text("content").notNull(),
+    /**
+     * 原文。切块与索引在读取时算 —— 文档量级不大时省掉一层一致性维护。
+     * MEDIUMTEXT:接口允许 20 万字符,中文按 3 字节算远超 TEXT 的 64KB。
+     */
+    content: mediumtext("content").notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (t) => ({ byAgent: index("idx_knowledge_agent").on(t.agentId) }),

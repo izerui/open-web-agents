@@ -71,6 +71,30 @@ export class ClaudeSdkEngine implements EnginePort {
     let sessionId: string | undefined;
     let result: RunResult | undefined;
 
+    // 按消息累计 token,给"没等到结算消息就中止"的运行一个部分花费。
+    // 同一条 assistant 消息可能分多次到达,按 messageId 取最后一次
+    const usageByMessage = new Map<string, { input: number; output: number }>();
+    let anonymousUsage = { input: 0, output: 0 };
+    const trackUsage = (e: AgentEvent) => {
+      if (e.kind !== "usage") return;
+      const u = { input: e.input + (e.cacheRead ?? 0) + (e.cacheCreation ?? 0), output: e.output };
+      if (e.messageId) usageByMessage.set(e.messageId, u);
+      else
+        anonymousUsage = {
+          input: anonymousUsage.input + u.input,
+          output: anonymousUsage.output + u.output,
+        };
+    };
+    const partialCost = (): RunResult["cost"] => {
+      let input = anonymousUsage.input;
+      let output = anonymousUsage.output;
+      for (const u of usageByMessage.values()) {
+        input += u.input;
+        output += u.output;
+      }
+      return input || output ? { input, output, partial: true } : undefined;
+    };
+
     try {
       const stream = this.queryFn({
         prompt: ctx.prompt,
@@ -104,8 +128,10 @@ export class ClaudeSdkEngine implements EnginePort {
         } else {
           // 完整消息(assistant / user)。
           // 流式模式下:text / thinking 已经增量推过,只提取 tool_use / question / usage。
-          for (const e of normalizeSdkMessage(msg, { skipStreamed: hasStreamed }))
+          for (const e of normalizeSdkMessage(msg, { skipStreamed: hasStreamed })) {
+            trackUsage(e);
             onEvent(label(e));
+          }
           // assistant 消息处理完毕,重置标记 —— 下一条 assistant 消息重新计数
           if (m?.type === "assistant") hasStreamed = false;
         }
@@ -122,6 +148,7 @@ export class ClaudeSdkEngine implements EnginePort {
       return {
         status: "failed",
         sessionId,
+        cost: partialCost(),
         error: { kind: abort.signal.aborted ? "aborted" : "engine_error", message },
       };
     } finally {
@@ -133,6 +160,7 @@ export class ClaudeSdkEngine implements EnginePort {
       return {
         status: "failed",
         sessionId,
+        cost: partialCost(),
         error: abort.signal.aborted
           ? { kind: "aborted", message: "运行被中断" }
           : { kind: "no_result", message: "SDK 未产出 result 消息" },

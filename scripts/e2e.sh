@@ -46,7 +46,8 @@ else
   fi
 
   echo "[e2e] 起服务(端口 $PORT,日志 $LOG)…"
-  PORT="$PORT" pnpm start >"$LOG" 2>&1 &
+  # 套件从同一地址注册几十个账号,按来源地址的登录/注册限流会误伤;按账号的限流照常生效
+  OWA_AUTH_IP_RATE_LIMIT="${OWA_AUTH_IP_RATE_LIMIT:-0}" PORT="$PORT" pnpm start >"$LOG" 2>&1 &
   SERVER_PID=$!
 
   ready=""

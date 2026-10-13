@@ -7,7 +7,11 @@ import {
   hasResourceAccess,
   isPublic,
 } from "@/lib/modules/access/domain/grants";
-import type { AgentConfig } from "@/lib/modules/agent/domain/config";
+import {
+  type AgentConfig,
+  pickAgentConfig,
+  redactAgentConfigForReader,
+} from "@/lib/modules/agent/domain/config";
 import { validateAgentConfig } from "@/lib/modules/agent/domain/validate-config";
 import { validateWebhookUrl } from "@/lib/modules/integration/domain/webhook-policy";
 
@@ -37,12 +41,15 @@ export async function GET(req: Request) {
     return Response.json({
       agents: filterVisible(subject, all, allGrants).map((a) => {
         const manage = canManageWebhook(subject, a);
+        const canWrite = hasResourceAccess(subject, a, "write", allGrants);
         return {
           ...a,
+          // 只读者(含公开智能体的所有用户)看不到 MCP 环境变量与逃生舱
+          config: canWrite ? a.config : redactAgentConfigForReader(a.config),
           // 回调地址可能带着接收方的令牌,非所有者不该看到
           webhookUrl: manage ? a.webhookUrl : undefined,
           isPublic: isPublic(a.id, allGrants),
-          canWrite: hasResourceAccess(subject, a, "write", allGrants),
+          canWrite,
           canManageWebhook: manage,
         };
       }),
@@ -100,8 +107,11 @@ export async function POST(req: Request) {
     );
   }
 
+  const cfg = pickAgentConfig((body.config ?? {}) as Partial<AgentConfig>);
   const targetId = body.id?.trim();
   let ownerId = subject.userId;
+  let escapeHatch = cfg.escapeHatch;
+  let existingHatch: Record<string, unknown> | undefined;
   const requestedWebhook = body.webhookUrl?.trim() || undefined;
   let webhookUrl = requestedWebhook;
 
@@ -128,7 +138,20 @@ export async function POST(req: Request) {
         }
         webhookUrl = existing.webhookUrl;
       }
+      // 构建器不提交逃生舱:没带就沿用原值,否则任何一次保存都会把管理员设的逃生舱清掉
+      existingHatch = existing.config.escapeHatch;
+      if (cfg.escapeHatch === undefined) escapeHatch = existingHatch;
     }
+  }
+
+  // 逃生舱只给平台管理员:它能改动平台没建模的运行参数,不是普通作者该碰的东西。
+  // 原样回传已有值不算修改(调用方可能 GET 后整份 POST 回来)
+  if (
+    cfg.escapeHatch !== undefined &&
+    subject.role !== "admin" &&
+    JSON.stringify(cfg.escapeHatch) !== JSON.stringify(existingHatch)
+  ) {
+    return Response.json({ error: "只有平台管理员可以设置逃生舱(escapeHatch)" }, { status: 403 });
   }
 
   // 只校验本次提交的新地址;沿用的存量地址在投递时还会按解析结果再查一次
@@ -137,7 +160,6 @@ export async function POST(req: Request) {
     if (!v.ok) return Response.json({ error: v.reason }, { status: 400 });
   }
 
-  const cfg = body.config as Partial<AgentConfig>;
   const saved = await agents.upsert({
     id: targetId || randomUUID().replace(/-/g, "").slice(0, 24),
     ownerId,
@@ -146,22 +168,11 @@ export async function POST(req: Request) {
     description: body.description,
     webhookUrl,
     config: {
+      ...cfg,
       systemPrompt: cfg.systemPrompt as string,
       model: cfg.model ?? "sonnet",
       maxTurns: cfg.maxTurns ?? 20,
-      effort: cfg.effort,
-      skills: cfg.skills,
-      mcpServers: cfg.mcpServers,
-      tools: cfg.tools,
-      subagents: cfg.subagents,
-      // 【显式白名单的代价】这里逐字段列举而非 spread —— 好处是外部塞不进意料之外的键,
-      // 坏处是新增字段忘了加就【静默丢弃】:保存返回 201、界面显示成功,
-      // 读回来才发现字段没了,全程没有任何报错。inputSchema 就这么漏过一次。
-      inputSchema: cfg.inputSchema,
-      outputSchema: cfg.outputSchema,
-      verifyRules: cfg.verifyRules,
-      approvalRules: cfg.approvalRules,
-      escapeHatch: cfg.escapeHatch,
+      escapeHatch,
     },
   });
 

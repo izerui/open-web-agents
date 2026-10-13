@@ -35,6 +35,42 @@ describe("resolveCredentials", () => {
     ).toEqual({ baseUrl: "p", key: "pk" });
   });
 
+  // 【平台 key 外泄回归】baseUrl 与 key 曾经各自回退:只给自己的 baseUrl、不给 key,
+  // 平台 key 就会被发到这个 baseUrl 上 —— 任何能填 baseUrl 的人都能把平台 key 引到自己的服务器
+  it("自定义 baseUrl 而没给 key:拒绝,绝不把平台 key 发过去", () => {
+    expect(() =>
+      resolveCredentials({
+        platform: { baseUrl: "https://gw", key: "pk" },
+        request: { baseUrl: "https://attacker" },
+      }),
+    ).toThrow(/baseUrl/);
+    expect(() =>
+      resolveCredentials({
+        platform: { baseUrl: "https://gw", key: "pk" },
+        user: { baseUrl: "https://attacker" },
+      }),
+    ).toThrow(/baseUrl/);
+  });
+
+  it("自定义 baseUrl 也不能借用更低层(用户)的 key", () => {
+    expect(() =>
+      resolveCredentials({
+        platform: { baseUrl: "gw", key: "pk" },
+        user: { key: "uk" },
+        request: { baseUrl: "https://elsewhere" },
+      }),
+    ).toThrow(/baseUrl/);
+  });
+
+  it("自定义 baseUrl 与同层 key 一起给:放行", () => {
+    expect(
+      resolveCredentials({
+        platform: { baseUrl: "gw", key: "pk" },
+        user: { baseUrl: "https://mine", key: "uk" },
+      }),
+    ).toEqual({ baseUrl: "https://mine", key: "uk" });
+  });
+
   it("各级都缺 key 时抛错", () => {
     expect(() => resolveCredentials({ user: { baseUrl: "u" } })).toThrow(/key/i);
   });

@@ -12,6 +12,10 @@ import { describe, expect, it, vi } from "vitest";
 
 /** 内存 repo + 结果存储,凑齐 worker 需要的 RunRepo & RunPayloadSource。 */
 class TestRepo extends InMemoryRunRepo {
+  readonly recordedCosts = new Map<string, unknown>();
+  async recordCost(id: string, cost: unknown): Promise<void> {
+    if (!this.recordedCosts.has(id)) this.recordedCosts.set(id, cost);
+  }
   readonly savedResults = new Map<
     string,
     { finalText?: string; structured?: unknown; cost?: unknown; error?: unknown }
@@ -228,6 +232,22 @@ describe("RunWorker 终态通知", () => {
     expect(finalized).toEqual([]);
   });
 
+  it("运行中被取消:结果作废,但花掉的钱照样入账", async () => {
+    const ref: { repo?: TestRepo } = {};
+    const engine = new FakeEngine(
+      { status: "failed", cost: { input: 900, output: 80, partial: true } },
+      async () => {
+        await ref.repo?.cancel("r1");
+      },
+    );
+    const { repo, worker } = await setup(engine);
+    ref.repo = repo;
+    await repo.createWithPrompt("r1", "s1", "go");
+    await worker.tick();
+    expect((await repo.get("r1"))?.state).toBe("cancelled");
+    expect(repo.recordedCosts.get("r1")).toEqual({ input: 900, output: 80, partial: true });
+  });
+
   it("通知抛错不影响终态", async () => {
     const { repo, worker } = await setup(new FakeEngine(), () => 1000, {
       onFinalized: () => {
@@ -355,6 +375,47 @@ describe("RunWorker 并发", () => {
     expect(worker.abortInFlight()).toBe(1);
     expect(await worker.drain(2000)).toBe(true);
     expect((await repo.get("r1"))?.state).toBe("failed");
+  });
+});
+
+describe("RunWorker 取消通知", () => {
+  it("收到取消通知立即中止,不等下一次心跳", async () => {
+    let fire: (runId: string) => void = () => {};
+    const cancelSignal = {
+      publish: async () => {},
+      subscribe: (cb: (runId: string) => void) => {
+        fire = cb;
+        return () => {};
+      },
+    };
+    let aborted = false;
+    let started = false;
+    const stuck: EnginePort = {
+      run: (_s, _c, _e, signal) =>
+        new Promise<RunResult>((resolve) => {
+          started = true;
+          const done = () => {
+            aborted = true;
+            resolve({ status: "failed", error: { kind: "aborted", message: "中止" } });
+          };
+          if (signal.aborted) done();
+          else signal.addEventListener("abort", done);
+        }),
+    };
+    const { repo, worker } = await setup(stuck, () => Date.now(), { cancelSignal });
+    await repo.createWithPrompt("r1", "s1", "长任务");
+    worker.start(); // 心跳 10 秒一次,测试窗口里不会触发
+    // 等引擎真正跑起来(准备阶段就被中止的运行根本不会启动引擎)
+    for (let i = 0; i < 200 && !started; i++) await new Promise((r) => setTimeout(r, 5));
+    const start = Date.now();
+    await repo.cancel("r1");
+    fire("r1");
+    for (let i = 0; i < 200 && !aborted; i++) await new Promise((r) => setTimeout(r, 5));
+    expect(aborted).toBe(true);
+    expect(Date.now() - start).toBeLessThan(1_000);
+    expect((await repo.get("r1"))?.state).toBe("cancelled");
+    worker.stop();
+    await worker.drain(2000);
   });
 });
 

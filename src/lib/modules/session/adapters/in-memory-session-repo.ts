@@ -1,4 +1,10 @@
-import type { NewSession, Session, SessionRepo } from "@/lib/modules/session/ports";
+import type {
+  NewSession,
+  Session,
+  SessionListFilter,
+  SessionRepo,
+  SessionStatus,
+} from "@/lib/modules/session/ports";
 
 /** 内存会话仓储。垂直切片先用它跑通,MySQL adapter 后续替换(端口不变)。 */
 export class InMemorySessionRepo implements SessionRepo {
@@ -8,6 +14,8 @@ export class InMemorySessionRepo implements SessionRepo {
     const session: Session = {
       ...s,
       billingUserId: s.billingUserId ?? s.ownerId,
+      source: s.source ?? (s.unattended ? "invoke" : "web"),
+      status: "active",
       createdAt: Date.now(),
     };
     this.sessions.set(s.id, session);
@@ -19,13 +27,19 @@ export class InMemorySessionRepo implements SessionRepo {
     return s ? { ...s } : null;
   }
 
-  async list(filter?: { ownerId?: string; callerApiKeyId?: string }): Promise<Session[]> {
+  async list(filter?: SessionListFilter): Promise<Session[]> {
     return [...this.sessions.values()]
       .filter((s) => {
         if (filter?.ownerId !== undefined && s.ownerId !== filter.ownerId) return false;
         if (filter?.callerApiKeyId !== undefined && s.callerApiKeyId !== filter.callerApiKeyId) {
           return false;
         }
+        if (filter?.billingUserId !== undefined && s.billingUserId !== filter.billingUserId) {
+          return false;
+        }
+        if (filter?.sources && !filter.sources.includes(s.source)) return false;
+        if (s.status === "deleted") return false;
+        if (s.status === "archived" && !filter?.includeArchived) return false;
         return true;
       })
       .sort((a, b) => b.createdAt - a.createdAt);
@@ -38,5 +52,12 @@ export class InMemorySessionRepo implements SessionRepo {
 
   async delete(id: string): Promise<void> {
     this.sessions.delete(id);
+  }
+
+  async update(id: string, patch: { title?: string; status?: SessionStatus }): Promise<void> {
+    const s = this.sessions.get(id);
+    if (!s) return;
+    if (patch.title !== undefined) s.title = patch.title;
+    if (patch.status !== undefined) s.status = patch.status;
   }
 }

@@ -34,6 +34,11 @@ export interface AuthDeps {
   currentUser(req: Request): Promise<{ id: string; role?: "admin" | "user" } | null>;
   /** 用户所属组 id。授权判定要用;未启用组时返回空数组即可。 */
   groupIdsOf?(userId: string): Promise<string[]>;
+  /**
+   * 账号是否仍可用(存在且未停用)。
+   * API Key 与嵌入令牌都以签发人的身份运行:签发人被停用,它们必须一起失效。
+   */
+  isUserActive?(userId: string): Promise<boolean>;
 }
 
 export class Unauthorized extends Error {
@@ -58,6 +63,10 @@ export class Authorizer {
 
     const record = await this.deps.apiKeys.findByHash(hashApiKey(plain));
     if (!record) throw new Unauthorized("invalid API key");
+    // 曾经只按哈希查 key:账号停用只拦得住 cookie,签出去的 key 照常可用
+    if (this.deps.isUserActive && !(await this.deps.isUserActive(record.ownerId))) {
+      throw new Unauthorized("API key owner is disabled");
+    }
 
     void this.deps.apiKeys.touch(record.id, Date.now()).catch(() => {});
 
@@ -67,6 +76,28 @@ export class Authorizer {
       ownerId: record.ownerId,
       agentId: record.agentId,
     };
+  }
+
+  /**
+   * 嵌入令牌的调用方。令牌本身只证明"签过名、没过期";这里再核对签发它的 key 仍然存在、
+   * 签发人未被停用、且仍有权运行该智能体。
+   *
+   * 曾经只验签名与过期:Key 被吊销、账号被停用、分享被撤销之后,已签出的令牌在有效期内照常可用。
+   */
+  async resolveEmbed(claims: { keyId: string; agentId: string }): Promise<Principal> {
+    const record = await this.deps.apiKeys.get(claims.keyId);
+    if (!record) throw new Unauthorized("embed token revoked");
+    if (this.deps.isUserActive && !(await this.deps.isUserActive(record.ownerId))) {
+      throw new Unauthorized("embed token owner is disabled");
+    }
+    const principal: Principal = {
+      type: "apiKey",
+      keyId: record.id,
+      ownerId: record.ownerId,
+      agentId: record.agentId,
+    };
+    await this.assertCanInvoke(principal, claims.agentId);
+    return principal;
   }
 
   /**
@@ -112,13 +143,15 @@ export class Authorizer {
   /** 会话归属校验:读事件流 / 工作空间文件 / 结果之前必须过这一关。 */
   async assertSessionAccess(p: Principal, sessionId: string): Promise<void> {
     const s = await this.deps.sessions.get(sessionId);
-    if (!s) throw new Forbidden("session not found");
+    // 已删除的会话视同不存在 —— 不能再读它的文件、事件,也不能继续在里面运行
+    if (!s || s.status === "deleted") throw new Forbidden("session not found");
     this.assert(
       canAccessSession(p, {
         id: s.id,
         agentId: s.agentId,
         ownerId: s.ownerId,
         callerApiKeyId: s.callerApiKeyId,
+        billingUserId: s.billingUserId,
       }),
     );
   }

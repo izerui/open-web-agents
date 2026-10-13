@@ -9,17 +9,33 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { AlertTriangle } from "lucide-react";
 
-export function LoginForm({ firstRun }: { firstRun: boolean }) {
+export function LoginForm({
+  firstRun,
+  allowSignup,
+}: {
+  firstRun: boolean;
+  /** 平台关闭自助注册时不展示注册入口(第一个账号始终可以注册)。 */
+  allowSignup: boolean;
+}) {
   const router = useRouter();
   // 首次部署(库里还没有用户)默认落在注册页,省掉"先注册再登录"的困惑
   const [mode, setMode] = useState<"login" | "register">(firstRun ? "register" : "login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // 首次部署创建的是管理员,打错一个字符就只能去库里改 —— 要求再输一遍
+  const needConfirm = mode === "register" && firstRun;
+  const mismatch = needConfirm && confirm.length > 0 && confirm !== password;
+
   async function submit() {
     if (!email.trim() || !password || busy) return;
+    if (needConfirm && confirm !== password) {
+      setError("两次输入的密码不一致");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -57,53 +73,87 @@ export function LoginForm({ firstRun }: { firstRun: boolean }) {
           </CardDescription>
         </CardHeader>
 
-        <CardContent className="flex flex-col gap-4">
-          <label className="space-y-1">
-            <span className="text-xs opacity-70">邮箱</span>
-            <Input
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </label>
-
-          <label className="space-y-1">
-            <span className="text-xs opacity-70">
-              密码{mode === "register" ? "(至少 8 位)" : ""}
-            </span>
-            <Input
-              type="password"
-              autoComplete={mode === "register" ? "new-password" : "current-password"}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && submit()}
-            />
-          </label>
-
-          {/* 原来是硬编码的 text-red-600,不跟主题走,暗色下偏暗看不清 */}
-          {error && (
-            <Alert variant="destructive">
-              <AlertTriangle />
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-
-          <Button type="button" onClick={submit} disabled={busy || !email.trim() || !password}>
-            {busy ? "处理中…" : mode === "register" ? "注册并进入" : "登录"}
-          </Button>
-
-          <Button
-            type="button"
-            variant="link"
-            className="text-xs opacity-60 hover:opacity-100"
-            onClick={() => {
-              setMode(mode === "login" ? "register" : "login");
-              setError(null);
+        {/*
+          真正的 <form>:任一输入框回车都能提交,密码管理器也能识别。
+          曾经只有密码框监听回车,且没判断输入法组合输入,中文输入法选字时会误提交。
+        */}
+        <CardContent>
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submit();
             }}
           >
-            {mode === "login" ? "还没有账号?去注册" : "已有账号?去登录"}
-          </Button>
+            <label className="space-y-1">
+              <span className="text-xs text-muted-foreground">邮箱</span>
+              <Input
+                type="email"
+                name="email"
+                autoComplete="email"
+                required
+                autoFocus
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </label>
+
+            <label className="space-y-1">
+              <span className="text-xs text-muted-foreground">
+                密码{mode === "register" ? "(至少 8 位)" : ""}
+              </span>
+              <Input
+                type="password"
+                name="password"
+                autoComplete={mode === "register" ? "new-password" : "current-password"}
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </label>
+
+            {needConfirm && (
+              <label className="space-y-1">
+                <span className="text-xs text-muted-foreground">再次输入密码</span>
+                <Input
+                  type="password"
+                  name="confirm-password"
+                  autoComplete="new-password"
+                  required
+                  aria-invalid={mismatch}
+                  value={confirm}
+                  onChange={(e) => setConfirm(e.target.value)}
+                />
+                {mismatch && <span className="text-xs text-destructive">两次输入的密码不一致</span>}
+              </label>
+            )}
+
+            {/* 原来是硬编码的 text-red-600,不跟主题走,暗色下偏暗看不清 */}
+            {error && (
+              <Alert variant="destructive">
+                <AlertTriangle />
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+
+            <Button type="submit" disabled={busy || !email.trim() || !password || mismatch}>
+              {busy ? "处理中…" : mode === "register" ? "注册并进入" : "登录"}
+            </Button>
+
+            {allowSignup && !firstRun && (
+              <Button
+                type="button"
+                variant="link"
+                className="text-xs text-muted-foreground hover:text-foreground"
+                onClick={() => {
+                  setMode(mode === "login" ? "register" : "login");
+                  setError(null);
+                }}
+              >
+                {mode === "login" ? "还没有账号?去注册" : "已有账号?去登录"}
+              </Button>
+            )}
+          </form>
         </CardContent>
       </Card>
     </main>

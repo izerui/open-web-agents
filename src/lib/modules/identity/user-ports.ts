@@ -61,4 +61,10 @@ export interface UserRepo {
 
   /** 当前管理员数量 —— 用来挡住"把最后一个管理员降级/禁用"。 */
   countAdmins(): Promise<number>;
+
+  /** 改密码(传入已哈希的值)。 */
+  setPasswordHash(id: string, passwordHash: string): Promise<void>;
+
+  /** 按 id 取带密码哈希的记录(改密码时校验旧密码用)。 */
+  getWithPassword(id: string): Promise<(User & { passwordHash: string }) | null>;
 }

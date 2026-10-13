@@ -105,6 +105,10 @@ interface Draft {
   approvalPatternsText: string;
   /** 权限模式;按场景选,不是安全等级 */
   permissionMode: PermissionMode;
+  /** 没有审批人时(接口调用、嵌入组件)命中审批规则怎么办;空 = 按入口默认 */
+  unattendedApproval: "" | "allow" | "deny";
+  /** 开场建议,一行一条 */
+  startersText: string;
 }
 
 type BuilderAgent = AgentSummary & { config: Record<string, unknown> };
@@ -131,6 +135,8 @@ const EMPTY: Draft = {
   approvalToolsText: "",
   approvalPatternsText: "",
   permissionMode: "default",
+  unattendedApproval: "",
+  startersText: "",
 };
 
 /**
@@ -174,6 +180,14 @@ export function Builder() {
   const [list, setList] = useState<AgentSummary[]>([]);
   const [allowStdioMcp, setAllowStdioMcp] = useState(false);
   const [draft, setDraft] = useState<Draft>(EMPTY);
+  /**
+   * 当前打开的是哪个已保存的智能体;null = 正在新建。
+   *
+   * 【为什么不能用 draft.id 推断】曾经 selectedAgent = list.find(a => a.id === draft.id):
+   * 新建时在 ID 框里敲出某个已有 ID 的瞬间,输入框被禁用、整页可能切到别人的只读视图,
+   * 知识库/分享面板还会按每次按键对那个智能体发请求 —— 保存之前就能往别人的知识库里加文档。
+   */
+  const [openedId, setOpenedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const cleanDraftRef = useRef(JSON.stringify(EMPTY));
   const editSeqRef = useRef(0);
@@ -263,7 +277,7 @@ export function Builder() {
     }
   }
 
-  const selectedAgent = list.find((agent) => agent.id === draft.id);
+  const selectedAgent = openedId ? list.find((agent) => agent.id === openedId) : undefined;
   const canWrite = selectedAgent?.canWrite !== false;
   // 新建时自己就是所有者;已有的看服务端给的判定
   const canManageWebhook = selectedAgent?.canManageWebhook !== false;
@@ -278,6 +292,12 @@ export function Builder() {
 
   async function save() {
     if (!canSave) return;
+    // 新建时撞上已有 ID 会覆盖那个智能体 —— 明确拦下,而不是悄悄改掉别的配置
+    const wantedId = draft.id.trim();
+    if (!openedId && wantedId && list.some((a) => a.id === wantedId)) {
+      toast.error(`ID「${wantedId}」已被占用,请换一个,或从左侧打开该智能体编辑`);
+      return;
+    }
     setSaving(true);
     try {
       const mcpServers = draft.mcpServers
@@ -331,6 +351,14 @@ export function Builder() {
             tools: parseSkills(draft.toolsText).map((name) => ({ name })),
             skills: parseSkills(draft.skillsText),
             permissionMode: draft.permissionMode,
+            unattendedApproval: draft.unattendedApproval || undefined,
+            starters: (() => {
+              const lines = draft.startersText
+                .split("\n")
+                .map((x) => x.trim())
+                .filter(Boolean);
+              return lines.length ? lines.slice(0, 4) : undefined;
+            })(),
             approvalRules:
               draft.approvalToolsText.trim() || draft.approvalPatternsText.trim()
                 ? {
@@ -361,6 +389,7 @@ export function Builder() {
       const savedDraft = { ...draft, id: data.agent.id };
       cleanDraftRef.current = JSON.stringify(savedDraft);
       setDraft((current) => ({ ...current, id: data.agent?.id ?? current.id }));
+      setOpenedId(data.agent.id);
       toast.success(`已保存:${data.agent.id}`);
       await reload();
     } catch (e) {
@@ -371,7 +400,7 @@ export function Builder() {
   }
 
   function edit(a: AgentSummary) {
-    if (a.id !== draft.id && !confirmDiscard()) return;
+    if (a.id !== openedId && !confirmDiscard()) return;
     const seq = ++editSeqRef.current;
     void fetchJson<AgentsResponse>("/api/agents")
       .then((d) => {
@@ -413,6 +442,11 @@ export function Builder() {
           permissionMode: PERMISSION_MODES.includes(cfg.permissionMode as PermissionMode)
             ? (cfg.permissionMode as PermissionMode)
             : "default",
+          unattendedApproval:
+            cfg.unattendedApproval === "allow" || cfg.unattendedApproval === "deny"
+              ? cfg.unattendedApproval
+              : "",
+          startersText: Array.isArray(cfg.starters) ? (cfg.starters as string[]).join("\n") : "",
           mcpServers: Array.isArray(cfg.mcpServers)
             ? (
                 cfg.mcpServers as {
@@ -448,6 +482,7 @@ export function Builder() {
             : [],
         };
         setCleanDraft(nextDraft);
+        setOpenedId(a.id);
       })
       // 点了智能体却没反应最让人困惑 —— 至少说清楚是没读到,而不是这个智能体本身是空的
       .catch((error: unknown) => {
@@ -471,6 +506,7 @@ export function Builder() {
               if (!confirmDiscard()) return;
               editSeqRef.current += 1;
               setCleanDraft(EMPTY);
+              setOpenedId(null);
             }}
             tooltip="新建智能体"
           >
@@ -480,7 +516,7 @@ export function Builder() {
         </SidebarMenuItem>
 
         {list.map((a) => {
-          const active = draft.id === a.id;
+          const active = openedId === a.id;
           return (
             <SidebarMenuItem key={a.id}>
               <SidebarMenuButton
@@ -567,12 +603,12 @@ export function Builder() {
           />
         </label>
         <label className="space-y-1">
-          <span className="text-xs text-muted-foreground">ID(留空自动生成;填已有 ID 即覆盖)</span>
+          <span className="text-xs text-muted-foreground">ID(留空自动生成;保存后不可修改)</span>
           <Input
             value={draft.id}
             onChange={(e) => setDraft({ ...draft, id: e.target.value })}
             placeholder="code-reviewer"
-            disabled={Boolean(selectedAgent)}
+            disabled={Boolean(openedId)}
           />
         </label>
       </div>
@@ -582,6 +618,18 @@ export function Builder() {
         <Input
           value={draft.description}
           onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+        />
+      </label>
+
+      <label className="block space-y-1">
+        <span className="text-xs text-muted-foreground">
+          开场建议(可选,一行一条,最多 4 条)—— 工作台新会话里给用户点的示例输入
+        </span>
+        <Textarea
+          className="h-20 resize-y"
+          value={draft.startersText}
+          onChange={(e) => setDraft({ ...draft, startersText: e.target.value })}
+          placeholder={"审一下这份合同的付款条款\n把附件里的发票抽成表格"}
         />
       </label>
 
@@ -838,15 +886,27 @@ export function Builder() {
         </span>
       </label>
 
-      {/* 无人值守却配了审批 = 这一轮会一直挂到审批超时。放在这里提醒,
-            因为两个设置离得远时没人会把它们联系起来。 */}
-      {draft.permissionMode === "bypassPermissions" &&
-        (draft.approvalToolsText.trim() || draft.approvalPatternsText.trim()) && (
-          <p className="rounded-md border border-[var(--warning)]/40 bg-[var(--warning)]/10 px-2 py-1.5 text-xs">
-            这个模式通常用于无人值守的接口调用,而你配了审批规则 ——
-            没人去点确认的话,那一轮会一直挂到审批超时。
-          </p>
-        )}
+      <label className="block space-y-1">
+        <span className="text-xs text-muted-foreground">
+          没有审批人时(接口调用、嵌入组件)命中下面的审批规则
+        </span>
+        <Select
+          value={draft.unattendedApproval}
+          onChange={(e) =>
+            setDraft({
+              ...draft,
+              unattendedApproval: e.target.value as Draft["unattendedApproval"],
+            })
+          }
+        >
+          <option value="">按入口默认(接口调用放行,嵌入组件拒绝)</option>
+          <option value="deny">一律拒绝(更安全)</option>
+          <option value="allow">一律放行</option>
+        </Select>
+        <span className="block text-xs text-muted-foreground">
+          网页工作台里始终等人审批;接口调用与嵌入组件没有审批人,不会挂着等。
+        </span>
+      </label>
 
       <div className="grid grid-cols-2 gap-3">
         <label className="space-y-1">
@@ -932,27 +992,109 @@ export function Builder() {
         {!schemaError && schemaText && <Badge variant="success">schema 合法 · 接口型智能体</Badge>}
       </div>
 
-      {draft.id && <KnowledgePanel agentId={draft.id} canWrite={canWrite} />}
+      {openedId && <KnowledgePanel agentId={openedId} canWrite={canWrite} />}
 
-      {draft.id && <SharePanel agentId={draft.id} />}
+      {openedId && <SharePanel agentId={openedId} />}
 
-      {draft.id && parsedSchema && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">第三方系统这样调用它:</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-xs text-muted-foreground">
-              {`curl -X POST /api/agents/${draft.id}/invoke \\
-  -H 'Content-Type: application/json' \\
-  -d '{"input":"……"}'
-# → { "taskId": "…" }
-curl /api/agents/{taskId}/result
-# → { "status":"success", "structured": { … } }`}
-            </pre>
-          </CardContent>
-        </Card>
+      {openedId && (
+        <InvokeSnippet
+          agentId={openedId}
+          inputSchema={parsedInputSchema}
+          hasOutputSchema={Boolean(parsedSchema)}
+        />
       )}
     </SpaceShell>
+  );
+}
+
+/** 按 JSON Schema 生成一份示例值:给调用示例用,让复制下来的请求能直接通过入参校验。 */
+function sampleFromSchema(schema: unknown, depth = 0): unknown {
+  const sch = (schema ?? {}) as {
+    type?: string | string[];
+    properties?: Record<string, unknown>;
+    items?: unknown;
+    enum?: unknown[];
+    example?: unknown;
+    default?: unknown;
+  };
+  if (sch.example !== undefined) return sch.example;
+  if (sch.default !== undefined) return sch.default;
+  if (Array.isArray(sch.enum) && sch.enum.length > 0) return sch.enum[0];
+  const type = Array.isArray(sch.type) ? sch.type[0] : sch.type;
+  if (depth > 4) return null;
+  switch (type) {
+    case "object":
+      return Object.fromEntries(
+        Object.entries(sch.properties ?? {}).map(([k, v]) => [k, sampleFromSchema(v, depth + 1)]),
+      );
+    case "array":
+      return [sampleFromSchema(sch.items, depth + 1)];
+    case "integer":
+    case "number":
+      return 0;
+    case "boolean":
+      return false;
+    default:
+      return "…";
+  }
+}
+
+/**
+ * 接口调用示例。
+ *
+ * 曾经是一段复制即 401 的 curl:没有 X-Api-Key、用相对地址、入参写死成纯文本
+ * (声明了 inputSchema 的智能体会直接 400),而且只有填了 outputSchema 才显示。
+ */
+function InvokeSnippet({
+  agentId,
+  inputSchema,
+  hasOutputSchema,
+}: {
+  agentId: string;
+  inputSchema?: Record<string, unknown> | null;
+  hasOutputSchema: boolean;
+}) {
+  const origin = typeof window === "undefined" ? "" : window.location.origin;
+  const input = inputSchema ? sampleFromSchema(inputSchema) : "你的输入";
+  const body = JSON.stringify({ input }, null, 2);
+  const curl = `curl -X POST ${origin}/api/agents/${agentId}/invoke \\
+  -H "X-Api-Key: $OWA_API_KEY" \\
+  -H "Idempotency-Key: $(uuidgen)" \\
+  -H "Content-Type: application/json" \\
+  -d '${body.replaceAll("'", "'\\''")}'
+# → 202 { "taskId": "…" }
+
+curl ${origin}/api/agents/<taskId>/result -H "X-Api-Key: $OWA_API_KEY"
+# → { "status": "success", ${hasOutputSchema ? '"structured": { … }' : '"text": "…"'} }`;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm">接口调用</CardTitle>
+        <CardDescription>
+          在「设置 → 接入与 API Key」签发 Key 后,从你的后端调用(Key 不要放进浏览器)。
+          {hasOutputSchema
+            ? "已声明输出契约,结果在 structured 字段里。"
+            : "未声明输出契约,结果是文本;要拿结构化 JSON 请填写输出 schema。"}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        <pre className="overflow-x-auto whitespace-pre font-mono text-xs text-muted-foreground">
+          {curl}
+        </pre>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() =>
+            void navigator.clipboard
+              .writeText(curl)
+              .then(() => toast.success("已复制调用示例"))
+              .catch(() => toast.error("复制失败,请手动选择文本"))
+          }
+        >
+          复制
+        </Button>
+      </CardContent>
+    </Card>
   );
 }

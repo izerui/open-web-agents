@@ -220,3 +220,27 @@ describe("validateAgentConfig / outputSchema", () => {
     expect(validateAgentConfig({ ...ok, outputSchema: { properties: {} } })).toEqual([]);
   });
 });
+
+describe("validateAgentConfig / 逃生舱", () => {
+  it("安全边界字段在保存时就被拒绝", () => {
+    const issues = validateAgentConfig({
+      systemPrompt: "p",
+      model: "sonnet",
+      escapeHatch: { hooks: {}, sandbox: null, cwd: "/", maxBudgetUsd: 1 },
+    });
+    const hatch = issues.find((i) => i.field === "escapeHatch");
+    expect(hatch?.message).toMatch(/hooks/);
+    expect(hatch?.message).toMatch(/sandbox/);
+    expect(hatch?.message).toMatch(/cwd/);
+    expect(hatch?.message).not.toMatch(/maxBudgetUsd/);
+  });
+
+  it("普通参数可以放进逃生舱", () => {
+    const issues = validateAgentConfig({
+      systemPrompt: "p",
+      model: "sonnet",
+      escapeHatch: { maxBudgetUsd: 1, fallbackModel: "haiku" },
+    });
+    expect(issues.find((i) => i.field === "escapeHatch")).toBeUndefined();
+  });
+});

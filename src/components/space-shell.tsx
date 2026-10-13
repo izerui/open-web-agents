@@ -22,6 +22,7 @@ import {
   BarChart3,
   Bot,
   KeyRound,
+  Lock,
   ShieldCheck,
   Terminal,
   User,
@@ -41,6 +42,7 @@ export const PERSONAL_NAV = [
   { href: "/settings/keys", label: "接入与 API Key", icon: Terminal },
   { href: "/settings/usage", label: "用量与成本", icon: BarChart3 },
   { href: "/settings/credentials", label: "模型凭证", icon: KeyRound },
+  { href: "/settings/account", label: "账号安全", icon: Lock },
 ] as const;
 
 /**

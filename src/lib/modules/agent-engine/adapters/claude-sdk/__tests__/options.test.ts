@@ -156,32 +156,64 @@ describe("buildSdkOptions", () => {
     });
   });
 
-  it("escapeHatch 不能在平台关闭时偷塞 stdio MCP", () => {
-    expect(() =>
-      buildSdkOptions(
-        specOf({
-          escapeHatch: {
-            mcpServers: { local: { type: "stdio", command: "sh", args: ["-c", "id"] } },
-          },
-        }),
-        ctx,
-        deps(),
-      ),
-    ).toThrow(/stdio MCP.*未启用|OWA_ALLOW_STDIO_MCP/);
+  it("escapeHatch 偷塞不进 stdio MCP(mcpServers 属于受保护字段)", () => {
+    const o = buildSdkOptions(
+      specOf({
+        escapeHatch: {
+          mcpServers: { local: { type: "stdio", command: "sh", args: ["-c", "id"] } },
+        },
+      }),
+      ctx,
+      deps(),
+    );
+    expect(o.mcpServers).toBeUndefined();
   });
 
   it("无 mcpServers 时不传该字段", () => {
     expect(buildSdkOptions(specOf(), ctx, deps()).mcpServers).toBeUndefined();
   });
 
-  it("逃生舱最后 spread,可覆盖任何默认", () => {
+  it("逃生舱可覆盖平台没建模的普通参数", () => {
     const o = buildSdkOptions(
-      specOf({ escapeHatch: { permissionMode: "default", includePartialMessages: true } }),
+      specOf({ escapeHatch: { maxBudgetUsd: 3, fallbackModel: "haiku" } }),
       ctx,
       deps(),
     );
-    expect(o.permissionMode).toBe("default");
-    expect(o.includePartialMessages).toBe(true);
+    expect(o.maxBudgetUsd).toBe(3);
+    expect(o.fallbackModel).toBe("haiku");
+  });
+
+  // 【越权回归】逃生舱曾经能一次性拆掉所有安全设置
+  it("逃生舱改不了安全边界字段:hooks、cwd、env、settingSources、权限模式、工具限制", () => {
+    const base = buildSdkOptions(specOf({}), ctx, deps());
+    const o = buildSdkOptions(
+      specOf({
+        escapeHatch: {
+          hooks: {},
+          cwd: "/",
+          env: { HOME: "/root" },
+          settingSources: ["user", "project"],
+          permissionMode: "bypassPermissions",
+          allowDangerouslySkipPermissions: true,
+          disallowedTools: [],
+          canUseTool: undefined,
+          additionalDirectories: ["/"],
+        },
+      }),
+      ctx,
+      deps(),
+    );
+    expect(o.hooks).toBe(base.hooks === undefined ? undefined : o.hooks);
+    expect(Object.keys((o.hooks ?? {}) as object)).toEqual(
+      Object.keys((base.hooks ?? {}) as object),
+    );
+    expect(o.cwd).toBe(base.cwd);
+    expect(o.env).toEqual(base.env);
+    expect(o.settingSources).toEqual([]);
+    expect(o.permissionMode).toBe(base.permissionMode);
+    expect(o.allowDangerouslySkipPermissions).toBeUndefined();
+    expect(o.additionalDirectories).toBeUndefined();
+    expect(typeof o.canUseTool).toBe("function");
   });
 });
 
@@ -212,9 +244,11 @@ describe("执行隔离进入 SDK options", () => {
     expect(o.disallowedTools).toEqual(expect.arrayContaining([expect.stringContaining("Write(")]));
   });
 
-  it("逃生舱可覆盖沙箱设置(留给特殊业务)", () => {
+  it("逃生舱关不掉沙箱", () => {
+    const base = buildSdkOptions(specOf({}), ctx, withSandbox());
     const o = buildSdkOptions(specOf({ escapeHatch: { sandbox: undefined } }), ctx, withSandbox());
-    expect(o.sandbox).toBeUndefined();
+    expect(o.sandbox).toEqual(base.sandbox);
+    expect(o.sandbox).toBeDefined();
   });
 });
 
@@ -631,5 +665,47 @@ describe("PreToolUse 围栏接入 SDK options", () => {
     });
     await gateOf(o)("Bash", { command: "ls" });
     expect(spy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("没有审批人时的审批策略", () => {
+  const ruled = specOf({ approvalRules: { tools: ["Bash"] } });
+  async function decide(policy: "ask" | "allow" | "deny") {
+    const asked: string[] = [];
+    const o = buildSdkOptions(
+      ruled,
+      { ...ctx, approvalPolicy: policy },
+      {
+        ...deps(),
+        requestApproval: async (r) => {
+          asked.push(r.toolName);
+          return { approved: true };
+        },
+      },
+    );
+    const hook = (o.hooks as { PreToolUse: { hooks: ((i: unknown) => Promise<unknown>)[] }[] })
+      .PreToolUse[0]?.hooks[0];
+    const out = (await hook?.({
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_input: { command: "ls" },
+    })) as { hookSpecificOutput?: { permissionDecision?: string } } | undefined;
+    return { decision: out?.hookSpecificOutput?.permissionDecision, asked };
+  }
+
+  it("ask:发起人工审批", async () => {
+    expect((await decide("ask")).asked).toEqual(["Bash"]);
+  });
+
+  it("deny:不等人,直接拒绝(嵌入组件默认)", async () => {
+    const r = await decide("deny");
+    expect(r.asked).toEqual([]);
+    expect(r.decision).toBe("deny");
+  });
+
+  it("allow:不等人,直接放行(接口调用默认)", async () => {
+    const r = await decide("allow");
+    expect(r.asked).toEqual([]);
+    expect(r.decision).not.toBe("deny");
   });
 });

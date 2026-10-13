@@ -106,6 +106,26 @@ describe("ClaudeSdkEngine 回放", () => {
     expect((arg?.options.env as Record<string, string>).ANTHROPIC_API_KEY).toBe("sk-x");
   });
 
+  it("没等到结算就结束:按已收到的消息报部分花费,同一条消息不重复计", async () => {
+    const msg = (id: string, input: number, output: number) => ({
+      type: "assistant",
+      message: {
+        id,
+        content: [{ type: "text", text: "x" }],
+        usage: { input_tokens: input, output_tokens: output, cache_read_input_tokens: 10 },
+      },
+    });
+    const r = await engine(replay([msg("m1", 100, 5), msg("m1", 100, 20), msg("m2", 200, 30)])).run(
+      spec(),
+      ctx,
+      () => {},
+      new AbortController().signal,
+    );
+    expect(r.status).toBe("failed");
+    // m1 取最后一次(110 入 / 20 出),m2(210 入 / 30 出);缓存读计入输入
+    expect(r.cost).toEqual({ input: 320, output: 50, partial: true });
+  });
+
   it("流里没有 result 消息 → 失败并标 no_result", async () => {
     const r = await engine(replay([{ type: "system", subtype: "init", session_id: "s1" }])).run(
       spec(),

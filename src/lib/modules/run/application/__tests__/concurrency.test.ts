@@ -231,6 +231,16 @@ if (!TEST_DB_URL) {
       expect(await repo.claimWebhook(now + 999_999, 60_000)).toBeNull();
     });
 
+    it("被取消的运行补记花费:不需要令牌,且不覆盖已结算的数据", async () => {
+      const id = randomUUID().replace(/-/g, "").slice(0, 24);
+      await repo.create({ id, sessionId: "s-cost", prompt: "t" });
+      await repo.claimNext(30_000, Date.now());
+      await repo.cancel(id);
+      await repo.recordCost(id, { input: 10, output: 2, partial: true });
+      await repo.recordCost(id, { input: 99, output: 99 });
+      expect((await repo.getResult(id))?.cost).toEqual({ input: 10, output: 2, partial: true });
+    });
+
     it("取消与孤儿回收同样登记回调 —— 等回调的系统不能永远等下去", async () => {
       const a = randomUUID().replace(/-/g, "").slice(0, 24);
       const b = randomUUID().replace(/-/g, "").slice(0, 24);

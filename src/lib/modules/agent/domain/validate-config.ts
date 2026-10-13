@@ -3,7 +3,12 @@
 // 为什么要单独校验:MCP/skills 配错了不会在保存时报错,而是在【运行时】让 agent
 // 起不来或静默少能力 —— 那时候排查成本高得多。宁可在构建器里当场拦住。
 
-import { MODEL_ALIASES, PERMISSION_MODES, isModelAlias } from "@/lib/shared";
+import {
+  MODEL_ALIASES,
+  PERMISSION_MODES,
+  isModelAlias,
+  protectedEscapeHatchKeys,
+} from "@/lib/shared";
 import type { AgentConfig } from "./config";
 
 export interface ConfigIssue {
@@ -171,6 +176,33 @@ export function validateAgentConfig(
     if (s.type !== undefined && s.type !== "object") {
       issues.push({ field: "inputSchema.type", message: "顶层类型须是 object" });
     }
+  }
+
+  if (
+    cfg.unattendedApproval !== undefined &&
+    cfg.unattendedApproval !== "allow" &&
+    cfg.unattendedApproval !== "deny"
+  ) {
+    issues.push({ field: "unattendedApproval", message: "须为 allow 或 deny" });
+  }
+
+  if (cfg.starters !== undefined) {
+    if (
+      !Array.isArray(cfg.starters) ||
+      cfg.starters.length > 4 ||
+      cfg.starters.some((x) => typeof x !== "string" || !x.trim() || x.length > 200)
+    ) {
+      issues.push({ field: "starters", message: "最多 4 条,每条 1~200 字" });
+    }
+  }
+
+  // 逃生舱碰不了安全边界 —— 运行时会忽略这些字段,这里直接说清楚,免得作者以为生效了
+  const blocked = protectedEscapeHatchKeys(cfg.escapeHatch);
+  if (blocked.length > 0) {
+    issues.push({
+      field: "escapeHatch",
+      message: `以下字段属于安全边界,不能通过逃生舱覆盖:${blocked.join(", ")}`,
+    });
   }
 
   return issues;

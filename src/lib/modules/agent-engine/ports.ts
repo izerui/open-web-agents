@@ -7,7 +7,11 @@ export interface RunResult {
   summary?: string;
   /** SDK session id,供下一轮 resume。 */
   sessionId?: string;
-  cost?: { usd?: number; input: number; output: number };
+  /**
+   * partial:运行被中止或异常终止、没等到 SDK 的结算消息,token 数是按已收到的消息累计的,
+   * 美元金额未知(usd 为空)。曾经这种情况 cost 直接缺失,取消/超时的运行花费一律不入账。
+   */
+  cost?: { usd?: number; input: number; output: number; partial?: boolean };
   /** status:上游模型 API 的 HTTP 状态码(仅 api_error 有)。 */
   error?: { kind: string; message: string; status?: number };
   /**

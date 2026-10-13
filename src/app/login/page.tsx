@@ -17,5 +17,5 @@ export default async function LoginPage() {
   if (await authService.currentUser(req)) redirect("/");
 
   const firstRun = (await users.count()) === 0;
-  return <LoginForm firstRun={firstRun} />;
+  return <LoginForm firstRun={firstRun} allowSignup={firstRun || env.allowSignup} />;
 }

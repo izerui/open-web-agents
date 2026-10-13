@@ -39,6 +39,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     const session = await sessions.get(id);
     if (!session) return Response.json({ error: "session not found" }, { status: 404 });
+    // 会话归属只说明"这是你的会话";能不能继续跑这个智能体要再查一次 ——
+    // 分享被撤销之后,原会话里仍能继续使用别人的提示词与知识库
+    await auth.assertCanInvoke(principal, session.agentId);
 
     /*
      * 额度关卡。

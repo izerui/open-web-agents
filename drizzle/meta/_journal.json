@@ -78,6 +78,20 @@
       "when": 1791787231951,
       "tag": "0010_design_fixes",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1791880762585,
+      "tag": "0011_widen_text_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1791881092669,
+      "tag": "0012_session_source",
+      "breakpoints": true
     }
   ]
 }

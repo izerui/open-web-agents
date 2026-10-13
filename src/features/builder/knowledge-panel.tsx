@@ -32,6 +32,7 @@ export function KnowledgePanel({
   const [denied, setDenied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const reloadSeqRef = useRef(0);
 
   const reload = useCallback(async () => {
@@ -50,11 +51,14 @@ export function KnowledgePanel({
       setMsg(null);
     } catch (error) {
       if (seq === reloadSeqRef.current) setMsg(`知识库加载失败:${errorText(error)}`);
+    } finally {
+      if (seq === reloadSeqRef.current) setLoaded(true);
     }
   }, [agentId]);
 
   useEffect(() => {
     reloadSeqRef.current += 1;
+    setLoaded(false);
     setDocs([]);
     setTitle("");
     setContent("");
@@ -145,7 +149,10 @@ export function KnowledgePanel({
 
       {msg && <p className="text-xs text-destructive">{msg}</p>}
 
-      {docs.length === 0 && <p className="text-xs opacity-40">还没有知识文档</p>}
+      {!loaded && <p className="text-xs text-muted-foreground">载入中…</p>}
+      {loaded && !msg && docs.length === 0 && (
+        <p className="text-xs text-muted-foreground">还没有知识文档</p>
+      )}
       {docs.map((d) => (
         <div
           key={d.id}

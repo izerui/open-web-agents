@@ -2,13 +2,13 @@
 //
 // 这是全工程唯一决定"用哪个实现"的地方 —— 换 DB / 换总线 / 换引擎都只改这里。
 
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import path from "node:path";
 import { type Db, createDb } from "@/lib/db/client";
 import { type Env, loadEnv } from "@/lib/env";
 import { MysqlGrantRepo } from "@/lib/modules/access/adapters/mysql-grant-repo";
 import { MysqlGroupRepo } from "@/lib/modules/access/adapters/mysql-group-repo";
-import { Authorizer } from "@/lib/modules/access/application/authorize";
+import { Authorizer, WEB_USER_ID } from "@/lib/modules/access/application/authorize";
 import { PUBLIC_PRINCIPAL } from "@/lib/modules/access/domain/grants";
 import type { GroupRepo } from "@/lib/modules/access/group-ports";
 import type { GrantRepo } from "@/lib/modules/access/ports";
@@ -27,6 +27,10 @@ import { RedisBus } from "@/lib/modules/events/adapters/redis-bus";
 import type { BusPort } from "@/lib/modules/events/ports";
 import { MysqlApiKeyRepo } from "@/lib/modules/identity/adapters/mysql-api-key-repo";
 import { MysqlUserRepo } from "@/lib/modules/identity/adapters/mysql-user-repo";
+import {
+  type RateLimiter,
+  RedisRateLimiter,
+} from "@/lib/modules/identity/adapters/redis-rate-limiter";
 import { AuthService } from "@/lib/modules/identity/application/auth-service";
 import { SecretBox } from "@/lib/modules/identity/domain/secret-box";
 import type { ApiKeyRepo } from "@/lib/modules/identity/ports";
@@ -41,6 +45,7 @@ import { formatContext, retrieve } from "@/lib/modules/knowledge/domain/retrieva
 import { EnvModelGateway } from "@/lib/modules/model-gateway/adapters/env-gateway";
 import type { ModelGatewayPort } from "@/lib/modules/model-gateway/ports";
 import { MysqlRunRepo } from "@/lib/modules/run/adapters/mysql-run-repo";
+import { RedisCancelSignal } from "@/lib/modules/run/adapters/redis-cancel-signal";
 import { RunEnqueuer } from "@/lib/modules/run/application/enqueue";
 import {
   type RunCommand,
@@ -48,6 +53,7 @@ import {
   topicOf,
 } from "@/lib/modules/run/application/orchestrator";
 import { RunWorker } from "@/lib/modules/run/application/worker";
+import type { CancelSignal } from "@/lib/modules/run/ports";
 import { MysqlSessionRepo } from "@/lib/modules/session/adapters/mysql-session-repo";
 import type { SessionRepo } from "@/lib/modules/session/ports";
 import { MysqlUsageRepo } from "@/lib/modules/usage/adapters/mysql-usage-repo";
@@ -55,6 +61,11 @@ import { QuotaExceeded, assertWithinQuota } from "@/lib/modules/usage/applicatio
 
 export interface Container {
   env: Env;
+  /**
+   * 嵌入令牌的签名密钥,由 sessionSecret 派生而不是直接复用 —— 登录 cookie 与嵌入令牌
+   * 用同一把密钥签名,任一种格式的解析缺陷都可能让另一种被伪造。
+   */
+  embedSecret: string;
   db: Db;
   sessions: SessionRepo;
   agents: AgentRepo;
@@ -82,6 +93,10 @@ export interface Container {
   worker: RunWorker;
   /** 回调发件箱投递器。与 worker 同进程启动。 */
   webhooks: WebhookDispatcher;
+  /** 取消通知:取消接口落库后发出,执行中的 worker 立即中止。 */
+  cancelSignal: CancelSignal;
+  /** 登录、注册等入口的限流。 */
+  rateLimiter: RateLimiter;
 }
 
 /** 人工审批的等待上限。到点自动拒绝,避免 worker 被无人值守的审批永久占住。 */
@@ -170,7 +185,9 @@ function build(): Container {
     users,
     sessionSecret: env.sessionSecret,
     secureCookie: process.env.NODE_ENV === "production",
+    allowSignup: env.allowSignup,
   });
+  const rateLimiter = new RedisRateLimiter(env.redisUrl);
   const auth = new Authorizer({
     apiKeys,
     sessions,
@@ -179,6 +196,12 @@ function build(): Container {
     authRequired: env.authRequired,
     currentUser: (req) => authService.currentUser(req),
     groupIdsOf: (userId) => groupRepo.groupIdsOf(userId),
+    isUserActive: async (userId) => {
+      // 关闭登录的本地开发模式下,key 归属于没有账号行的固定主体
+      if (!env.authRequired && userId === WEB_USER_ID) return true;
+      const u = await users.get(userId);
+      return !!u && !u.disabled;
+    },
   });
   // 审批钩子:先把待审事件推上总线(界面才看得到),再挂起等裁决。
   // 超时兜底在 RedisApproval 里 —— 没人审批时到点自动拒,绝不永久占住 worker。
@@ -298,6 +321,7 @@ function build(): Container {
 
   // 同进程内起 worker。拆成独立进程时,web 侧用 OWA_EMBEDDED_WORKER=0 关掉,
   // 由 worker 入口(src/worker.ts)单独起 —— worker 无本地状态,代码完全不变。
+  const cancelSignal = new RedisCancelSignal(env.redisUrl);
   const enqueuer = new RunEnqueuer({
     runs,
     sessions,
@@ -310,6 +334,7 @@ function build(): Container {
     orchestrator,
     { concurrency: env.workerConcurrency },
     {
+      cancelSignal,
       decodeOverride: (enc) => {
         const plain = secrets.decrypt(enc);
         // 解不开就失败,绝不悄悄回落到平台凭证 —— 那会让调用方的花费记错账
@@ -337,7 +362,11 @@ function build(): Container {
     outbox: runs,
     loadTarget: async (sessionId) => {
       const session = await sessions.get(sessionId);
-      const agent = session ? await agents.get(session.agentId) : null;
+      // 回调是给集成方的:只推系统发起的运行(接口调用、API 会话)。
+      // 曾经对每个运行都推 —— 被分享者在工作台里的对话、访客在嵌入组件里的对话,
+      // 最终回答都会被推到智能体所有者的地址上
+      if (!session || (session.source !== "invoke" && session.source !== "api")) return null;
+      const agent = await agents.get(session.agentId);
       if (!agent?.webhookUrl) return null;
       // 用智能体所有者的签名密钥。配置了却解不开就抛错 —— 不能退化成不签名照发
       const owner = await users.get(agent.ownerId);
@@ -395,6 +424,7 @@ function build(): Container {
 
   return {
     env,
+    embedSecret: createHmac("sha256", env.sessionSecret).update("owa-embed-token-v1").digest("hex"),
     db,
     sessions,
     agents,
@@ -419,6 +449,8 @@ function build(): Container {
     enqueuer,
     worker,
     webhooks,
+    cancelSignal,
+    rateLimiter,
   };
 }
 

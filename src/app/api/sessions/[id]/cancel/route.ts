@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { runs, auth, bus } = getContainer();
+  const { runs, auth, bus, cancelSignal } = getContainer();
 
   try {
     const principal = await auth.resolveWeb(req);
@@ -50,6 +50,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const cancelled: string[] = [];
   for (const runId of targets) {
     if (!(await runs.cancel(runId))) continue;
+    // 落库之后立即通知执行它的 worker 停下,而不是等下一次心跳(最多 15 秒)
+    await cancelSignal.publish(runId);
     cancelled.push(runId);
     // 取消是数据库里的真实终态，也要进入事件流。否则当前页面只能靠 abort 猜测，
     // 刷新后 transcript 又没有取消事件，最终只剩一条没有回答的用户消息。
@@ -57,7 +59,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       .publish(topicOf(id, runId), {
         kind: "result",
         status: "cancelled",
-        summary: "已请求停止；正在执行的工具会在下一次心跳时中止",
+        summary: "已停止",
         runId,
       })
       .catch(() => {});
@@ -68,7 +70,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     // 如实告知延迟,别让界面在点下去的瞬间就宣称"已停止"
     note:
       cancelled.length > 0
-        ? "已标记取消;正在执行的运行会在下一次心跳(最多 15 秒)内中止"
+        ? "已取消;正在执行的运行会立即收到停止通知(通知丢失时最迟在下一次心跳、约 15 秒内中止)"
         : "没有可取消的运行(都已结束)",
   });
 }

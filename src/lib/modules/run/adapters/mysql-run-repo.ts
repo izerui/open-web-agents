@@ -15,7 +15,7 @@ import {
   WORKER_LOST,
 } from "@/lib/modules/run/ports";
 import type { RunState } from "@/lib/shared";
-import { and, count, eq, gte, inArray, lt, lte, ne, or, sql } from "drizzle-orm";
+import { and, count, eq, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 
 interface RunRow {
   id: string;
@@ -450,6 +450,14 @@ export class MysqlRunRepo implements RunRepo {
       sdkSessionId: r.sdkSessionId ?? undefined,
       createdAt: r.createdAt.getTime(),
     }));
+  }
+
+  /** 补记花费:只在还没有花费记录时写入(不覆盖结算过的数据),见 RunPayloadSource.recordCost。 */
+  async recordCost(id: string, cost: unknown): Promise<void> {
+    await this.db
+      .update(runs)
+      .set({ cost })
+      .where(and(eq(runs.id, id), isNull(runs.cost)));
   }
 
   /** 记录终态结果,供轮询接口读取。 */

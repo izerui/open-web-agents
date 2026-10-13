@@ -102,3 +102,16 @@ export interface RunStats {
   /** 最后一次发起运行的时间戳(ms)。比会话创建时间更能反映"最近在用哪个"。 */
   lastRunAt: number;
 }
+
+/**
+ * 取消通知:取消接口在数据库里标记 cancelled 之后发一条,正在执行该运行的 worker 立即中止。
+ *
+ * 【为什么需要】取消原本只靠 worker 的续租心跳发现(默认 15 秒一次):点了停止,
+ * 工具还会继续执行最多 15 秒、继续花钱、继续产生副作用。
+ * 通知是"尽力而为"(pub/sub 最多一次),丢了仍由心跳兜底 —— 正确性不依赖它,只是更快。
+ */
+export interface CancelSignal {
+  publish(runId: string): Promise<void>;
+  /** 订阅取消通知;返回取消订阅函数。 */
+  subscribe(onCancel: (runId: string) => void): () => void;
+}

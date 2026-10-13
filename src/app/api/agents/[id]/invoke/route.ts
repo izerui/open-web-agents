@@ -144,6 +144,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     workspaceDir,
     title: "invoke",
     unattended: true,
+    source: "invoke",
     callerApiKeyId: principal.type === "apiKey" ? principal.keyId : undefined,
     ownerId: principal.type === "web" ? principal.userId : undefined,
     // 花费记在签发 key 的账号上:额度按它算,模型凭证也用它自带的
@@ -222,6 +223,10 @@ function parseOverride(
       return { ok: false, reason: "override.model 不是已知的模型别名" };
     }
     out.model = o.model;
+  }
+  // 自定义网关必须自带 key:否则平台 key 会被发往调用方指定的地址(凭证链同层绑定)
+  if (out.baseUrl && !out.key) {
+    return { ok: false, reason: "override.baseUrl 必须与 override.key 一起提供" };
   }
   return { ok: true, value: Object.keys(out).length ? out : undefined };
 }

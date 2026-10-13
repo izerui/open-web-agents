@@ -1,5 +1,6 @@
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
+import { AuthError } from "@/lib/modules/identity/application/auth-service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -61,17 +62,51 @@ interface PatchBody {
   disabled?: boolean;
   /** 微美元;null 表示取消限额。 */
   monthlyQuotaMicroUsd?: number | null;
+  /** 重置密码:返回一次性新密码。 */
+  resetPassword?: boolean;
+}
+
+/**
+ * 管理员创建账号。关闭自助注册(OWA_ALLOW_SIGNUP=0)之后,这是开通账号的唯一途径。
+ * 返回一次性初始密码 —— 只在这次响应里出现。
+ */
+export async function POST(req: Request) {
+  const { auth, authService } = getContainer();
+  try {
+    auth.assertCanAdministerPlatform(await auth.resolveWeb(req));
+    const body = (await req.json().catch(() => ({}))) as { email?: string; role?: string };
+    if (!body.email) return Response.json({ error: "email is required" }, { status: 400 });
+    if (body.role !== undefined && body.role !== "admin" && body.role !== "user") {
+      return Response.json({ error: "role 须为 admin 或 user" }, { status: 400 });
+    }
+    const { user, tempPassword } = await authService.createAccount(body.email, body.role ?? "user");
+    return Response.json(
+      { account: { id: user.id, email: user.email, role: user.role }, tempPassword },
+      { status: 201 },
+    );
+  } catch (err) {
+    if (err instanceof AuthError) {
+      return Response.json({ error: err.message }, { status: err.status });
+    }
+    const res = authErrorResponse(err);
+    if (res) return res;
+    throw err;
+  }
 }
 
 /** 改一个账号的角色 / 停用状态 / 月度额度。 */
 export async function PATCH(req: Request) {
-  const { users, auth } = getContainer();
+  const { users, auth, authService } = getContainer();
   try {
     const principal = await auth.resolveWeb(req);
     auth.assertCanAdministerPlatform(principal);
 
     const body = (await req.json().catch(() => ({}))) as PatchBody;
     if (!body.id) return Response.json({ error: "id is required" }, { status: 400 });
+    // 曾经 role 不校验取值,传什么存什么
+    if (body.role !== undefined && body.role !== "admin" && body.role !== "user") {
+      return Response.json({ error: "role 须为 admin 或 user" }, { status: 400 });
+    }
 
     const target = await users.get(body.id);
     if (!target) return Response.json({ error: "account not found" }, { status: 404 });
@@ -114,6 +149,7 @@ export async function PATCH(req: Request) {
       disabled: body.disabled,
       monthlyQuotaMicroUsd: body.monthlyQuotaMicroUsd,
     });
+    const tempPassword = body.resetPassword ? await authService.resetPassword(body.id) : undefined;
 
     const updated = await users.get(body.id);
     return Response.json({
@@ -124,6 +160,7 @@ export async function PATCH(req: Request) {
         disabled: updated.disabled,
         monthlyQuotaMicroUsd: updated.monthlyQuotaMicroUsd ?? null,
       },
+      ...(tempPassword ? { tempPassword } : {}),
     });
   } catch (err) {
     const res = authErrorResponse(err);

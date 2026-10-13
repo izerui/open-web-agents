@@ -5,13 +5,14 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { NativeSelect as Select } from "@/components/ui/native-select";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   type UsageBucket,
   type UsageTotals,
   formatUsd,
 } from "@/lib/modules/usage/domain/aggregate";
 import { AlertTriangle } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 interface UsageData {
   days: number;
@@ -56,16 +57,23 @@ export function UsageView({ scope = "self" }: { scope?: "self" | "all" }) {
   const [days, setDays] = useState(7);
   const [data, setData] = useState<UsageData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  /** 快速切换时间窗口时,慢的旧响应不能覆盖新窗口的数据 */
+  const seqRef = useRef(0);
 
   const load = useCallback(async () => {
+    const seq = ++seqRef.current;
     setError(null);
+    setLoading(true);
     try {
       const res = await fetch(`/api/usage?days=${days}&scope=${scope}`);
       const d = (await res.json()) as UsageData & { error?: string };
       if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
-      setData(d);
+      if (seq === seqRef.current) setData(d);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (seq === seqRef.current) setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (seq === seqRef.current) setLoading(false);
     }
   }, [days, scope]);
 
@@ -97,6 +105,14 @@ export function UsageView({ scope = "self" }: { scope?: "self" | "all" }) {
         </Select>
       }
     >
+      {loading && !data && (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4" aria-busy>
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-16" />
+          ))}
+        </div>
+      )}
+
       {error && (
         <Alert variant="destructive">
           <AlertTriangle />

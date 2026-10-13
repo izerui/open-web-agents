@@ -6,7 +6,7 @@
 import type { RunResult } from "@/lib/modules/agent-engine/ports";
 import type { AgentConfig } from "@/lib/modules/agent/domain/config";
 import { nextRunState } from "@/lib/modules/run/domain/state-machine";
-import { type RunRepo, WORKER_LOST } from "@/lib/modules/run/ports";
+import { type CancelSignal, type RunRepo, WORKER_LOST } from "@/lib/modules/run/ports";
 import type { RunState } from "@/lib/shared";
 import type { RunCommand, RunOrchestrator } from "./orchestrator";
 
@@ -61,6 +61,12 @@ export interface RunPayloadSource {
   getPayload(
     id: string,
   ): Promise<{ prompt: string; agentConfig?: unknown; overrideEnc?: string } | null>;
+  /**
+   * 补记花费,只在该运行还没有花费记录时写入,不需要租约令牌。
+   * 被取消的运行已经不归本 worker 写结果,但它花掉的钱仍要入账 —— 否则在运行快结束时
+   * 点取消,这一轮的花费就不计入额度。
+   */
+  recordCost?(id: string, cost: unknown): Promise<void>;
   /** 落终态结果,供轮询接口读取(内存 fake 可不实现)。只写传进来的字段。 */
   saveResult?(
     id: string,
@@ -80,6 +86,8 @@ export interface WorkerHooks {
   onFinalized?: (info: RunFinalized) => void | Promise<void>;
   /** 解密请求级覆盖。解不开必须抛错 —— 不能悄悄回落到平台凭证。 */
   decodeOverride?: (enc: string) => RunCommand["override"];
+  /** 取消通知:收到就立即中止对应的在途运行,不必等下一次续租心跳。 */
+  cancelSignal?: CancelSignal;
 }
 
 export class RunWorker {
@@ -88,6 +96,9 @@ export class RunWorker {
   private stopped = false;
   /** 在途运行的中止器 —— 关停宽限期到点时用来主动收尾。 */
   private readonly inFlight = new Set<AbortController>();
+  /** 在途运行 → 让它按"已失租"收场的函数。取消通知按 runId 找到它。 */
+  private readonly cancelByRun = new Map<string, () => void>();
+  private unsubscribeCancel: (() => void) | null = null;
   /** 连续轮询失败次数。健康检查据此判断 worker 是不是在空转假死。 */
   private consecutiveFailures = 0;
   private lastError?: string;
@@ -147,6 +158,11 @@ export class RunWorker {
      * 现在续租返回 false(被取消或被判定为孤儿)就立刻 abort 本轮,把损失止在这里。
      */
     let lostLease = false;
+    // 收到取消通知:与续租返回 false 同等处理(数据库里已经是 cancelled,结果本就写不进去)
+    this.cancelByRun.set(claimed.id, () => {
+      lostLease = true;
+      abort.abort();
+    });
     const heartbeat = setInterval(() => {
       void this.repo
         .touch(claimed.id, this.opts.now() + this.opts.leaseMs, fence)
@@ -196,8 +212,12 @@ export class RunWorker {
     }
 
     try {
-      // 已被取消或判为孤儿:本轮结果作废,不写库、不通知 —— 终态由取消方/回收方负责
-      if (lostLease) return true;
+      // 已被取消或判为孤儿:本轮结果作废,不写结果、不通知 —— 终态由取消方/回收方负责。
+      // 但花费照记:钱已经花出去了
+      if (lostLease) {
+        if (result.cost) await this.repo.recordCost?.(claimed.id, result.cost).catch(() => {});
+        return true;
+      }
 
       const finalState = nextRunState(
         "running",
@@ -215,7 +235,11 @@ export class RunWorker {
         fence,
       );
       const written = await this.repo.complete(claimed.id, finalState, fence);
-      // 没写进去 = 这一刻恰好被取消/回收了,同样不归本 worker 通知
+      // 没写进去 = 这一刻恰好被取消/回收了(上面带令牌的 saveResult 也同样没写进去),
+      // 不归本 worker 通知 —— 但花费要补记
+      if (!written && result.cost) {
+        await this.repo.recordCost?.(claimed.id, result.cost).catch(() => {});
+      }
       if (written) {
         await this.notifyFinalized({
           runId: claimed.id,
@@ -228,6 +252,7 @@ export class RunWorker {
       clearInterval(heartbeat);
       clearTimeout(timeout);
       this.inFlight.delete(abort);
+      this.cancelByRun.delete(claimed.id);
     }
     return true;
   }
@@ -268,6 +293,8 @@ export class RunWorker {
   start(): void {
     if (this.activeLoops > 0) return;
     this.stopped = false;
+    this.unsubscribeCancel ??=
+      this.hooks.cancelSignal?.subscribe((runId) => this.cancelByRun.get(runId)?.()) ?? null;
     for (let slot = 0; slot < this.opts.concurrency; slot++) {
       this.activeLoops++;
       void this.loop(slot === 0);

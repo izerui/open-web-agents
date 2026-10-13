@@ -1,8 +1,15 @@
 import type { Db } from "@/lib/db/client";
 import { sessions } from "@/lib/db/schema";
-import type { NewSession, Session, SessionRepo } from "@/lib/modules/session/ports";
+import type {
+  NewSession,
+  Session,
+  SessionListFilter,
+  SessionRepo,
+  SessionSource,
+  SessionStatus,
+} from "@/lib/modules/session/ports";
 import type { ModelAlias } from "@/lib/shared";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 
 interface Row {
   id: string;
@@ -14,6 +21,8 @@ interface Row {
   sdkSessionId: string | null;
   title: string | null;
   unattended: number;
+  source: string;
+  status: string;
   baseUrl: string | null;
   model: string | null;
   createdAt: Date;
@@ -30,6 +39,8 @@ function toSession(r: Row): Session {
     sdkSessionId: r.sdkSessionId ?? undefined,
     title: r.title ?? undefined,
     unattended: r.unattended === 1,
+    source: r.source as SessionSource,
+    status: r.status as SessionStatus,
     baseUrl: r.baseUrl ?? undefined,
     model: (r.model as ModelAlias | null) ?? undefined,
     createdAt: r.createdAt.getTime(),
@@ -46,6 +57,8 @@ const COLUMNS = {
   sdkSessionId: sessions.sdkSessionId,
   title: sessions.title,
   unattended: sessions.unattended,
+  source: sessions.source,
+  status: sessions.status,
   baseUrl: sessions.baseUrl,
   model: sessions.model,
   createdAt: sessions.createdAt,
@@ -80,6 +93,7 @@ export class MysqlSessionRepo implements SessionRepo {
       workspaceDir: s.workspaceDir,
       title: s.title,
       unattended: s.unattended ? 1 : 0,
+      source: s.source ?? (s.unattended ? "invoke" : "web"),
       status: "active",
     });
     const created = await this.get(s.id);
@@ -93,7 +107,7 @@ export class MysqlSessionRepo implements SessionRepo {
     return row ? toSession(row) : null;
   }
 
-  async list(filter?: { ownerId?: string; callerApiKeyId?: string }): Promise<Session[]> {
+  async list(filter?: SessionListFilter): Promise<Session[]> {
     // 过滤下推到 SQL —— 100 条上限的含义才是「这个人最近的 100 条」,
     // 而不是「全库最近 100 条里恰好属于这个人的那几条」
     const conds = [
@@ -101,6 +115,11 @@ export class MysqlSessionRepo implements SessionRepo {
       filter?.callerApiKeyId !== undefined
         ? eq(sessions.callerApiKeyId, filter.callerApiKeyId)
         : undefined,
+      filter?.billingUserId !== undefined
+        ? eq(sessions.billingUserId, filter.billingUserId)
+        : undefined,
+      filter?.sources ? inArray(sessions.source, filter.sources) : undefined,
+      filter?.includeArchived ? ne(sessions.status, "deleted") : eq(sessions.status, "active"),
     ].filter((c) => c !== undefined);
 
     const q = this.db.select(COLUMNS).from(sessions);
@@ -116,5 +135,13 @@ export class MysqlSessionRepo implements SessionRepo {
 
   async delete(id: string): Promise<void> {
     await this.db.delete(sessions).where(eq(sessions.id, id));
+  }
+
+  async update(id: string, patch: { title?: string; status?: SessionStatus }): Promise<void> {
+    const set: Record<string, string> = {};
+    if (patch.title !== undefined) set.title = patch.title;
+    if (patch.status !== undefined) set.status = patch.status;
+    if (Object.keys(set).length === 0) return;
+    await this.db.update(sessions).set(set).where(eq(sessions.id, id));
   }
 }

@@ -4,6 +4,13 @@ import type { NewUser, User, UserRepo } from "@/lib/modules/identity/user-ports"
 import { describe, expect, it } from "vitest";
 
 class InMemoryUserRepo implements UserRepo {
+  async setPasswordHash(id: string, passwordHash: string): Promise<void> {
+    const u = this.byId.get(id);
+    if (u) u.passwordHash = passwordHash;
+  }
+  async getWithPassword(id: string) {
+    return this.byId.get(id) ?? null;
+  }
   private byId = new Map<string, User & { passwordHash: string }>();
 
   async create(u: NewUser): Promise<User> {
@@ -227,5 +234,54 @@ describe("AuthService.logoutCookie", () => {
   it("登出 cookie 立即过期", () => {
     const { auth } = setup();
     expect(auth.logoutCookie()).toContain("Max-Age=0");
+  });
+});
+
+describe("AuthService / 注册开关与账号管理", () => {
+  function closed() {
+    const users = new InMemoryUserRepo();
+    return {
+      users,
+      auth: new AuthService({ users, sessionSecret: "s", secureCookie: false, allowSignup: false }),
+    };
+  }
+
+  it("关闭自助注册后,第一个账号仍可注册(成为管理员)", async () => {
+    const { auth } = closed();
+    const { user } = await auth.register("root@x.io", "password-1");
+    expect(user.role).toBe("admin");
+  });
+
+  it("关闭自助注册后,其他人不能自助注册", async () => {
+    const { auth } = closed();
+    await auth.register("root@x.io", "password-1");
+    await expect(auth.register("a@x.io", "password-1")).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("管理员建号:返回一次性初始密码,用它能登录", async () => {
+    const { auth } = closed();
+    await auth.register("root@x.io", "password-1");
+    const { user, tempPassword } = await auth.createAccount("new@x.io");
+    expect(user.role).toBe("user");
+    expect(tempPassword).toHaveLength(16);
+    await expect(auth.login("new@x.io", tempPassword)).resolves.toBeTruthy();
+  });
+
+  it("重置密码后旧密码失效,新密码可用", async () => {
+    const { auth } = closed();
+    const { user } = await auth.register("root@x.io", "password-1");
+    const next = await auth.resetPassword(user.id);
+    await expect(auth.login("root@x.io", "password-1")).rejects.toBeTruthy();
+    await expect(auth.login("root@x.io", next)).resolves.toBeTruthy();
+  });
+
+  it("自己改密码必须先给对当前密码", async () => {
+    const { auth } = closed();
+    const { user } = await auth.register("root@x.io", "password-1");
+    await expect(auth.changePassword(user.id, "wrong", "password-2")).rejects.toMatchObject({
+      status: 400,
+    });
+    await auth.changePassword(user.id, "password-1", "password-2");
+    await expect(auth.login("root@x.io", "password-2")).resolves.toBeTruthy();
   });
 });

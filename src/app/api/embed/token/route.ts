@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
  * 令牌绑定单个会话:泄露了也只能操作那一个会话,读不到别人的。
  */
 export async function POST(req: Request) {
-  const { agents, sessions, auth, env } = getContainer();
+  const { agents, sessions, auth, env, embedSecret } = getContainer();
 
   let principal: Awaited<ReturnType<typeof auth.requireApiKey>>;
   try {
@@ -58,13 +58,14 @@ export async function POST(req: Request) {
     agentId,
     workspaceDir,
     title: body.title ?? "embed",
+    source: "embed",
     callerApiKeyId: principal.type === "apiKey" ? principal.keyId : undefined,
     // 访客在浏览器里花的钱,记在签发这把 key 的账号上
     billingUserId: principal.type === "apiKey" ? principal.ownerId : principal.userId,
   });
 
   const token = issueEmbedToken(
-    env.sessionSecret,
+    embedSecret,
     {
       agentId,
       sessionId,

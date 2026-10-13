@@ -1,5 +1,11 @@
 import type { ModelAlias } from "@/lib/shared";
 
+/** 会话从哪个入口来。决定审批怎么走、结果是否推 webhook、在哪个列表里展示。 */
+export type SessionSource = "web" | "api" | "invoke" | "embed";
+
+/** active 正常 / archived 归档(列表默认不显示) / deleted 已删除(视同不存在)。 */
+export type SessionStatus = "active" | "archived" | "deleted";
+
 /** 会话 = 项目 = 工作目录,一对一。 */
 export interface Session {
   id: string;
@@ -19,6 +25,8 @@ export interface Session {
   title?: string;
   /** 无人值守(接口 invoke)。决定碰到需要人确认的关口时是等人还是直接放行。 */
   unattended?: boolean;
+  source: SessionSource;
+  status: SessionStatus;
   /** 会话级凭证覆盖(三级链的中间层)。 */
   baseUrl?: string;
   key?: string;
@@ -37,6 +45,18 @@ export interface NewSession {
   billingUserId?: string;
   /** 无人值守(接口 invoke)。不传则默认有人。 */
   unattended?: boolean;
+  /** 不传:无人值守即 invoke,否则 web。 */
+  source?: SessionSource;
+}
+
+export interface SessionListFilter {
+  ownerId?: string;
+  callerApiKeyId?: string;
+  billingUserId?: string;
+  /** 只列这些入口来的会话。 */
+  sources?: SessionSource[];
+  /** 是否包含归档的会话。已删除的永远不列。 */
+  includeArchived?: boolean;
 }
 
 export interface SessionRepo {
@@ -50,9 +70,11 @@ export interface SessionRepo {
    * 用户打开自己的列表就是空的:数据没丢,但界面完全不可达,能看到几条取决于
    * 【别人】的活跃度。没有游标、没有截断提示,纯静默失效。
    */
-  list(filter?: { ownerId?: string; callerApiKeyId?: string }): Promise<Session[]>;
+  list(filter?: SessionListFilter): Promise<Session[]>;
   /** 每轮结束后记下 SDK session id,供下一轮 resume。 */
   setSdkSessionId(id: string, sdkSessionId: string): Promise<void>;
   /** 删除一条还没有任何运行的会话(入队失败或幂等冲突时回滚刚建的会话)。 */
   delete(id: string): Promise<void>;
+  /** 改标题 / 归档 / 软删除。只改传进来的字段。 */
+  update(id: string, patch: { title?: string; status?: SessionStatus }): Promise<void>;
 }
