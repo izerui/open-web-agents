@@ -329,3 +329,67 @@ describe("幂等重放跨版本:v1 受理 → 发布不兼容的 v2 → 原键�
     expect(retry.body.structured).toBe(false);
   });
 });
+
+describe("幂等重放先于额度:首次受理 → 额度耗尽 → 原键重试", () => {
+  /*
+   * e2e 建不出管理员,没法走接口设额度;这里直接改服务端库里【本用例刚注册的】账号。
+   * 库地址只认 scripts/e2e.sh 导出的 OWA_E2E_DATABASE_URL(确知是服务正在用的库),
+   * 没有就跳过并说明,不去猜。
+   */
+  const dbUrl = process.env.OWA_E2E_DATABASE_URL;
+  if (!dbUrl) {
+    console.warn(
+      "[skip] 额度耗尽重放用例未运行 —— 需由 scripts/e2e.sh 起服务并设置 OWA_DATABASE_URL",
+    );
+  }
+
+  it.skipIf(!dbUrl)("原键原请求仍返回原任务;新键请求返回 402", async () => {
+    if (!(await serverUp())) throw new Error("e2e 需要一个跑着的服务");
+    const owner = await newUser("quota-owner");
+    const email = (await owner.get<{ user?: { email: string } }>("/api/auth")).body.user?.email;
+    expect(email).toBeTruthy();
+    const id =
+      (
+        await owner.post<AgentRes>("/api/agents", {
+          name: "额度重放",
+          config: { systemPrompt: "p", model: "sonnet" },
+        })
+      ).body.agent?.id ?? "";
+    const key =
+      (await owner.post<{ plaintext?: string }>("/api/keys", { name: "q", agentId: id })).body
+        .plaintext ?? "";
+    const anon = new Client("anon-quota");
+    type R = InvokeRes & { replayed?: boolean; code?: string };
+    const call = (idemKey: string) =>
+      anon.post<R>(
+        `/api/agents/${id}/invoke`,
+        { input: "同一个请求" },
+        { "X-Api-Key": key, "Idempotency-Key": idemKey },
+      );
+
+    const first = await call(`quota-${id}`);
+    expect(first.status).toBe(202);
+
+    // 模拟"这次运行把额度用完了":额度设为 0(已用 >= 上限即耗尽)
+    const mysql = await import("mysql2/promise");
+    const conn = await mysql.createConnection(dbUrl as string);
+    try {
+      const [res] = await conn.execute(
+        "UPDATE users SET monthly_quota_micro_usd = 0 WHERE email = ?",
+        [email],
+      );
+      expect((res as { affectedRows: number }).affectedRows).toBe(1);
+    } finally {
+      await conn.end();
+    }
+
+    const retry = await call(`quota-${id}`);
+    expect(retry.status).toBe(200);
+    expect(retry.body.replayed).toBe(true);
+    expect(retry.body.taskId).toBe(first.body.taskId);
+
+    const fresh = await call(`quota-new-${id}`);
+    expect(fresh.status).toBe(402);
+    expect(fresh.body.code).toBe("quota_exceeded");
+  });
+});

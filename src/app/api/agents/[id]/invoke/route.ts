@@ -40,29 +40,25 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const { id: agentId } = await params;
   const { agents, sessions, runs, env, auth, users, usage, enqueuer, releases } = getContainer();
 
+  /*
+   * 关卡顺序:
+   *   鉴权与权限复查(每个请求都要过,重放也不例外 —— 吊销的 Key 拿不回任何东西)
+   *   → 请求形状与摘要 → 幂等重放
+   *   → 【只对新请求】额度、版本解析、契约校验、入队。
+   * 额度(以及之后的调用限流)只约束"新开一次运行";重放不产生新的执行和花费,
+   * 拦它只会让调用方拿不回已经受理、甚至已经扣过费的任务。
+   */
   let principal: Awaited<ReturnType<typeof auth.requireApiKey>>;
-  let billingUserId: string;
   try {
     principal = await auth.requireApiKey(req);
     await auth.assertCanInvoke(principal, agentId);
-
-    /*
-     * 额度关卡 —— 对外接口尤其需要。
-     *
-     * 【为什么这条路径比 web 更要紧】invoke 是给第三方系统轮询调用的,
-     * 对方的一个死循环就能在几分钟内烧掉整月预算,而且没有人盯着屏幕。
-     * 花费记在签发这把 key 的账号头上,额度自然也按它算。
-     */
-    // requireApiKey 的返回类型是 Principal 联合类型,这里窄化一下拿归属账号
-    billingUserId = principal.type === "apiKey" ? principal.ownerId : principal.userId;
-    await assertWithinQuota({ users, usage }, billingUserId);
   } catch (err) {
-    const quota = quotaErrorResponse(err);
-    if (quota) return quota;
     const res = authErrorResponse(err);
     if (res) return res;
     throw err;
   }
+  // 花费记在签发这把 key 的账号头上,额度自然也按它算
+  const billingUserId = principal.type === "apiKey" ? principal.ownerId : principal.userId;
 
   const agent = await agents.get(agentId);
   if (!agent) {
@@ -121,7 +117,20 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (existing) return replayed(existing, requestHash, agent.config.outputSchema !== undefined);
   }
 
-  // ── 第三步:新请求 —— 解析这次跑哪一版,按那一版校验契约 ─────────────────────────
+  // ── 第三步:新请求 —— 额度,再解析这次跑哪一版、按那一版校验契约 ───────────────────
+  /*
+   * 额度关卡 —— 对外接口尤其需要:invoke 是给第三方系统轮询调用的,
+   * 对方的一个死循环就能在几分钟内烧掉整月预算,而且没有人盯着屏幕。
+   * 放在幂等重放之后:首次受理的那次运行可能恰好把额度用完,原键重试仍要拿回原任务。
+   */
+  try {
+    await assertWithinQuota({ users, usage }, billingUserId);
+  } catch (err) {
+    const quota = quotaErrorResponse(err);
+    if (quota) return quota;
+    throw err;
+  }
+
   /*
    * 入参校验、结构化结果的有无都以【这一版】为准 ——
    * 草稿里刚改的 inputSchema 不该影响还在用已发布版本的调用方。
