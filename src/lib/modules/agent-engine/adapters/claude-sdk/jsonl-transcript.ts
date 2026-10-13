@@ -43,9 +43,7 @@ async function warnIfEncodingDrifted(
         continue;
       }
       console.warn(
-        `[owa] transcript 路径编码可能与 SDK 不一致:期望目录 ${expectedDir},` +
-          `但 ${fileName} 实际在 ${dir} —— 历史回放会静默为空,` +
-          "请核对 domain/transcript-path.ts 的 projectDirNameFor 替换规则",
+        `[owa] transcript 路径编码可能与 SDK 不一致:期望目录 ${expectedDir},但 ${fileName} 实际在 ${dir} —— 历史回放会静默为空,请核对 domain/transcript-path.ts 的 projectDirNameFor 替换规则`,
       );
       return;
     }

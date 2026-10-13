@@ -98,8 +98,15 @@ export const SchemaDisplayPath = ({
 }: SchemaDisplayPathProps) => {
   const { path } = useContext(SchemaDisplayContext);
 
-  // Highlight path parameters
-  const highlightedPath = path.replaceAll(
+  // Highlight path parameters。先转义再拼标签 —— path 来自外部数据,
+  // 原样塞进 innerHTML 就是 XSS(上游组件这里没有转义)。
+  const escapedPath = path
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+  const highlightedPath = escapedPath.replaceAll(
     /\{([^}]+)\}/g,
     '<span class="text-blue-600 dark:text-blue-400">{$1}</span>'
   );
@@ -108,6 +115,7 @@ export const SchemaDisplayPath = ({
     <span
       className={cn("font-mono text-sm", className)}
       // oxlint-disable-next-line eslint-plugin-react(no-danger)
+      // biome-ignore lint/security/noDangerouslySetInnerHtml: path 已在上面转义,只拼入固定的高亮标签
       dangerouslySetInnerHTML={{ __html: children ?? highlightedPath }}
       {...props}
     />
