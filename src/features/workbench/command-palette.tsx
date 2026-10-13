@@ -11,7 +11,17 @@ import {
   CommandShortcut,
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
-import { BarChart3, Bot, KeyRound, Lock, MessageSquare, Plus, Terminal, Users } from "lucide-react";
+import {
+  BarChart3,
+  Bot,
+  History,
+  KeyRound,
+  Lock,
+  MessageSquare,
+  Plus,
+  Terminal,
+  Users,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { activityOf, relativeTime } from "./session-groups";
@@ -26,6 +36,7 @@ import type { AgentSummary, SessionSummary } from "./types";
  */
 const PAGES = [
   { href: "/agents", label: "我的智能体", icon: Bot },
+  { href: "/settings/runs", label: "运行记录", icon: History },
   { href: "/settings/keys", label: "接入与 API Key", icon: Terminal },
   { href: "/settings/usage", label: "用量与成本", icon: BarChart3 },
   { href: "/settings/credentials", label: "模型凭证", icon: KeyRound },

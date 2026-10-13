@@ -346,3 +346,59 @@ describe("账号安全", () => {
     expect(statuses.at(-1)).toBe(429);
   });
 });
+
+describe("运行记录", () => {
+  type RunList = { items?: { id: string; source: string; status: string }[]; nextCursor?: string };
+  let owner: Client;
+  let other: Client;
+  let key = "";
+  let taskId = "";
+
+  beforeAll(async () => {
+    if (!(await serverUp())) throw new Error("e2e 需要一个跑着的服务");
+    owner = await newUser("runs-owner");
+    other = await newUser("runs-other");
+    const a = await owner.post<AgentRes>("/api/agents", {
+      name: `runs-${Date.now()}`,
+      config: { systemPrompt: "p", model: "sonnet" },
+    });
+    const agentId = a.body.agent?.id ?? "";
+    key = (await owner.post<KeyRes>("/api/keys", { name: "runs", agentId })).body.plaintext ?? "";
+    const inv = await new Client("anon").post<InvokeRes>(
+      `/api/agents/${agentId}/invoke`,
+      { input: "列出运行" },
+      { "X-Api-Key": key },
+    );
+    taskId = inv.body.taskId ?? "";
+  });
+
+  it("签发人在运行记录里看得到自己 Key 发起的调用;API Key 也能列出自己的", async () => {
+    const mine = await owner.get<RunList>("/api/runs?source=invoke");
+    expect((mine.body.items ?? []).map((r) => r.id)).toContain(taskId);
+    const byKey = await new Client("anon").get<RunList>("/api/runs", { "X-Api-Key": key });
+    expect((byKey.body.items ?? []).map((r) => r.id)).toContain(taskId);
+  });
+
+  it("详情:自己能看,别人 404", async () => {
+    expect((await owner.get(`/api/runs/${taskId}`)).status).toBe(200);
+    expect((await other.get(`/api/runs/${taskId}`)).status).toBe(404);
+    expect((await other.get<RunList>("/api/runs")).body.items?.some((r) => r.id === taskId)).toBe(
+      false,
+    );
+  });
+
+  it("按 taskId 取消:别人不能取消;自己可以(已结束的如实说明)", async () => {
+    expect((await other.post(`/api/runs/${taskId}/cancel`, {})).status).toBe(404);
+    const r = await new Client("anon").post<{ cancelled?: boolean }>(
+      `/api/runs/${taskId}/cancel`,
+      {},
+      { "X-Api-Key": key },
+    );
+    expect(r.status).toBe(200);
+    expect(typeof r.body.cancelled).toBe("boolean");
+  });
+
+  it("非法筛选参数返回 400", async () => {
+    expect((await owner.get("/api/runs?status=bogus")).status).toBe(400);
+  });
+});

@@ -18,15 +18,15 @@ afterEach(async () => {
 describe("materializeSkillPlugin", () => {
   it("写出 SDK 能识别的插件结构:清单 + skills/<名称>/SKILL.md + 附带文件", async () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), "owa-skills-"));
-    const dir = await materializeSkillPlugin(root, [pkg]);
-    expect(dir).toBeTruthy();
+    const dir = String(await materializeSkillPlugin(root, [pkg]));
+    expect(dir).not.toBe("undefined");
     const manifest = JSON.parse(
-      await fs.readFile(path.join(dir!, ".claude-plugin/plugin.json"), "utf8"),
+      await fs.readFile(path.join(dir, ".claude-plugin/plugin.json"), "utf8"),
     );
     expect(manifest.name).toBe("skills");
-    const md = await fs.readFile(path.join(dir!, "skills/manim-scene/SKILL.md"), "utf8");
+    const md = await fs.readFile(path.join(dir, "skills/manim-scene/SKILL.md"), "utf8");
     expect(md).toMatch(/^---\nname: manim-scene\n/);
-    expect(await fs.readFile(path.join(dir!, "skills/manim-scene/scripts/render.py"), "utf8")).toBe(
+    expect(await fs.readFile(path.join(dir, "skills/manim-scene/scripts/render.py"), "utf8")).toBe(
       "print('hi')",
     );
   });

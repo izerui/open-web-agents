@@ -190,11 +190,10 @@ export function overlayConfig(
   base: Record<string, unknown>,
   form: Record<string, unknown>,
 ): Record<string, unknown> {
-  const merged: Record<string, unknown> = { ...base, ...form };
-  for (const [k, v] of Object.entries(form)) if (v === undefined) delete merged[k];
+  const cleared = new Set(Object.keys(form).filter((k) => form[k] === undefined));
   // 旧版"技能名"字段从未生效;表单已改用技能包,不再回写它
-  delete merged.skills;
-  return merged;
+  cleared.add("skills");
+  return Object.fromEntries(Object.entries({ ...base, ...form }).filter(([k]) => !cleared.has(k)));
 }
 
 function parseSkills(text: string): string[] {

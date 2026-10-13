@@ -46,6 +46,7 @@ import { ChunkCache } from "@/lib/modules/knowledge/application/chunk-cache";
 import { formatContext, retrieve } from "@/lib/modules/knowledge/domain/retrieval";
 import { EnvModelGateway } from "@/lib/modules/model-gateway/adapters/env-gateway";
 import type { ModelGatewayPort } from "@/lib/modules/model-gateway/ports";
+import { MysqlRunQuery } from "@/lib/modules/run/adapters/mysql-run-query";
 import { MysqlRunRepo } from "@/lib/modules/run/adapters/mysql-run-repo";
 import { RedisCancelSignal } from "@/lib/modules/run/adapters/redis-cancel-signal";
 import { RunEnqueuer } from "@/lib/modules/run/application/enqueue";
@@ -87,6 +88,8 @@ export interface Container {
   authService: AuthService;
   auth: Authorizer;
   runs: MysqlRunRepo;
+  /** 运行记录查询(读模型)。 */
+  runQuery: MysqlRunQuery;
   usage: MysqlUsageRepo;
   knowledge: MysqlKnowledgeRepo;
   orchestrator: RunOrchestrator;
@@ -470,6 +473,7 @@ function build(): Container {
     authService,
     auth,
     runs,
+    runQuery: new MysqlRunQuery(db),
     usage,
     knowledge,
     orchestrator,

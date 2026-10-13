@@ -118,6 +118,7 @@ export const sessions = mysqlTable(
     byAgent: index("idx_sessions_agent").on(t.agentId),
     byOwner: index("idx_sessions_owner").on(t.ownerId),
     byBilling: index("idx_sessions_billing").on(t.billingUserId),
+    byCaller: index("idx_sessions_caller").on(t.callerApiKeyId),
   }),
 );
 
@@ -199,6 +200,8 @@ export const runs = mysqlTable(
     bySession: index("idx_runs_session").on(t.sessionId),
     byParent: index("idx_runs_parent").on(t.parentRunId),
     byWebhook: index("idx_runs_webhook").on(t.webhookState, t.webhookNextAt),
+    // 运行记录与用量按时间倒序查;没有它每次都是全表排序
+    byCreated: index("idx_runs_created").on(t.createdAt),
     uniqIdempotency: uniqueIndex("uniq_runs_idempotency").on(t.idempotencyKey),
   }),
 );
