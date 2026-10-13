@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { admissionErrorResponse, callerOf } from "@/app/api/_lib/admission";
+import { apiError } from "@/lib/api-error";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
+import type { Principal } from "@/lib/modules/access/domain/principal";
 import { extractEmbedToken, verifyEmbedToken } from "@/lib/modules/integration/domain/embed-token";
-import { PromptTooLarge, assertPromptSize } from "@/lib/modules/run/application/enqueue";
-import { assertWithinQuota, quotaErrorResponse } from "@/lib/modules/usage/application/quota-guard";
 import { streamRun } from "../../_lib/run-stream";
 
 export const runtime = "nodejs";
@@ -16,51 +17,40 @@ export const dynamic = "force-dynamic";
  * 所以拿到令牌也换不到别人的会话。
  */
 export async function POST(req: Request) {
-  const { runs, bus, sessions, users, usage, enqueuer, embedSecret, auth } = getContainer();
+  const { runs, bus, enqueuer, embedSecret, auth, admission } = getContainer();
 
   const token = extractEmbedToken(req.headers);
   const claims = token ? verifyEmbedToken(embedSecret, token) : null;
-  if (!claims) {
-    return Response.json({ error: "invalid or expired embed token" }, { status: 401 });
-  }
+  if (!claims) return apiError(401, "unauthorized", "invalid or expired embed token");
   // 令牌签名有效还不够:签发它的 key 被吊销、签发人被停用、分享被撤销,都必须立即失效
+  let principal: Principal;
   try {
-    await auth.resolveEmbed(claims);
+    principal = await auth.resolveEmbed(claims);
   } catch (err) {
     const res = authErrorResponse(err);
     if (res) return res;
     throw err;
   }
 
-  const body = (await req.json().catch(() => ({}))) as { prompt?: string };
-  const prompt = body.prompt?.trim();
-  if (!prompt) return Response.json({ error: "prompt is required" }, { status: 400 });
-
-  try {
-    assertPromptSize(prompt);
-  } catch (err) {
-    if (err instanceof PromptTooLarge) {
-      return Response.json({ error: err.message }, { status: 413 });
-    }
-    throw err;
-  }
-
+  const body = (await req.json().catch(() => ({}))) as { prompt?: unknown };
   const sessionId = claims.sessionId;
-  const session = await sessions.get(sessionId);
-  if (!session) return Response.json({ error: "session not found" }, { status: 404 });
 
   /*
-   * 额度关卡。embed 曾经完全没有 —— 浏览器里的访客可以在令牌有效期内无限发起运行,
-   * 花费记在签发 key 的账号上却不受它的额度约束。
+   * 受理:与对话、分支同一套规则。访客在浏览器里花的钱记在签发 Key 的账号上,
+   * 所以这把 Key 的调用限流与签发人的额度同样约束嵌入组件 —— 这两条曾经都没有
+   * (额度是后来补的,限流此前只拦 invoke)。
    */
-  if (session.billingUserId) {
-    try {
-      await assertWithinQuota({ users, usage }, session.billingUserId);
-    } catch (err) {
-      const quota = quotaErrorResponse(err);
-      if (quota) return quota;
-      throw err;
-    }
+  let prompt: string;
+  try {
+    ({ prompt } = await admission.admit({
+      sessionId,
+      caller: callerOf(principal),
+      prompt: body.prompt,
+    }));
+  } catch (err) {
+    const res = admissionErrorResponse(err);
+    if (res) return res;
+    throw err;
   }
 
   const runId = randomUUID().replace(/-/g, "").slice(0, 24);

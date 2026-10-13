@@ -293,7 +293,7 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 | GET/POST        | `/api/groups` · `/api/groups/{id}/members` | cookie                 | 用户组与成员              |
 | GET/POST/DELETE/PATCH | `/api/keys`                          | cookie                 | API Key(明文仅签发时返回一次);PATCH 调整每分钟调用上限 |
 | GET/POST        | `/api/sessions`                            | cookie / key           | 会话列表与创建             |
-| POST            | `/api/sessions/{id}/run`                   | cookie / key           | 发起一轮,SSE 流式返回       |
+| POST            | `/api/sessions/{id}/run`                   | cookie / key           | 发起一轮,SSE 流式返回;用 Key 建的会话里,声明了 inputSchema 的智能体须传符合它的 `input` |
 | GET             | `/api/sessions/{id}/events`                | cookie / key           | joinStream 断线重连     |
 | GET             | `/api/sessions/{id}/files`                 | cookie / key           | 文件树 / 预览 / 下载       |
 | GET/POST        | `/api/sessions/{id}/approvals`             | cookie / key           | 待审列表 / 批准拒绝         |
@@ -323,7 +323,8 @@ SSE 传输是裸 `data: <AgentEvent JSON>\n\n`。前端用 `fetch + getReader` �
 
 ### 调用限流
 
-`invoke` 对**新调用**限流(用同一个 `Idempotency-Key` 重放已受理的任务不计入),两层固定窗口:
+用 API Key 发起的**新运行**都要限流 —— `invoke`、用 Key 建的会话里的 `/sessions/{id}/run` 与重跑、
+嵌入组件(访客的运行记在签发令牌的 Key 上)。用同一个 `Idempotency-Key` 重放已受理的任务不计入。两层固定窗口:
 
 - 每把 API Key 每分钟 `OWA_INVOKE_RATE_LIMIT_PER_KEY` 次(默认 60)。签发时或在接入中心可单独调低;只有管理员能调高。
 - 每个智能体每分钟 `OWA_INVOKE_RATE_LIMIT_PER_AGENT` 次(默认 600,所有 Key 合计)。

@@ -1,15 +1,13 @@
 import { randomUUID } from "node:crypto";
+import { admissionErrorResponse, callerOf } from "@/app/api/_lib/admission";
+import { apiError } from "@/lib/api-error";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
+import type { Principal } from "@/lib/modules/access/domain/principal";
 import type { BusPort } from "@/lib/modules/events/ports";
-import {
-  type EnqueueRequest,
-  PromptTooLarge,
-  assertPromptSize,
-} from "@/lib/modules/run/application/enqueue";
+import type { EnqueueRequest } from "@/lib/modules/run/application/enqueue";
 import { topicOf } from "@/lib/modules/run/application/orchestrator";
 import { type TerminalSource, watchTerminal } from "@/lib/modules/run/application/terminal-watch";
-import { assertWithinQuota, quotaErrorResponse } from "@/lib/modules/usage/application/quota-guard";
 import type { AgentEvent } from "@/lib/shared";
 import { streamRun } from "../../../_lib/run-stream";
 
@@ -32,53 +30,45 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { runs, bus, sessions, auth, users, usage, enqueuer } = getContainer();
+  const { runs, bus, sessions, auth, enqueuer, admission } = getContainer();
 
+  let principal: Principal;
   try {
-    const principal = await auth.resolveWeb(req);
+    principal = await auth.resolveWeb(req);
     await auth.assertSessionAccess(principal, id);
-
     const session = await sessions.get(id);
-    if (!session) return Response.json({ error: "session not found" }, { status: 404 });
+    if (!session) return apiError(404, "not_found", "session not found");
     // 会话归属只说明"这是你的会话";能不能继续跑这个智能体要再查一次 ——
     // 分享被撤销之后,原会话里仍能继续使用别人的提示词与知识库
     await auth.assertCanInvoke(principal, session.agentId);
-
-    /*
-     * 额度关卡。
-     *
-     * 【为什么在这里,而不是只在 worker 里】拦在发起之前才叫"上限" ——
-     * 一次运行可能跑很久、烧掉可观的花费,等 worker 跑完再发现超支
-     * 只能追认。worker 执行前还会再复核一次(队列里可能积压了很多)。
-     *
-     * 【为什么按会话的计费账号算】花费记在会话的计费账号上(worker 也按它取凭证),
-     * 额度必须查同一个账号 —— 查的和记的不是同一个人,额度就形同虚设。
-     */
-    const billingUserId =
-      session.billingUserId ??
-      session.ownerId ??
-      (principal.type === "web" ? principal.userId : principal.ownerId);
-    if (billingUserId) await assertWithinQuota({ users, usage }, billingUserId);
   } catch (err) {
-    const quota = quotaErrorResponse(err);
-    if (quota) return quota;
     const res = authErrorResponse(err);
     if (res) return res;
     throw err;
   }
 
   const body = (await req.json().catch(() => ({}))) as {
-    prompt?: string;
+    prompt?: unknown;
+    /** 结构化输入:API Key 建的会话里,声明了 inputSchema 的智能体按它传 */
+    input?: unknown;
     stream?: boolean;
   };
-  const prompt = body.prompt?.trim();
-  if (!prompt) return Response.json({ error: "prompt is required" }, { status: 400 });
+
+  /*
+   * 受理:计费账号、Key 调用限流、额度、输入规范化与契约 —— 与分支重跑、嵌入组件同一套规则
+   * (见 run/application/admission.ts)。额度拦在发起之前才叫"上限";worker 执行前还会再复核。
+   */
+  let prompt: string;
   try {
-    assertPromptSize(prompt);
+    ({ prompt } = await admission.admit({
+      sessionId: id,
+      caller: callerOf(principal),
+      prompt: body.prompt,
+      input: body.input,
+    }));
   } catch (err) {
-    if (err instanceof PromptTooLarge) {
-      return Response.json({ error: err.message }, { status: 413 });
-    }
+    const res = admissionErrorResponse(err);
+    if (res) return res;
     throw err;
   }
 

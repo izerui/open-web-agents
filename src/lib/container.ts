@@ -22,6 +22,7 @@ import { MysqlAgentRepo } from "@/lib/modules/agent/adapters/mysql-agent-repo";
 import { MysqlAgentVersionRepo } from "@/lib/modules/agent/adapters/mysql-agent-version-repo";
 import { AgentReleases } from "@/lib/modules/agent/application/releases";
 import { ARCHITECT_AGENT_ID, ARCHITECT_CONFIG } from "@/lib/modules/agent/domain/architect";
+import { validateInput } from "@/lib/modules/agent/domain/validate-output";
 import type { AgentRepo } from "@/lib/modules/agent/ports";
 import { RedisApproval } from "@/lib/modules/approval/adapters/redis-approval";
 import { type ApprovalPort, ApprovalUnavailable } from "@/lib/modules/approval/ports";
@@ -40,6 +41,7 @@ import {
   RedisRateLimiter,
 } from "@/lib/modules/identity/adapters/redis-rate-limiter";
 import { AuthService } from "@/lib/modules/identity/application/auth-service";
+import { checkInvokeRate } from "@/lib/modules/identity/application/invoke-rate-limit";
 import { SecretBox } from "@/lib/modules/identity/domain/secret-box";
 import type { ApiKeyRepo } from "@/lib/modules/identity/ports";
 import type { UserRepo } from "@/lib/modules/identity/user-ports";
@@ -55,6 +57,7 @@ import type { ModelGatewayPort } from "@/lib/modules/model-gateway/ports";
 import { MysqlRunQuery } from "@/lib/modules/run/adapters/mysql-run-query";
 import { MysqlRunRepo } from "@/lib/modules/run/adapters/mysql-run-repo";
 import { RedisCancelSignal } from "@/lib/modules/run/adapters/redis-cancel-signal";
+import { AdmissionRejected, RunAdmission } from "@/lib/modules/run/application/admission";
 import { RunEnqueuer } from "@/lib/modules/run/application/enqueue";
 import {
   type RunCommand,
@@ -103,6 +106,8 @@ export interface Container {
   orchestrator: RunOrchestrator;
   /** 所有发起运行的入口都经它入队(限长、配置快照、加密覆盖、幂等)。 */
   enqueuer: RunEnqueuer;
+  /** 在已有会话里受理新一轮的统一关卡(计费账号、Key 限流、额度、输入与契约)。 */
+  admission: RunAdmission;
   worker: RunWorker;
   /** 回调发件箱投递器。与 worker 同进程启动。 */
   webhooks: WebhookDispatcher;
@@ -503,6 +508,33 @@ function build(): Container {
     cancelSignal,
     rateLimiter,
     bundles: { read: readBundle, write: writeBundle },
+    admission: new RunAdmission({
+      sessions,
+      checkQuota: async (userId) => {
+        await assertWithinQuota({ users, usage }, userId);
+      },
+      checkRate: (i) =>
+        checkInvokeRate(rateLimiter, {
+          ...i,
+          defaultKeyLimit: env.invokeRateLimitPerKey,
+          agentLimit: env.invokeRateLimitPerAgent,
+        }),
+      inputSchemaOf: async (s) => {
+        const agent = await agents.get(s.agentId);
+        if (!agent) return undefined;
+        return (await releases.at(agent, s.agentVersion)).config.inputSchema;
+      },
+      validateInput,
+      quotaRejection: (err) =>
+        err instanceof QuotaExceeded
+          ? new AdmissionRejected(402, "quota_exceeded", err.message, {
+              quota: {
+                usedMicroUsd: err.verdict.usedMicroUsd,
+                limitMicroUsd: err.verdict.limitMicroUsd,
+              },
+            })
+          : null,
+    }),
     audit: new AuditLog({
       repo: new MysqlAuditRepo(db),
       emailOf: async (id) => (await users.get(id))?.email,

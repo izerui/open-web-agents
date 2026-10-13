@@ -13,6 +13,7 @@ const ERROR_CLASSES: [string, string[]][] = [
   ["@/lib/modules/artifacts/domain/safe-path", ["PathEscapeError"]],
   ["@/lib/modules/integration/application/webhook", ["WebhookTargetRejected"]],
   ["@/lib/modules/knowledge/domain/limits", ["KnowledgeLimitExceeded"]],
+  ["@/lib/modules/run/application/admission", ["AdmissionRejected"]],
 ];
 
 type Cls = (new (...a: never[]) => Error) & { brand?: symbol };
