@@ -231,8 +231,8 @@ export function AccessCenterView() {
         <CardHeader>
           <CardTitle className="text-sm">接口文档与调用代码</CardTitle>
           <CardDescription>
-            按智能体生成:入参示例来自它的输入契约(inputSchema),复制即可运行。 调用是异步的 —— 提交拿
-            taskId,轮询结果或等 Webhook 回调。
+            按智能体生成:入参示例按它的输入契约(inputSchema)生成,并用平台同款校验器复核。
+            调用是异步的 —— 提交拿 taskId,轮询结果或等 Webhook 回调。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
