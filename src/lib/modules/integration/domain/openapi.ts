@@ -12,6 +12,8 @@ export interface OpenApiAgent {
   description?: string;
   inputSchema?: JsonSchema;
   outputSchema?: JsonSchema;
+  /** 文档对应的已发布版本;null = 草稿(从未发布) */
+  version?: number | null;
 }
 
 const ERROR = {
@@ -60,7 +62,8 @@ export function buildAgentOpenApi(agent: OpenApiAgent, origin: string): Record<s
     info: {
       title: `${agent.name} —— Open Web Agents`,
       description: agent.description ?? "",
-      version: "1.0.0",
+      // 智能体发布一版,文档版本跟着变;未发布的草稿标成 draft
+      version: agent.version ? `v${agent.version}` : "draft",
     },
     servers: [{ url: origin }],
     security: [{ ApiKey: [] }],
@@ -87,6 +90,13 @@ export function buildAgentOpenApi(agent: OpenApiAgent, origin: string): Record<s
                   required: ["input"],
                   properties: {
                     input,
+                    version: {
+                      type: "integer",
+                      minimum: 1,
+                      description: agent.version
+                        ? `锁定智能体版本;不传 = 当前发布的版本(本文档对应 v${agent.version})`
+                        : "锁定智能体版本;该智能体尚未发布,不传则使用草稿",
+                    },
                     override: {
                       type: "object",
                       description: "请求级模型凭证;自定义 baseUrl 必须同时给 key",
@@ -112,6 +122,10 @@ export function buildAgentOpenApi(agent: OpenApiAgent, origin: string): Record<s
                       taskId: { type: "string" },
                       sessionId: { type: "string" },
                       structured: { type: "boolean", description: "结果是否带结构化输出" },
+                      agentVersion: {
+                        type: ["integer", "null"],
+                        description: "实际执行的版本;null = 草稿",
+                      },
                     },
                   },
                 },
@@ -120,6 +134,7 @@ export function buildAgentOpenApi(agent: OpenApiAgent, origin: string): Record<s
             "200": { description: "同一 Idempotency-Key 的重放,返回第一次受理的任务" },
             "400": errorResponse("入参不合法"),
             "401": errorResponse("缺少或无效的 API Key"),
+            "404": errorResponse("智能体或指定的版本不存在"),
             "402": errorResponse("超出月度额度"),
             "413": errorResponse("输入过长"),
             "422": errorResponse("同一 Idempotency-Key 用于了不同的请求体"),
@@ -146,6 +161,10 @@ export function buildAgentOpenApi(agent: OpenApiAgent, origin: string): Record<s
                         enum: ["pending", "running", "success", "failed", "cancelled"],
                       },
                       done: { type: "boolean" },
+                      agentVersion: {
+                        type: ["integer", "null"],
+                        description: "实际执行的版本;null = 草稿",
+                      },
                       structured,
                       text: { type: ["string", "null"] },
                       cost: { type: ["object", "null"] },

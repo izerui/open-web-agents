@@ -1,4 +1,6 @@
 import { InMemoryAgentRepo } from "@/lib/modules/agent/adapters/in-memory-agent-repo";
+import { InMemoryAgentVersionRepo } from "@/lib/modules/agent/adapters/in-memory-agent-version-repo";
+import { AgentReleases } from "@/lib/modules/agent/application/releases";
 import { InMemoryRunRepo } from "@/lib/modules/run/adapters/in-memory-run-repo";
 import {
   EnqueueTargetMissing,
@@ -15,17 +17,48 @@ async function setup(withCrypto = true) {
   const agents = new InMemoryAgentRepo([
     { id: "a1", ownerId: "u1", name: "a", config: { systemPrompt: "v1", model: "sonnet" } },
   ]);
+  const versions = new InMemoryAgentVersionRepo(agents);
   await sessions.create({ id: "s1", agentId: "a1", workspaceDir: "/ws" });
   const enqueuer = new RunEnqueuer({
     runs,
     sessions,
     agents,
+    releases: new AgentReleases(agents, versions),
     encryptOverride: withCrypto ? (o) => `enc:${JSON.stringify(o)}` : undefined,
   });
-  return { runs, agents, enqueuer };
+  return { runs, agents, versions, sessions, enqueuer };
 }
 
 describe("RunEnqueuer", () => {
+  it("会话锁定了版本:草稿之后再改,运行仍按那一版的快照执行并记下版本号", async () => {
+    const { runs, agents, versions, sessions, enqueuer } = await setup();
+    const releases = new AgentReleases(agents, versions);
+    const a1 = await agents.get("a1");
+    if (!a1) throw new Error("seed missing");
+    await releases.publish(a1, "u1");
+    await agents.upsert({ ...a1, config: { systemPrompt: "v2-draft", model: "sonnet" } });
+    await sessions.create({ id: "pinned", agentId: "a1", workspaceDir: "/w", agentVersion: 1 });
+
+    await enqueuer.enqueue({ runId: "r-pinned", sessionId: "pinned", prompt: "hi" });
+    const p = await runs.getPayload("r-pinned");
+    expect(p?.agentConfig).toEqual({ systemPrompt: "v1", model: "sonnet" });
+    expect(p?.agentVersion).toBe(1);
+
+    // 跟随草稿的会话(s1)跑的是草稿,版本号为空
+    await enqueuer.enqueue({ runId: "r-draft", sessionId: "s1", prompt: "hi" });
+    const d = await runs.getPayload("r-draft");
+    expect(d?.agentConfig).toEqual({ systemPrompt: "v2-draft", model: "sonnet" });
+    expect(d?.agentVersion).toBeUndefined();
+  });
+
+  it("会话锁定的版本不存在:按目标缺失拒绝,而不是悄悄改跑草稿", async () => {
+    const { sessions, enqueuer } = await setup();
+    await sessions.create({ id: "ghost", agentId: "a1", workspaceDir: "/w", agentVersion: 9 });
+    await expect(
+      enqueuer.enqueue({ runId: "r", sessionId: "ghost", prompt: "hi" }),
+    ).rejects.toBeInstanceOf(EnqueueTargetMissing);
+  });
+
   it("入队时记下智能体配置快照", async () => {
     const { runs, enqueuer } = await setup();
     await enqueuer.enqueue({ runId: "r1", sessionId: "s1", prompt: "hi" });

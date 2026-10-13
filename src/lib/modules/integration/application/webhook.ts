@@ -12,6 +12,8 @@ export interface WebhookPayload {
   taskId: string;
   sessionId?: string;
   agentId?: string;
+  /** 执行的智能体版本;缺省 = 草稿 */
+  agentVersion?: number;
   status: string;
   structured?: unknown;
   summary?: string;

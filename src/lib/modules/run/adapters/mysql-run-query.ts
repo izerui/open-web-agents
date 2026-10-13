@@ -29,6 +29,8 @@ export interface RunListItem {
   sessionId: string;
   agentId: string;
   agentName?: string;
+  /** 执行的智能体版本;undefined = 草稿 */
+  agentVersion?: number;
   source: SessionSource;
   status: RunState;
   promptPreview: string;
@@ -71,6 +73,7 @@ const COLUMNS = {
   sessionId: runs.sessionId,
   agentId: sessions.agentId,
   agentName: agents.name,
+  agentVersion: runs.agentVersion,
   source: sessions.source,
   status: runs.status,
   prompt: runs.prompt,
@@ -87,6 +90,7 @@ type Row = {
   sessionId: string;
   agentId: string;
   agentName: string | null;
+  agentVersion: number | null;
   source: string;
   status: string;
   prompt: string;
@@ -106,6 +110,7 @@ function toItem(r: Row): RunListItem {
     sessionId: r.sessionId,
     agentId: r.agentId,
     agentName: r.agentName ?? undefined,
+    agentVersion: r.agentVersion ?? undefined,
     source: r.source as SessionSource,
     status: r.status as RunState,
     promptPreview: r.prompt.slice(0, PREVIEW_CHARS),

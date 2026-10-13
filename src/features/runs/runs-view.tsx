@@ -25,6 +25,8 @@ interface RunItem {
   sessionId: string;
   agentId: string;
   agentName?: string;
+  /** 执行的智能体版本;undefined = 草稿 */
+  agentVersion?: number;
   source: "web" | "api" | "invoke" | "embed";
   status: "pending" | "running" | "success" | "failed" | "cancelled";
   promptPreview: string;
@@ -224,7 +226,12 @@ export function RunsView() {
                 <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
                   {new Date(r.createdAt).toLocaleString()}
                 </td>
-                <td className="max-w-40 truncate px-3 py-2">{r.agentName ?? r.agentId}</td>
+                <td className="max-w-40 truncate px-3 py-2">
+                  {r.agentName ?? r.agentId}
+                  <span className="ml-1 text-muted-foreground">
+                    {r.agentVersion ? `v${r.agentVersion}` : "草稿"}
+                  </span>
+                </td>
                 <td className="px-3 py-2">{SOURCE_LABEL[r.source]}</td>
                 <td className="px-3 py-2">
                   <Badge className={cn("border-0", STATUS_META[r.status].className)}>
@@ -271,7 +278,12 @@ export function RunsView() {
           {detail && (
             <>
               <SheetHeader>
-                <SheetTitle>{detail.agentName ?? detail.agentId}</SheetTitle>
+                <SheetTitle>
+                  {detail.agentName ?? detail.agentId}
+                  <span className="ml-2 font-normal text-muted-foreground text-sm">
+                    {detail.agentVersion ? `v${detail.agentVersion}` : "草稿"}
+                  </span>
+                </SheetTitle>
                 <SheetDescription>
                   {new Date(detail.createdAt).toLocaleString()} · {SOURCE_LABEL[detail.source]} ·{" "}
                   {STATUS_META[detail.status].label} · {formatDuration(detail.durationMs)} ·{" "}

@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Textarea } from "@/components/ui/textarea";
 import { KnowledgePanel } from "@/features/builder/knowledge-panel";
+import { ReleasePanel } from "@/features/builder/release-panel";
 import { SharePanel } from "@/features/builder/share-panel";
 import { InvokeSnippetTabs } from "@/features/integration/invoke-snippet";
 import type { AgentSummary } from "@/features/workbench/types";
@@ -708,6 +709,16 @@ export function Builder() {
             <Sparkles className="size-3.5" />
             {designing ? "准备中…" : openedId ? "用 AI 修改" : "用 AI 设计"}
           </Button>
+          {selectedAgent && canWrite && (
+            <Badge
+              variant={selectedAgent.hasUnpublishedChanges ? "warning" : "secondary"}
+              title="接口调用、嵌入组件和其他用户使用已发布版本;发布在页面下方「版本与发布」"
+            >
+              {selectedAgent.publishedVersion
+                ? `已发布 v${selectedAgent.publishedVersion}${selectedAgent.hasUnpublishedChanges ? " · 草稿有修改" : ""}`
+                : "未发布"}
+            </Badge>
+          )}
           <Button size="sm" onClick={save} disabled={!canSave}>
             <Save className="size-3.5" />
             {saving ? "保存中…" : "保存智能体"}
@@ -1183,6 +1194,21 @@ export function Builder() {
         {schemaError && <span className="text-xs text-destructive">schema 非法:{schemaError}</span>}
         {!schemaError && schemaText && <Badge variant="success">schema 合法 · 接口型智能体</Badge>}
       </div>
+
+      {openedId && selectedAgent && canWrite && (
+        <ReleasePanel
+          agentId={openedId}
+          publishedVersion={selectedAgent.publishedVersion ?? null}
+          hasUnpublishedChanges={selectedAgent.hasUnpublishedChanges === true}
+          unsaved={dirty}
+          onChanged={reload}
+          onRestored={async () => {
+            await reload();
+            // 草稿内容换了,表单重新从服务端读一遍
+            edit(selectedAgent);
+          }}
+        />
+      )}
 
       {openedId && <KnowledgePanel agentId={openedId} canWrite={canWrite} />}
 

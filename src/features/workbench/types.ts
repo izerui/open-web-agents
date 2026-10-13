@@ -27,6 +27,16 @@ export interface AgentSummary {
   };
   /** 结果回调地址(仅所有者与管理员可见) */
   webhookUrl?: string;
+  /** 当前发布的版本;null = 从未发布(所有入口跑草稿) */
+  publishedVersion?: number | null;
+  /** 草稿是否有未发布的修改(仅能修改的人可见) */
+  hasUnpublishedChanges?: boolean;
+  /** 调用方默认拿到的契约;null = 从未发布,调用跑草稿 */
+  published?: {
+    version: number;
+    inputSchema?: Record<string, unknown>;
+    outputSchema?: Record<string, unknown>;
+  } | null;
   /** 是否已公开分享 */
   isPublic?: boolean;
   /** 当前用户能否修改 */

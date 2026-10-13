@@ -15,6 +15,8 @@ interface Row {
   inputSchema: unknown;
   outputSchema: unknown;
   webhookUrl: string | null;
+  publishedVersion: number | null;
+  publishedHash: string | null;
 }
 
 const COLUMNS = {
@@ -27,6 +29,8 @@ const COLUMNS = {
   inputSchema: agents.inputSchema,
   outputSchema: agents.outputSchema,
   webhookUrl: agents.webhookUrl,
+  publishedVersion: agents.publishedVersion,
+  publishedHash: agents.publishedHash,
 };
 
 function toAgent(r: Row): Agent {
@@ -38,6 +42,8 @@ function toAgent(r: Row): Agent {
     icon: r.icon ?? undefined,
     description: r.description ?? undefined,
     webhookUrl: r.webhookUrl ?? undefined,
+    publishedVersion: r.publishedVersion ?? undefined,
+    publishedHash: r.publishedHash ?? undefined,
     // 两个 schema 都单列存储(要按它们做接口契约查询/展示),回填进 config 供上层使用。
     // input_schema 这一列建表时就有,但此前【从没被读写过】—— 一个死列配一句谎话注释。
     config: {

@@ -12,21 +12,24 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { auth, agents } = getContainer();
+  const { auth, agents, releases } = getContainer();
   try {
     const principal = await auth.resolveWeb(req);
     await auth.assertCanInvoke(principal, id);
     const agent = await agents.get(id);
     if (!agent) return apiError(404, "not_found", "agent not found");
+    // 文档描述的是调用方默认会拿到的那一版(已发布;从未发布则为草稿)
+    const release = await releases.resolve(agent);
     const origin = new URL(req.url).origin;
     return Response.json(
       buildAgentOpenApi(
         {
           id: agent.id,
-          name: agent.name,
-          description: agent.description,
-          inputSchema: agent.config.inputSchema,
-          outputSchema: agent.config.outputSchema,
+          name: release.name,
+          description: release.description,
+          inputSchema: release.config.inputSchema,
+          outputSchema: release.config.outputSchema,
+          version: release.version,
         },
         origin,
       ),

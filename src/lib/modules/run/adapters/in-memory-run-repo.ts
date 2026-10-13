@@ -39,12 +39,20 @@ export class InMemoryRunRepo implements RunRepo {
     return run && id ? { ...run, idempotencyHash: this.payloads.get(id)?.idempotencyHash } : null;
   }
 
-  async getPayload(
-    id: string,
-  ): Promise<{ prompt: string; agentConfig?: unknown; overrideEnc?: string } | null> {
+  async getPayload(id: string): Promise<{
+    prompt: string;
+    agentConfig?: unknown;
+    overrideEnc?: string;
+    agentVersion?: number;
+  } | null> {
     const p = this.payloads.get(id);
     if (!p) return null;
-    return { prompt: p.prompt ?? "", agentConfig: p.agentConfig, overrideEnc: p.overrideEnc };
+    return {
+      prompt: p.prompt ?? "",
+      agentConfig: p.agentConfig,
+      overrideEnc: p.overrideEnc,
+      agentVersion: p.agentVersion,
+    };
   }
 
   async claimNext(leaseMs: number, now: number): Promise<Run | null> {

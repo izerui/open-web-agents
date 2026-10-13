@@ -23,6 +23,8 @@ export interface NewRun {
   resumeAnchor?: string;
   /** 入队时的智能体配置快照,worker 按它执行。 */
   agentConfig?: unknown;
+  /** 执行的智能体版本;不传 = 草稿。 */
+  agentVersion?: number;
   /** 请求级凭证覆盖,已加密。 */
   overrideEnc?: string;
   /** 幂等键(已带调用方作用域)。重复则 create 抛 DuplicateIdempotencyKey。 */

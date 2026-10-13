@@ -29,6 +29,8 @@ export interface Session {
   status: SessionStatus;
   /** 设计会话的目标智能体。 */
   designTargetAgentId?: string;
+  /** 锁定的智能体版本;undefined = 跟随草稿。建会话时定下,整个会话不变。 */
+  agentVersion?: number;
   /** 会话级凭证覆盖(三级链的中间层)。 */
   baseUrl?: string;
   key?: string;
@@ -50,6 +52,8 @@ export interface NewSession {
   /** 不传:无人值守即 invoke,否则 web。 */
   source?: SessionSource;
   designTargetAgentId?: string;
+  /** 锁定的智能体版本;不传 = 跟随草稿。 */
+  agentVersion?: number;
 }
 
 export interface SessionListFilter {

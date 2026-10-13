@@ -31,21 +31,44 @@ export const dynamic = "force-dynamic";
 
 /** 列出调用方可见的智能体:自己的 + 被分享的 + 公开的(admin 看全部)。 */
 export async function GET(req: Request) {
-  const { agents, grants, auth, env } = getContainer();
+  const { agents, grants, auth, env, releases } = getContainer();
   try {
     const subject = await auth.resolveSubject(req);
     const all = await agents.list();
     // 一次拉齐该类型的授权,避免逐个智能体查一次(N+1)
     const allGrants = await grants.listForType("agent");
+    const visible = filterVisible(subject, all, allGrants);
+    // 同理一次取齐各自当前发布的版本
+    const published = await releases.publishedOf(visible);
 
     return Response.json({
-      agents: filterVisible(subject, all, allGrants).map((a) => {
+      agents: visible.map((a) => {
         const manage = canManageWebhook(subject, a);
         const canWrite = hasResourceAccess(subject, a, "write", allGrants);
+        const pub = published.get(a.id);
+        /*
+         * 只读者看到的是【已发布版本】—— 他们的会话跑的就是这一版(见 POST /api/sessions),
+         * 列表若给草稿,开场建议、契约说明都会和实际运行对不上。作者看到草稿,在构建器里改。
+         */
+        const shown = !canWrite && pub ? pub : a;
         return {
           ...a,
+          name: shown.name,
+          icon: shown.icon,
+          description: shown.description,
           // 只读者(含公开智能体的所有用户)看不到 MCP 环境变量与逃生舱
-          config: canWrite ? a.config : redactAgentConfigForReader(a.config),
+          config: canWrite ? a.config : redactAgentConfigForReader(shown.config),
+          publishedVersion: a.publishedVersion ?? null,
+          hasUnpublishedChanges: canWrite ? releases.hasUnpublishedChanges(a) : undefined,
+          // 调用方默认拿到的契约(接入中心据此生成文档与示例);从未发布则为 null,调用跑草稿
+          published: pub
+            ? {
+                version: pub.version,
+                inputSchema: pub.config.inputSchema,
+                outputSchema: pub.config.outputSchema,
+              }
+            : null,
+          publishedHash: undefined,
           // 回调地址可能带着接收方的令牌,非所有者不该看到
           webhookUrl: manage ? a.webhookUrl : undefined,
           isPublic: isPublic(a.id, allGrants),

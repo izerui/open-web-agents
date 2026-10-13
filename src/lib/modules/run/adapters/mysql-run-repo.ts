@@ -84,6 +84,7 @@ export class MysqlRunRepo implements RunRepo {
         parentRunId: r.parentRunId,
         resumeAnchor: r.resumeAnchor,
         agentConfig: r.agentConfig ?? null,
+        agentVersion: r.agentVersion ?? null,
         overrideEnc: r.overrideEnc,
         idempotencyKey: r.idempotencyKey,
         idempotencyHash: r.idempotencyHash,
@@ -492,6 +493,7 @@ export class MysqlRunRepo implements RunRepo {
     cost: unknown;
     error: unknown;
     summary: string | null;
+    agentVersion: number | null;
   } | null> {
     const rows = await this.db
       .select({
@@ -501,6 +503,7 @@ export class MysqlRunRepo implements RunRepo {
         finalText: runs.finalText,
         cost: runs.cost,
         error: runs.errorInfo,
+        agentVersion: runs.agentVersion,
       })
       .from(runs)
       .where(eq(runs.id, id))
@@ -514,6 +517,7 @@ export class MysqlRunRepo implements RunRepo {
       cost: row.cost,
       error: row.error,
       summary: row.finalText,
+      agentVersion: row.agentVersion,
     };
   }
 

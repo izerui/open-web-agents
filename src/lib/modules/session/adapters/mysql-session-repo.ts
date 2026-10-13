@@ -24,6 +24,7 @@ interface Row {
   source: string;
   status: string;
   designTargetAgentId: string | null;
+  agentVersion: number | null;
   baseUrl: string | null;
   model: string | null;
   createdAt: Date;
@@ -43,6 +44,7 @@ function toSession(r: Row): Session {
     source: r.source as SessionSource,
     status: r.status as SessionStatus,
     designTargetAgentId: r.designTargetAgentId ?? undefined,
+    agentVersion: r.agentVersion ?? undefined,
     baseUrl: r.baseUrl ?? undefined,
     model: (r.model as ModelAlias | null) ?? undefined,
     createdAt: r.createdAt.getTime(),
@@ -62,6 +64,7 @@ const COLUMNS = {
   source: sessions.source,
   status: sessions.status,
   designTargetAgentId: sessions.designTargetAgentId,
+  agentVersion: sessions.agentVersion,
   baseUrl: sessions.baseUrl,
   model: sessions.model,
   createdAt: sessions.createdAt,
@@ -98,6 +101,7 @@ export class MysqlSessionRepo implements SessionRepo {
       unattended: s.unattended ? 1 : 0,
       source: s.source ?? (s.unattended ? "invoke" : "web"),
       designTargetAgentId: s.designTargetAgentId,
+      agentVersion: s.agentVersion ?? null,
       status: "active",
     });
     const created = await this.get(s.id);

@@ -3,6 +3,8 @@ import fs from "node:fs/promises";
 import { apiError } from "@/lib/api-error";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
+import { VersionNotFound } from "@/lib/modules/agent/application/releases";
+import { parseVersion } from "@/lib/modules/agent/domain/release";
 import { validateInput } from "@/lib/modules/agent/domain/validate-output";
 import { PromptTooLarge, assertPromptSize } from "@/lib/modules/run/application/enqueue";
 import { isValidIdempotencyKey } from "@/lib/modules/run/domain/limits";
@@ -19,6 +21,8 @@ interface InvokeBody {
   input?: unknown;
   /** 请求级覆盖(三级链最高优先)。 */
   override?: { baseUrl?: string; key?: string; model?: ModelAlias };
+  /** 锁定智能体版本;不传 = 当前发布的版本(从未发布则为草稿)。 */
+  version?: number;
 }
 
 /**
@@ -34,7 +38,7 @@ interface InvokeBody {
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id: agentId } = await params;
-  const { agents, sessions, runs, env, auth, users, usage, enqueuer } = getContainer();
+  const { agents, sessions, runs, env, auth, users, usage, enqueuer, releases } = getContainer();
 
   let principal: Awaited<ReturnType<typeof auth.requireApiKey>>;
   let billingUserId: string;
@@ -66,6 +70,22 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   const body = (await req.json().catch(() => ({}))) as InvokeBody;
+
+  /*
+   * 这次跑哪一版。入参校验、结构化结果的有无都以【这一版】为准 ——
+   * 草稿里刚改的 inputSchema 不该影响还在用已发布版本的调用方。
+   */
+  const requested = parseVersion(body.version);
+  if (!requested.ok) return apiError(400, "invalid_request", "version 须为正整数");
+  let release: Awaited<ReturnType<typeof releases.resolve>>;
+  try {
+    release = await releases.resolve(agent, requested.value);
+  } catch (err) {
+    if (err instanceof VersionNotFound) return apiError(404, "not_found", err.message);
+    throw err;
+  }
+  const structured = release.config.outputSchema !== undefined;
+
   const prompt =
     typeof body.input === "string" ? body.input.trim() : JSON.stringify(body.input ?? {});
   if (!prompt || prompt === "{}") {
@@ -80,7 +100,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
    * 调用方拿到 200 和一份结构合规的 JSON,根本意识不到自己传错了,还白花一次模型钱。
    * 直接说清楚错在哪个字段,比事后对着结果猜便宜得多。
    */
-  const inputSchema = agent.config.inputSchema;
+  const inputSchema = release.config.inputSchema;
   if (inputSchema) {
     // 纯文本对上 object schema 必然不合格,提示要说人话
     if (typeof body.input === "string") {
@@ -123,7 +143,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
    */
   const rawKey = req.headers.get("Idempotency-Key")?.trim();
   // 同键重放时用来判断"是不是同一个请求"
-  const requestHash = sha256(JSON.stringify({ prompt, override: override.value ?? null }));
+  // 请求体里的 version 也算请求内容:同一个键换了版本是不同的请求
+  const requestHash = sha256(
+    JSON.stringify({ prompt, override: override.value ?? null, version: requested.value ?? null }),
+  );
   let idempotencyKey: string | undefined;
   if (rawKey) {
     if (!isValidIdempotencyKey(rawKey)) {
@@ -138,7 +161,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const scope = principal.type === "apiKey" ? `k:${principal.keyId}` : `u:${principal.userId}`;
     idempotencyKey = sha256(`${scope}|${agentId}|${rawKey}`);
     const existing = await runs.findByIdempotencyKey(idempotencyKey);
-    if (existing) return replayed(existing, requestHash, agent.config.outputSchema !== undefined);
+    if (existing) return replayed(existing, requestHash, structured);
   }
 
   const sessionId = randomUUID().replace(/-/g, "").slice(0, 24);
@@ -155,6 +178,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     ownerId: principal.type === "web" ? principal.userId : undefined,
     // 花费记在签发 key 的账号上:额度按它算,模型凭证也用它自带的
     billingUserId,
+    agentVersion: release.version ?? undefined,
   });
 
   const taskId = randomUUID().replace(/-/g, "").slice(0, 24);
@@ -174,9 +198,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (err instanceof DuplicateIdempotencyKey) {
       // 并发的同键请求:另一个先入队了,返回它
       const existing = await runs.findByIdempotencyKey(err.idempotencyKey);
-      if (existing) {
-        return replayed(existing, requestHash, agent.config.outputSchema !== undefined);
-      }
+      if (existing) return replayed(existing, requestHash, structured);
     }
     throw err;
   }
@@ -186,7 +208,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       taskId,
       sessionId,
       /** 有 outputSchema 才会返回结构化结果,否则只有文本 summary */
-      structured: agent.config.outputSchema !== undefined,
+      structured,
+      /** 实际执行的版本;null = 草稿(该智能体从未发布) */
+      agentVersion: release.version,
     },
     { status: 202 },
   );

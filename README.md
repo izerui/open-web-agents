@@ -89,6 +89,23 @@ agent/skills/<名称>/...         技能附带的脚本、模板
 技能在运行时写入 `dataDir/.skills/<内容哈希>/` 作为本地插件交给 SDK —— 不放开 `settingSources`,
 agent 也写不进这个目录(沙箱只放开工作目录,文件写工具受路径守卫限制)。
 
+## 版本与发布
+
+智能体分**草稿**与**已发布版本**。构建器保存、AI 设计师「应用」改的都是草稿;
+在构建器下方的「版本与发布」里把草稿发布为 v1、v2……
+
+| 入口 | 跑哪一版 |
+|---|---|
+| 接口调用 `invoke` | 当前发布的版本;请求体可用 `"version": N` 锁定某一版 |
+| 嵌入组件、API Key 建的会话 | 当前发布的版本 |
+| 网页工作台 | 能修改该智能体的人(作者)跟随草稿,便于试运行;其他人用已发布版本 |
+| 从未发布过的智能体 | 一律草稿(与发布功能上线前的行为相同) |
+
+- 版本在**建会话时锁定**,同一会话的每一轮都用同一版;发布或回滚只影响之后新建的会话。
+- **回滚**是把发布指针指回旧版本,不新建版本;**载入草稿**把旧版本内容放回草稿继续改。
+- 入参校验、结构化结果、OpenAPI 文档都以实际使用的版本为准;结果接口、运行记录与 webhook 带 `agentVersion`(`null` = 草稿)。
+- 回调地址不属于版本内容;切换到逃生舱不同的版本只有平台管理员能做。
+
 ## 架构
 
 务实的六边形(Ports & Adapters):**只对真正会变的依赖建端口**,其余不过度抽象。
@@ -258,6 +275,10 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 | POST            | `/api/agents/{id}/invoke`                  | **key**                | 对外触发,返回 taskId;支持 `Idempotency-Key` |
 | GET             | `/api/agents/{id}/result`                  | **key**                | 轮询结构化结果             |
 | GET             | `/api/agents/{id}/openapi.json`            | cookie / key           | 该智能体的 OpenAPI 3.1 文档(含入参与结果契约) |
+| GET/POST        | `/api/agents/{id}/versions`                | 读:cookie / key;发布:cookie(write) | 版本列表 / 把草稿发布为新版本 |
+| GET             | `/api/agents/{id}/versions/{v}`            | cookie / key           | 某个版本的完整内容            |
+| POST            | `/api/agents/{id}/versions/{v}/activate`   | cookie(write)          | 把发布指针切到该版本(回滚)    |
+| POST            | `/api/agents/{id}/versions/{v}/restore`    | cookie(write)          | 把该版本载入草稿            |
 | POST            | `/api/embed/token`                         | **key**                | 换短时效嵌入令牌(服务端调)      |
 | POST            | `/api/embed/run`                           | **embed token**        | widget 发起运行         |
 | GET             | `/api/embed/script`                        | —                      | 嵌入脚本                |

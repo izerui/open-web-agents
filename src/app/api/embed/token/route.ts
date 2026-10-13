@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
  * 令牌绑定单个会话:泄露了也只能操作那一个会话,读不到别人的。
  */
 export async function POST(req: Request) {
-  const { agents, sessions, auth, env, embedSecret } = getContainer();
+  const { agents, sessions, auth, env, embedSecret, releases } = getContainer();
 
   let principal: Awaited<ReturnType<typeof auth.requireApiKey>>;
   try {
@@ -45,9 +45,12 @@ export async function POST(req: Request) {
     throw err;
   }
 
-  if (!(await agents.get(agentId))) {
+  const agent = await agents.get(agentId);
+  if (!agent) {
     return Response.json({ error: "agent not found" }, { status: 404 });
   }
+  // 访客用的是已发布版本;作者在草稿里的改动不会出现在别人的页面上
+  const release = await releases.resolve(agent);
 
   // 每枚令牌配一个新会话(= 独立工作目录),互不干扰
   const sessionId = randomUUID().replace(/-/g, "").slice(0, 24);
@@ -62,6 +65,7 @@ export async function POST(req: Request) {
     callerApiKeyId: principal.type === "apiKey" ? principal.keyId : undefined,
     // 访客在浏览器里花的钱,记在签发这把 key 的账号上
     billingUserId: principal.type === "apiKey" ? principal.ownerId : principal.userId,
+    agentVersion: release.version ?? undefined,
   });
 
   const token = issueEmbedToken(

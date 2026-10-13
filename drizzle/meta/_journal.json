@@ -113,6 +113,13 @@
       "when": 1791885799447,
       "tag": "0015_run_query_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "5",
+      "when": 1791889088884,
+      "tag": "0016_agent_versions",
+      "breakpoints": true
     }
   ]
 }

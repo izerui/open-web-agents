@@ -4,6 +4,7 @@
 // 请求级凭证覆盖在 invoke 里解析完就被丢掉。四个入口各自漏一点,
 // 收拢到一处之后每条规则只需要写一次。
 
+import type { AgentReleases } from "@/lib/modules/agent/application/releases";
 import type { AgentRepo } from "@/lib/modules/agent/ports";
 import { checkPromptSize } from "@/lib/modules/run/domain/limits";
 import type { Run, RunRepo } from "@/lib/modules/run/ports";
@@ -43,6 +44,8 @@ export interface EnqueueDeps {
   runs: Pick<RunRepo, "create">;
   sessions: Pick<SessionRepo, "get">;
   agents: Pick<AgentRepo, "get">;
+  /** 会话锁定了版本时按版本取配置快照。 */
+  releases: Pick<AgentReleases, "at">;
   /** 加密请求级覆盖。不提供则拒绝带覆盖的请求 —— 绝不明文落库。 */
   encryptOverride?: (o: NonNullable<RunCommand["override"]>) => string;
 }
@@ -68,6 +71,11 @@ export class RunEnqueuer {
     const agent = await this.deps.agents.get(session.agentId);
     if (!agent) throw new EnqueueTargetMissing(`agent not found: ${session.agentId}`);
 
+    // 会话锁定了版本就跑那一版;版本不存在(不应发生)按目标缺失处理,而不是悄悄改跑草稿
+    const release = await this.deps.releases.at(agent, session.agentVersion).catch((err) => {
+      throw new EnqueueTargetMissing(err instanceof Error ? err.message : String(err));
+    });
+
     let overrideEnc: string | undefined;
     if (hasOverride(req.override)) {
       if (!this.deps.encryptOverride) throw new Error("请求级凭证覆盖未启用加密,拒绝明文落库");
@@ -80,7 +88,8 @@ export class RunEnqueuer {
       prompt: req.prompt,
       parentRunId: req.parentRunId,
       resumeAnchor: req.resumeAnchor,
-      agentConfig: agent.config,
+      agentConfig: release.config,
+      agentVersion: release.version ?? undefined,
       overrideEnc,
       idempotencyKey: req.idempotencyKey,
       idempotencyHash: req.idempotencyHash,

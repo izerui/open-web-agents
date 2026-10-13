@@ -18,6 +18,8 @@ import type { EngineDeps } from "@/lib/modules/agent-engine/adapters/claude-sdk/
 import type { EnginePort, TranscriptPort } from "@/lib/modules/agent-engine/ports";
 import { readBundle, writeBundle } from "@/lib/modules/agent/adapters/fs-bundle-store";
 import { MysqlAgentRepo } from "@/lib/modules/agent/adapters/mysql-agent-repo";
+import { MysqlAgentVersionRepo } from "@/lib/modules/agent/adapters/mysql-agent-version-repo";
+import { AgentReleases } from "@/lib/modules/agent/application/releases";
 import { ARCHITECT_AGENT_ID, ARCHITECT_CONFIG } from "@/lib/modules/agent/domain/architect";
 import type { AgentRepo } from "@/lib/modules/agent/ports";
 import { RedisApproval } from "@/lib/modules/approval/adapters/redis-approval";
@@ -72,6 +74,8 @@ export interface Container {
   db: Db;
   sessions: SessionRepo;
   agents: AgentRepo;
+  /** 版本与发布:发布、回滚、载入草稿,以及每个入口该跑哪一版。 */
+  releases: AgentReleases;
   bus: BusPort;
   engine: EnginePort;
   gateway: ModelGatewayPort;
@@ -163,6 +167,7 @@ function build(): Container {
 
   const sessions = new MysqlSessionRepo(db);
   const agents = new MysqlAgentRepo(db);
+  const releases = new AgentReleases(agents, new MysqlAgentVersionRepo(db));
   // 首次启动播种内置智能体,保证开箱可用;已存在则覆盖为最新定义。
   // 它归 system 所有,故必须同时授予公开 read —— 否则新注册用户在列表里看不到它。
   void agents
@@ -356,6 +361,7 @@ function build(): Container {
     runs,
     sessions,
     agents,
+    releases,
     encryptOverride: (o) => secrets.encrypt(JSON.stringify(o)),
   });
 
@@ -415,6 +421,7 @@ function build(): Container {
         taskId: runId,
         sessionId,
         agentId: session?.agentId,
+        agentVersion: r.agentVersion ?? undefined,
         status: r.status,
         structured: r.structured ?? undefined,
         summary: r.summary ?? undefined,
@@ -458,6 +465,7 @@ function build(): Container {
     db,
     sessions,
     agents,
+    releases,
     bus,
     engine,
     gateway,

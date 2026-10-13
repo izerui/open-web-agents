@@ -5,7 +5,8 @@ export class InMemoryAgentRepo implements AgentRepo {
   private items = new Map<string, Agent>();
 
   constructor(seed: Agent[] = []) {
-    for (const a of seed) this.items.set(a.id, a);
+    // 存副本:调用方传进来的种子对象不能被后续的发布指针等写入改掉
+    for (const a of seed) this.items.set(a.id, structuredClone(a));
   }
 
   async get(id: string): Promise<Agent | null> {
@@ -18,8 +19,23 @@ export class InMemoryAgentRepo implements AgentRepo {
   }
 
   async upsert(a: Agent): Promise<Agent> {
-    this.items.set(a.id, structuredClone(a));
-    return structuredClone(a);
+    // 与 MySQL 实现一致:发布指针只由版本仓储维护,upsert 不动它
+    const prev = this.items.get(a.id);
+    const next: Agent = {
+      ...structuredClone(a),
+      publishedVersion: prev?.publishedVersion,
+      publishedHash: prev?.publishedHash,
+    };
+    this.items.set(a.id, next);
+    return structuredClone(next);
+  }
+
+  /** 仅供内存版本仓储调用。 */
+  setPublished(id: string, version: number, hash: string): void {
+    const a = this.items.get(id);
+    if (!a) throw new Error(`agent not found: ${id}`);
+    a.publishedVersion = version;
+    a.publishedHash = hash;
   }
 
   async delete(id: string): Promise<void> {

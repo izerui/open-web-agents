@@ -47,5 +47,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     summary: run.summary,
     cost: run.cost ?? null,
     error: run.error ?? null,
+    /** 执行的智能体版本;null = 草稿 */
+    agentVersion: run.agentVersion ?? null,
   });
 }

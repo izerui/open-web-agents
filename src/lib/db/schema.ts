@@ -59,10 +59,40 @@ export const agents = mysqlTable(
     verifyRules: json("verify_rules"),
     webhookUrl: varchar("webhook_url", { length: 1024 }),
     visibility: varchar("visibility", { length: 16 }).notNull().default("private"),
+    /**
+     * 当前发布的版本号;NULL = 从未发布,所有入口都用草稿(本行的配置)。
+     * 本行的 name/config/schema 始终是【草稿】—— 构建器与设计师只改草稿,
+     * 对外入口(接口调用、嵌入、API 会话)跑的是这里指向的版本快照。
+     */
+    publishedVersion: int("published_version"),
+    /** 已发布版本的内容摘要,用来判断"草稿有没有未发布的修改",免得每次都去读快照 */
+    publishedHash: varchar("published_hash", { length: 64 }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
   },
   (t) => ({ byOwner: index("idx_agents_owner").on(t.ownerId) }),
+);
+
+/**
+ * 智能体的发布版本:发布时把草稿整份快照下来,之后只读。
+ * 版本号按智能体从 1 递增;回滚 = 把 agents.published_version 指回旧版本,不新建行。
+ */
+export const agentVersions = mysqlTable(
+  "agent_versions",
+  {
+    agentId: varchar("agent_id", { length: 36 }).notNull(),
+    version: int("version").notNull(),
+    name: varchar("name", { length: 255 }).notNull(),
+    icon: varchar("icon", { length: 64 }),
+    description: varchar("description", { length: 1024 }),
+    /** 完整 AgentConfig(含 inputSchema / outputSchema) */
+    config: json("config").notNull(),
+    contentHash: varchar("content_hash", { length: 64 }).notNull(),
+    note: varchar("note", { length: 512 }),
+    createdBy: varchar("created_by", { length: 36 }).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => ({ pk: uniqueIndex("uniq_agent_versions").on(t.agentId, t.version) }),
 );
 
 /** 会话 = 项目 = 工作目录,一对一。 */
@@ -107,6 +137,12 @@ export const sessions = mysqlTable(
      * 新建智能体的设计会话一开始为空,第一次"应用"后填上。
      */
     designTargetAgentId: varchar("design_target_agent_id", { length: 36 }),
+    /**
+     * 会话锁定的智能体版本;NULL = 跟随草稿。
+     * 建会话时定下来,整个会话的每一轮都用同一版本 —— 多轮对话中途换版本,
+     * 前后轮的提示词与契约对不上。
+     */
+    agentVersion: int("agent_version"),
     status: varchar("status", { length: 16 }).notNull().default("active"),
     /** 会话级凭证覆盖(三级链中间层) */
     baseUrl: varchar("base_url", { length: 512 }),
@@ -144,6 +180,8 @@ export const runs = mysqlTable(
      * 迁移前入队的旧任务为空,回退到当前配置。
      */
     agentConfig: json("agent_config"),
+    /** 执行的智能体版本;NULL = 草稿。结果、运行记录、回调里都带上,便于追溯。 */
+    agentVersion: int("agent_version"),
     /** 请求级凭证覆盖(三级链最高优先),整体加密的 JSON。只在 worker 执行时解密。 */
     overrideEnc: varchar("override_enc", { length: 2048 }),
     /**

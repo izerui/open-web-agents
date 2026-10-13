@@ -43,6 +43,8 @@ export function AccessCenterView() {
   const [docAgentId, setDocAgentId] = useState("");
   const agentName = useMemo(() => new Map(agents.map((a) => [a.id, a.name])), [agents]);
   const docAgent = agents.find((a) => a.id === docAgentId) ?? agents[0];
+  // 调用方默认拿到的契约:已发布版本的;从未发布则是草稿的
+  const contract = docAgent?.published ?? docAgent?.config;
 
   /**
    * 两块数据各拉各的。
@@ -259,11 +261,20 @@ export function AccessCenterView() {
                       </option>
                     ))}
                   </Select>
+                  {docAgent.published ? (
+                    <Badge variant="success" className="text-[11px]">
+                      已发布 v{docAgent.published.version}
+                    </Badge>
+                  ) : (
+                    <Badge variant="warning" className="text-[11px]">
+                      未发布 · 调用使用草稿
+                    </Badge>
+                  )}
                   <Badge variant="secondary" className="text-[11px]">
-                    {docAgent.config.inputSchema ? "结构化入参" : "文本入参"}
+                    {contract?.inputSchema ? "结构化入参" : "文本入参"}
                   </Badge>
                   <Badge variant="secondary" className="text-[11px]">
-                    {docAgent.config.outputSchema ? "结构化结果 structured" : "文本结果 text"}
+                    {contract?.outputSchema ? "结构化结果 structured" : "文本结果 text"}
                   </Badge>
                   <Button variant="link" size="sm" className="ml-auto h-8 px-2" asChild>
                     <a
@@ -276,11 +287,17 @@ export function AccessCenterView() {
                     </a>
                   </Button>
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  {docAgent.published
+                    ? `调用默认使用当前发布的版本(v${docAgent.published.version}),发布新版本后自动切换;需要固定某一版时在请求体里加 "version": ${docAgent.published.version}。`
+                    : "这个智能体还没有发布:调用直接使用草稿,作者保存即生效。对外稳定使用前,建议在构建器里发布一个版本。"}
+                  {docAgent.hasUnpublishedChanges && " 草稿里还有未发布的修改,不影响调用方。"}
+                </p>
                 <InvokeSnippetTabs
-                  key={docAgent.id}
+                  key={`${docAgent.id}@${docAgent.published?.version ?? "draft"}`}
                   agentId={docAgent.id}
-                  inputSchema={docAgent.config.inputSchema}
-                  hasOutputSchema={Boolean(docAgent.config.outputSchema)}
+                  inputSchema={contract?.inputSchema}
+                  hasOutputSchema={Boolean(contract?.outputSchema)}
                 />
                 <p className="text-xs text-muted-foreground">
                   结果回调:
