@@ -55,12 +55,14 @@ curl localhost:5678/api/agents/<taskId>/result -H "X-Api-Key: <key>"
 | 入参契约       | 定义了 `inputSchema` 则 `invoke` 的入参必须符合它,否则 400 并指出是哪个字段                                    |
 | 工作空间       | 每会话一个独立目录,文件树 / 预览 / 下载                                                                  |
 | 执行隔离       | OS 内核沙箱(Bash)+ 路径守卫(文件工具),见下文限制                                                          |
-| 人工审批(HITL) | 按工具名或命令模式挂起等人确认,超时自动拒绝                                                                   |
+| 人工审批(HITL) | 按工具名或命令模式挂起等人确认,超时自动拒绝;审批服务不可用时按故障拒绝并如实标注,不记为超时                                                                   |
 | 知识库        | 智能体级文档,运行时按问题检索片段注入提示词(BM25)                                                              |
 | 权限         | 登录 / 每用户凭证 / API Key / 智能体分享 / 用户组                                                        |
 | 可嵌入 widget | 一行 `<script>` 挂到企业页面;**API Key 不下发浏览器**                                                  |
 | 用量监控       | 按智能体 / 按天的花费与 token,队列积压提示                                                                |
-| 队列与扩容      | MySQL 租约队列 + Redis 事件总线 + 可独立扩容的 worker                                                  |
+| 队列与扩容      | MySQL 租约队列 + Redis 事件总线 + 可独立扩容的 worker;运行**至多执行一次**                               |
+| 结果回调       | 终态 webhook 走数据库发件箱,失败按退避重试;按所有者的密钥做 HMAC 签名                                      |
+| 幂等调用       | `invoke` 支持 `Idempotency-Key`,超时重试拿回同一个任务,不重复执行与计费                                  |
 
 ---
 
@@ -121,12 +123,22 @@ const bus = new RedisBus(env.redisUrl); // 曾是 InMemoryBus
 | `OWA_ALLOW_STDIO_MCP`                               | 是否允许 stdio MCP,默认 0;开启后智能体可在宿主机启动程序,仅可信部署使用 |
 | `OWA_EMBEDDED_WORKER`                               | 设 0 关掉 web 进程内嵌的 worker(拆进程部署时用)           |
 | `OWA_SHUTDOWN_GRACE_MS`                             | worker 收到 SIGTERM 后等在途任务的上限,默认 60000       |
+| `OWA_WORKER_CONCURRENCY`                            | 单个 worker 进程同时执行的运行数,默认 4(同一会话仍串行)     |
+| `OWA_WEBHOOK_ALLOW_PRIVATE`                         | webhook 允许投递到内网私有网段,默认 0;回环与云元数据地址始终禁止 |
 
 ### 凭证三级覆盖
 
 `请求级 override > 会话级 > 用户自带 > 平台默认`,`baseUrl` 与 `key` 各自独立回退 ——
 允许用户只覆盖 key 而沿用平台网关。用户自带的 key 用 AES-256-GCM 加密入库,
 只在运行时解密注入 agent 子进程;界面只回掩码。
+
+请求级 override(`invoke` 的 `override` 字段)整体加密后随任务入队,只在 worker 执行时解密;
+解不开就让这一轮失败,不会悄悄回落到平台凭证。
+
+**计费账号**:每个会话有一个计费账号(`sessions.billing_user_id`)—— 网页会话是它的所有者,
+API Key / embed 会话是签发那把 key 的账号。花费记在它头上、额度按它算、"用户自带"这一层
+凭证也取它的。额度在入口查一次,worker 执行前再复核一次(两者之间隔着队列)。
+额度是**事前检查**而非预留:并发中的运行可能让实际花费略超上限,超出量以并发运行数为界。
 
 > `OWA_SECRET_KEY` 泄露 = 所有用户的 key 泄露。它是可逆加密(要原样取回注入子进程),不是哈希。
 
@@ -165,8 +177,12 @@ worker 进程会自己加载 `.env` / `.env.local`(与 web 同一套配置)。
 ### 滚动更新
 
 worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落终态**
-(上限 `OWA_SHUTDOWN_GRACE_MS`,默认 60 秒)。超时才强退,那些任务由租约过期后的
-孤儿回收接手 —— 栅栏令牌保证它们不会被重复写入结果。
+(上限 `OWA_SHUTDOWN_GRACE_MS`,默认 60 秒)。到点仍在跑的运行会被主动中止、落 `failed`。
+
+**运行是至多一次的**:worker 崩溃或失租时,租约过期后的孤儿回收把运行判为 `failed`
+(`error.kind = "worker_lost"`),**不会**交给别的 worker 从头重跑。原因是运行有外部副作用
+(MCP 调用、Bash 里的网络请求),栅栏令牌只挡得住重复写结果,挡不住重复执行。
+需要重试的调用方自行重新 `invoke`(配合 `Idempotency-Key` 防止重复受理)。
 
 编排系统的 `terminationGracePeriodSeconds` 要**大于**这个值,否则进程会被 SIGKILL
 打断,白等一场。
@@ -189,6 +205,7 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 | POST            | `/api/auth`                                | —                      | 登录 / 注册 / 登出        |
 | GET             | `/api/auth`                                | cookie                 | 当前登录态(key 只回掩码)     |
 | PUT             | `/api/me/credentials`                      | cookie                 | 设置自带 base_url / key |
+| POST/DELETE     | `/api/me/webhook-secret`                   | cookie                 | 设置或生成 / 清除 webhook 签名密钥 |
 | GET/POST        | `/api/agents`                              | cookie                 | 列出可见智能体 / 创建更新       |
 | GET/POST/DELETE | `/api/agents/{id}/share`                   | cookie(write)          | 分享给用户 / 组 / 公开      |
 | GET/POST/DELETE | `/api/agents/{id}/knowledge`               | cookie(读 read、写 write) | 知识文档                |
@@ -201,7 +218,7 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 | GET/POST        | `/api/sessions/{id}/approvals`             | cookie / key           | 待审列表 / 批准拒绝         |
 | GET/POST        | `/api/sessions/{id}/branch`                | cookie / key           | 运行列表 / 重跑           |
 | POST            | `/api/sessions/{id}/cancel`                | cookie / key           | 取消未完成的运行(见下方延迟说明)   |
-| POST            | `/api/agents/{id}/invoke`                  | **key**                | 对外触发,返回 taskId      |
+| POST            | `/api/agents/{id}/invoke`                  | **key**                | 对外触发,返回 taskId;支持 `Idempotency-Key` |
 | GET             | `/api/agents/{id}/result`                  | **key**                | 轮询结构化结果             |
 | POST            | `/api/embed/token`                         | **key**                | 换短时效嵌入令牌(服务端调)      |
 | POST            | `/api/embed/run`                           | **embed token**        | widget 发起运行         |
@@ -211,6 +228,31 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 
 SSE 传输是裸 `data: <AgentEvent JSON>\n\n`。前端用 `fetch + getReader` 手工拆帧,
 不能用原生 `EventSource` —— 后者带不了鉴权头。
+
+终态 `result` 事件在运行**落库之后**才发布,与数据库口径一致。事件总线是尽力而为的:
+那条事件若丢失,SSE 与 `stream:false` 阻塞请求会从数据库读到终态收尾,不会一直挂着。
+
+输入(`prompt` / `invoke` 的 `input`)上限 200,000 字符,超出返回 413。
+
+### Webhook
+
+智能体配了回调地址,运行落终态(成功 / 失败 / 取消 / worker 失联)后会 `POST` 一次:
+
+```
+X-OWA-Delivery:  <taskId>          # 重发时不变,接收方据此去重
+X-OWA-Timestamp: <unix 秒>
+X-OWA-Signature: v1=<hex(HMAC-SHA256(密钥, "<timestamp>.<原始请求体>"))>
+```
+
+- 签名密钥按用户设置(设置 → 模型凭证 → Webhook 签名密钥),该用户名下所有智能体共用;
+  没配置则不带签名头。验签时用**原始请求体字节**,并拒绝时间戳过旧的请求以防重放。
+- 投递是**至少一次**:失败按 30s / 2m / 10m / 30m / 2h 退避重试,4xx(408/429 除外)不重试。
+- 只有智能体所有者(与管理员)能查看和修改回调地址;有 write 权限的协作者也不行 ——
+  否则能把所有者名下全部调用的结果转发走。
+- 地址不能指向回环、链路本地(含云元数据 169.254.169.254)等网段;内网私有网段需
+  `OWA_WEBHOOK_ALLOW_PRIVATE=1`。保存时检查字面量;投递时的检查接在**建连自己的那次 DNS 解析**上,
+  被检查的地址就是被连接的地址 —— 域名两次解析返回不同地址(DNS rebinding)绕不过去。
+  请求仍以原始域名发出,Host 头与 TLS 证书校验照常针对域名;不复用连接,不跟随重定向。
 
 ---
 
@@ -226,6 +268,16 @@ macOS 的 seatbelt 沙箱会**吞掉沙箱内 Bash 的 stdout** —— agent 跑
 **沙箱关闭时 Bash 没有围栏。** 文件工具(Write/Edit/Read)由路径守卫拦住,始终生效;
 但 Bash 执行任意命令,路径藏在命令文本里,引号/变量/拼接都能绕过匹配 ——
 只能靠内核沙箱。所以本地开发环境下不要跑不受信任的智能体。
+
+### 会话之间没有读隔离
+
+每个会话有独立工作目录,但**隔离的只是写入**。所有会话共享 `dataDir/.agent-home`
+作为 HOME,SDK 把每个会话未脱敏的完整过程(transcript)写在其下的 `.claude/projects/`;
+沙箱的禁读名单只覆盖宿主 HOME 的敏感目录,路径守卫也只拦写不拦读。所以任何会话的
+Bash 或 Read 工具都能读到其它会话的 transcript。`OWA_SANDBOX=0` 时 Bash 更是没有任何围栏。
+
+这是项目明确接受的边界(见 `agents.md` §13.2),适合单租户或内部部署。
+对外多租户需按租户分离 SDK 状态,并对 Bash 和文件工具落实对应的文件访问边界。
 
 ### SDK 的 session id 不是时间点快照
 
@@ -254,7 +306,7 @@ macOS 的 seatbelt 沙箱会**吞掉沙箱内 Bash 的 stdout** —— agent 跑
 (本地没有远端仓库)。
 
 已经验证的是每一条 `run:` 里的命令本身能跑通 —— `pnpm ci:dryrun` 会按 ci.yml 的
-步骤顺序在本机实跑一遍(建库、迁移两个库、typecheck、lint、645 单测、
+步骤顺序在本机实跑一遍(建库、迁移两个库、typecheck、lint、全部单测、
 **故意抽掉依赖确认跳过守卫真的会拦下**、build、e2e 53 条、服务被拆干净)。
 这个脚本在仓库里,谁都可以复现,不是一句"我验过了"。
 
@@ -283,9 +335,8 @@ macOS 的 seatbelt 沙箱会**吞掉沙箱内 Bash 的 stdout** —— agent 跑
 (默认 15 秒)才发现自己已被取消并中止。接口的响应里如实写了这一点 ——
 界面不应在点下去的瞬间就宣称「已停止」。
 
-**已知不一致**:取消时 SSE 末帧报 `status:"failed"`(摘要是 `aborted by user`),
-而数据库里是 `cancelled`。因为 result 事件由编排层发布,它区分不了这次中止来自
-取消还是故障;worker 知道但手上没有总线。数据库口径是准确的。
+取消时 SSE 末帧是 `status:"cancelled"`,与数据库一致。(曾经报 `failed`:result 事件由编排层
+在落库前发布,分不清中止来自取消还是故障。现在由真正写入终态的一方发布。)
 
 ---
 

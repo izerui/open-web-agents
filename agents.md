@@ -165,10 +165,10 @@ Open Web Agents 是一个基于 `@anthropic-ai/claude-agent-sdk` 的多智能体
 
 | 表 | 作用 | 关键字段 |
 | --- | --- | --- |
-| `users` | 平台用户 | `email`, `role`, `default_base_url`, `anthropic_key_enc` |
+| `users` | 平台用户 | `email`, `role`, `default_base_url`, `anthropic_key_enc`, `webhook_secret_enc` |
 | `agents` | 智能体定义 | `config`, `input_schema`, `output_schema`, `verify_rules`, `webhook_url` |
-| `sessions` | 会话与工作目录 | `agent_id`, `workspace_dir`, `sdk_session_id`, `base_url`, `key_enc`, `model` |
-| `runs` | 运行队列与终态 | `status`, `prompt`, `final_text`, `resume_anchor`, `sdk_session_id`, `lease_until`, `lease_owner` |
+| `sessions` | 会话与工作目录 | `agent_id`, `workspace_dir`, `owner_id`, `billing_user_id`, `sdk_session_id`, `base_url`, `key_enc`, `model` |
+| `runs` | 运行队列与终态 | `status`, `prompt`, `agent_config`(入队快照), `override_enc`, `idempotency_key`, `final_text`, `resume_anchor`, `sdk_session_id`, `lease_until`, `lease_owner`, `webhook_state` |
 | `artifacts` | 产物文件元数据 | `session_id`, `path`, `mime`, `size`, `storage_url` |
 | `api_keys` | 系统调用鉴权 | `owner_id`, `agent_id`, `hashed_key`, `quota` |
 | `access_grants` | 通用授权 | `resource_type`, `resource_id`, `principal_type`, `principal_id`, `permission` |
@@ -281,18 +281,20 @@ Open Web Agents 是一个基于 `@anthropic-ai/claude-agent-sdk` 的多智能体
 
 `RunOrchestrator.execute()` 当前负责:
 
-1. 读取 session 和 agent
-2. 解析用户级、会话级、请求级凭证覆盖
+1. 读取 session;智能体配置优先用入队时的快照,没有才读当前配置
+2. 按会话的计费账号复核额度,并解析用户级、会话级、请求级凭证覆盖
 3. 解析模型别名
 4. 解析本轮起跑的 `resumeAnchor`
 5. 检索知识库上下文
 6. `buildSpec()` 组装 `AgentSpec`
-7. 发布 `status` 事件
+7. 发布 `status` 事件(相邻的文本增量合并后再发布)
 8. 调 `engine.run()` 执行 Claude SDK 会话
 9. 记录新的 `sdkSessionId`
 10. 若定义 `outputSchema`,对结构化结果做最终校验
-11. 发布 `result` 事件
-12. 触发 webhook 等终态回调
+11. 返回结果
+
+`result` 事件与 webhook **不在编排层**:worker 把终态写进数据库之后才发布 `result`;
+webhook 在终态的同一条 UPDATE 里登记到发件箱,由投递器异步发送(见 `architecture-deviations.md` F2)。
 
 ### 8.3 Claude SDK 执行层
 
@@ -375,7 +377,11 @@ Open Web Agents 是一个基于 `@anthropic-ai/claude-agent-sdk` 的多智能体
 - `leaseOwner`
 - `attempts`
 
-`leaseOwner` 的作用是防止失去租约的旧 worker 覆写新 worker 结果。
+`leaseOwner` 的作用是防止失去租约的旧 worker 写入结果。
+
+运行是**至多一次**的:只认领 `pending`;租约过期的 `running` 由孤儿回收判为 `failed`
+(`worker_lost`),不会被别的 worker 重跑。单个 worker 进程按 `OWA_WORKER_CONCURRENCY`
+并发执行不同会话的运行,同一会话仍然串行。
 
 ### 10.2 Redis 事件流
 
