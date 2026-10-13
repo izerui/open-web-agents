@@ -1,4 +1,4 @@
-import type { Agent, AgentRepo } from "@/lib/modules/agent/ports";
+import type { Agent, AgentListFilter, AgentRepo } from "@/lib/modules/agent/ports";
 
 /** 内存智能体仓储。垂直切片先内置一个通用智能体,构建器与 MySQL adapter 后续接入。 */
 export class InMemoryAgentRepo implements AgentRepo {
@@ -14,8 +14,22 @@ export class InMemoryAgentRepo implements AgentRepo {
     return a ? structuredClone(a) : null;
   }
 
-  async list(): Promise<Agent[]> {
-    return [...this.items.values()].map((a) => structuredClone(a));
+  async list(filter?: AgentListFilter): Promise<Agent[]> {
+    const all = [...this.items.values()];
+    const picked = filter
+      ? all.filter(
+          (a) =>
+            (filter.ownerId !== undefined && a.ownerId === filter.ownerId) ||
+            (filter.ids?.includes(a.id) ?? false),
+        )
+      : all;
+    return picked.map((a) => structuredClone(a));
+  }
+
+  async countByOwner(): Promise<Map<string, number>> {
+    const m = new Map<string, number>();
+    for (const a of this.items.values()) m.set(a.ownerId, (m.get(a.ownerId) ?? 0) + 1);
+    return m;
   }
 
   async upsert(a: Agent): Promise<Agent> {

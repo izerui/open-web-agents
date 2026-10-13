@@ -56,9 +56,25 @@ export interface AgentVersionRepo {
   activate(agentId: string, version: number, contentHash: string): Promise<void>;
 }
 
+/** 列表过滤:归属于 ownerId 的,或 id 在 ids 里的(两者取并集)。 */
+export interface AgentListFilter {
+  ownerId?: string;
+  ids?: string[];
+}
+
 export interface AgentRepo {
   get(id: string): Promise<Agent | null>;
-  list(): Promise<Agent[]>;
+  /**
+   * 列出智能体。
+   *
+   * 【过滤必须下推到查询】曾经只有无参 list():取全库最新 200 条,路由再在内存里按可见性过滤。
+   * 平台上的智能体一过 200,内置的公开智能体就被挤出那 200 条 —— 新用户的列表是空的,
+   * 工作台输入框直接禁用;数据都在,能看到什么取决于【别人】建了多少。
+   * 不传过滤条件仍是"最新 200 条",只给管理视图用。
+   */
+  list(filter?: AgentListFilter): Promise<Agent[]>;
+  /** 每个所有者名下的智能体数量(管理页统计用,不受列表条数上限影响)。 */
+  countByOwner(): Promise<Map<string, number>>;
   upsert(a: Agent): Promise<Agent>;
   delete?(id: string): Promise<void>;
 }

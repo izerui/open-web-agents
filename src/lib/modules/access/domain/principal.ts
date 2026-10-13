@@ -82,6 +82,31 @@ export function canInvokeAgent(
   return ALLOW;
 }
 
+/**
+ * 主体对某个智能体能做到哪一级:none / read / write。所有"读智能体相关资源"的路由都走它。
+ *
+ * 【为什么不能只看签发人】API Key 曾在这些路由里被 subjectOf 换成签发人的身份,
+ * 只按签发人的资源授权判定 —— Key 自己绑定的 agentId 被丢掉了:给第三方的 A 专用 Key
+ * 能读到签发人名下 B 的完整配置,甚至能改 B 的知识库与分享设置。
+ *
+ * 规则:
+ * - Key 绑定了别的智能体 → none(与"不存在"不可区分);
+ * - Key 最多 read:它是给系统调用智能体用的,不是管理凭证,签发人的 write 不传给它 ——
+ *   于是也拿不到 MCP 环境变量、逃生舱这些只给可写者看的配置;
+ * - 网页登录按资源授权判定。
+ */
+export function agentAccessLevel(
+  p: Principal,
+  agent: OwnedResource,
+  subject: Subject,
+  grants: Grant[],
+): "none" | "read" | "write" {
+  if (p.type === "apiKey" && p.agentId && p.agentId !== agent.id) return "none";
+  if (!hasResourceAccess(subject, agent, "read", grants)) return "none";
+  if (p.type === "apiKey") return "read";
+  return hasResourceAccess(subject, agent, "write", grants) ? "write" : "read";
+}
+
 /** 能否管理智能体定义(创建/修改)。对外 key 一律不行,防止调用方改提示词。 */
 export function canManageAgents(p: Principal): Decision {
   return p.type === "web" ? ALLOW : deny("api keys cannot manage agents");

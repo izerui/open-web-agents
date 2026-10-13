@@ -13,6 +13,13 @@ export interface Run {
   fence?: string;
   /** 仅 findByIdempotencyKey 返回:首次受理时的请求体摘要。 */
   idempotencyHash?: string;
+  /**
+   * 仅 findByIdempotencyKey 返回:首次受理时锁定的智能体版本(undefined = 草稿),
+   * 以及那次的配置快照是否声明了 outputSchema(快照缺失的旧任务为 undefined)。
+   * 重放必须如实回报【原任务】的版本与结果形态,而不是当前发布的版本。
+   */
+  agentVersion?: number;
+  hasOutputSchema?: boolean;
 }
 
 export interface NewRun {

@@ -3,16 +3,18 @@ import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import {
   type Subject,
-  filterVisible,
+  grantedResourceIds,
   hasResourceAccess,
   isPublic,
 } from "@/lib/modules/access/domain/grants";
+import { agentAccessLevel } from "@/lib/modules/access/domain/principal";
 import {
   type AgentConfig,
   pickAgentConfig,
   redactAgentConfigForReader,
 } from "@/lib/modules/agent/domain/config";
 import { validateAgentConfig } from "@/lib/modules/agent/domain/validate-config";
+import type { Agent } from "@/lib/modules/agent/ports";
 import { validateWebhookUrl } from "@/lib/modules/integration/domain/webhook-policy";
 
 /**
@@ -33,18 +35,40 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const { agents, grants, auth, env, releases } = getContainer();
   try {
-    const subject = await auth.resolveSubject(req);
-    const all = await agents.list();
+    // 保留 principal:API Key 只能看到它绑定的智能体,且永远按只读者对待(见 agentAccessLevel)
+    const principal = await auth.resolveWeb(req);
+    const subject = await auth.subjectOf(principal);
     // 一次拉齐该类型的授权,避免逐个智能体查一次(N+1)
     const allGrants = await grants.listForType("agent");
-    const visible = filterVisible(subject, all, allGrants);
+    /*
+     * 先算出可能可见的范围,再让 SQL 只取这些 —— 不能先取全库最新 N 条再过滤:
+     * 别人的智能体一多,内置的公开智能体就被挤出去,新用户的列表直接是空的。
+     */
+    let all: Agent[];
+    if (principal.type === "apiKey" && principal.agentId) {
+      const bound = await agents.get(principal.agentId);
+      all = bound ? [bound] : [];
+    } else {
+      const scoped = await agents.list({
+        ownerId: subject.userId,
+        ids: grantedResourceIds(subject, allGrants),
+      });
+      // 管理员另外看到全库最近更新的(管理视图);与自己可见的合并去重
+      const extra = principal.type === "web" && subject.role === "admin" ? await agents.list() : [];
+      all = [...new Map([...scoped, ...extra].map((a) => [a.id, a])).values()];
+    }
+    const levels = new Map(
+      all.map((a) => [a.id, agentAccessLevel(principal, a, subject, allGrants)] as const),
+    );
+    const visible = all.filter((a) => levels.get(a.id) !== "none");
     // 同理一次取齐各自当前发布的版本
     const published = await releases.publishedOf(visible);
 
     return Response.json({
       agents: visible.map((a) => {
-        const manage = canManageWebhook(subject, a);
-        const canWrite = hasResourceAccess(subject, a, "write", allGrants);
+        // 回调地址可能带接收方令牌:只给网页登录的所有者 / 管理员
+        const manage = principal.type === "web" && canManageWebhook(subject, a);
+        const canWrite = levels.get(a.id) === "write";
         const pub = published.get(a.id);
         /*
          * 只读者看到的是【已发布版本】—— 他们的会话跑的就是这一版(见 POST /api/sessions),

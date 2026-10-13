@@ -71,12 +71,61 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   const body = (await req.json().catch(() => ({}))) as InvokeBody;
 
+  // ── 第一步:只看请求本身的形状(与版本无关),算出请求摘要 ─────────────────────
+  const prompt =
+    typeof body.input === "string" ? body.input.trim() : JSON.stringify(body.input ?? {});
+  if (!prompt || prompt === "{}") {
+    return apiError(400, "input_invalid", "input is required");
+  }
+
   /*
-   * 这次跑哪一版。入参校验、结构化结果的有无都以【这一版】为准 ——
-   * 草稿里刚改的 inputSchema 不该影响还在用已发布版本的调用方。
+   * 请求级凭证覆盖(三级链最高优先)。
+   * 曾经在这里解析完就丢了:入队只存了 prompt,worker 永远拿不到它,
+   * 调用方以为用了自己的 key,实际跑的是别的凭证,且没有任何报错。
    */
+  const override = parseOverride(body.override);
+  if (!override.ok) return apiError(400, "invalid_request", override.reason);
+
   const requested = parseVersion(body.version);
   if (!requested.ok) return apiError(400, "invalid_request", "version 须为正整数");
+
+  // 同键重放时用来判断"是不是同一个请求";请求体里的 version 也算请求内容
+  const requestHash = sha256(
+    JSON.stringify({ prompt, override: override.value ?? null, version: requested.value ?? null }),
+  );
+
+  // ── 第二步:幂等重放 —— 必须在解析当前版本、校验契约【之前】 ───────────────────
+  /*
+   * 调用方因超时重试同一个请求时带上同一个 Idempotency-Key,拿回的是第一次受理的任务,
+   * 而不是又跑一次、又扣一次费。键按调用方 + 智能体隔离。
+   *
+   * 【为什么要排在版本解析之前】不指定版本的请求按 v1 受理后,作者发布了 schema 不兼容的 v2;
+   * 原请求原键重试若先按"当前发布版本"校验,会被 v2 拒成 400,拿不回已经受理的任务 ——
+   * 恰恰是幂等键要保证的场景。重放只认原任务:原版本、原快照决定的结果形态。
+   */
+  const rawKey = req.headers.get("Idempotency-Key")?.trim();
+  let idempotencyKey: string | undefined;
+  if (rawKey) {
+    if (!isValidIdempotencyKey(rawKey)) {
+      return apiError(
+        400,
+        "idempotency_key_invalid",
+        "Idempotency-Key 须为 1~128 个可见 ASCII 字符",
+      );
+    }
+    // 作用域 = 调用方 + 智能体:同一个键换一个智能体调用,不该拿回另一个智能体的任务。
+    // 存摘要而不是原文:拼起来可能超过列宽
+    const scope = principal.type === "apiKey" ? `k:${principal.keyId}` : `u:${principal.userId}`;
+    idempotencyKey = sha256(`${scope}|${agentId}|${rawKey}`);
+    const existing = await runs.findByIdempotencyKey(idempotencyKey);
+    if (existing) return replayed(existing, requestHash, agent.config.outputSchema !== undefined);
+  }
+
+  // ── 第三步:新请求 —— 解析这次跑哪一版,按那一版校验契约 ─────────────────────────
+  /*
+   * 入参校验、结构化结果的有无都以【这一版】为准 ——
+   * 草稿里刚改的 inputSchema 不该影响还在用已发布版本的调用方。
+   */
   let release: Awaited<ReturnType<typeof releases.resolve>>;
   try {
     release = await releases.resolve(agent, requested.value);
@@ -85,12 +134,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     throw err;
   }
   const structured = release.config.outputSchema !== undefined;
-
-  const prompt =
-    typeof body.input === "string" ? body.input.trim() : JSON.stringify(body.input ?? {});
-  if (!prompt || prompt === "{}") {
-    return apiError(400, "input_invalid", "input is required");
-  }
 
   /**
    * 入站契约校验。智能体声明了 inputSchema,调用方就必须按它传。
@@ -118,7 +161,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     }
   }
 
-  // 每次 invoke 开一个新会话(= 独立工作目录),互不干扰;归属记到发起的 key 上
   try {
     assertPromptSize(prompt);
   } catch (err) {
@@ -128,42 +170,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     throw err;
   }
 
-  /*
-   * 请求级凭证覆盖(三级链最高优先)。
-   * 曾经在这里解析完就丢了:入队只存了 prompt,worker 永远拿不到它,
-   * 调用方以为用了自己的 key,实际跑的是别的凭证,且没有任何报错。
-   */
-  const override = parseOverride(body.override);
-  if (!override.ok) return apiError(400, "invalid_request", override.reason);
-
-  /*
-   * 幂等键。调用方因超时重试同一个请求时带上同一个 Idempotency-Key,
-   * 拿回的是第一次受理的任务,而不是又跑一次、又扣一次费。
-   * 键按调用方隔离:不同 key / 不同账号用同样的字符串不会撞在一起。
-   */
-  const rawKey = req.headers.get("Idempotency-Key")?.trim();
-  // 同键重放时用来判断"是不是同一个请求"
-  // 请求体里的 version 也算请求内容:同一个键换了版本是不同的请求
-  const requestHash = sha256(
-    JSON.stringify({ prompt, override: override.value ?? null, version: requested.value ?? null }),
-  );
-  let idempotencyKey: string | undefined;
-  if (rawKey) {
-    if (!isValidIdempotencyKey(rawKey)) {
-      return apiError(
-        400,
-        "idempotency_key_invalid",
-        "Idempotency-Key 须为 1~128 个可见 ASCII 字符",
-      );
-    }
-    // 作用域 = 调用方 + 智能体:同一个键换一个智能体调用,不该拿回另一个智能体的任务。
-    // 存摘要而不是原文:拼起来可能超过列宽
-    const scope = principal.type === "apiKey" ? `k:${principal.keyId}` : `u:${principal.userId}`;
-    idempotencyKey = sha256(`${scope}|${agentId}|${rawKey}`);
-    const existing = await runs.findByIdempotencyKey(idempotencyKey);
-    if (existing) return replayed(existing, requestHash, structured);
-  }
-
+  // 每次 invoke 开一个新会话(= 独立工作目录),互不干扰;归属记到发起的 key 上
   const sessionId = randomUUID().replace(/-/g, "").slice(0, 24);
   const workspaceDir = workspacePathFor(env.dataDir, sessionId);
   await fs.mkdir(workspaceDir, { recursive: true });
@@ -198,7 +205,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (err instanceof DuplicateIdempotencyKey) {
       // 并发的同键请求:另一个先入队了,返回它
       const existing = await runs.findByIdempotencyKey(err.idempotencyKey);
-      if (existing) return replayed(existing, requestHash, structured);
+      if (existing) {
+        return replayed(existing, requestHash, agent.config.outputSchema !== undefined);
+      }
     }
     throw err;
   }
@@ -216,11 +225,20 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   );
 }
 
-/** 同一幂等键的重复请求:返回第一次受理的任务。200 而非 202,让调用方知道这是重放。 */
+/**
+ * 同一幂等键的重复请求:返回第一次受理的任务。200 而非 202,让调用方知道这是重放。
+ * 版本与结果形态取自【原任务】;快照缺失的旧任务(版本功能之前受理)才回退到当前草稿判断。
+ */
 function replayed(
-  run: { id: string; sessionId: string; idempotencyHash?: string },
+  run: {
+    id: string;
+    sessionId: string;
+    idempotencyHash?: string;
+    agentVersion?: number;
+    hasOutputSchema?: boolean;
+  },
   requestHash: string,
-  structured: boolean,
+  legacyStructured: boolean,
 ): Response {
   // 同一个键配了不同的请求体:多半是调用方复用键的 bug,明确报错而不是返回别的任务
   if (run.idempotencyHash && run.idempotencyHash !== requestHash) {
@@ -232,7 +250,13 @@ function replayed(
     );
   }
   return Response.json(
-    { taskId: run.id, sessionId: run.sessionId, structured, replayed: true },
+    {
+      taskId: run.id,
+      sessionId: run.sessionId,
+      structured: run.hasOutputSchema ?? legacyStructured,
+      agentVersion: run.agentVersion ?? null,
+      replayed: true,
+    },
     { status: 200 },
   );
 }

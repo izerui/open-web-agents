@@ -107,12 +107,23 @@ export class MysqlRunRepo implements RunRepo {
         status: runs.status,
         leaseUntil: runs.leaseUntil,
         idempotencyHash: runs.idempotencyHash,
+        agentVersion: runs.agentVersion,
+        agentConfig: runs.agentConfig,
       })
       .from(runs)
       .where(eq(runs.idempotencyKey, key))
       .limit(1);
     const row = rows[0];
-    return row ? { ...toRun(row), idempotencyHash: row.idempotencyHash ?? undefined } : null;
+    if (!row) return null;
+    const cfg = row.agentConfig as { outputSchema?: unknown } | null;
+    return {
+      ...toRun(row),
+      idempotencyHash: row.idempotencyHash ?? undefined,
+      agentVersion: row.agentVersion ?? undefined,
+      hasOutputSchema: cfg
+        ? cfg.outputSchema !== undefined && cfg.outputSchema !== null
+        : undefined,
+    };
   }
 
   /**

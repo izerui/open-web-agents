@@ -25,16 +25,12 @@ export async function GET(req: Request) {
 
     const since = monthStart();
     // 三个查询互不依赖,并行拿;各自都是一次性批量,没有 N+1
-    const [list, costMap, allAgents] = await Promise.all([
+    // 智能体数量用聚合查询 —— 曾经数的是"全库最新 200 条",智能体一多就数错
+    const [list, costMap, agentCount] = await Promise.all([
       users.listAll(),
       usage.costByOwner(since),
-      agents.list(),
+      agents.countByOwner(),
     ]);
-
-    const agentCount = new Map<string, number>();
-    for (const a of allAgents) {
-      agentCount.set(a.ownerId, (agentCount.get(a.ownerId) ?? 0) + 1);
-    }
 
     return Response.json({
       monthStart: since,

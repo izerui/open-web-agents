@@ -2,8 +2,9 @@ import type { Db } from "@/lib/db/client";
 import { agents } from "@/lib/db/schema";
 import type { AgentConfig } from "@/lib/modules/agent/domain/config";
 import type { Agent, AgentRepo } from "@/lib/modules/agent/ports";
+import type { AgentListFilter } from "@/lib/modules/agent/ports";
 import type { JsonSchema } from "@/lib/shared";
-import { desc, eq } from "drizzle-orm";
+import { type SQL, count, desc, eq, inArray, or } from "drizzle-orm";
 
 interface Row {
   id: string;
@@ -67,13 +68,35 @@ export class MysqlAgentRepo implements AgentRepo {
     return row ? toAgent(row) : null;
   }
 
-  async list(): Promise<Agent[]> {
+  async list(filter?: AgentListFilter): Promise<Agent[]> {
+    if (!filter) {
+      const rows = await this.db
+        .select(COLUMNS)
+        .from(agents)
+        .orderBy(desc(agents.updatedAt))
+        .limit(200);
+      return rows.map(toAgent);
+    }
+    const conds: SQL[] = [];
+    if (filter.ownerId !== undefined) conds.push(eq(agents.ownerId, filter.ownerId));
+    if (filter.ids?.length) conds.push(inArray(agents.id, filter.ids));
+    if (conds.length === 0) return [];
     const rows = await this.db
       .select(COLUMNS)
       .from(agents)
+      .where(or(...conds))
       .orderBy(desc(agents.updatedAt))
-      .limit(200);
+      // 已按可见范围过滤,这里的上限只是防呆,不再会把别人的智能体挤出去
+      .limit(1000);
     return rows.map(toAgent);
+  }
+
+  async countByOwner(): Promise<Map<string, number>> {
+    const rows = await this.db
+      .select({ ownerId: agents.ownerId, n: count() })
+      .from(agents)
+      .groupBy(agents.ownerId);
+    return new Map(rows.map((r) => [r.ownerId, Number(r.n)]));
   }
 
   async upsert(a: Agent): Promise<Agent> {

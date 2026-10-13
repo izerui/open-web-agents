@@ -40,6 +40,15 @@ function matchesSubject(g: Grant, s: Subject): boolean {
   return false;
 }
 
+/**
+ * 授权记录里该主体能匹配上的资源 id(含公开资源)。
+ * 列表查询用它先算出"可能可见"的集合,再交给仓储下推到 SQL ——
+ * 而不是先取全库最新 N 条再在内存里过滤(别人的资源一多,自己的就被挤出去)。
+ */
+export function grantedResourceIds(s: Subject, grants: Grant[]): string[] {
+  return [...new Set(grants.filter((g) => matchesSubject(g, s)).map((g) => g.resourceId))];
+}
+
 export interface OwnedResource {
   id: string;
   ownerId: string;

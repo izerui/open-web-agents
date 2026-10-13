@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
-import { PUBLIC_PRINCIPAL, hasResourceAccess } from "@/lib/modules/access/domain/grants";
-import type { Principal } from "@/lib/modules/access/domain/principal";
+import { PUBLIC_PRINCIPAL } from "@/lib/modules/access/domain/grants";
+import { type Principal, agentAccessLevel } from "@/lib/modules/access/domain/principal";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,16 +13,20 @@ export const dynamic = "force-dynamic";
  */
 async function requireWrite(req: Request, agentId: string) {
   const { agents, grants, auth } = getContainer();
-  const subject = await auth.resolveSubject(req);
+  // 保留 principal:API Key 绑定的智能体与"Key 不可写"都要算进去 ——
+  // 否则一把给第三方的 Key 就能把签发人名下的任意智能体公开出去
+  const principal = await auth.resolveWeb(req);
+  const subject = await auth.subjectOf(principal);
   const agent = await agents.get(agentId);
   if (!agent) return { error: Response.json({ error: "not found" }, { status: 404 }) };
 
   const list = await grants.listForResource("agent", agentId);
+  const access = agentAccessLevel(principal, agent, subject, list);
   // 连读都无权 → 404,不确认资源存在;能读但不能写 → 403
-  if (!hasResourceAccess(subject, agent, "read", list)) {
+  if (access === "none") {
     return { error: Response.json({ error: "not found" }, { status: 404 }) };
   }
-  if (!hasResourceAccess(subject, agent, "write", list)) {
+  if (access !== "write") {
     return { error: Response.json({ error: "no write permission" }, { status: 403 }) };
   }
   return { subject, agent, list };

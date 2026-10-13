@@ -197,3 +197,135 @@ describe("智能体版本与发布", () => {
     expect([401, 403]).toContain(byKey.status);
   });
 });
+
+describe("API Key 的智能体绑定与只读边界", () => {
+  type VersionDetail = {
+    version?: {
+      config?: { mcpServers?: { env?: Record<string, string> }[]; escapeHatch?: unknown };
+    };
+  };
+  let owner: Client;
+  let a = "";
+  let b = "";
+  let keyA = "";
+  const anon = new Client("anon-bound");
+  const withKey = () => ({ "X-Api-Key": keyA });
+
+  beforeAll(async () => {
+    if (!(await serverUp())) throw new Error("e2e 需要一个跑着的服务");
+    owner = await newUser("bound-owner");
+    const mk = async (name: string) =>
+      (
+        await owner.post<AgentRes>("/api/agents", {
+          name,
+          config: {
+            systemPrompt: name,
+            model: "sonnet",
+            mcpServers: [
+              {
+                name: "files",
+                type: "http",
+                url: "https://mcp.example.com",
+                env: { TOKEN: "s3cret" },
+              },
+            ],
+          },
+        })
+      ).body.agent?.id ?? "";
+    a = await mk("绑定-A");
+    b = await mk("绑定-B");
+    for (const id of [a, b]) {
+      expect((await owner.post(`/api/agents/${id}/versions`, {})).status).toBe(201);
+    }
+    keyA =
+      (await owner.post<{ plaintext?: string }>("/api/keys", { name: "only-a", agentId: a })).body
+        .plaintext ?? "";
+  });
+
+  it("A 专用 Key 读 B 的版本:404(与不存在不可区分)", async () => {
+    expect((await anon.get(`/api/agents/${b}/versions`, withKey())).status).toBe(404);
+    expect((await anon.get(`/api/agents/${b}/versions/1`, withKey())).status).toBe(404);
+  });
+
+  it("A 专用 Key 读 A 的版本详情:能读,但 MCP 环境变量脱敏、没有逃生舱字段", async () => {
+    const r = await anon.get<VersionDetail>(`/api/agents/${a}/versions/1`, withKey());
+    expect(r.status).toBe(200);
+    expect(r.body.version?.config?.mcpServers?.[0]?.env).toEqual({ TOKEN: "***" });
+    expect(JSON.stringify(r.body)).not.toContain("s3cret");
+    expect(r.body.version?.config).not.toHaveProperty("escapeHatch");
+    // 所有者在网页上看到的是原值 —— 脱敏是因为 Key,不是因为数据丢了
+    const mine = await owner.get<VersionDetail>(`/api/agents/${a}/versions/1`);
+    expect(mine.body.version?.config?.mcpServers?.[0]?.env).toEqual({ TOKEN: "s3cret" });
+  });
+
+  it("智能体列表:A 专用 Key 只看得到 A,且配置脱敏", async () => {
+    const r = await anon.get<ListRes>("/api/agents", withKey());
+    expect(r.status).toBe(200);
+    expect(r.body.agents?.map((x) => x.id)).toEqual([a]);
+    expect(JSON.stringify(r.body)).not.toContain("s3cret");
+  });
+
+  it("知识库与分享:Key 碰不到 B;对 A 也只能读、不能改", async () => {
+    expect((await anon.get(`/api/agents/${b}/knowledge`, withKey())).status).toBe(404);
+    expect((await anon.get(`/api/agents/${a}/knowledge`, withKey())).status).toBe(200);
+    expect(
+      (await anon.post(`/api/agents/${a}/knowledge`, { title: "t", content: "c" }, withKey()))
+        .status,
+    ).toBe(403);
+    expect(
+      (await anon.post(`/api/agents/${b}/share`, { target: "public" }, withKey())).status,
+    ).toBe(404);
+    expect(
+      (await anon.post(`/api/agents/${a}/share`, { target: "public" }, withKey())).status,
+    ).toBe(403);
+  });
+});
+
+describe("幂等重放跨版本:v1 受理 → 发布不兼容的 v2 → 原键原请求重试", () => {
+  it("仍返回原 taskId、原版本与原结果形态,而不是被 v2 的 schema 拒绝", async () => {
+    if (!(await serverUp())) throw new Error("e2e 需要一个跑着的服务");
+    const owner = await newUser("replay-owner");
+    const save = (id: string | undefined, inputSchema: unknown, outputSchema?: unknown) =>
+      owner.post<AgentRes>("/api/agents", {
+        id,
+        name: "重放",
+        config: { systemPrompt: "p", model: "sonnet", inputSchema, outputSchema },
+      });
+    const id = (await save(undefined, schemaA)).body.agent?.id ?? "";
+    expect((await owner.post(`/api/agents/${id}/versions`, {})).status).toBe(201);
+    const key =
+      (await owner.post<{ plaintext?: string }>("/api/keys", { name: "r", agentId: id })).body
+        .plaintext ?? "";
+    const anon = new Client("anon-replay");
+    type R = InvokeRes & { structured?: boolean; replayed?: boolean };
+    const call = () =>
+      anon.post<R>(
+        `/api/agents/${id}/invoke`,
+        { input: { a: "首次" } },
+        { "X-Api-Key": key, "Idempotency-Key": `replay-${id}` },
+      );
+
+    const first = await call();
+    expect(first.status).toBe(202);
+    expect(first.body.agentVersion).toBe(1);
+    expect(first.body.structured).toBe(false);
+
+    // v2:入参改成 schemaB(与原请求不兼容),并声明了 outputSchema
+    await save(id, schemaB, { type: "object", properties: { ok: { type: "boolean" } } });
+    expect((await owner.post(`/api/agents/${id}/versions`, {})).status).toBe(201);
+    // 新请求确实会被 v2 拒绝 —— 证明下面的重放不是因为校验碰巧通过
+    const fresh = await anon.post<R>(
+      `/api/agents/${id}/invoke`,
+      { input: { a: "新请求" } },
+      { "X-Api-Key": key },
+    );
+    expect(fresh.status).toBe(400);
+
+    const retry = await call();
+    expect(retry.status).toBe(200);
+    expect(retry.body.replayed).toBe(true);
+    expect(retry.body.taskId).toBe(first.body.taskId);
+    expect(retry.body.agentVersion).toBe(1);
+    expect(retry.body.structured).toBe(false);
+  });
+});

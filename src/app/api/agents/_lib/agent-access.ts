@@ -1,19 +1,20 @@
 import { apiError } from "@/lib/api-error";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
-import { type Subject, hasResourceAccess } from "@/lib/modules/access/domain/grants";
+import type { Subject } from "@/lib/modules/access/domain/grants";
+import { type Principal, agentAccessLevel } from "@/lib/modules/access/domain/principal";
 import type { Agent } from "@/lib/modules/agent/ports";
 
 export type AgentAccess =
-  | { ok: true; agent: Agent; subject: Subject; canWrite: boolean }
+  | { ok: true; agent: Agent; principal: Principal; subject: Subject; canWrite: boolean }
   | { ok: false; res: Response };
 
 /**
- * 打开一个智能体并校验权限。
+ * 打开一个智能体并校验权限(判定见 agentAccessLevel)。
  *
- * - read:登录用户或 API Key,能看到这个智能体即可;
- * - write:只限网页登录且有管理智能体的功能权限,并对该智能体有 write 授权
- *   (发布、回滚会改变所有对外调用方拿到的结果,不该交给 API Key)。
+ * - read:登录用户,或【绑定在这个智能体上 / 未绑定】的 API Key;
+ * - write:只限网页登录、有管理智能体的功能权限,且对该智能体有 write 授权。
+ *   API Key 永远不是 write —— 签发人的写权限不传给 Key,所以 Key 也拿不到未脱敏配置。
  *
  * 连读都无权时一律 404 —— 用 403 等于向调用方确认"这个 id 确实存在"。
  */
@@ -23,9 +24,10 @@ export async function openAgent(
   level: "read" | "write",
 ): Promise<AgentAccess> {
   const { auth, agents, grants } = getContainer();
+  let principal: Principal;
   let subject: Subject;
   try {
-    const principal = await auth.resolveWeb(req);
+    principal = await auth.resolveWeb(req);
     if (level === "write") auth.assertCanManageAgents(principal);
     subject = await auth.subjectOf(principal);
   } catch (err) {
@@ -35,13 +37,14 @@ export async function openAgent(
   }
 
   const agent = await agents.get(id);
-  const list = agent ? await grants.listForResource("agent", id) : [];
-  if (!agent || !hasResourceAccess(subject, agent, "read", list)) {
+  const access = agent
+    ? agentAccessLevel(principal, agent, subject, await grants.listForResource("agent", id))
+    : "none";
+  if (!agent || access === "none") {
     return { ok: false, res: apiError(404, "not_found", "agent not found") };
   }
-  const canWrite = hasResourceAccess(subject, agent, "write", list);
-  if (level === "write" && !canWrite) {
+  if (level === "write" && access !== "write") {
     return { ok: false, res: apiError(403, "forbidden", "no write permission on this agent") };
   }
-  return { ok: true, agent, subject, canWrite };
+  return { ok: true, agent, principal, subject, canWrite: access === "write" };
 }
