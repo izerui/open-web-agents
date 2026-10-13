@@ -4,8 +4,10 @@
 // 曾经复制即 401(没带 Key、相对地址、入参写死)。生成逻辑集中一处、有单测兜着。
 //
 // 示例代码的两条底线:
-// 1. 轮询必须检查 HTTP 状态并有整体期限 —— Key 被吊销后 /result 回 401,
-//    响应里没有 done,不检查就会无限请求。
+// 1. 轮询必须检查 HTTP 状态,并且整体期限要覆盖【网络等待本身】 ——
+//    Key 被吊销后 /result 回 401,响应里没有 done,不检查就会无限请求;
+//    只在拿到响应后才比较 deadline 也不够:服务端不回响应、或发了响应头不结束 body,
+//    就永远走不到那次比较。
 // 2. 示例入参必须过平台同款的 inputSchema 校验;过不了就明说"需要按实际填写",
 //    不能继续承诺"复制即可运行"。
 
@@ -122,6 +124,8 @@ export interface SnippetInput {
   agentId: string;
   inputSchema?: Record<string, unknown> | null;
   hasOutputSchema: boolean;
+  /** 轮询整体期限(秒),默认 POLL_DEADLINE_SECONDS;测试里调小 */
+  pollDeadlineSeconds?: number;
 }
 
 /** 轮询整体期限(秒)。长任务请改用 Webhook 回调,而不是把期限调得很大。 */
@@ -146,7 +150,9 @@ export function buildSnippets({
   agentId,
   inputSchema,
   hasOutputSchema,
+  pollDeadlineSeconds = POLL_DEADLINE_SECONDS,
 }: SnippetInput): Snippets {
+  const N = pollDeadlineSeconds;
   const sample = sampleInput(inputSchema);
   const input = sample.value;
   const body = JSON.stringify({ input }, null, 2);
@@ -165,12 +171,12 @@ export function buildSnippets({
 curl ${origin}/api/agents/<taskId>/result -H "X-Api-Key: $OWA_API_KEY"
 # → { "status": "success", "done": true, "${resultField}": … }`;
 
-  const python = `import os, time, uuid, requests
+  const python = `import json, os, time, uuid, requests
 
 BASE = ${JSON.stringify(origin)}
 HEADERS = {"X-Api-Key": os.environ["OWA_API_KEY"]}
 ${todo ? `\n# ${todo}` : ""}
-# 重试时沿用同一个 Idempotency-Key,不会重复执行与计费
+# 重试时沿用同一个 Idempotency-Key,不会重复执行与计费。提交单独限时 30 秒
 r = requests.post(
     f"{BASE}/api/agents/${agentId}/invoke",
     headers={**HEADERS, "Idempotency-Key": str(uuid.uuid4())},
@@ -181,18 +187,44 @@ if r.status_code not in (200, 202):
     raise RuntimeError(f"提交失败 HTTP {r.status_code}: {r.text}")
 task_id = r.json()["taskId"]
 
-# 整体期限:Key 被吊销、任务卡住时都要能结束;长任务建议改用 Webhook 回调
-deadline = time.monotonic() + ${POLL_DEADLINE_SECONDS}
+# 轮询整体期限 ${N} 秒:连接、等响应头、读响应体、间隔等待都算在内。
+# requests 的 timeout 只管单次连接/两次读之间的间隔,不是总时长 ——
+# 所以每次请求前按剩余时间限时(最多 30 秒),并且边读响应体边检查期限。
+# 超时语义:总耗时不超过"期限 + 一次读等待"(读等待 ≤ min(30 秒, 发请求时的剩余时间));
+# 需要严格准时的话,在独立线程/进程里跑并由外层强制结束。
+# 长任务建议改用 Webhook 回调,而不是把期限调得很大。
+deadline = time.monotonic() + ${N}
+
+def timed_out():
+    return TimeoutError(f"等待结果超时(${N} 秒),taskId={task_id}")
+
+def get_result():
+    left = deadline - time.monotonic()
+    if left <= 0:
+        raise timed_out()
+    try:
+        with requests.get(
+            f"{BASE}/api/agents/{task_id}/result",
+            headers=HEADERS, timeout=min(30, left), stream=True,
+        ) as resp:
+            body = b""
+            for chunk in resp.iter_content(8192):
+                body += chunk
+                if time.monotonic() > deadline:
+                    raise timed_out()
+    except requests.exceptions.RequestException as e:
+        if time.monotonic() >= deadline:
+            raise timed_out() from e
+        raise
+    if resp.status_code != 200:
+        raise RuntimeError(f"查询结果失败 HTTP {resp.status_code}: {body.decode(errors='replace')}")
+    return json.loads(body)
+
 while True:
-    r = requests.get(f"{BASE}/api/agents/{task_id}/result", headers=HEADERS, timeout=30)
-    if r.status_code != 200:
-        raise RuntimeError(f"查询结果失败 HTTP {r.status_code}: {r.text}")
-    res = r.json()
+    res = get_result()
     if res.get("done"):
         break
-    if time.monotonic() > deadline:
-        raise TimeoutError(f"等待结果超时,taskId={task_id}")
-    time.sleep(2)
+    time.sleep(max(0, min(2, deadline - time.monotonic())))
 
 if res["status"] != "success":
     raise RuntimeError(res.get("error"))
@@ -201,25 +233,35 @@ print(res["${resultField}"])`;
   const node = `const BASE = ${JSON.stringify(origin)};
 const headers = { "X-Api-Key": process.env.OWA_API_KEY };
 ${todo ? `\n// ${todo}` : ""}
-// 重试时沿用同一个 Idempotency-Key,不会重复执行与计费
+// 重试时沿用同一个 Idempotency-Key,不会重复执行与计费。提交单独限时 30 秒
 const r = await fetch(\`\${BASE}/api/agents/${agentId}/invoke\`, {
   method: "POST",
   headers: { ...headers, "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
   body: JSON.stringify(${JSON.stringify({ input }, null, 2).replaceAll("\n", "\n  ")}),
+  signal: AbortSignal.timeout(30_000),
 });
 if (!r.ok) throw new Error(\`提交失败 HTTP \${r.status}: \${await r.text()}\`);
 const { taskId } = await r.json();
 
-// 整体期限:Key 被吊销、任务卡住时都要能结束;长任务建议改用 Webhook 回调
-const deadline = Date.now() + ${POLL_DEADLINE_SECONDS}_000;
+// 轮询整体期限 ${N} 秒:同一个取消信号覆盖每次请求的等待、响应体读取与间隔等待,
+// 服务端不回响应、只发响应头不结束 body、或一直慢速发送,都会在期限到时被取消。
+// 长任务建议改用 Webhook 回调,而不是把期限调得很大。
+const signal = AbortSignal.timeout(${N * 1000});
 let res;
-for (;;) {
-  const q = await fetch(\`\${BASE}/api/agents/\${taskId}/result\`, { headers });
-  if (!q.ok) throw new Error(\`查询结果失败 HTTP \${q.status}: \${await q.text()}\`);
-  res = await q.json();
-  if (res.done) break;
-  if (Date.now() > deadline) throw new Error(\`等待结果超时,taskId=\${taskId}\`);
-  await new Promise((ok) => setTimeout(ok, 2000));
+try {
+  for (;;) {
+    const q = await fetch(\`\${BASE}/api/agents/\${taskId}/result\`, { headers, signal });
+    if (!q.ok) throw new Error(\`查询结果失败 HTTP \${q.status}: \${await q.text()}\`);
+    res = await q.json();
+    if (res.done) break;
+    await new Promise((ok, fail) => {
+      const t = setTimeout(ok, 2000);
+      signal.addEventListener("abort", () => (clearTimeout(t), fail(signal.reason)), { once: true });
+    });
+  }
+} catch (err) {
+  if (signal.aborted) throw new Error(\`等待结果超时(${N} 秒),taskId=\${taskId}\`, { cause: err });
+  throw err;
 }
 
 if (res.status !== "success") throw new Error(res.error?.message);

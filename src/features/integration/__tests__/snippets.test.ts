@@ -1,10 +1,12 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { buildSnippets, sampleFromSchema, sampleInput } from "@/features/integration/snippets";
 import { validateInput } from "@/lib/modules/agent/domain/validate-output";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 describe("sampleFromSchema + 校验复核", () => {
   // 每一条都要求:生成值能真的通过平台的入参校验,而不只是"长得像"
@@ -118,163 +120,212 @@ describe("buildSnippets 文本内容", () => {
 });
 
 // ── 真正执行生成出来的示例代码 ────────────────────────────────────────────────
+//
+// 用真实的本地 HTTP 服务、在子进程里跑真实的 node / python3 + requests。
+// 只模拟"快速返回 done:false"证明不了网络等待有界,所以这里专门有两种卡住的服务端:
+// 请求进来后永不响应;发了响应头和半截 body 之后再也不动。
 
-const snippets = buildSnippets({
-  origin: "https://owa.example.com",
-  agentId: "a1",
-  inputSchema: {
-    type: "object",
-    required: ["n"],
-    properties: { n: { type: "integer", minimum: 1 } },
-  },
-  hasOutputSchema: true,
+/** 测试里把轮询期限调到 1 秒,子进程整体时限 15 秒兜底 */
+const DEADLINE_S = 1;
+
+type Mode = "unauth" | "pending" | "hang" | "stall" | "trickle" | "reject" | "ok";
+
+let server: http.Server;
+let origin = "";
+const hits: Record<string, number> = {};
+
+beforeAll(async () => {
+  server = http.createServer((req, res) => {
+    // /api/agents/<mode>/invoke 与 /api/agents/<mode>/result —— 用 agentId / taskId 携带场景
+    const m = /^\/api\/agents\/([a-z]+)\/(invoke|result)$/.exec(req.url ?? "");
+    const mode = m?.[1] as Mode | undefined;
+    const send = (status: number, body: unknown) => {
+      res.writeHead(status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(body));
+    };
+    if (!m || !mode) return send(404, { error: "no route", code: "not_found" });
+    hits[`${mode}:${m[2]}`] = (hits[`${mode}:${m[2]}`] ?? 0) + 1;
+    if (m[2] === "invoke") {
+      if (mode === "reject") return send(400, { error: "bad input", code: "input_invalid" });
+      return send(202, { taskId: mode });
+    }
+    switch (mode) {
+      case "unauth":
+        return send(401, { error: "invalid api key", code: "unauthorized" });
+      case "pending":
+        return send(200, { done: false, status: "running" });
+      case "hang":
+        return; // 永不响应
+      case "stall":
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.write('{"done":'); // 响应头到了,body 永不结束
+        return;
+      case "trickle": {
+        // 一直慢慢发空白字节,每次间隔都小于读超时 —— 只限"读间隔"的客户端会被拖住
+        res.writeHead(200, { "Content-Type": "application/json" });
+        const t = setInterval(() => res.write(" "), 300);
+        res.on("close", () => clearInterval(t));
+        return;
+      }
+      default:
+        return send(200, { done: true, status: "success", structured: { ok: 1 } });
+    }
+  });
+  await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+  origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 
-const json = (status: number, body: unknown) =>
-  new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+afterAll(async () => {
+  server.closeAllConnections();
+  await new Promise((ok) => server.close(ok));
+});
 
-/**
- * 把 Node 示例当成一个 async 函数执行,注入假的 fetch / Date / setTimeout。
- * 假 fetch 设了调用上限:示例若失控轮询,测试会以 "runaway polling" 明确失败,而不是卡死。
- */
-function runNode(inner: typeof fetch, now: () => number) {
-  let n = 0;
-  const fetchImpl = (async (...args: Parameters<typeof fetch>) => {
-    if (++n > 50) throw new Error("runaway polling");
-    return inner(...args);
-  }) as typeof fetch;
-  const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
-  const fn = new AsyncFunction(
-    "fetch",
-    "process",
-    "crypto",
-    "setTimeout",
-    "console",
-    "Date",
-    snippets.node,
-  );
-  return fn(
-    fetchImpl,
-    { env: { OWA_API_KEY: "k" } },
-    { randomUUID: () => "uuid" },
-    (cb: () => void) => cb(),
-    { log: () => {} },
-    { now },
-  ) as Promise<void>;
+const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "owa-snippet-"));
+
+interface RunOutcome {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+  ms: number;
 }
 
-describe("Node 示例的执行行为", () => {
-  it("受理成功、轮询返回 401(Key 被吊销):立刻明确报错,不再继续请求", async () => {
-    const fetchImpl = vi.fn(async (url: string) =>
-      url.endsWith("/invoke")
-        ? json(202, { taskId: "t1" })
-        : json(401, { error: "invalid api key", code: "unauthorized" }),
-    );
-    await expect(runNode(fetchImpl as unknown as typeof fetch, () => 0)).rejects.toThrow(
-      /查询结果失败 HTTP 401/,
-    );
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-  });
-
-  it("任务一直不结束:到整体期限就超时退出", async () => {
-    let t = 0;
-    const fetchImpl = vi.fn(async (url: string) =>
-      url.endsWith("/invoke")
-        ? json(202, { taskId: "t1" })
-        : json(200, { done: false, status: "running" }),
-    );
-    await expect(
-      runNode(fetchImpl as unknown as typeof fetch, () => {
-        t += 61_000;
-        return t;
-      }),
-    ).rejects.toThrow(/等待结果超时/);
-    expect(fetchImpl.mock.calls.length).toBeLessThan(20);
-  });
-
-  it("提交被拒(如 400):带状态码报错", async () => {
-    const fetchImpl = vi.fn(async () => json(400, { error: "bad", code: "input_invalid" }));
-    await expect(runNode(fetchImpl as unknown as typeof fetch, () => 0)).rejects.toThrow(
-      /提交失败 HTTP 400/,
+/** 异步起子进程 —— 服务端就在本进程里,同步执行会把它一起卡死 */
+function runFile(cmd: string, file: string): Promise<RunOutcome> {
+  const t0 = Date.now();
+  return new Promise((ok) => {
+    execFile(
+      cmd,
+      [file],
+      { env: { ...process.env, OWA_API_KEY: "k" }, timeout: 15_000 },
+      (err, stdout, stderr) => {
+        const code = err ? (typeof err.code === "number" ? err.code : null) : 0;
+        ok({ code, stdout, stderr, ms: Date.now() - t0 });
+      },
     );
   });
+}
 
-  it("正常完成:拿到结果后结束", async () => {
-    const fetchImpl = vi.fn(async (url: string) =>
-      url.endsWith("/invoke")
-        ? json(202, { taskId: "t1" })
-        : json(200, { done: true, status: "success", structured: { ok: 1 } }),
-    );
-    await expect(runNode(fetchImpl as unknown as typeof fetch, () => 0)).resolves.toBeUndefined();
+function snippetFor(mode: Mode) {
+  return buildSnippets({
+    origin,
+    agentId: mode,
+    inputSchema: {
+      type: "object",
+      required: ["n"],
+      properties: { n: { type: "integer", minimum: 1 } },
+    },
+    hasOutputSchema: true,
+    pollDeadlineSeconds: DEADLINE_S,
+  });
+}
+
+const hasNode18 = Number(process.versions.node.split(".")[0]) >= 18;
+
+describe.skipIf(!hasNode18)("Node 示例:真实网络下的结束行为", () => {
+  const run = (mode: Mode) => {
+    const file = path.join(outDir, `${mode}.mjs`);
+    fs.writeFileSync(file, snippetFor(mode).node);
+    return runFile(process.execPath, file);
+  };
+
+  it("受理成功、轮询返回 401(Key 被吊销):立刻带状态码报错,只轮询一次", async () => {
+    const r = await run("unauth");
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toContain("查询结果失败 HTTP 401");
+    expect(hits["unauth:result"]).toBe(1);
+  });
+
+  it("受理成功、下一次请求不返回:到期限按时结束", async () => {
+    const r = await run("hang");
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toContain("等待结果超时");
+    expect(r.ms).toBeLessThan(DEADLINE_S * 1000 + 3000);
+  });
+
+  it("响应头到了但 body 不结束:读 body 也在期限内被取消", async () => {
+    const r = await run("stall");
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toContain("等待结果超时");
+    expect(r.ms).toBeLessThan(DEADLINE_S * 1000 + 3000);
+  });
+
+  it("服务端持续慢速发送、永不结束:总时长仍受期限约束", async () => {
+    const r = await run("trickle");
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toContain("等待结果超时");
+    expect(r.ms).toBeLessThan(DEADLINE_S * 1000 + 3000);
+  });
+
+  it("一直 done:false:到期限结束", async () => {
+    const r = await run("pending");
+    expect(r.stderr).toContain("等待结果超时");
+    expect(r.ms).toBeLessThan(DEADLINE_S * 1000 + 3000);
+  });
+
+  it("提交被拒(400):带状态码报错,不进入轮询", async () => {
+    const r = await run("reject");
+    expect(r.stderr).toContain("提交失败 HTTP 400");
+    expect(hits["reject:result"]).toBeUndefined();
+  });
+
+  it("正常完成:输出结果并以 0 退出", async () => {
+    const r = await run("ok");
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("ok");
   });
 });
 
-// Python 示例:用假的 requests 模块执行一遍。没有 python3 的环境跳过
-const hasPython = (() => {
+// Python 示例:需要 python3 与 requests;缺任一则跳过
+const hasPythonRequests = (() => {
   try {
-    execFileSync("python3", ["--version"], { stdio: "ignore" });
+    execFileSync("python3", ["-c", "import requests"], { stdio: "ignore" });
     return true;
   } catch {
     return false;
   }
 })();
 
-const HARNESS = `
-import sys, types, json, os, time
-calls = []
-mode = sys.argv[2]
-class Resp:
-    def __init__(self, code, body):
-        self.status_code = code; self._b = body; self.text = json.dumps(body)
-    def json(self): return self._b
-def post(url, **kw):
-    calls.append(url); return Resp(202, {"taskId": "t1"})
-def get(url, **kw):
-    calls.append(url)
-    if len(calls) > 50: raise SystemError("runaway polling")
-    if mode == "401": return Resp(401, {"error": "invalid api key", "code": "unauthorized"})
-    return Resp(200, {"done": False, "status": "running"})
-sys.modules["requests"] = types.SimpleNamespace(post=post, get=get)
-os.environ["OWA_API_KEY"] = "k"
-t = [0.0]
-def mono():
-    t[0] += 61
-    return t[0]
-time.monotonic = mono
-time.sleep = lambda s: None
-try:
-    exec(compile(open(sys.argv[1]).read(), "snippet", "exec"), {})
-    print(json.dumps({"ok": True, "calls": len(calls)}))
-except BaseException as e:
-    print(json.dumps({"ok": False, "type": type(e).__name__, "msg": str(e), "calls": len(calls)}))
-`;
+describe.skipIf(!hasPythonRequests)("Python 示例:真实网络下的结束行为", () => {
+  const run = (mode: Mode) => {
+    const file = path.join(outDir, `${mode}.py`);
+    fs.writeFileSync(file, snippetFor(mode).python);
+    return runFile("python3", file);
+  };
 
-describe.skipIf(!hasPython)("Python 示例的执行行为", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owa-snippet-"));
-  const snippetFile = path.join(dir, "snippet.py");
-  const harnessFile = path.join(dir, "harness.py");
-  fs.writeFileSync(snippetFile, snippets.python);
-  fs.writeFileSync(harnessFile, HARNESS);
-  const run = (mode: string) =>
-    JSON.parse(execFileSync("python3", [harnessFile, snippetFile, mode], { encoding: "utf8" })) as {
-      ok: boolean;
-      type?: string;
-      msg?: string;
-      calls: number;
-    };
-
-  it("受理成功、轮询返回 401:明确的 RuntimeError(带状态码),不是 KeyError,也不再轮询", () => {
-    const r = run("401");
-    expect(r.ok).toBe(false);
-    expect(r.type).toBe("RuntimeError");
-    expect(r.msg).toContain("HTTP 401");
-    expect(r.calls).toBe(2);
+  it("受理成功、轮询返回 401:RuntimeError 带状态码,不是 KeyError", async () => {
+    const r = await run("unauth");
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toContain("RuntimeError: 查询结果失败 HTTP 401");
+    expect(r.stderr).not.toContain("KeyError");
   });
 
-  it("任务一直不结束:到整体期限抛 TimeoutError", () => {
-    const r = run("pending");
-    expect(r.ok).toBe(false);
-    expect(r.type).toBe("TimeoutError");
-    expect(r.calls).toBeLessThan(20);
+  it("受理成功、下一次请求不返回:按期限抛 TimeoutError", async () => {
+    const r = await run("hang");
+    expect(r.stderr).toContain("TimeoutError: 等待结果超时");
+    expect(r.ms).toBeLessThan(DEADLINE_S * 1000 + 4000);
+  });
+
+  it("响应头到了但 body 不结束:按期限抛 TimeoutError", async () => {
+    const r = await run("stall");
+    expect(r.stderr).toContain("TimeoutError: 等待结果超时");
+    expect(r.ms).toBeLessThan(DEADLINE_S * 1000 + 4000);
+  });
+
+  it("服务端持续慢速发送、永不结束:总时长仍受期限约束", async () => {
+    const r = await run("trickle");
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toContain("等待结果超时");
+    expect(r.ms).toBeLessThan(DEADLINE_S * 1000 + 4000);
+  });
+
+  it("一直 done:false:到期限抛 TimeoutError", async () => {
+    const r = await run("pending");
+    expect(r.stderr).toContain("TimeoutError: 等待结果超时");
+  });
+
+  it("正常完成:输出结果并以 0 退出", async () => {
+    const r = await run("ok");
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("ok");
   });
 });
