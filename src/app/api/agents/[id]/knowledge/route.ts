@@ -34,7 +34,7 @@ async function requirePermission(req: Request, agentId: string, need: "read" | "
   if (need === "write" && access !== "write") {
     return { error: Response.json({ error: "no write permission" }, { status: 403 }) };
   }
-  return { agent };
+  return { agent, principal };
 }
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -76,6 +76,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       title,
       content,
     });
+    await getContainer().audit.record({
+      actor: r.principal,
+      action: "knowledge.add",
+      resource: { type: "agent", id },
+      ownerId: r.agent.ownerId,
+      details: { docId: doc.id, title: doc.title, chars: content.length },
+      req,
+    });
     return Response.json({ doc: { id: doc.id, title: doc.title } }, { status: 201 });
   } catch (err) {
     const res = authErrorResponse(err);
@@ -100,6 +108,14 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
       return Response.json({ error: "该文档不属于本智能体" }, { status: 404 });
     }
     await knowledge.delete(docId);
+    await getContainer().audit.record({
+      actor: r.principal,
+      action: "knowledge.delete",
+      resource: { type: "agent", id },
+      ownerId: r.agent.ownerId,
+      details: { docId, title: doc.title },
+      req,
+    });
     return Response.json({ deleted: docId });
   } catch (err) {
     const res = authErrorResponse(err);

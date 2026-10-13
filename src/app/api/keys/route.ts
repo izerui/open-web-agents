@@ -55,7 +55,7 @@ export async function GET(req: Request) {
  * 明文【只在本次响应里返回一次】—— 库里只有哈希,丢了只能重新签发。
  */
 export async function POST(req: Request) {
-  const { apiKeys, agents, grants, auth, env } = getContainer();
+  const { apiKeys, agents, grants, auth, env, audit } = getContainer();
 
   let ownerId: string;
   let isAdmin: boolean;
@@ -93,8 +93,10 @@ export async function POST(req: Request) {
   // 而且那把 key 在受害者的界面上根本看不见。
   //
   // 存在与无权返回同一个 404:不区分二者,免得这个接口变成智能体 id 的存在性预言机。
+  let boundAgentName: string | undefined;
   if (body.agentId) {
     const a = await agents.get(body.agentId);
+    boundAgentName = a?.name;
     const subject = await auth.subjectOf(await auth.resolveWeb(req));
     const list = await grants.listForResource("agent", body.agentId);
     if (!a || !hasResourceAccess(subject, a, "read", list)) {
@@ -110,6 +112,22 @@ export async function POST(req: Request) {
     name: body.name,
     rateLimitPerMinute,
     hashedKey: hashApiKey(plain),
+  });
+
+  await audit.record({
+    actor: { type: "web", userId: ownerId },
+    action: "api_key.issue",
+    resource: { type: "api_key", id: record.id },
+    ownerId,
+    // 明文绝不进审计;只记元信息
+    details: {
+      name: record.name,
+      boundAgentId: record.agentId,
+      // 名称快照:智能体日后改名或删除,审计里仍看得懂
+      boundAgentName,
+      rateLimitPerMinute: record.rateLimitPerMinute,
+    },
+    req,
   });
 
   return Response.json(
@@ -146,6 +164,14 @@ export async function DELETE(req: Request) {
   }
 
   await apiKeys.revoke(id);
+  await getContainer().audit.record({
+    actor: { type: "web", userId: ownerId },
+    action: "api_key.revoke",
+    resource: { type: "api_key", id },
+    ownerId,
+    details: { name: record.name, boundAgentId: record.agentId },
+    req,
+  });
   return Response.json({ revoked: id });
 }
 
@@ -187,5 +213,13 @@ export async function PATCH(req: Request) {
   if (!v.ok) return Response.json({ error: v.reason, code: "invalid_request" }, { status: 400 });
 
   await apiKeys.setRateLimit(id, v.value);
+  await getContainer().audit.record({
+    actor: { type: "web", userId: user.userId },
+    action: "api_key.rate_limit",
+    resource: { type: "api_key", id },
+    ownerId: user.userId,
+    details: { name: record.name, from: record.rateLimitPerMinute ?? null, to: v.value },
+    req,
+  });
   return Response.json({ key: await apiKeys.get(id) });
 }

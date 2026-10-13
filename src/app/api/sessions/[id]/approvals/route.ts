@@ -1,5 +1,7 @@
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
+import type { Principal } from "@/lib/modules/access/domain/principal";
+import type { ApprovalRequest } from "@/lib/modules/approval/ports";
 import { ApprovalUnavailable } from "@/lib/modules/approval/ports";
 
 export const runtime = "nodejs";
@@ -47,8 +49,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const { approval, auth } = getContainer();
 
   let by = "unknown";
+  let principal: Principal;
   try {
-    const principal = await auth.resolveWeb(req);
+    principal = await auth.resolveWeb(req);
     await auth.assertSessionAccess(principal, id);
     by = principal.type === "web" ? principal.userId : principal.keyId;
   } catch (err) {
@@ -64,10 +67,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   let ok: boolean;
+  let target: ApprovalRequest | undefined;
   try {
     // 只能裁决属于本会话的请求,防止拿别会话的 id 越权批准
     const pending = await approval.listPending(id);
-    if (!pending.some((p) => p.id === body.approvalId)) {
+    target = pending.find((p) => p.id === body.approvalId);
+    if (!target) {
       return Response.json({ error: "该待审请求不存在或已失效" }, { status: 404 });
     }
     ok = await approval.resolve(
@@ -83,6 +88,26 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     throw err;
   }
   if (!ok) return Response.json({ error: "该待审请求已失效" }, { status: 409 });
+
+  // 批准了哪个危险操作、谁批的 —— 审批最需要事后能追溯
+  const { sessions, audit } = getContainer();
+  const session = await sessions.get(id).catch(() => null);
+  await audit.record({
+    actor: principal,
+    action: "approval.decide",
+    resource: { type: "session", id },
+    ownerId: session?.billingUserId ?? session?.ownerId,
+    details: {
+      approvalId: body.approvalId,
+      runId: target?.runId,
+      tool: target?.toolName,
+      summary: target?.summary,
+      reason: target?.reason,
+      decision: body.decision,
+      message: body.message,
+    },
+    req,
+  });
 
   return Response.json({ resolved: body.approvalId, decision: body.decision });
 }

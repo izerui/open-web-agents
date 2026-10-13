@@ -52,7 +52,7 @@ const MINUTE = 60_000;
 
 /** 登录 / 注册 / 登出。 */
 export async function POST(req: Request) {
-  const { authService, rateLimiter, env } = getContainer();
+  const { authService, rateLimiter, env, audit, users } = getContainer();
   const body = (await req.json().catch(() => ({}))) as Body;
 
   if (body.action === "logout") {
@@ -96,12 +96,35 @@ export async function POST(req: Request) {
         ? await authService.register(body.email, body.password)
         : await authService.login(body.email, body.password);
 
+    await audit.record({
+      actor: { type: "web", userId: user.id },
+      action: body.action === "register" ? "auth.register" : "auth.login",
+      resource: { type: "account", id: user.id },
+      ownerId: user.id,
+      req,
+    });
+
     return new Response(
       JSON.stringify({ user: { id: user.id, email: user.email, role: user.role } }),
       { status: 200, headers: { "Content-Type": "application/json", "Set-Cookie": cookie } },
     );
   } catch (err) {
     if (err instanceof AuthError) {
+      if (body.action === "login") {
+        /*
+         * 登录失败也记:账号存在时记在该账号名下,本人能看到"有人在试我的密码";
+         * 账号不存在的只有管理员看得到(撞库排查)。尝试的密码当然不记。
+         */
+        const target = await users.findByEmail(email).catch(() => null);
+        await audit.record({
+          actor: { type: "anonymous" },
+          action: "auth.login_failed",
+          resource: { type: "account", id: target?.id },
+          ownerId: target?.id,
+          details: { email, reason: err.message },
+          req,
+        });
+      }
       return Response.json({ error: err.message }, { status: err.status });
     }
     throw err;

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { agentChanges } from "@/app/api/agents/_lib/audit-agent";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import {
@@ -7,7 +8,7 @@ import {
   hasResourceAccess,
   isPublic,
 } from "@/lib/modules/access/domain/grants";
-import { agentAccessLevel } from "@/lib/modules/access/domain/principal";
+import { type Principal, agentAccessLevel } from "@/lib/modules/access/domain/principal";
 import {
   type AgentConfig,
   pickAgentConfig,
@@ -125,11 +126,12 @@ interface CreateBody {
  * 改已有智能体需 write 权限:只被分享了 read 的人能用、不能改。
  */
 export async function POST(req: Request) {
-  const { agents, grants, auth, env } = getContainer();
+  const { agents, grants, auth, env, audit } = getContainer();
 
   let subject: Subject;
+  let principal: Principal;
   try {
-    const principal = await auth.resolveWeb(req);
+    principal = await auth.resolveWeb(req);
     auth.assertCanManageAgents(principal);
     subject = await auth.subjectOf(principal);
   } catch (err) {
@@ -161,9 +163,12 @@ export async function POST(req: Request) {
   let existingHatch: Record<string, unknown> | undefined;
   const requestedWebhook = body.webhookUrl?.trim() || undefined;
   let webhookUrl = requestedWebhook;
+  // 审计要对比保存前后,所以在外层留住它
+  let before: Agent | null = null;
 
   if (targetId) {
     const existing = await agents.get(targetId);
+    before = existing;
     if (existing) {
       const list = await grants.listForResource("agent", targetId);
       // 连读都无权时返回 404 —— 用 403 会向调用方确认"这个 id 确实存在",是信息泄露
@@ -221,6 +226,15 @@ export async function POST(req: Request) {
       maxTurns: cfg.maxTurns ?? 20,
       escapeHatch,
     },
+  });
+
+  await audit.record({
+    actor: principal,
+    action: before ? "agent.update" : "agent.create",
+    resource: { type: "agent", id: saved.id },
+    ownerId: saved.ownerId,
+    details: { name: saved.name, changed: agentChanges(before, saved) },
+    req,
   });
 
   return Response.json({ agent: saved }, { status: 201 });

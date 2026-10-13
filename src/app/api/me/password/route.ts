@@ -22,6 +22,13 @@ export async function PUT(req: Request) {
   }
   try {
     await authService.changePassword(user.id, body.current, body.next);
+    await getContainer().audit.record({
+      actor: { type: "web", userId: user.id },
+      action: "me.password_change",
+      resource: { type: "account", id: user.id },
+      ownerId: user.id,
+      req,
+    });
     return Response.json({ ok: true });
   } catch (err) {
     if (err instanceof AuthError) {

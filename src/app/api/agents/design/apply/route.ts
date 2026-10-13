@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { agentChanges } from "@/app/api/agents/_lib/audit-agent";
 import { apiError } from "@/lib/api-error";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
@@ -18,7 +19,7 @@ export const dynamic = "force-dynamic";
  * webhook、逃生舱、归属这些字段不在智能体包里,应用时一律沿用原值。
  */
 export async function POST(req: Request) {
-  const { auth, agents, grants, sessions, env, bundles } = getContainer();
+  const { auth, agents, grants, sessions, env, bundles, audit } = getContainer();
   try {
     const principal = await auth.resolveWeb(req);
     auth.assertCanManageAgents(principal);
@@ -66,6 +67,19 @@ export async function POST(req: Request) {
       config: { ...parsed.agent.config, escapeHatch: existing?.config.escapeHatch },
     });
     if (!existing) await sessions.update(session.id, { designTargetAgentId: saved.id });
+    await audit.record({
+      actor: principal,
+      action: existing ? "agent.update" : "agent.create",
+      resource: { type: "agent", id: saved.id },
+      ownerId: saved.ownerId,
+      details: {
+        name: saved.name,
+        changed: agentChanges(existing, saved),
+        via: "designer",
+        designSessionId: session.id,
+      },
+      req,
+    });
 
     return Response.json({
       agent: { id: saved.id, name: saved.name },

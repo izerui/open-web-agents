@@ -27,6 +27,8 @@ import { type ApprovalPort, ApprovalUnavailable } from "@/lib/modules/approval/p
 import { LocalFsStorage } from "@/lib/modules/artifacts/adapters/local-fs-storage";
 import { WorkspaceGc } from "@/lib/modules/artifacts/application/gc";
 import type { StoragePort } from "@/lib/modules/artifacts/ports";
+import { MysqlAuditRepo } from "@/lib/modules/audit/adapters/mysql-audit-repo";
+import { AuditLog } from "@/lib/modules/audit/application/audit-log";
 import { RedisBus } from "@/lib/modules/events/adapters/redis-bus";
 import type { BusPort } from "@/lib/modules/events/ports";
 import { MysqlApiKeyRepo } from "@/lib/modules/identity/adapters/mysql-api-key-repo";
@@ -106,6 +108,8 @@ export interface Container {
   cancelSignal: CancelSignal;
   /** 登录、注册等入口的限流。 */
   rateLimiter: RateLimiter;
+  /** 审计日志:谁在什么时候对什么做了什么。操作成功后由路由记录。 */
+  audit: AuditLog;
   /** 设计会话工作目录里的智能体包读写。 */
   bundles: {
     read(workspaceDir: string): Promise<Record<string, string>>;
@@ -491,6 +495,10 @@ function build(): Container {
     cancelSignal,
     rateLimiter,
     bundles: { read: readBundle, write: writeBundle },
+    audit: new AuditLog({
+      repo: new MysqlAuditRepo(db),
+      emailOf: async (id) => (await users.get(id))?.email,
+    }),
   };
 }
 

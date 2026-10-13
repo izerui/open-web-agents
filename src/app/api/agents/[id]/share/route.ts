@@ -29,7 +29,7 @@ async function requireWrite(req: Request, agentId: string) {
   if (access !== "write") {
     return { error: Response.json({ error: "no write permission" }, { status: 403 }) };
   }
-  return { subject, agent, list };
+  return { subject, agent, list, principal };
 }
 
 /** 查看某智能体当前的分享设置。 */
@@ -80,6 +80,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         principalId: PUBLIC_PRINCIPAL,
         permission,
       });
+      await shareAudited(req, r, g, "public");
       return Response.json({ grant: g }, { status: 201 });
     }
 
@@ -98,6 +99,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         principalId: groupId,
         permission,
       });
+      await shareAudited(req, r, g, `group:${groupId}`);
       return Response.json({ grant: g }, { status: 201 });
     }
 
@@ -113,6 +115,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       principalId: user.id,
       permission,
     });
+    await shareAudited(req, r, g, user.email);
     return Response.json({ grant: g, email: user.email }, { status: 201 });
   } catch (err) {
     const res = authErrorResponse(err);
@@ -136,11 +139,42 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
     if (!r.list.some((g) => g.id === grantId)) {
       return Response.json({ error: "grant not found on this agent" }, { status: 404 });
     }
+    const revoked = r.list.find((g) => g.id === grantId);
     await grants.revoke(grantId);
+    await getContainer().audit.record({
+      actor: r.principal,
+      action: "agent.unshare",
+      resource: { type: "agent", id },
+      ownerId: r.agent.ownerId,
+      details: {
+        grantId,
+        principalType: revoked?.principalType,
+        principalId: revoked?.principalId,
+        permission: revoked?.permission,
+      },
+      req,
+    });
     return Response.json({ revoked: grantId });
   } catch (err) {
     const res = authErrorResponse(err);
     if (res) return res;
     throw err;
   }
+}
+
+/** 记一条"分享"审计。target 是人能看懂的对象:public / group:<id> / 邮箱。 */
+async function shareAudited(
+  req: Request,
+  r: { principal: Principal; agent: { id: string; ownerId: string } },
+  g: { id: string; permission: string },
+  target: string,
+): Promise<void> {
+  await getContainer().audit.record({
+    actor: r.principal,
+    action: "agent.share",
+    resource: { type: "agent", id: r.agent.id },
+    ownerId: r.agent.ownerId,
+    details: { grantId: g.id, target, permission: g.permission },
+    req,
+  });
 }

@@ -338,3 +338,32 @@ export const userValves = mysqlTable(
   },
   (t) => ({ byUser: index("idx_valves_user").on(t.userId) }),
 );
+
+/**
+ * 审计日志:只追加。谁(actor)在什么时候对什么资源(resource)做了什么(action)。
+ * owner_id 是资源归属账号,决定谁能看到(归属人、操作者本人、管理员)。
+ * 时间用毫秒整数:键集分页需要比 timestamp 的秒级更细的序。
+ */
+export const auditLogs = mysqlTable(
+  "audit_logs",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    atMs: bigint("at_ms", { mode: "number" }).notNull(),
+    actorType: varchar("actor_type", { length: 16 }).notNull(),
+    actorId: varchar("actor_id", { length: 36 }),
+    actorLabel: varchar("actor_label", { length: 255 }),
+    action: varchar("action", { length: 64 }).notNull(),
+    resourceType: varchar("resource_type", { length: 32 }).notNull(),
+    resourceId: varchar("resource_id", { length: 64 }),
+    ownerId: varchar("owner_id", { length: 36 }),
+    details: json("details"),
+    ip: varchar("ip", { length: 64 }),
+    userAgent: varchar("user_agent", { length: 256 }),
+  },
+  (t) => ({
+    byOwner: index("idx_audit_owner").on(t.ownerId, t.atMs),
+    byActor: index("idx_audit_actor").on(t.actorId, t.atMs),
+    byResource: index("idx_audit_resource").on(t.resourceType, t.resourceId, t.atMs),
+    byTime: index("idx_audit_time").on(t.atMs),
+  }),
+);

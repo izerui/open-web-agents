@@ -39,6 +39,14 @@ export async function POST(req: Request) {
   }
 
   await users.setCredentials(user.id, { webhookSecretEnc: secrets.encrypt(secret) });
+  await getContainer().audit.record({
+    actor: { type: "web", userId: user.id },
+    action: "me.webhook_secret_set",
+    resource: { type: "account", id: user.id },
+    ownerId: user.id,
+    details: { generated: !(typeof body.secret === "string" && body.secret.trim()) },
+    req,
+  });
   return Response.json({ secret, mask: maskSecret(secret) }, { status: 201 });
 }
 
@@ -48,5 +56,12 @@ export async function DELETE(req: Request) {
   const user = await authService.currentUser(req);
   if (!user) return Response.json({ error: "login required" }, { status: 401 });
   await users.setCredentials(user.id, { webhookSecretEnc: null });
+  await getContainer().audit.record({
+    actor: { type: "web", userId: user.id },
+    action: "me.webhook_secret_clear",
+    resource: { type: "account", id: user.id },
+    ownerId: user.id,
+    req,
+  });
   return Response.json({ cleared: true });
 }

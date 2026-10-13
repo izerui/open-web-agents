@@ -106,6 +106,18 @@ agent 也写不进这个目录(沙箱只放开工作目录,文件写工具受路
 - 入参校验、结构化结果、OpenAPI 文档都以实际使用的版本为准;结果接口、运行记录与 webhook 带 `agentVersion`(`null` = 草稿)。
 - 回调地址不属于版本内容;切换到逃生舱不同的版本只有平台管理员能做。
 
+## 审计日志
+
+「设置 → 审计日志」记录谁在什么时候对什么做了什么:智能体的创建 / 修改(只记改了哪些字段,
+不记内容)/ 发布 / 回滚 / 载入草稿、分享、知识文档、API Key 的签发 / 吊销 / 限额、审批裁决、
+账号管理、登录与登录失败、个人凭证与签名密钥的变更、用户组。
+
+- **谁看得到**:资源归属人与操作者本人;管理员可看全平台。别人改了你分享出去的智能体、
+  有人试图登录你的账号,你都看得到。
+- **机密不进日志**:Key 明文、密码、签名密钥、模型 Key、提示词内容一律不记;另有按字段名的兜底打码。
+- **已知取舍**:审计在业务操作成功之后单独写入,写失败只记错误日志、不回滚业务。
+  两次写入之间进程崩溃或审计写失败,这条审计会丢;需要强保证时应改为同库同事务的发件箱。
+
 ## 架构
 
 务实的六边形(Ports & Adapters):**只对真正会变的依赖建端口**,其余不过度抽象。
@@ -275,6 +287,7 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 | POST            | `/api/agents/{id}/invoke`                  | **key**                | 对外触发,返回 taskId;支持 `Idempotency-Key` |
 | GET             | `/api/agents/{id}/result`                  | **key**                | 轮询结构化结果             |
 | GET             | `/api/agents/{id}/openapi.json`            | cookie / key           | 该智能体的 OpenAPI 3.1 文档(含入参与结果契约) |
+| GET             | `/api/audit`                               | cookie                 | 审计日志(与自己相关的;管理员 `scope=all` 看全部) |
 | GET/POST        | `/api/agents/{id}/versions`                | 读:cookie / key;发布:cookie(write) | 版本列表 / 把草稿发布为新版本 |
 | GET             | `/api/agents/{id}/versions/{v}`            | cookie / key           | 某个版本的完整内容            |
 | POST            | `/api/agents/{id}/versions/{v}/activate`   | cookie(write)          | 把发布指针切到该版本(回滚)    |

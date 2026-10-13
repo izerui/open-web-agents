@@ -67,15 +67,25 @@ interface PatchBody {
  * 返回一次性初始密码 —— 只在这次响应里出现。
  */
 export async function POST(req: Request) {
-  const { auth, authService } = getContainer();
+  const { auth, authService, audit } = getContainer();
   try {
-    auth.assertCanAdministerPlatform(await auth.resolveWeb(req));
+    const principal = await auth.resolveWeb(req);
+    auth.assertCanAdministerPlatform(principal);
     const body = (await req.json().catch(() => ({}))) as { email?: string; role?: string };
     if (!body.email) return Response.json({ error: "email is required" }, { status: 400 });
     if (body.role !== undefined && body.role !== "admin" && body.role !== "user") {
       return Response.json({ error: "role 须为 admin 或 user" }, { status: 400 });
     }
     const { user, tempPassword } = await authService.createAccount(body.email, body.role ?? "user");
+    // 初始密码绝不进审计
+    await audit.record({
+      actor: principal,
+      action: "account.create",
+      resource: { type: "account", id: user.id },
+      ownerId: user.id,
+      details: { email: user.email, role: user.role },
+      req,
+    });
     return Response.json(
       { account: { id: user.id, email: user.email, role: user.role }, tempPassword },
       { status: 201 },
@@ -92,7 +102,7 @@ export async function POST(req: Request) {
 
 /** 改一个账号的角色 / 停用状态 / 月度额度。 */
 export async function PATCH(req: Request) {
-  const { users, auth, authService } = getContainer();
+  const { users, auth, authService, audit } = getContainer();
   try {
     const principal = await auth.resolveWeb(req);
     auth.assertCanAdministerPlatform(principal);
@@ -148,6 +158,46 @@ export async function PATCH(req: Request) {
     const tempPassword = body.resetPassword ? await authService.resetPassword(body.id) : undefined;
 
     const updated = await users.get(body.id);
+
+    // 记在被改的账号名下:当事人也看得到管理员对自己做了什么
+    const changes: Record<string, { from: unknown; to: unknown }> = {};
+    if (body.role !== undefined && body.role !== target.role) {
+      changes.role = { from: target.role, to: body.role };
+    }
+    if (body.disabled !== undefined && body.disabled !== target.disabled) {
+      changes.disabled = { from: target.disabled, to: body.disabled };
+    }
+    if (
+      body.monthlyQuotaMicroUsd !== undefined &&
+      body.monthlyQuotaMicroUsd !== (target.monthlyQuotaMicroUsd ?? null)
+    ) {
+      changes.monthlyQuotaMicroUsd = {
+        from: target.monthlyQuotaMicroUsd ?? null,
+        to: body.monthlyQuotaMicroUsd,
+      };
+    }
+    if (Object.keys(changes).length > 0) {
+      await audit.record({
+        actor: principal,
+        action: "account.update",
+        resource: { type: "account", id: target.id },
+        ownerId: target.id,
+        details: { email: target.email, changes },
+        req,
+      });
+    }
+    if (tempPassword) {
+      // 只记"重置过",新密码绝不进审计
+      await audit.record({
+        actor: principal,
+        action: "account.reset_password",
+        resource: { type: "account", id: target.id },
+        ownerId: target.id,
+        details: { email: target.email },
+        req,
+      });
+    }
+
     return Response.json({
       account: updated && {
         id: updated.id,

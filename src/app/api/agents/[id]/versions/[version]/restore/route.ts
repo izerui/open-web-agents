@@ -29,5 +29,13 @@ export async function POST(
   if (denied) return denied;
 
   const agent = await releases.restoreToDraft(opened.agent, n.value);
+  await getContainer().audit.record({
+    actor: opened.principal,
+    action: "agent.restore_version",
+    resource: { type: "agent", id },
+    ownerId: opened.agent.ownerId,
+    details: { version: n.value },
+    req,
+  });
   return Response.json({ agent });
 }

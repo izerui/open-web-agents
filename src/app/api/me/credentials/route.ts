@@ -50,6 +50,24 @@ export async function PUT(req: Request) {
   }
 
   await users.setCredentials(user.id, patch);
+  // 只记"改了什么",不记值:Base URL 可能带令牌,Key 更不必说
+  await getContainer().audit.record({
+    actor: { type: "web", userId: user.id },
+    action: "me.credentials_update",
+    resource: { type: "account", id: user.id },
+    ownerId: user.id,
+    details: {
+      baseUrl:
+        patch.defaultBaseUrl === undefined ? "unchanged" : patch.defaultBaseUrl ? "set" : "cleared",
+      modelKey:
+        patch.anthropicKeyEnc === undefined
+          ? "unchanged"
+          : patch.anthropicKeyEnc
+            ? "set"
+            : "cleared",
+    },
+    req,
+  });
 
   const updated = await users.get(user.id);
   const decrypted = updated?.anthropicKeyEnc ? secrets.decrypt(updated.anthropicKeyEnc) : null;

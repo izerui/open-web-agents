@@ -41,6 +41,18 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       body.note as string | undefined,
     );
     const { config: _config, ...meta } = v;
+    await getContainer().audit.record({
+      actor: opened.principal,
+      action: "agent.publish",
+      resource: { type: "agent", id },
+      ownerId: opened.agent.ownerId,
+      details: {
+        version: v.version,
+        previousVersion: opened.agent.publishedVersion ?? null,
+        note: v.note,
+      },
+      req,
+    });
     return Response.json({ version: meta }, { status: 201 });
   } catch (err) {
     if (err instanceof NothingToPublish) {

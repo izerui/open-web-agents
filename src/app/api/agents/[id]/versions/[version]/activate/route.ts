@@ -35,5 +35,13 @@ export async function POST(
   if (denied) return denied;
 
   await releases.activate(id, n.value);
+  await getContainer().audit.record({
+    actor: opened.principal,
+    action: "agent.activate_version",
+    resource: { type: "agent", id },
+    ownerId: opened.agent.ownerId,
+    details: { from: opened.agent.publishedVersion ?? null, to: n.value },
+    req,
+  });
   return Response.json({ publishedVersion: n.value });
 }
