@@ -11,11 +11,13 @@ import {
   verifyToken,
 } from "@/lib/modules/identity/domain/session-token";
 import type { User, UserRepo } from "@/lib/modules/identity/user-ports";
+import { BrandedError } from "@/lib/shared";
 
 /** 登录态有效期。 */
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
-export class AuthError extends Error {
+export class AuthError extends BrandedError {
+  static readonly brand = Symbol.for("owa.error.AuthError");
   constructor(
     message: string,
     readonly status = 400,

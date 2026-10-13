@@ -1,4 +1,5 @@
 import type { RunState } from "@/lib/shared";
+import { BrandedError } from "@/lib/shared";
 
 export interface Run {
   id: string;
@@ -40,7 +41,8 @@ export interface NewRun {
 }
 
 /** create 撞上已存在的幂等键。调用方据此回滚自己刚建的会话,并返回已有的任务。 */
-export class DuplicateIdempotencyKey extends Error {
+export class DuplicateIdempotencyKey extends BrandedError {
+  static readonly brand = Symbol.for("owa.error.DuplicateIdempotencyKey");
   constructor(readonly idempotencyKey: string) {
     super(`duplicate idempotency key: ${idempotencyKey}`);
     this.name = "DuplicateIdempotencyKey";

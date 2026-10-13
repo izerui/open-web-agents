@@ -4,8 +4,10 @@
 // 拼接,调用方就能读到工作空间之外的任意文件(密钥、其它租户的会话)。
 
 import path from "node:path";
+import { BrandedError } from "@/lib/shared";
 
-export class PathEscapeError extends Error {
+export class PathEscapeError extends BrandedError {
+  static readonly brand = Symbol.for("owa.error.PathEscapeError");
   constructor(rel: string) {
     super(`path escapes workspace: ${JSON.stringify(rel)}`);
     this.name = "PathEscapeError";

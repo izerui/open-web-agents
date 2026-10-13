@@ -9,10 +9,12 @@ import type { AgentRepo } from "@/lib/modules/agent/ports";
 import { checkPromptSize } from "@/lib/modules/run/domain/limits";
 import type { Run, RunRepo } from "@/lib/modules/run/ports";
 import type { SessionRepo } from "@/lib/modules/session/ports";
+import { BrandedError } from "@/lib/shared";
 import type { RunCommand } from "./orchestrator";
 
 /** 输入超长。路由翻成 413。 */
-export class PromptTooLarge extends Error {
+export class PromptTooLarge extends BrandedError {
+  static readonly brand = Symbol.for("owa.error.PromptTooLarge");
   constructor(message: string) {
     super(message);
     this.name = "PromptTooLarge";
@@ -20,7 +22,8 @@ export class PromptTooLarge extends Error {
 }
 
 /** 会话或其智能体不存在。路由翻成 404。 */
-export class EnqueueTargetMissing extends Error {
+export class EnqueueTargetMissing extends BrandedError {
+  static readonly brand = Symbol.for("owa.error.EnqueueTargetMissing");
   constructor(message: string) {
     super(message);
     this.name = "EnqueueTargetMissing";

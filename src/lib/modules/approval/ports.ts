@@ -1,3 +1,5 @@
+import { BrandedError } from "@/lib/shared";
+
 export interface ApprovalRequest {
   id: string;
   sessionId: string;
@@ -23,7 +25,8 @@ export type ApprovalOutcome =
  * 批准可能早已落地,只是读不到 —— 冒充成超时拒绝,审计上就成了"审批人批准了,系统说没人批"。
  * 调用方应按基础设施故障处理(引擎侧按 fail-closed 拒绝本次工具调用,并如实说明原因)。
  */
-export class ApprovalUnavailable extends Error {
+export class ApprovalUnavailable extends BrandedError {
+  static readonly brand = Symbol.for("owa.error.ApprovalUnavailable");
   constructor(message: string) {
     super(message);
     this.name = "ApprovalUnavailable";

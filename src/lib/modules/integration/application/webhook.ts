@@ -4,6 +4,7 @@
 // 绝不因为回调打不通而影响 run 的最终状态 —— 结果已经在库里,调用方随时能轮询兜底。
 
 import { signWebhook } from "@/lib/modules/integration/domain/webhook-policy";
+import { BrandedError } from "@/lib/shared";
 
 export interface WebhookPayload {
   /** 投递标识(= taskId)。重发时不变,接收方据此去重。 */
@@ -57,7 +58,8 @@ export interface WebhookOptions {
 }
 
 /** 目标地址被策略拒绝。属于配置问题,重试没有意义。 */
-export class WebhookTargetRejected extends Error {
+export class WebhookTargetRejected extends BrandedError {
+  static readonly brand = Symbol.for("owa.error.WebhookTargetRejected");
   constructor(message: string) {
     super(message);
     this.name = "WebhookTargetRejected";

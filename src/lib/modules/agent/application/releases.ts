@@ -15,9 +15,11 @@ import type {
   AgentVersion,
   AgentVersionRepo,
 } from "@/lib/modules/agent/ports";
+import { BrandedError } from "@/lib/shared";
 
 /** 指定的版本不存在。路由翻成 404。 */
-export class VersionNotFound extends Error {
+export class VersionNotFound extends BrandedError {
+  static readonly brand = Symbol.for("owa.error.VersionNotFound");
   constructor(
     readonly agentId: string,
     readonly version: number,
@@ -28,7 +30,8 @@ export class VersionNotFound extends Error {
 }
 
 /** 草稿与当前发布版本完全相同,没有可发布的内容。路由翻成 409。 */
-export class NothingToPublish extends Error {
+export class NothingToPublish extends BrandedError {
+  static readonly brand = Symbol.for("owa.error.NothingToPublish");
   constructor(readonly version: number) {
     super(`草稿与已发布的 v${version} 相同,无需重复发布`);
     this.name = "NothingToPublish";

@@ -15,6 +15,7 @@ import type { AgentRepo } from "@/lib/modules/agent/ports";
 import { extractApiKey, hashApiKey, looksLikeApiKey } from "@/lib/modules/identity/domain/api-key";
 import type { ApiKeyRepo } from "@/lib/modules/identity/ports";
 import type { SessionRepo } from "@/lib/modules/session/ports";
+import { BrandedError } from "@/lib/shared";
 
 /**
  * 关闭登录时(OWA_AUTH_REQUIRED=0,仅本地开发)使用的固定主体。
@@ -41,10 +42,12 @@ export interface AuthDeps {
   isUserActive?(userId: string): Promise<boolean>;
 }
 
-export class Unauthorized extends Error {
+export class Unauthorized extends BrandedError {
+  static readonly brand = Symbol.for("owa.error.Unauthorized");
   readonly status = 401;
 }
-export class Forbidden extends Error {
+export class Forbidden extends BrandedError {
+  static readonly brand = Symbol.for("owa.error.Forbidden");
   readonly status = 403;
 }
 

@@ -55,8 +55,12 @@ else
   SERVER_PID=$!
 
   ready=""
+  # 第一个请求故意打【页面】而不是 /api/health:服务里同一个错误类会在页面与接口两套
+  # 模块图里各有一份,容器由先加载的那一份创建。生产上第一个请求多半是页面 —— 曾经因此
+  # 所有该 401/403/404 的接口都变成 500,而 e2e 一直先打 /api/health,从没测出来。
+  # 让整套 e2e 在"页面先加载"这种更严格的条件下跑
   for _ in $(seq 1 60); do
-    if curl -sf "${BASE}/api/health?probe=live" >/dev/null 2>&1; then ready=1; break; fi
+    if curl -sf "${BASE}/login" >/dev/null 2>&1; then ready=1; break; fi
     # 服务自己先挂了就别再空等
     kill -0 "$SERVER_PID" 2>/dev/null || break
     sleep 1
