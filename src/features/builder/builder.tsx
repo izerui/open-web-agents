@@ -84,6 +84,22 @@ function newSubagentRow(): SubagentDraft {
   return { uid: crypto.randomUUID(), name: "", description: "", prompt: "" };
 }
 
+/**
+ * 技能包:SKILL.md 之外的附带文件(脚本、模板)在这里原样保留、不提供编辑 ——
+ * 多文件的技能请用"AI 设计"修改。曾经构建器不认识技能包,保存一次就把它们全清掉了。
+ */
+interface SkillDraft {
+  uid: string;
+  name: string;
+  description: string;
+  body: string;
+  extraFiles: Record<string, string>;
+}
+
+function newSkillRow(): SkillDraft {
+  return { uid: crypto.randomUUID(), name: "", description: "", body: "", extraFiles: {} };
+}
+
 interface Draft {
   id: string;
   name: string;
@@ -97,7 +113,7 @@ interface Draft {
   /** 工具白名单(逗号分隔);留空 = 不限制 */
   toolsText: string;
   /** 逗号/换行分隔的技能名 */
-  skillsText: string;
+  skillPackages: SkillDraft[];
   mcpServers: McpDraft[];
   subagents: SubagentDraft[];
   /** 需审批的工具名(逗号分隔) */
@@ -130,7 +146,7 @@ const EMPTY: Draft = {
   outputSchemaText: "",
   webhookUrl: "",
   toolsText: "",
-  skillsText: "",
+  skillPackages: [],
   mcpServers: [],
   subagents: [],
   approvalToolsText: "",
@@ -166,6 +182,21 @@ const PERMISSION_MODE_META: Record<PermissionMode, { label: string; hint: string
 };
 
 /** 技能名按逗号/换行/空格拆分,去空去重 —— 用户怎么贴都能用 */
+/**
+ * 以已加载的配置为底,覆盖表单管理的字段。表单字段值为 undefined 表示"清空",要真的删掉 ——
+ * 直接展开的话 JSON 会丢掉 undefined 键,底下的旧值就又冒出来了。
+ */
+export function overlayConfig(
+  base: Record<string, unknown>,
+  form: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...base, ...form };
+  for (const [k, v] of Object.entries(form)) if (v === undefined) delete merged[k];
+  // 旧版"技能名"字段从未生效;表单已改用技能包,不再回写它
+  delete merged.skills;
+  return merged;
+}
+
 function parseSkills(text: string): string[] {
   return [
     ...new Set(
@@ -189,6 +220,11 @@ export function Builder() {
    * 知识库/分享面板还会按每次按键对那个智能体发请求 —— 保存之前就能往别人的知识库里加文档。
    */
   const [openedId, setOpenedId] = useState<string | null>(null);
+  /**
+   * 打开的智能体的完整配置。保存时以它为底、只覆盖表单管理的字段 ——
+   * 表单不认识的字段(effort、设计师写入的新字段……)原样保留,而不是被一次保存清掉。
+   */
+  const loadedConfigRef = useRef<Record<string, unknown>>({});
   const [saving, setSaving] = useState(false);
   const cleanDraftRef = useRef(JSON.stringify(EMPTY));
   const editSeqRef = useRef(0);
@@ -366,7 +402,7 @@ export function Builder() {
           name: draft.name.trim(),
           description: draft.description.trim() || undefined,
           webhookUrl: draft.webhookUrl.trim() || undefined,
-          config: {
+          config: overlayConfig(loadedConfigRef.current, {
             systemPrompt: draft.systemPrompt,
             model: draft.model,
             maxTurns: Number(draft.maxTurns) || 20,
@@ -374,7 +410,13 @@ export function Builder() {
             outputSchema: parsedSchema,
             // 留空 = 不限制。给空数组的语义是「一个工具都不许用」,两者不能混
             tools: parseSkills(draft.toolsText).map((name) => ({ name })),
-            skills: parseSkills(draft.skillsText),
+            skillPackages: draft.skillPackages
+              .filter((k) => k.name.trim())
+              .map((k) => ({
+                name: k.name.trim(),
+                description: k.description.trim(),
+                files: { ...k.extraFiles, "SKILL.md": k.body },
+              })),
             permissionMode: draft.permissionMode,
             unattendedApproval: draft.unattendedApproval || undefined,
             starters: (() => {
@@ -404,7 +446,7 @@ export function Builder() {
                 prompt: s.prompt.trim(),
                 background: false,
               })),
-          },
+          }),
         }),
       });
       const data = (await res.json()) as { agent?: AgentSummary; error?: string };
@@ -434,6 +476,7 @@ export function Builder() {
         const full = d.agents?.find((x) => x.id === a.id);
         if (!full) return;
         const cfg = full.config as Record<string, unknown>;
+        loadedConfigRef.current = cfg;
         const nextDraft: Draft = {
           id: full.id,
           name: full.name,
@@ -450,7 +493,24 @@ export function Builder() {
                 .join(", ")
             : "",
           webhookUrl: (full as { webhookUrl?: string }).webhookUrl ?? "",
-          skillsText: Array.isArray(cfg.skills) ? (cfg.skills as string[]).join(", ") : "",
+          skillPackages: Array.isArray(cfg.skillPackages)
+            ? (
+                cfg.skillPackages as {
+                  name: string;
+                  description: string;
+                  files: Record<string, string>;
+                }[]
+              ).map((k) => {
+                const { "SKILL.md": body = "", ...extraFiles } = k.files ?? {};
+                return {
+                  uid: crypto.randomUUID(),
+                  name: k.name,
+                  description: k.description,
+                  body,
+                  extraFiles,
+                };
+              })
+            : [],
           approvalToolsText: Array.isArray(
             (cfg.approvalRules as { tools?: string[] } | undefined)?.tools,
           )
@@ -532,6 +592,7 @@ export function Builder() {
               editSeqRef.current += 1;
               setCleanDraft(EMPTY);
               setOpenedId(null);
+              loadedConfigRef.current = {};
             }}
             tooltip="新建智能体"
           >
@@ -714,16 +775,86 @@ export function Builder() {
         </label>
       </div>
 
-      <label className="block space-y-1">
-        <span className="text-xs text-muted-foreground">
-          Skills(逗号或换行分隔,可选)—— SDK 内置技能,如 pdf、xlsx
-        </span>
-        <Input
-          value={draft.skillsText}
-          onChange={(e) => setDraft({ ...draft, skillsText: e.target.value })}
-          placeholder="pdf, xlsx"
-        />
-      </label>
+      {/* ── 技能包 ── */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-sm">技能</CardTitle>
+              <CardDescription>
+                可复用的专门做法:流程、规范、脚本。描述写"何时使用",模型据此自动调用。
+                多文件技能(带脚本、模板)建议用「用 AI 修改」编辑。
+              </CardDescription>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() =>
+                setDraft({ ...draft, skillPackages: [...draft.skillPackages, newSkillRow()] })
+              }
+            >
+              <Plus /> 添加
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {draft.skillPackages.length === 0 && (
+            <p className="text-xs text-muted-foreground">未配置技能</p>
+          )}
+          {draft.skillPackages.map((k, i) => {
+            const patch = (next: Partial<SkillDraft>) => {
+              const list = [...draft.skillPackages];
+              list[i] = { ...k, ...next };
+              setDraft({ ...draft, skillPackages: list });
+            };
+            const extra = Object.keys(k.extraFiles).length;
+            return (
+              <div key={k.uid} className="space-y-2 border-b border-border pb-3 last:border-b-0">
+                <div className="flex gap-2">
+                  <Input
+                    value={k.name}
+                    onChange={(e) => patch({ name: e.target.value })}
+                    placeholder="技能名(小写字母、数字、连字符)"
+                    aria-label="技能名"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label="删除这个技能"
+                    onClick={() =>
+                      setDraft({
+                        ...draft,
+                        skillPackages: draft.skillPackages.filter((x) => x.uid !== k.uid),
+                      })
+                    }
+                  >
+                    <Trash2 />
+                  </Button>
+                </div>
+                <Input
+                  value={k.description}
+                  onChange={(e) => patch({ description: e.target.value })}
+                  placeholder="何时使用,如:需要把数学推导做成动画时使用"
+                  aria-label="技能描述"
+                />
+                <Textarea
+                  className="h-28 resize-y font-mono"
+                  value={k.body}
+                  onChange={(e) => patch({ body: e.target.value })}
+                  placeholder="SKILL.md 正文:步骤、约定、示例"
+                  aria-label="SKILL.md"
+                />
+                {extra > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    另附 {extra} 个文件({Object.keys(k.extraFiles).slice(0, 3).join("、")}
+                    {extra > 3 ? "…" : ""}),保存时原样保留
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
 
       {/* ── MCP 服务 ── */}
       <Card>
