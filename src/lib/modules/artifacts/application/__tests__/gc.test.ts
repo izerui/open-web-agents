@@ -157,7 +157,7 @@ describe("WorkspaceGc / 走会话行锁协议(reclaim)", () => {
       listWorkspaces: async () => old,
       policy,
       now: () => NOW,
-      reclaim: async () => false,
+      reclaim: async () => "busy" as const,
     });
     const r = await gc.run();
     expect(r).toMatchObject({ purged: 0, spared: 1 });
@@ -178,7 +178,7 @@ describe("WorkspaceGc / 走会话行锁协议(reclaim)", () => {
         await op();
         const after = (await fs.stat(dir).catch(() => null)) !== null;
         calls.push({ id, existedInOp: before && !after, opts });
-        return true;
+        return "reclaimed" as const;
       },
     });
     const r = await gc.run();
@@ -203,8 +203,7 @@ describe("WorkspaceGc / 走会话行锁协议(reclaim)", () => {
       now: () => NOW,
       reclaim: async (_id, opts, op) => {
         kinds.push(opts.kind);
-        await op();
-        return true;
+        return (await op()) ? ("reclaimed" as const) : ("gone" as const);
       },
     });
     const r = await gc.run();

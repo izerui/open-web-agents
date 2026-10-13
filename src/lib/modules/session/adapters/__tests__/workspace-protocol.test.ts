@@ -52,12 +52,13 @@ if (!TEST_DB_URL) {
     nowMs: Date.now(),
     kind,
   });
-  const noop = async () => {};
+  /** 假装挪走了东西 */
+  const noop = async () => true;
 
   describe("reclaimWorkspace / prepareWorkspace(真实 MySQL)", () => {
     it("长期没活动:可回收,并记下清理时刻", async () => {
       const { id } = await oldSession();
-      expect(await sessions.reclaimWorkspace(id, opts(), noop)).toBe(true);
+      expect(await sessions.reclaimWorkspace(id, opts(), noop)).toBe("reclaimed");
       expect((await sessions.get(id))?.workspacePurgedAt).toBeGreaterThan(0);
     });
 
@@ -66,13 +67,13 @@ if (!TEST_DB_URL) {
       await sessions.prepareWorkspace(id, { nowMs: Date.now() }, async () => {
         await fs.mkdir(dir, { recursive: true });
       });
-      expect(await sessions.reclaimWorkspace(id, opts(), noop)).toBe(false);
+      expect(await sessions.reclaimWorkspace(id, opts(), noop)).toBe("busy");
     });
 
     it("保留期内有运行活动:不回收", async () => {
       const { id } = await oldSession();
       await runs.create({ id: sid(), sessionId: id, prompt: "新一轮" });
-      expect(await sessions.reclaimWorkspace(id, opts(), noop)).toBe(false);
+      expect(await sessions.reclaimWorkspace(id, opts(), noop)).toBe("busy");
     });
 
     it("运行正在执行(租约有效)即使很早创建也不回收;租约过期则可以", async () => {
@@ -82,9 +83,9 @@ if (!TEST_DB_URL) {
       await db.execute(
         sql`UPDATE runs SET created_at = NOW() - INTERVAL 8 DAY, status = 'running', lease_until = ${Date.now() + 60_000} WHERE id = ${runId}`,
       );
-      expect(await sessions.reclaimWorkspace(id, opts(), noop)).toBe(false);
+      expect(await sessions.reclaimWorkspace(id, opts(), noop)).toBe("busy");
       await db.execute(sql`UPDATE runs SET lease_until = ${Date.now() - 1} WHERE id = ${runId}`);
-      expect(await sessions.reclaimWorkspace(id, opts(), noop)).toBe(true);
+      expect(await sessions.reclaimWorkspace(id, opts(), noop)).toBe("reclaimed");
     });
 
     it("卡在 pending 的僵尸运行:整体清理放行(兜底占盘),清中间产物不放行", async () => {
@@ -94,8 +95,8 @@ if (!TEST_DB_URL) {
       await db.execute(
         sql`UPDATE runs SET created_at = NOW() - INTERVAL 8 DAY WHERE id = ${runId}`,
       );
-      expect(await sessions.reclaimWorkspace(id, opts("clean"), noop)).toBe(false);
-      expect(await sessions.reclaimWorkspace(id, opts("purge"), noop)).toBe(true);
+      expect(await sessions.reclaimWorkspace(id, opts("clean"), noop)).toBe("busy");
+      expect(await sessions.reclaimWorkspace(id, opts("purge"), noop)).toBe("reclaimed");
     });
 
     it("op 失败:整体回滚,不留下清理时刻", async () => {
@@ -185,7 +186,7 @@ if (!TEST_DB_URL) {
   });
 
   describe("半完成状态:改名成功但清理没提交", () => {
-    const gcFor = (reclaimWrap?: (op: () => Promise<void>) => () => Promise<void>) =>
+    const gcFor = (reclaimWrap?: (op: () => Promise<boolean>) => () => Promise<boolean>) =>
       new WorkspaceGc({
         workspacesRoot: root,
         listWorkspaces: () => runs.listSessionActivity(),
@@ -198,7 +199,7 @@ if (!TEST_DB_URL) {
     it("真实改名成功后再抛错(事务回滚):目录挪回原处,库里无清理时刻,回收站不留,并报错", async () => {
       const { id, dir } = await oldSession();
       const report = await gcFor((op) => async () => {
-        await op(); // 真的把目录挪进了回收站
+        expect(await op()).toBe(true); // 真的把目录挪进了回收站
         expect(await fs.stat(dir).catch(() => null)).toBeNull();
         throw new Error("commit failed");
       }).run();
@@ -284,10 +285,11 @@ if (!TEST_DB_URL) {
         listWorkspaces: async () => [{ sessionId: id, lastActiveAt: 0, finished: true }],
         reclaim: (sid2, o, op) =>
           sessions.reclaimWorkspace(sid2, o, async () => {
-            await op();
+            const m = await op();
             moved();
             await gate;
             if (outcome === "rollback") throw new Error("A 提交失败");
+            return m;
           }),
         lockSession,
       });
@@ -341,6 +343,97 @@ if (!TEST_DB_URL) {
         expect(await fs.readFile(path.join(dir, "旧产出.md"), "utf8")).toBe("上周的");
         expect((await sessions.get(id))?.workspacePurgedAt).toBeUndefined();
         expect(await fs.readdir(path.join(root, TRASH_DIR))).toEqual([]);
+      },
+    );
+  });
+
+  describe("两个 GC 都走完整扫描:后到的不能覆盖先到那一批的清理标记", () => {
+    const lockSession = <T>(id: string, fn: (p: number | undefined) => Promise<T>) =>
+      sessions.withWorkspaceLock(id, (st) => fn(st?.workspacePurgedAt));
+    const gate = () => {
+      let open!: () => void;
+      let reached!: () => void;
+      const at = new Promise<void>((r) => {
+        reached = r;
+      });
+      const pass = new Promise<void>((r) => {
+        open = r;
+      });
+      return {
+        at,
+        open,
+        wait: async () => {
+          reached();
+          await pass;
+        },
+      };
+    };
+
+    it("源目录已不存在:op 返回未挪动,不记清理标记(返回 gone)", async () => {
+      const { id } = await oldSession();
+      expect(await sessions.reclaimWorkspace(id, opts(), async () => false)).toBe("gone");
+      expect((await sessions.get(id))?.workspacePurgedAt).toBeUndefined();
+    });
+
+    it(
+      "B 先过目录检查,A 改名提交后在删除前停住;B 拿锁时无可挪 —— 标记仍属于 A,随后核对删除 A 的批次而不是恢复",
+      { timeout: 30_000 },
+      async () => {
+        const { id, dir } = await oldSession();
+        const T_A = Date.now();
+        const T_B = T_A + 1000;
+        const bAfterStat = gate();
+        const aAfterReclaim = gate();
+        const list = async () => [{ sessionId: id, lastActiveAt: 0, finished: true }];
+        const deps = {
+          workspacesRoot: root,
+          listWorkspaces: list,
+          reclaim: (
+            sid2: string,
+            o: { quietSinceMs: number; nowMs: number; kind: "purge" | "clean" },
+            op: () => Promise<boolean>,
+          ) => sessions.reclaimWorkspace(sid2, o, op),
+          lockSession,
+        };
+        const gcB = new WorkspaceGc({
+          ...deps,
+          now: () => T_B,
+          afterStat: () => bAfterStat.wait(),
+        });
+        const gcA = new WorkspaceGc({
+          ...deps,
+          now: () => T_A,
+          afterReclaim: () => aAfterReclaim.wait(),
+        });
+
+        const bDone = gcB.run();
+        await bAfterStat.at; // B 已在锁外确认目录存在
+        const aDone = gcA.run();
+        await aAfterReclaim.at; // A 已改名并提交,停在删除回收站批次之前
+        expect((await sessions.get(id))?.workspacePurgedAt).toBe(T_A);
+
+        bAfterStat.open();
+        const rb = await bDone;
+        expect(rb.purged).toBe(0);
+        expect(rb.spared).toBe(0);
+        // B 什么都没挪,不能把标记改成自己的时间
+        expect((await sessions.get(id))?.workspacePurgedAt).toBe(T_A);
+
+        // 模拟 A 在提交后、删除前退出:由另一轮核对来处理 A 留下的批次
+        const reconcile = new WorkspaceGc({
+          workspacesRoot: root,
+          listWorkspaces: async () => [],
+          lockSession,
+        });
+        const rc = await reconcile.run();
+        expect(rc.errors.join("\n")).not.toMatch(/挪回原处/);
+        expect(await fs.readdir(path.join(root, TRASH_DIR))).toEqual([]);
+        expect(await fs.stat(dir).catch(() => null)).toBeNull(); // 没被恢复
+
+        aAfterReclaim.open();
+        await aDone;
+        expect((await sessions.get(id))?.workspacePurgedAt).toBe(T_A);
+        expect(await fs.stat(dir).catch(() => null)).toBeNull();
       },
     );
   });

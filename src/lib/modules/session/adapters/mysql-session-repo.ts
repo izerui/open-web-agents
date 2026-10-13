@@ -2,6 +2,7 @@ import type { Db } from "@/lib/db/client";
 import { sessions } from "@/lib/db/schema";
 import type {
   NewSession,
+  ReclaimResult,
   Session,
   SessionListFilter,
   SessionRepo,
@@ -181,8 +182,8 @@ export class MysqlSessionRepo implements SessionRepo {
   async reclaimWorkspace(
     id: string,
     opts: { quietSinceMs: number; nowMs: number; kind: "purge" | "clean" },
-    op: () => Promise<void>,
-  ): Promise<boolean> {
+    op: () => Promise<boolean>,
+  ): Promise<ReclaimResult> {
     return this.db.transaction(async (tx) => {
       // 时间一律按 UNIX_TIMESTAMP 换成毫秒比较,与 listSessionActivity 的口径一致
       const locked = await tx.execute(sql`
@@ -190,9 +191,9 @@ export class MysqlSessionRepo implements SessionRepo {
         FROM sessions WHERE id = ${id} FOR UPDATE
       `);
       const row = ((locked as unknown as [Record<string, unknown>[]])[0] ?? [])[0];
-      if (!row) return false;
-      if (Number(row.createdMs) >= opts.quietSinceMs) return false;
-      if (row.touchedMs !== null && Number(row.touchedMs) >= opts.quietSinceMs) return false;
+      if (!row) return "gone";
+      if (Number(row.createdMs) >= opts.quietSinceMs) return "busy";
+      if (row.touchedMs !== null && Number(row.touchedMs) >= opts.quietSinceMs) return "busy";
 
       const busy = await tx.execute(sql`
         SELECT 1 AS hit FROM runs r
@@ -204,14 +205,17 @@ export class MysqlSessionRepo implements SessionRepo {
           )
         LIMIT 1
       `);
-      if (((busy as unknown as [unknown[]])[0] ?? []).length > 0) return false;
+      if (((busy as unknown as [unknown[]])[0] ?? []).length > 0) return "busy";
 
+      // 在锁内完成改名:写方此刻在等这把锁,改名之后它才会建新的空目录
+      const moved = await op();
+      // 什么都没挪(通常是另一个 GC 已挪走):不记标记 —— 否则会把那一批的清理时刻覆盖成本批的
+      if (!moved) return "gone";
       if (opts.kind === "purge") {
+        // 挪走之后才记,同一事务:提交失败则标记回滚,文件由 GC 核对回收站批次补偿
         await tx.update(sessions).set({ workspacePurgedAt: opts.nowMs }).where(eq(sessions.id, id));
       }
-      // 在锁内完成改名:写方此刻在等这把锁,改名之后它才会建新的空目录
-      await op();
-      return true;
+      return "reclaimed";
     });
   }
 

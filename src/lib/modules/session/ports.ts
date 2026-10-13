@@ -70,6 +70,9 @@ export interface SessionListFilter {
   includeArchived?: boolean;
 }
 
+/** reclaimWorkspace 的结果,见其注释。 */
+export type ReclaimResult = "reclaimed" | "busy" | "gone";
+
 export interface SessionRepo {
   create(s: NewSession): Promise<Session>;
   get(id: string): Promise<Session | null>;
@@ -101,14 +104,19 @@ export interface SessionRepo {
    * - 会话创建于 quietSinceMs 之前,且 workspaceTouchedAt 为空或早于它;
    * - 没有在 quietSinceMs 之后有过活动的运行,没有租约有效的运行;
    * - kind = "clean"(清中间产物)还要求没有未结束的运行。
-   * 返回是否执行了 op。op 或提交失败时【只有数据库标记回滚】,op 里已经完成的文件操作
-   * (改名)不会自动撤回 —— 由 GC 核对回收站批次后挪回或留存(见 artifacts/application/gc.ts)。
+   * op 返回是否真的挪走了东西。结果:
+   * - "reclaimed":条件成立且 op 确实挪走了东西;purge 时【在挪走之后】于同一事务记下清理时刻;
+   * - "busy":条件不成立(刚用过、有活动、有运行在执行),op 未执行;
+   * - "gone":条件成立但没有可挪的(通常是另一个 GC 已挪走)—— 不记任何标记,
+   *   免得把别人那一批的清理时刻覆盖掉。
+   * op 或提交失败时【只有数据库标记回滚】,op 里已经完成的文件操作(改名)不会自动撤回 ——
+   * 由 GC 核对回收站批次后挪回或留存(见 artifacts/application/gc.ts)。
    */
   reclaimWorkspace(
     id: string,
     opts: { quietSinceMs: number; nowMs: number; kind: "purge" | "clean" },
-    op: () => Promise<void>,
-  ): Promise<boolean>;
+    op: () => Promise<boolean>,
+  ): Promise<ReclaimResult>;
   /**
    * 锁住会话行,把库里记下的清理时刻交给 fn,在锁内执行。GC 核对回收站批次用:
    * 另一个 GC 正在 reclaimWorkspace(改名之后、提交之前)时,这里会等它的事务结束,

@@ -77,14 +77,22 @@ async function sizeOf(p: string): Promise<number> {
   return st.isDirectory() ? dirSize(p) : st.size;
 }
 
-/** 改名挪走;源已不在(另一轮已挪走)视为完成。 */
-async function moveAway(from: string, to: string): Promise<void> {
+/**
+ * 改名挪走。返回是否真的挪了:源已不在(通常是另一个 GC 已挪走)返回 false ——
+ * 【不能当成功】,否则调用方会为一次什么都没做的回收记下清理时刻,覆盖掉真正挪走那一批的标记。
+ */
+async function moveAway(from: string, to: string): Promise<boolean> {
   try {
     await fs.rename(from, to);
+    return true;
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw err;
   }
 }
+
+/** reclaim 的结果(与 SessionRepo.reclaimWorkspace 一致)。 */
+type ReclaimResult = "reclaimed" | "busy" | "gone";
 
 export interface GcDeps {
   /** 工作空间根目录(dataDir/workspaces)。 */
@@ -101,10 +109,14 @@ export interface GcDeps {
   reclaim?(
     sessionId: string,
     opts: { quietSinceMs: number; nowMs: number; kind: "purge" | "clean" },
-    op: () => Promise<void>,
-  ): Promise<boolean>;
+    op: () => Promise<boolean>,
+  ): Promise<ReclaimResult>;
   /** 测试用:在锁内、改名之前暂停,用来确定性地制造"判定之后有人要写"的并发。 */
   beforeMove?(sessionId: string): Promise<void>;
+  /** 测试用:锁外的目录检查通过之后暂停(制造"两个 GC 都通过了检查"的并发)。 */
+  afterStat?(sessionId: string): Promise<void>;
+  /** 测试用:回收已提交、删除回收站批次之前暂停(模拟提交后、删除前进程退出)。 */
+  afterReclaim?(sessionId: string): Promise<void>;
   /**
    * 在会话行锁内拿到库里的清理时刻并执行 fn(见 SessionRepo.withWorkspaceLock),
    * 用来核对回收站批次。不提供则不加锁、清理时刻一律视为未知:只挪回 / 留存,不删除
@@ -144,9 +156,11 @@ export class WorkspaceGc {
   private reclaim(
     sessionId: string,
     opts: { quietSinceMs: number; nowMs: number; kind: "purge" | "clean" },
-    op: () => Promise<void>,
-  ): Promise<boolean> {
-    return this.deps.reclaim ? this.deps.reclaim(sessionId, opts, op) : op().then(() => true);
+    op: () => Promise<boolean>,
+  ): Promise<ReclaimResult> {
+    return this.deps.reclaim
+      ? this.deps.reclaim(sessionId, opts, op)
+      : op().then((moved) => (moved ? "reclaimed" : "gone"));
   }
 
   private async scan(report: GcReport): Promise<void> {
@@ -182,6 +196,7 @@ export class WorkspaceGc {
         continue;
       }
 
+      await this.deps.afterStat?.(ws.sessionId);
       const action = decideGc(ws, policy, now);
       if (action === "keep") continue;
       // 本次要挪走的东西统一放到回收站里的这个目录下
@@ -192,19 +207,19 @@ export class WorkspaceGc {
       try {
         if (action === "purge") {
           const size = await dirSize(dir);
-          const done = await this.reclaim(
+          const result = await this.reclaim(
             ws.sessionId,
             { quietSinceMs: now - policy.purgeAfterMs, nowMs: now, kind: "purge" },
             async () => {
               await this.deps.beforeMove?.(ws.sessionId);
               await fs.mkdir(trash, { recursive: true });
-              await moveAway(dir, bin);
+              return moveAway(dir, bin);
             },
           );
-          if (!done) {
-            report.spared++;
-            continue;
-          }
+          if (result === "busy") report.spared++;
+          // gone:别人已挪走,本批什么都没做,也没记标记
+          if (result !== "reclaimed") continue;
+          await this.deps.afterReclaim?.(ws.sessionId);
           await fs.rm(bin, { recursive: true, force: true });
           report.freedBytes += size;
           report.purged++;
@@ -213,21 +228,24 @@ export class WorkspaceGc {
           if (names.length === 0) continue;
           let size = 0;
           for (const n of names) size += await sizeOf(resolveInWorkspace(dir, n));
-          const done = await this.reclaim(
+          const result = await this.reclaim(
             ws.sessionId,
             { quietSinceMs: now - policy.intermediateAfterMs, nowMs: now, kind: "clean" },
             async () => {
               await this.deps.beforeMove?.(ws.sessionId);
               await fs.mkdir(bin, { recursive: true });
+              let moved = false;
               // 每一项都过 resolveInWorkspace,异常名字也删不到目录外
-              for (const n of names) await moveAway(resolveInWorkspace(dir, n), path.join(bin, n));
+              for (const n of names) {
+                if (await moveAway(resolveInWorkspace(dir, n), path.join(bin, n))) moved = true;
+              }
+              return moved;
             },
           );
-          if (!done) {
-            report.spared++;
-            continue;
-          }
+          if (result === "busy") report.spared++;
+          // clean 批次不记任何标记,未执行或没挪到东西时把空批次目录收掉即可
           await fs.rm(bin, { recursive: true, force: true });
+          if (result !== "reclaimed") continue;
           report.freedBytes += size;
           report.cleaned++;
         }

@@ -1,5 +1,6 @@
 import type {
   NewSession,
+  ReclaimResult,
   Session,
   SessionListFilter,
   SessionRepo,
@@ -64,23 +65,20 @@ export class InMemorySessionRepo implements SessionRepo {
   async reclaimWorkspace(
     id: string,
     opts: { quietSinceMs: number; nowMs: number; kind: "purge" | "clean" },
-    op: () => Promise<void>,
-  ): Promise<boolean> {
+    op: () => Promise<boolean>,
+  ): Promise<ReclaimResult> {
     return this.withLock(id, async () => {
       const s = this.sessions.get(id);
-      if (!s || s.createdAt >= opts.quietSinceMs) return false;
+      if (!s) return "gone";
+      if (s.createdAt >= opts.quietSinceMs) return "busy";
       if (s.workspaceTouchedAt !== undefined && s.workspaceTouchedAt >= opts.quietSinceMs) {
-        return false;
+        return "busy";
       }
-      const prev = s.workspacePurgedAt;
+      // op 抛错时什么都不记(与事务回滚一致:只回滚标记,不管文件)
+      const moved = await op();
+      if (!moved) return "gone";
       if (opts.kind === "purge") s.workspacePurgedAt = opts.nowMs;
-      try {
-        await op();
-      } catch (err) {
-        s.workspacePurgedAt = prev; // 与事务回滚一致:只回滚标记,不管文件
-        throw err;
-      }
-      return true;
+      return "reclaimed";
     });
   }
 
