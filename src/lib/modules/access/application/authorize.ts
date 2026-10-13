@@ -184,10 +184,10 @@ export class Authorizer {
 /** 把授权异常翻成 HTTP 响应;非授权异常交给调用方处理。 */
 export function authErrorResponse(err: unknown): Response | null {
   if (err instanceof Unauthorized) {
-    return Response.json({ error: err.message }, { status: 401 });
+    return Response.json({ error: err.message, code: "unauthorized" }, { status: 401 });
   }
   if (err instanceof Forbidden) {
-    return Response.json({ error: err.message }, { status: 403 });
+    return Response.json({ error: err.message, code: "forbidden" }, { status: 403 });
   }
   return null;
 }

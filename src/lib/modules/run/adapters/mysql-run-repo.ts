@@ -86,6 +86,7 @@ export class MysqlRunRepo implements RunRepo {
         agentConfig: r.agentConfig ?? null,
         overrideEnc: r.overrideEnc,
         idempotencyKey: r.idempotencyKey,
+        idempotencyHash: r.idempotencyHash,
         leaseUntil: null,
       });
     } catch (err) {
@@ -104,12 +105,13 @@ export class MysqlRunRepo implements RunRepo {
         sessionId: runs.sessionId,
         status: runs.status,
         leaseUntil: runs.leaseUntil,
+        idempotencyHash: runs.idempotencyHash,
       })
       .from(runs)
       .where(eq(runs.idempotencyKey, key))
       .limit(1);
     const row = rows[0];
-    return row ? toRun(row) : null;
+    return row ? { ...toRun(row), idempotencyHash: row.idempotencyHash ?? undefined } : null;
   }
 
   /**

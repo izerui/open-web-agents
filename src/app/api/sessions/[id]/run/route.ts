@@ -11,6 +11,7 @@ import { topicOf } from "@/lib/modules/run/application/orchestrator";
 import { type TerminalSource, watchTerminal } from "@/lib/modules/run/application/terminal-watch";
 import { assertWithinQuota, quotaErrorResponse } from "@/lib/modules/usage/application/quota-guard";
 import type { AgentEvent } from "@/lib/shared";
+import { streamRun } from "../../../_lib/run-stream";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -108,90 +109,15 @@ interface RunRouteContext {
 
 // ─────────────────────────── 流式模式(SSE) ───────────────────────────
 
-/** stream: true → 逐事件 SSE 推送,Web 页面实时打字机效果。 */
+/** stream: true → 逐事件 SSE 推送,Web 页面实时打字机效果。实现与嵌入组件共用。 */
 function handleStreaming(req: Request, ctx: RunRouteContext) {
   const { id, runId, prompt, enqueue, results, bus } = ctx;
-  const encoder = new TextEncoder();
-
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      let closed = false;
-      const send = (e: AgentEvent, eventId?: string) => {
-        if (closed) return;
-        const idLine = eventId ? `id: ${eventId}\n` : "";
-        try {
-          controller.enqueue(encoder.encode(`${idLine}data: ${JSON.stringify(e)}\n\n`));
-        } catch {
-          closed = true;
-        }
-      };
-
-      let stopWatch = () => {};
-      const finish = () => {
-        if (closed) return;
-        closed = true;
-        unsubscribe();
-        stopWatch();
-        try {
-          controller.close();
-        } catch {
-          // 客户端已断开
-        }
-      };
-
-      const unsubscribe = bus.subscribe(
-        topicOf(id, runId),
-        (e: AgentEvent, eventId: string) => {
-          send(e, eventId);
-          if (e.kind === "result") finish();
-        },
-        { afterId: "0-0" },
-      );
-
-      req.signal.addEventListener("abort", finish, { once: true });
-
-      try {
-        let busUsable = true;
-        try {
-          await bus.ready?.();
-        } catch {
-          busUsable = false;
-          send({ kind: "status", label: "事件通道不可用,本次无实时过程", state: "degraded" });
-        }
-        await enqueue({ runId, sessionId: id, prompt });
-        send({ kind: "status", label: "已入队", state: "pending" });
-        stopWatch = watchTerminal(results, runId, (e) => {
-          send(e);
-          finish();
-        });
-
-        if (!busUsable) {
-          send({
-            kind: "result",
-            status: "unknown",
-            summary: "任务已提交,但事件通道不可用 —— 请稍后轮询结果接口查看结局",
-          });
-          finish();
-        }
-      } catch (err) {
-        send({
-          kind: "result",
-          status: "failed",
-          summary: err instanceof Error ? err.message : String(err),
-        });
-        finish();
-      }
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
-      "X-Run-Id": runId,
-    },
+  return streamRun(req, {
+    bus,
+    results,
+    sessionId: id,
+    runId,
+    enqueue: () => enqueue({ runId, sessionId: id, prompt }),
   });
 }
 
@@ -282,17 +208,7 @@ function handleBlocking(req: Request, ctx: RunRouteContext): Promise<Response> {
     // 入队
     (async () => {
       try {
-        try {
-          await bus.ready?.();
-        } catch {
-          settle(
-            Response.json(
-              { error: "事件通道不可用,请改用流式模式或稍后轮询", runId },
-              { status: 503 },
-            ),
-          );
-          return;
-        }
+        // 事件通道不可用也照常执行:过程事件拿不到,结局由数据库终态送达
         await enqueue({ runId, sessionId: id, prompt });
         // 总线上的 result 丢了也不能让请求永远挂着:库里有终态就用库里的收尾
         stopWatch = watchTerminal(results, runId, (e) => {

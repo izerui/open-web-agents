@@ -65,6 +65,34 @@ describe("对外 invoke 的入口规则", () => {
     expect(rs.filter((r) => r.status === 202)).toHaveLength(1);
   });
 
+  it("同一个 Idempotency-Key 配不同请求体:422 idempotency_conflict", async () => {
+    const idem = { "Idempotency-Key": `e2e-conflict-${Date.now()}` };
+    expect((await invoke({ input: "内容A" }, idem)).status).toBe(202);
+    const r = await invoke({ input: "内容B" }, idem);
+    expect(r.status).toBe(422);
+    expect((r.body as { code?: string }).code).toBe("idempotency_conflict");
+  });
+
+  it("错误响应带机读的 code", async () => {
+    const r = await invoke({ input: "x".repeat(200_001) });
+    expect((r.body as { code?: string }).code).toBe("prompt_too_large");
+    const noKey = await new Client("anon").post<{ code?: string }>(
+      `/api/agents/${agentId}/invoke`,
+      {
+        input: "x",
+      },
+    );
+    expect(noKey.status).toBe(401);
+    expect(noKey.body.code).toBe("unauthorized");
+  });
+
+  it("结果接口先鉴权:未带 key 时,存在与不存在的任务都回 401(不能用来探测任务 id)", async () => {
+    const real = await invoke({ input: "probe" });
+    const anon = new Client("anon");
+    expect((await anon.get(`/api/agents/${real.body.taskId}/result`)).status).toBe(401);
+    expect((await anon.get("/api/agents/no-such-task/result")).status).toBe(401);
+  });
+
   it("非法的 Idempotency-Key 返回 400", async () => {
     const r = await invoke({ input: "x" }, { "Idempotency-Key": "k".repeat(129) });
     expect(r.status).toBe(400);

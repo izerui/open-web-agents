@@ -144,6 +144,8 @@ export const runs = mysqlTable(
      * 网络超时重试不会产生重复执行与重复计费。
      */
     idempotencyKey: varchar("idempotency_key", { length: 191 }),
+    /** 首次受理时请求体的摘要。同键不同请求体 → 422,而不是悄悄返回另一个任务。 */
+    idempotencyHash: varchar("idempotency_hash", { length: 64 }),
     /** 分支来源:从哪个运行分叉而来。为空即主线首轮。 */
     parentRunId: varchar("parent_run_id", { length: 36 }),
     /**

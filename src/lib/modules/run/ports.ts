@@ -11,6 +11,8 @@ export interface Run {
    * 只有 claimNext 会返回它 —— 拿不到令牌就没资格写这一行。
    */
   fence?: string;
+  /** 仅 findByIdempotencyKey 返回:首次受理时的请求体摘要。 */
+  idempotencyHash?: string;
 }
 
 export interface NewRun {
@@ -25,6 +27,7 @@ export interface NewRun {
   overrideEnc?: string;
   /** 幂等键(已带调用方作用域)。重复则 create 抛 DuplicateIdempotencyKey。 */
   idempotencyKey?: string;
+  idempotencyHash?: string;
 }
 
 /** create 撞上已存在的幂等键。调用方据此回滚自己刚建的会话,并返回已有的任务。 */

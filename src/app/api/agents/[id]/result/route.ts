@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/api-error";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 
@@ -20,19 +21,20 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const { id: taskId } = await params;
   const { runs, auth } = getContainer();
 
-  const run = await runs.getResult(taskId);
-  if (!run) return Response.json({ error: "task not found" }, { status: 404 });
-
+  // 先鉴权再查库:曾经先查库,未登录的人也能凭 404 / 401 的差别探测任务 id 是否存在
   try {
     const principal = await auth.requireApiKey(req);
     const owning = await runs.get(taskId);
-    if (!owning) return Response.json({ error: "task not found" }, { status: 404 });
+    if (!owning) return apiError(404, "not_found", "task not found");
     await auth.assertSessionAccess(principal, owning.sessionId);
   } catch (err) {
     const res = authErrorResponse(err);
     if (res) return res;
     throw err;
   }
+
+  const run = await runs.getResult(taskId);
+  if (!run) return apiError(404, "not_found", "task not found");
 
   const done = run.status === "success" || run.status === "failed" || run.status === "cancelled";
 

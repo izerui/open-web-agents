@@ -35,7 +35,8 @@ export class InMemoryRunRepo implements RunRepo {
 
   async findByIdempotencyKey(key: string): Promise<Run | null> {
     const id = this.idempotency.get(key);
-    return id ? this.get(id) : null;
+    const run = id ? await this.get(id) : null;
+    return run && id ? { ...run, idempotencyHash: this.payloads.get(id)?.idempotencyHash } : null;
   }
 
   async getPayload(

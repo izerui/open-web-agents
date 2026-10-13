@@ -69,6 +69,7 @@ export function quotaErrorResponse(err: unknown): Response | null {
   return Response.json(
     {
       error: err.message,
+      code: "quota_exceeded",
       quota: {
         usedMicroUsd: err.verdict.usedMicroUsd,
         limitMicroUsd: err.verdict.limitMicroUsd,

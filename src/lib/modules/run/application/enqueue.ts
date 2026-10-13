@@ -36,6 +36,7 @@ export interface EnqueueRequest {
   override?: RunCommand["override"];
   /** 已带调用方作用域的幂等键。 */
   idempotencyKey?: string;
+  idempotencyHash?: string;
 }
 
 export interface EnqueueDeps {
@@ -82,6 +83,7 @@ export class RunEnqueuer {
       agentConfig: agent.config,
       overrideEnc,
       idempotencyKey: req.idempotencyKey,
+      idempotencyHash: req.idempotencyHash,
     });
   }
 }

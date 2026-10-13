@@ -1,5 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
+import { apiError } from "@/lib/api-error";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { validateInput } from "@/lib/modules/agent/domain/validate-output";
@@ -61,14 +62,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   const agent = await agents.get(agentId);
   if (!agent) {
-    return Response.json({ error: "agent not found" }, { status: 404 });
+    return apiError(404, "not_found", "agent not found");
   }
 
   const body = (await req.json().catch(() => ({}))) as InvokeBody;
   const prompt =
     typeof body.input === "string" ? body.input.trim() : JSON.stringify(body.input ?? {});
   if (!prompt || prompt === "{}") {
-    return Response.json({ error: "input is required" }, { status: 400 });
+    return apiError(400, "input_invalid", "input is required");
   }
 
   /**
@@ -83,17 +84,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (inputSchema) {
     // 纯文本对上 object schema 必然不合格,提示要说人话
     if (typeof body.input === "string") {
-      return Response.json(
-        { error: "该智能体声明了 inputSchema,input 必须是符合它的对象,不能是纯文本" },
-        { status: 400 },
+      return apiError(
+        400,
+        "input_invalid",
+        "该智能体声明了 inputSchema,input 必须是符合它的对象,不能是纯文本",
       );
     }
     const verdict = validateInput(inputSchema, body.input);
     if (!verdict.ok) {
-      return Response.json(
-        { error: "input 不符合该智能体的 inputSchema", details: verdict.errors },
-        { status: 400 },
-      );
+      return apiError(400, "input_invalid", "input 不符合该智能体的 inputSchema", {
+        details: verdict.errors,
+      });
     }
   }
 
@@ -102,7 +103,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     assertPromptSize(prompt);
   } catch (err) {
     if (err instanceof PromptTooLarge) {
-      return Response.json({ error: err.message }, { status: 413 });
+      return apiError(413, "prompt_too_large", err.message);
     }
     throw err;
   }
@@ -113,7 +114,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
    * 调用方以为用了自己的 key,实际跑的是别的凭证,且没有任何报错。
    */
   const override = parseOverride(body.override);
-  if (!override.ok) return Response.json({ error: override.reason }, { status: 400 });
+  if (!override.ok) return apiError(400, "invalid_request", override.reason);
 
   /*
    * 幂等键。调用方因超时重试同一个请求时带上同一个 Idempotency-Key,
@@ -121,18 +122,23 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
    * 键按调用方隔离:不同 key / 不同账号用同样的字符串不会撞在一起。
    */
   const rawKey = req.headers.get("Idempotency-Key")?.trim();
+  // 同键重放时用来判断"是不是同一个请求"
+  const requestHash = sha256(JSON.stringify({ prompt, override: override.value ?? null }));
   let idempotencyKey: string | undefined;
   if (rawKey) {
     if (!isValidIdempotencyKey(rawKey)) {
-      return Response.json(
-        { error: "Idempotency-Key 须为 1~128 个可见 ASCII 字符" },
-        { status: 400 },
+      return apiError(
+        400,
+        "idempotency_key_invalid",
+        "Idempotency-Key 须为 1~128 个可见 ASCII 字符",
       );
     }
+    // 作用域 = 调用方 + 智能体:同一个键换一个智能体调用,不该拿回另一个智能体的任务。
+    // 存摘要而不是原文:拼起来可能超过列宽
     const scope = principal.type === "apiKey" ? `k:${principal.keyId}` : `u:${principal.userId}`;
-    idempotencyKey = `${scope}:${rawKey}`;
+    idempotencyKey = sha256(`${scope}|${agentId}|${rawKey}`);
     const existing = await runs.findByIdempotencyKey(idempotencyKey);
-    if (existing) return replayed(existing, agent.config.outputSchema !== undefined);
+    if (existing) return replayed(existing, requestHash, agent.config.outputSchema !== undefined);
   }
 
   const sessionId = randomUUID().replace(/-/g, "").slice(0, 24);
@@ -159,6 +165,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       prompt,
       override: override.value,
       idempotencyKey,
+      idempotencyHash: idempotencyKey ? requestHash : undefined,
     });
   } catch (err) {
     // 入队失败就回滚刚建的会话与目录,不留空壳
@@ -167,7 +174,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (err instanceof DuplicateIdempotencyKey) {
       // 并发的同键请求:另一个先入队了,返回它
       const existing = await runs.findByIdempotencyKey(err.idempotencyKey);
-      if (existing) return replayed(existing, agent.config.outputSchema !== undefined);
+      if (existing) {
+        return replayed(existing, requestHash, agent.config.outputSchema !== undefined);
+      }
     }
     throw err;
   }
@@ -184,7 +193,20 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 }
 
 /** 同一幂等键的重复请求:返回第一次受理的任务。200 而非 202,让调用方知道这是重放。 */
-function replayed(run: { id: string; sessionId: string }, structured: boolean): Response {
+function replayed(
+  run: { id: string; sessionId: string; idempotencyHash?: string },
+  requestHash: string,
+  structured: boolean,
+): Response {
+  // 同一个键配了不同的请求体:多半是调用方复用键的 bug,明确报错而不是返回别的任务
+  if (run.idempotencyHash && run.idempotencyHash !== requestHash) {
+    return apiError(
+      422,
+      "idempotency_conflict",
+      "这个 Idempotency-Key 已用于另一个不同内容的请求",
+      { taskId: run.id },
+    );
+  }
   return Response.json(
     { taskId: run.id, sessionId: run.sessionId, structured, replayed: true },
     { status: 200 },
@@ -229,4 +251,8 @@ function parseOverride(
     return { ok: false, reason: "override.baseUrl 必须与 override.key 一起提供" };
   }
   return { ok: true, value: Object.keys(out).length ? out : undefined };
+}
+
+function sha256(text: string): string {
+  return createHash("sha256").update(text).digest("hex");
 }
