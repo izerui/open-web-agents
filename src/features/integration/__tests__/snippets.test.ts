@@ -128,7 +128,7 @@ describe("buildSnippets 文本内容", () => {
 /** 测试里把轮询期限调到 1 秒,子进程整体时限 15 秒兜底 */
 const DEADLINE_S = 1;
 
-type Mode = "unauth" | "pending" | "hang" | "stall" | "trickle" | "reject" | "ok";
+type Mode = "unauth" | "pending" | "hang" | "stall" | "trickle" | "tricklecl" | "reject" | "ok";
 
 let server: http.Server;
 let origin = "";
@@ -163,6 +163,14 @@ beforeAll(async () => {
       case "trickle": {
         // 一直慢慢发空白字节,每次间隔都小于读超时 —— 只限"读间隔"的客户端会被拖住
         res.writeHead(200, { "Content-Type": "application/json" });
+        const t = setInterval(() => res.write(" "), 300);
+        res.on("close", () => clearInterval(t));
+        return;
+      }
+      case "tricklecl": {
+        // 同样慢速发送,但声明了很大的 Content-Length:不走 chunked 编码,
+        // 客户端按固定块读取时可能一直凑不满一块,读间隔又始终不超时
+        res.writeHead(200, { "Content-Type": "application/json", "Content-Length": "1000000" });
         const t = setInterval(() => res.write(" "), 300);
         res.on("close", () => clearInterval(t));
         return;
@@ -239,27 +247,34 @@ describe.skipIf(!hasNode18)("Node 示例:真实网络下的结束行为", () => 
     const r = await run("hang");
     expect(r.code).not.toBe(0);
     expect(r.stderr).toContain("等待结果超时");
-    expect(r.ms).toBeLessThan(DEADLINE_S * 1000 + 3000);
+    expect(r.ms).toBeLessThan(DEADLINE_S * 1000 + 2000);
   });
 
   it("响应头到了但 body 不结束:读 body 也在期限内被取消", async () => {
     const r = await run("stall");
     expect(r.code).not.toBe(0);
     expect(r.stderr).toContain("等待结果超时");
-    expect(r.ms).toBeLessThan(DEADLINE_S * 1000 + 3000);
+    expect(r.ms).toBeLessThan(DEADLINE_S * 1000 + 2000);
   });
 
   it("服务端持续慢速发送、永不结束:总时长仍受期限约束", async () => {
     const r = await run("trickle");
     expect(r.code).not.toBe(0);
     expect(r.stderr).toContain("等待结果超时");
-    expect(r.ms).toBeLessThan(DEADLINE_S * 1000 + 3000);
+    expect(r.ms).toBeLessThan(DEADLINE_S * 1000 + 2000);
+  });
+
+  it("声明了 Content-Length 的慢速发送(非 chunked):总时长仍受期限约束", async () => {
+    const r = await run("tricklecl");
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toContain("等待结果超时");
+    expect(r.ms).toBeLessThan(DEADLINE_S * 1000 + 2000);
   });
 
   it("一直 done:false:到期限结束", async () => {
     const r = await run("pending");
     expect(r.stderr).toContain("等待结果超时");
-    expect(r.ms).toBeLessThan(DEADLINE_S * 1000 + 3000);
+    expect(r.ms).toBeLessThan(DEADLINE_S * 1000 + 2000);
   });
 
   it("提交被拒(400):带状态码报错,不进入轮询", async () => {
@@ -302,20 +317,27 @@ describe.skipIf(!hasPythonRequests)("Python 示例:真实网络下的结束行�
   it("受理成功、下一次请求不返回:按期限抛 TimeoutError", async () => {
     const r = await run("hang");
     expect(r.stderr).toContain("TimeoutError: 等待结果超时");
-    expect(r.ms).toBeLessThan(DEADLINE_S * 1000 + 4000);
+    expect(r.ms).toBeLessThan(DEADLINE_S * 1000 + 2000);
   });
 
   it("响应头到了但 body 不结束:按期限抛 TimeoutError", async () => {
     const r = await run("stall");
     expect(r.stderr).toContain("TimeoutError: 等待结果超时");
-    expect(r.ms).toBeLessThan(DEADLINE_S * 1000 + 4000);
+    expect(r.ms).toBeLessThan(DEADLINE_S * 1000 + 2000);
   });
 
   it("服务端持续慢速发送、永不结束:总时长仍受期限约束", async () => {
     const r = await run("trickle");
     expect(r.code).not.toBe(0);
     expect(r.stderr).toContain("等待结果超时");
-    expect(r.ms).toBeLessThan(DEADLINE_S * 1000 + 4000);
+    expect(r.ms).toBeLessThan(DEADLINE_S * 1000 + 2000);
+  });
+
+  it("声明了 Content-Length 的慢速发送(非 chunked):总时长仍受期限约束", async () => {
+    const r = await run("tricklecl");
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toContain("等待结果超时");
+    expect(r.ms).toBeLessThan(DEADLINE_S * 1000 + 2000);
   });
 
   it("一直 done:false:到期限抛 TimeoutError", async () => {

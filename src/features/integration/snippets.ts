@@ -171,7 +171,7 @@ export function buildSnippets({
 curl ${origin}/api/agents/<taskId>/result -H "X-Api-Key: $OWA_API_KEY"
 # → { "status": "success", "done": true, "${resultField}": … }`;
 
-  const python = `import json, os, time, uuid, requests
+  const python = `import json, os, queue, threading, time, uuid, requests
 
 BASE = ${JSON.stringify(origin)}
 HEADERS = {"X-Api-Key": os.environ["OWA_API_KEY"]}
@@ -187,11 +187,12 @@ if r.status_code not in (200, 202):
     raise RuntimeError(f"提交失败 HTTP {r.status_code}: {r.text}")
 task_id = r.json()["taskId"]
 
-# 轮询整体期限 ${N} 秒:连接、等响应头、读响应体、间隔等待都算在内。
-# requests 的 timeout 只管单次连接/两次读之间的间隔,不是总时长 ——
-# 所以每次请求前按剩余时间限时(最多 30 秒),并且边读响应体边检查期限。
-# 超时语义:总耗时不超过"期限 + 一次读等待"(读等待 ≤ min(30 秒, 发请求时的剩余时间));
-# 需要严格准时的话,在独立线程/进程里跑并由外层强制结束。
+# 轮询整体期限 ${N} 秒:连接、DNS 解析、等响应头、读响应体、间隔等待都算在内。
+# requests 的 timeout 只管单次连接/两次读之间的间隔,不是总时长(也不管 DNS):
+# 服务端声明了 Content-Length 再慢慢发数据,就能一直拖住它。
+# 所以每次请求放到守护线程里跑,主线程最多等到期限 —— 到期直接放弃这次请求并抛 TimeoutError。
+# 注意:被放弃的请求仍在后台线程里,直到它自己的 timeout 或服务端结束;
+# 守护线程不会阻止进程退出,但若你捕获 TimeoutError 后长期继续运行,它会占着一个连接。
 # 长任务建议改用 Webhook 回调,而不是把期限调得很大。
 deadline = time.monotonic() + ${N}
 
@@ -202,22 +203,29 @@ def get_result():
     left = deadline - time.monotonic()
     if left <= 0:
         raise timed_out()
+    box = queue.Queue(maxsize=1)
+
+    def run():
+        try:
+            r = requests.get(
+                f"{BASE}/api/agents/{task_id}/result", headers=HEADERS, timeout=min(30, left)
+            )
+            box.put((True, (r.status_code, r.content)))
+        except BaseException as e:
+            box.put((False, e))
+
+    threading.Thread(target=run, daemon=True).start()
     try:
-        with requests.get(
-            f"{BASE}/api/agents/{task_id}/result",
-            headers=HEADERS, timeout=min(30, left), stream=True,
-        ) as resp:
-            body = b""
-            for chunk in resp.iter_content(8192):
-                body += chunk
-                if time.monotonic() > deadline:
-                    raise timed_out()
-    except requests.exceptions.RequestException as e:
+        ok, value = box.get(timeout=left)
+    except queue.Empty:
+        raise timed_out() from None
+    if not ok:
         if time.monotonic() >= deadline:
-            raise timed_out() from e
-        raise
-    if resp.status_code != 200:
-        raise RuntimeError(f"查询结果失败 HTTP {resp.status_code}: {body.decode(errors='replace')}")
+            raise timed_out() from value
+        raise value
+    status, body = value
+    if status != 200:
+        raise RuntimeError(f"查询结果失败 HTTP {status}: {body.decode(errors='replace')}")
     return json.loads(body)
 
 while True:
