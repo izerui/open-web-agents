@@ -108,6 +108,12 @@ describe("buildSnippets 文本内容", () => {
     expect(s.curl).not.toContain("需要按实际填写");
   });
 
+  it("Python:如实说明超时只停止等待、不取消底层请求", () => {
+    expect(s.python).toContain("没有被取消");
+    expect(s.python).toContain("无限期");
+    expect(s.python).not.toContain("暂时");
+  });
+
   it("Python:JSON 布尔值换成 Python 字面量", () => {
     expect(s.python).toContain('"ok": False');
     expect(s.python).toContain('print(res["structured"])');
