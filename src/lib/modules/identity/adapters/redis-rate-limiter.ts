@@ -25,16 +25,21 @@ end
 return {n, ttl}
 `;
 
+/** 单条限流命令的等待上限。限流在登录、改密码、invoke 的关键路径上,宁可放行也不能卡住请求。 */
+const DEFAULT_COMMAND_TIMEOUT_MS = 200;
+
 export class RedisRateLimiter implements RateLimiter {
   private readonly redis: Redis;
+  private readonly commandTimeoutMs: number;
 
   /**
    * 不排队(enableOfflineQueue: false):连接不可用时命令立刻失败、走放行分支,
    * 而不是让每个请求卡在等 Redis 上。代价是进程刚启动、连接还没建好的那几毫秒里也会放行。
    */
-  constructor(redisUrl: string) {
+  constructor(redisUrl: string, opts: { commandTimeoutMs?: number } = {}) {
     this.redis = new Redis(redisUrl, { maxRetriesPerRequest: 1, enableOfflineQueue: false });
     this.redis.on("error", () => {});
+    this.commandTimeoutMs = opts.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
   }
 
   /** 等连接就绪(测试用;生产在启动时创建,首个请求到来前通常已就绪)。 */
@@ -50,16 +55,29 @@ export class RedisRateLimiter implements RateLimiter {
   }
 
   async hit(key: string, limit: number, windowMs: number): Promise<RateLimitVerdict> {
+    /*
+     * 有界等待。enableOfflineQueue: false 只管"还没连上";连接已建立、Redis 却迟迟不回
+     * (卡死、过载、网络半断)时,裸 await 会让 invoke 卡在入队前,登录与改密码也一起被拖住。
+     * 超时按"Redis 故障时放行"处理。被放弃的那条命令之后若仍执行,只是多计了一次数。
+     */
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      const [count, ttl] = (await this.redis.eval(HIT, 1, `owa:rl:${key}`, windowMs)) as [
-        number,
-        number,
-      ];
+      const [count, ttl] = (await Promise.race([
+        this.redis.eval(HIT, 1, `owa:rl:${key}`, windowMs),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("rate limiter timeout")),
+            this.commandTimeoutMs,
+          );
+        }),
+      ])) as [number, number];
       return count > limit
         ? { allowed: false, retryAfterMs: ttl, remaining: 0, resetMs: ttl }
         : { allowed: true, retryAfterMs: 0, remaining: limit - count, resetMs: ttl };
     } catch {
       return { allowed: true, retryAfterMs: 0, remaining: limit, resetMs: windowMs };
+    } finally {
+      clearTimeout(timer);
     }
   }
 
