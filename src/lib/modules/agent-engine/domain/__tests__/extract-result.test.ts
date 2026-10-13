@@ -20,6 +20,39 @@ describe("extractRunResult", () => {
     expect(r.cost).toEqual({ usd: 0.02, input: 100, output: 50 });
   });
 
+  // 真实样本(开发环境 2026-10-12):上游网关 503,SDK 照样给 subtype:"success",
+  // 失败信号只在 is_error / api_error_status 上 —— 只看 subtype 会把报错文本记成"成功的回答"
+  it("subtype 是 success 但 is_error=true(上游 API 报错)→ 失败,不把报错文本当回答", () => {
+    const r = extractRunResult(
+      {
+        type: "result",
+        subtype: "success",
+        is_error: true,
+        api_error_status: 503,
+        result: "API Error: 503 Service temporarily unavailable.",
+        total_cost_usd: 0,
+        usage: { input_tokens: 0, output_tokens: 0 },
+        structured_output: { leftover: true },
+      },
+      { hasSchema: true },
+    );
+    expect(r.status).toBe("failed");
+    expect(r.error).toEqual({
+      kind: "api_error",
+      message: "API Error: 503 Service temporarily unavailable.",
+      status: 503,
+    });
+    expect(r.structured).toBeUndefined();
+  });
+
+  it("is_error=false 的 success 仍是成功", () => {
+    const r = extractRunResult(
+      { subtype: "success", is_error: false, result: "ok" },
+      { hasSchema: false },
+    );
+    expect(r.status).toBe("success");
+  });
+
   it("错误 subtype → 失败,且不采信残留 structured_output", () => {
     const r = extractRunResult(
       { subtype: "error_max_turns", result: "gave up", structured_output: { leftover: true } },

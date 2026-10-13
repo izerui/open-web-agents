@@ -8,7 +8,8 @@ export interface RunResult {
   /** SDK session id,供下一轮 resume。 */
   sessionId?: string;
   cost?: { usd?: number; input: number; output: number };
-  error?: { kind: string; message: string };
+  /** status:上游模型 API 的 HTTP 状态码(仅 api_error 有)。 */
+  error?: { kind: string; message: string; status?: number };
   /**
    * 结构化结果是从最终文本里提取的(而非 SDK 原生 structured_output)。
    * 兼容网关不支持 output_format 时的降级标记,便于运维识别与排查。

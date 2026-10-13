@@ -6,7 +6,8 @@ import { extractJsonObject } from "./extract-json";
 /**
  * 从 SDK `result` 消息提取 RunResult。
  *
- * - status:仅 `subtype==="success"` 算成功
+ * - status:`subtype==="success"` 且 `is_error` 不为 true 才算成功
+ *   (上游模型 API 报错时 SDK 仍给 subtype:"success",失败信号只在 is_error / api_error_status 上)
  * - structured:官方约定只在 success 时可读;错误 subtype 下即便带残留输出也不当契约结果
  * - 契约缺失:智能体声明了 outputSchema 却没拿到 structured_output → 降为 failed
  *   (否则调用方会拿到一个"成功但没有结果"的响应,对接系统无法消费)
@@ -32,6 +33,24 @@ export function extractRunResult(resultMsg: unknown, opts: { hasSchema: boolean 
       summary,
       cost,
       error: { kind: String(m.subtype ?? "unknown"), message: summary ?? "run failed" },
+    };
+  }
+
+  // 【subtype 是 success 不等于成功】上游网关 503、鉴权失败等 API 错误,SDK 照样给
+  // subtype:"success",只把 is_error 置 true,result 里是 "API Error: 503 ..." 这样的报错文本。
+  // 只看 subtype,这段报错就会被记成一次成功运行的最终回答:界面显示成功、invoke 的
+  // 调用方拿到 status:"success"、webhook 也按成功推送。残留的 structured_output 同样不采信。
+  if (m.is_error === true) {
+    const status = typeof m.api_error_status === "number" ? m.api_error_status : undefined;
+    return {
+      status: "failed",
+      summary,
+      cost,
+      error: {
+        kind: "api_error",
+        message: summary ?? "上游模型 API 报错",
+        ...(status !== undefined ? { status } : {}),
+      },
     };
   }
 
