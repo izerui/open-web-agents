@@ -48,6 +48,18 @@ const schema = z.object({
       z.boolean(),
     )
     .default(false),
+  // webhook 允许投递到内网私有网段(RFC1918 / CGNAT / IPv6 ULA)。回环与云元数据地址始终禁止。
+  OWA_WEBHOOK_ALLOW_PRIVATE: z
+    .preprocess(
+      (v) => ["1", "true", "on", "yes"].includes(String(v ?? "").toLowerCase()),
+      z.boolean(),
+    )
+    .default(false),
+  // 单个 worker 进程同时执行的运行数
+  OWA_WORKER_CONCURRENCY: z.preprocess(
+    (v) => (v === undefined || v === "" ? undefined : Number(v)),
+    z.number().int().min(1).max(64).default(4),
+  ),
 });
 
 export interface Env {
@@ -69,6 +81,10 @@ export interface Env {
   sandbox: boolean;
   /** 是否允许智能体配置在宿主机启动 stdio MCP 进程。 */
   allowStdioMcp: boolean;
+  /** webhook 是否允许投递到内网私有网段。 */
+  webhookAllowPrivate: boolean;
+  /** 单个 worker 进程的并发运行数。 */
+  workerConcurrency: number;
 }
 
 export function parseEnv(raw: Record<string, string | undefined>): Env {
@@ -92,6 +108,8 @@ export function parseEnv(raw: Record<string, string | undefined>): Env {
     authRequired: p.OWA_AUTH_REQUIRED,
     sandbox: p.OWA_SANDBOX,
     allowStdioMcp: p.OWA_ALLOW_STDIO_MCP,
+    webhookAllowPrivate: p.OWA_WEBHOOK_ALLOW_PRIVATE,
+    workerConcurrency: p.OWA_WORKER_CONCURRENCY,
   };
 }
 

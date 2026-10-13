@@ -133,17 +133,6 @@ describe("故障注入 / 审计与回调", () => {
     ).resolves.toMatchObject({ status: "success" });
   });
 
-  it("终态回调(webhook)抛异常不改变运行结果", async () => {
-    const { orch } = await setup({
-      onComplete: () => {
-        throw new Error("webhook 崩了");
-      },
-    });
-    await expect(orch.execute({ sessionId: "s1", prompt: "hi" }, signal())).resolves.toMatchObject({
-      status: "success",
-    });
-  });
-
   // 这条曾经断言"取分支锚点失败时回退到会话最新状态,不中断" —— 又一次把 bug 写成规格。
   //
   // 锚点决定这一轮从哪儿起跑。读失败时回落到会话最新锚点,意味着一个"从零重开"的
@@ -177,14 +166,8 @@ describe("故障注入 / 审计与回调", () => {
 
 describe("故障注入 / worker 韧性", () => {
   class TestRepo extends InMemoryRunRepo {
-    private prompts = new Map<string, string>();
-    failNextComplete = false;
     async seed(id: string, sessionId: string, prompt: string) {
-      await this.create({ id, sessionId });
-      this.prompts.set(id, prompt);
-    }
-    async getPrompt(id: string): Promise<string | null> {
-      return this.prompts.get(id) ?? null;
+      await this.create({ id, sessionId, prompt });
     }
   }
 
@@ -257,23 +240,26 @@ describe("故障注入 / worker 韧性", () => {
     expect((await repo.get("r1"))?.state).toBe("running");
   });
 
-  it("栅栏令牌:令牌作废后 complete 是空操作,写不进终态", async () => {
+  it("栅栏令牌:被判为孤儿后,僵尸 worker 拿旧令牌写不进终态", async () => {
     const repo = new TestRepo();
     await repo.seed("r1", "s1", "go");
     const first = await repo.claimNext(1000, 1000);
     expect(first?.fence).toBeTruthy();
 
-    // 租约过期,任务被另一个 worker 接手 → 换了新令牌
-    const second = await repo.claimNext(5000, 9000);
-    expect(second?.id).toBe("r1");
-    expect(second?.fence).not.toBe(first?.fence);
+    // 租约过期,被回收判为失败(至多一次:不会被别人接手重跑)
+    expect((await repo.reclaimOrphans(9000)).map((r) => r.id)).toEqual(["r1"]);
 
-    // 僵尸 worker 拿着旧令牌回来写结果
-    expect(await repo.complete("r1", "failed", first?.fence)).toBe(false);
+    // 僵尸 worker 拿着旧令牌回来写 success —— 不能把失败翻成成功
+    expect(await repo.complete("r1", "success", first?.fence)).toBe(false);
+    expect((await repo.get("r1"))?.state).toBe("failed");
+  });
+
+  it("令牌对不上的写入一律无效", async () => {
+    const repo = new TestRepo();
+    await repo.seed("r1", "s1", "go");
+    await repo.claimNext(1000, 1000);
+    expect(await repo.complete("r1", "success", "not-my-fence")).toBe(false);
     expect((await repo.get("r1"))?.state).toBe("running");
-    // 接手者用新令牌写得进去
-    expect(await repo.complete("r1", "success", second?.fence)).toBe(true);
-    expect((await repo.get("r1"))?.state).toBe("success");
   });
 
   it("终态不可被重入覆写 —— 状态机的规矩必须在写入边界上强制", async () => {
@@ -302,13 +288,8 @@ describe("故障注入 / worker 韧性", () => {
 // 「重复执行副作用」。注释描述的是意图,代码做的是相反的事。
 describe("关停 / drain 真的等在途任务", () => {
   class TestRepo extends InMemoryRunRepo {
-    private prompts = new Map<string, string>();
     async seed(id: string, sessionId: string, prompt: string) {
-      await this.create({ id, sessionId });
-      this.prompts.set(id, prompt);
-    }
-    async getPrompt(id: string): Promise<string | null> {
-      return this.prompts.get(id) ?? null;
+      await this.create({ id, sessionId, prompt });
     }
   }
 

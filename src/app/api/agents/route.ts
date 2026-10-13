@@ -9,6 +9,18 @@ import {
 } from "@/lib/modules/access/domain/grants";
 import type { AgentConfig } from "@/lib/modules/agent/domain/config";
 import { validateAgentConfig } from "@/lib/modules/agent/domain/validate-config";
+import { validateWebhookUrl } from "@/lib/modules/integration/domain/webhook-policy";
+
+/**
+ * 能否查看和修改智能体的 webhook:只有所有者(与平台管理员)。
+ *
+ * 【为什么 write 权限不够】回调里带的是该智能体所有调用的结构化结果。
+ * 被分享了 write 的协作者若能改 webhookUrl,就能把所有者名下全部 invoke 的结果
+ * 转发到自己的服务器上 —— 改提示词至少还看得见,改回调地址是静默外泄。
+ */
+function canManageWebhook(subject: Subject, agent: { ownerId: string }): boolean {
+  return agent.ownerId === subject.userId || subject.role === "admin";
+}
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,11 +35,17 @@ export async function GET(req: Request) {
     const allGrants = await grants.listForType("agent");
 
     return Response.json({
-      agents: filterVisible(subject, all, allGrants).map((a) => ({
-        ...a,
-        isPublic: isPublic(a.id, allGrants),
-        canWrite: hasResourceAccess(subject, a, "write", allGrants),
-      })),
+      agents: filterVisible(subject, all, allGrants).map((a) => {
+        const manage = canManageWebhook(subject, a);
+        return {
+          ...a,
+          // 回调地址可能带着接收方的令牌,非所有者不该看到
+          webhookUrl: manage ? a.webhookUrl : undefined,
+          isPublic: isPublic(a.id, allGrants),
+          canWrite: hasResourceAccess(subject, a, "write", allGrants),
+          canManageWebhook: manage,
+        };
+      }),
       capabilities: { stdioMcp: env.allowStdioMcp },
     });
   } catch (err) {
@@ -84,6 +102,8 @@ export async function POST(req: Request) {
 
   const targetId = body.id?.trim();
   let ownerId = subject.userId;
+  const requestedWebhook = body.webhookUrl?.trim() || undefined;
+  let webhookUrl = requestedWebhook;
 
   if (targetId) {
     const existing = await agents.get(targetId);
@@ -98,7 +118,23 @@ export async function POST(req: Request) {
       }
       // 改别人分享过来的智能体时不改变归属
       ownerId = existing.ownerId;
+      if (!canManageWebhook(subject, existing)) {
+        // 协作者看不到回调地址,保存时自然不会带上 —— 沿用原值,而不是把它清掉
+        if (requestedWebhook !== undefined && requestedWebhook !== existing.webhookUrl) {
+          return Response.json(
+            { error: "只有智能体所有者可以设置 webhook 回调地址" },
+            { status: 403 },
+          );
+        }
+        webhookUrl = existing.webhookUrl;
+      }
     }
+  }
+
+  // 只校验本次提交的新地址;沿用的存量地址在投递时还会按解析结果再查一次
+  if (requestedWebhook && webhookUrl === requestedWebhook) {
+    const v = validateWebhookUrl(requestedWebhook, { allowPrivate: env.webhookAllowPrivate });
+    if (!v.ok) return Response.json({ error: v.reason }, { status: 400 });
   }
 
   const cfg = body.config as Partial<AgentConfig>;
@@ -108,7 +144,7 @@ export async function POST(req: Request) {
     name: body.name.trim(),
     icon: body.icon,
     description: body.description,
-    webhookUrl: body.webhookUrl,
+    webhookUrl,
     config: {
       systemPrompt: cfg.systemPrompt as string,
       model: cfg.model ?? "sonnet",

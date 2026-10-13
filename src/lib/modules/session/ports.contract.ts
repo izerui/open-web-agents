@@ -25,8 +25,25 @@ export function sessionRepoContract(name: string, harness: SessionRepoHarness): 
       repo = await harness.makeRepo();
     });
 
-    const mk = (id: string, over: Partial<{ ownerId: string; callerApiKeyId: string }> = {}) =>
-      repo.create({ id, agentId: "a1", workspaceDir: `/ws/${id}`, ...over });
+    const mk = (
+      id: string,
+      over: Partial<{ ownerId: string; callerApiKeyId: string; billingUserId: string }> = {},
+    ) => repo.create({ id, agentId: "a1", workspaceDir: `/ws/${id}`, ...over });
+
+    it("计费归属:人用会话默认归 owner,API Key 会话归显式传入的签发人", async () => {
+      expect((await mk("web", { ownerId: "u1" })).billingUserId).toBe("u1");
+      const api = await mk("api", { callerApiKeyId: "key-a", billingUserId: "u2" });
+      expect(api.billingUserId).toBe("u2");
+      // 计费归属不能顺带变成人用归属 —— 否则 key 建的会话会出现在签发人的工作台里
+      expect(api.ownerId).toBeUndefined();
+      expect((await repo.get("api"))?.billingUserId).toBe("u2");
+    });
+
+    it("delete 删掉会话", async () => {
+      await mk("gone", { ownerId: "u1" });
+      await repo.delete("gone");
+      expect(await repo.get("gone")).toBeNull();
+    });
 
     it("按 ownerId 过滤只回该用户的会话", async () => {
       await mk("s1", { ownerId: "u1" });

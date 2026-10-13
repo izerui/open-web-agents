@@ -5,7 +5,11 @@ export class InMemorySessionRepo implements SessionRepo {
   private sessions = new Map<string, Session>();
 
   async create(s: NewSession): Promise<Session> {
-    const session: Session = { ...s, createdAt: Date.now() };
+    const session: Session = {
+      ...s,
+      billingUserId: s.billingUserId ?? s.ownerId,
+      createdAt: Date.now(),
+    };
     this.sessions.set(s.id, session);
     return { ...session };
   }
@@ -30,5 +34,9 @@ export class InMemorySessionRepo implements SessionRepo {
   async setSdkSessionId(id: string, sdkSessionId: string): Promise<void> {
     const s = this.sessions.get(id);
     if (s) s.sdkSessionId = sdkSessionId;
+  }
+
+  async delete(id: string): Promise<void> {
+    this.sessions.delete(id);
   }
 }

@@ -13,6 +13,7 @@ export async function GET(req: Request) {
     return Response.json({ authenticated: false, authRequired: env.authRequired });
   }
   const decrypted = user.anthropicKeyEnc ? secrets.decrypt(user.anthropicKeyEnc) : null;
+  const webhookSecret = user.webhookSecretEnc ? secrets.decrypt(user.webhookSecretEnc) : null;
   return Response.json({
     authenticated: true,
     authRequired: env.authRequired,
@@ -23,6 +24,7 @@ export async function GET(req: Request) {
       defaultBaseUrl: user.defaultBaseUrl ?? null,
       // 只回掩码,永不回明文
       anthropicKeyMask: decrypted ? maskSecret(decrypted) : null,
+      webhookSecretMask: webhookSecret ? maskSecret(webhookSecret) : null,
     },
   });
 }

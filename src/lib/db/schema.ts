@@ -6,6 +6,7 @@ import {
   index,
   int,
   json,
+  mediumtext,
   mysqlTable,
   text,
   timestamp,
@@ -33,6 +34,12 @@ export const users = mysqlTable("users", {
    * 也避免浮点误差 —— 本文件开头就定了"金额一律整数"。
    */
   monthlyQuotaMicroUsd: bigint("monthly_quota_micro_usd", { mode: "number" }),
+  /**
+   * Webhook 签名密钥,加密入库(与 anthropicKeyEnc 同一把主密钥)。
+   * 该用户名下所有智能体的回调都用它做 HMAC 签名;没配置则回调不带签名头。
+   * 必须可逆:签名时要取回明文。
+   */
+  webhookSecretEnc: varchar("webhook_secret_enc", { length: 1024 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -68,6 +75,14 @@ export const sessions = mysqlTable(
     ownerId: varchar("owner_id", { length: 36 }),
     /** 系统 invoke 时归属调用方 key */
     callerApiKeyId: varchar("caller_api_key_id", { length: 36 }),
+    /**
+     * 计费归属账号:花费记给谁、额度按谁算、用谁自带的模型凭证。
+     *
+     * 【为什么不复用 ownerId】ownerId 决定"谁能在工作台里看到并操作这个会话";
+     * API Key 与 embed 建的会话没有人用归属,但花费必须落到签发 key 的账号上。
+     * 曾经额度统计按 ownerId 聚合,于是这两类入口的花费不计入任何人的额度。
+     */
+    billingUserId: varchar("billing_user_id", { length: 36 }),
     workspaceDir: varchar("workspace_dir", { length: 512 }).notNull(),
     /** 上一轮 SDK session id,多轮 resume 用 */
     sdkSessionId: varchar("sdk_session_id", { length: 128 }),
@@ -90,6 +105,7 @@ export const sessions = mysqlTable(
   (t) => ({
     byAgent: index("idx_sessions_agent").on(t.agentId),
     byOwner: index("idx_sessions_owner").on(t.ownerId),
+    byBilling: index("idx_sessions_billing").on(t.billingUserId),
   }),
 );
 
@@ -103,7 +119,25 @@ export const runs = mysqlTable(
     id: varchar("id", { length: 36 }).primaryKey(),
     sessionId: varchar("session_id", { length: 36 }).notNull(),
     status: varchar("status", { length: 16 }).notNull().default("pending"),
-    prompt: varchar("prompt", { length: 8192 }).notNull().default(""),
+    /**
+     * 本轮输入。入口按 MAX_PROMPT_CHARS 限长(见 run/domain/limits.ts)。
+     * 曾经是 varchar(8192) 且入口不校验:结构化 input 稍大一点,INSERT 就在严格模式下
+     * 报错 500,而会话与工作目录此时已经建好了。
+     */
+    prompt: mediumtext("prompt").notNull(),
+    /**
+     * 入队时的智能体配置快照。worker 按它执行,而不是执行时去读"当前配置" ——
+     * 排队期间配置被改,不该改变已经受理的任务;事后也能追溯结果出自哪一版配置。
+     * 迁移前入队的旧任务为空,回退到当前配置。
+     */
+    agentConfig: json("agent_config"),
+    /** 请求级凭证覆盖(三级链最高优先),整体加密的 JSON。只在 worker 执行时解密。 */
+    overrideEnc: varchar("override_enc", { length: 2048 }),
+    /**
+     * 幂等键(调用方作用域 + 调用方给的键)。同一键重复提交返回同一个任务,
+     * 网络超时重试不会产生重复执行与重复计费。
+     */
+    idempotencyKey: varchar("idempotency_key", { length: 191 }),
     /** 分支来源:从哪个运行分叉而来。为空即主线首轮。 */
     parentRunId: varchar("parent_run_id", { length: 36 }),
     /**
@@ -132,12 +166,23 @@ export const runs = mysqlTable(
     errorInfo: json("error_info"),
     startedAt: timestamp("started_at"),
     endedAt: timestamp("ended_at"),
+    /**
+     * 终态回调的发件箱状态:pending / delivering / delivered / failed / skipped。
+     * 落终态的同一条 UPDATE 里置为 pending,投递器按它补发 ——
+     * 曾经是进程内 fire-and-forget,进程一挂回调就永久丢失。
+     */
+    webhookState: varchar("webhook_state", { length: 16 }),
+    webhookAttempts: int("webhook_attempts").notNull().default(0),
+    /** 下一次可投递的时刻(ms);投递中时兼作租约到期时刻。 */
+    webhookNextAt: bigint("webhook_next_at", { mode: "number" }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (t) => ({
     byClaim: index("idx_runs_claim").on(t.status, t.leaseUntil),
     bySession: index("idx_runs_session").on(t.sessionId),
     byParent: index("idx_runs_parent").on(t.parentRunId),
+    byWebhook: index("idx_runs_webhook").on(t.webhookState, t.webhookNextAt),
+    uniqIdempotency: uniqueIndex("uniq_runs_idempotency").on(t.idempotencyKey),
   }),
 );
 

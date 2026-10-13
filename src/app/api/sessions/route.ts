@@ -108,6 +108,8 @@ export async function POST(req: Request) {
     title: body.title,
     ownerId: principal.type === "web" ? principal.userId : undefined,
     callerApiKeyId: principal.type === "apiKey" ? principal.keyId : undefined,
+    // API Key 建的会话没有人用归属,但花费要记在签发人头上
+    billingUserId: principal.type === "web" ? principal.userId : principal.ownerId,
   });
 
   return NextResponse.json({ session }, { status: 201 });

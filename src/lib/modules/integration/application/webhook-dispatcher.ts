@@ -1,0 +1,142 @@
+// 回调投递器:从发件箱取到期的回调,签名后投递,失败按退避表重试。
+//
+// 投递是【至少一次】:投递成功但标记 delivered 之前进程崩了,租约过期后会再发一次。
+// 接收方按 X-OWA-Delivery(= taskId)去重。
+
+import type { WebhookPayload, WebhookResult } from "@/lib/modules/integration/application/webhook";
+import { WebhookTargetRejected } from "@/lib/modules/integration/application/webhook";
+import { nextWebhookDelay } from "@/lib/modules/integration/domain/webhook-policy";
+import type { WebhookOutbox } from "@/lib/modules/integration/ports";
+
+/** 投递目标。null = 该智能体没配回调,标 skipped。 */
+export interface WebhookTarget {
+  url: string;
+  /** 智能体所有者的签名密钥;没配置则不签名。 */
+  secret?: string;
+}
+
+export interface DispatcherDeps {
+  outbox: WebhookOutbox;
+  /** 解析该运行的投递目标。签名密钥配置了却解不开时必须抛错 —— 不能悄悄发不签名的请求。 */
+  loadTarget(sessionId: string): Promise<WebhookTarget | null>;
+  /** 从数据库读终态结果拼载荷 —— 回调内容与 /result 接口同源。 */
+  loadPayload(runId: string, sessionId: string): Promise<WebhookPayload | null>;
+  deliver(url: string, payload: WebhookPayload, secret?: string): Promise<WebhookResult>;
+  now?: () => number;
+}
+
+export interface DispatcherOptions {
+  /** 单次投递的认领租约。须大于一次投递的最长耗时(含即时重试)。 */
+  leaseMs?: number;
+  pollMs?: number;
+  /** 每轮最多处理几条,避免一轮占太久。 */
+  batch?: number;
+}
+
+export class WebhookDispatcher {
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private stopped = true;
+  private readonly now: () => number;
+  private readonly leaseMs: number;
+  private readonly pollMs: number;
+  private readonly batch: number;
+
+  constructor(
+    private readonly deps: DispatcherDeps,
+    opts: DispatcherOptions = {},
+  ) {
+    this.now = deps.now ?? (() => Date.now());
+    this.leaseMs = opts.leaseMs ?? 2 * 60_000;
+    this.pollMs = opts.pollMs ?? 2_000;
+    this.batch = opts.batch ?? 20;
+  }
+
+  /** 处理一批到期回调,返回处理条数。单步可测。 */
+  async runOnce(): Promise<number> {
+    let n = 0;
+    while (n < this.batch) {
+      const job = await this.deps.outbox.claimWebhook(this.now(), this.leaseMs);
+      if (!job) break;
+      n++;
+      await this.handle(job);
+    }
+    return n;
+  }
+
+  private async handle(job: { runId: string; sessionId: string; attempts: number }) {
+    const { outbox } = this.deps;
+    let target: WebhookTarget | null;
+    try {
+      target = await this.deps.loadTarget(job.sessionId);
+    } catch (err) {
+      console.warn(`[owa][webhook] 无法准备投递(run=${job.runId}):${errText(err)}`);
+      await outbox.markWebhook(job.runId, "failed");
+      return;
+    }
+    if (!target) {
+      await outbox.markWebhook(job.runId, "skipped");
+      return;
+    }
+
+    const payload = await this.deps.loadPayload(job.runId, job.sessionId);
+    if (!payload) {
+      await outbox.markWebhook(job.runId, "skipped");
+      return;
+    }
+
+    let result: WebhookResult;
+    try {
+      result = await this.deps.deliver(target.url, payload, target.secret);
+    } catch (err) {
+      if (err instanceof WebhookTargetRejected) {
+        console.warn(`[owa][webhook] 目标被拒(run=${job.runId}):${err.message}`);
+        await outbox.markWebhook(job.runId, "failed");
+        return;
+      }
+      result = { delivered: false, attempts: 1, error: errText(err) };
+    }
+
+    if (result.delivered) {
+      await outbox.markWebhook(job.runId, "delivered");
+      return;
+    }
+    // 4xx(除 408/429)是对方明确拒收,重试没有意义
+    const s = result.lastStatus;
+    const permanent = s !== undefined && s < 500 && s !== 408 && s !== 429;
+    const delay = permanent ? null : nextWebhookDelay(job.attempts);
+    if (delay === null) {
+      const reason = `${s ?? ""} ${result.error ?? ""}`.trim();
+      console.warn(`[owa][webhook] 放弃投递(run=${job.runId},第 ${job.attempts} 次):${reason}`);
+      await outbox.markWebhook(job.runId, "failed");
+    } else {
+      await outbox.markWebhook(job.runId, "pending", this.now() + delay);
+    }
+  }
+
+  start(): void {
+    if (!this.stopped) return;
+    this.stopped = false;
+    const tick = async () => {
+      try {
+        await this.runOnce();
+      } catch (err) {
+        console.warn(`[owa][webhook] 投递轮询失败:${errText(err)}`);
+      }
+      if (!this.stopped) {
+        this.timer = setTimeout(() => void tick(), this.pollMs);
+        this.timer.unref?.();
+      }
+    };
+    void tick();
+  }
+
+  stop(): void {
+    this.stopped = true;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+  }
+}
+
+function errText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}

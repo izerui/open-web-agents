@@ -3,7 +3,7 @@
 // 为什么要单独校验:MCP/skills 配错了不会在保存时报错,而是在【运行时】让 agent
 // 起不来或静默少能力 —— 那时候排查成本高得多。宁可在构建器里当场拦住。
 
-import { PERMISSION_MODES } from "@/lib/shared";
+import { MODEL_ALIASES, PERMISSION_MODES, isModelAlias } from "@/lib/shared";
 import type { AgentConfig } from "./config";
 
 export interface ConfigIssue {
@@ -16,7 +16,6 @@ export interface ConfigValidationPolicy {
   allowStdioMcp?: boolean;
 }
 
-const MODEL_ALIASES = new Set(["fable", "opus", "sonnet", "haiku"]);
 const EFFORTS = new Set(["low", "medium", "high"]);
 
 /** MCP 名称会作为 SDK mcpServers 的 key,必须是安全标识符。 */
@@ -46,8 +45,8 @@ export function validateAgentConfig(
     issues.push({ field: "systemPrompt", message: "系统提示词不能为空" });
   }
 
-  if (cfg.model !== undefined && !MODEL_ALIASES.has(cfg.model)) {
-    issues.push({ field: "model", message: `模型别名须是 ${[...MODEL_ALIASES].join("/")}` });
+  if (cfg.model !== undefined && !isModelAlias(cfg.model)) {
+    issues.push({ field: "model", message: `模型别名须是 ${MODEL_ALIASES.join("/")}` });
   }
 
   if (cfg.effort !== undefined && !EFFORTS.has(cfg.effort)) {

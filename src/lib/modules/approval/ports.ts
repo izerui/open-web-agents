@@ -17,6 +17,20 @@ export type ApprovalOutcome =
   | { decision: "expired" };
 
 /**
+ * 审批基础设施不可用:无法登记待审,或到期时无法确认是否已有裁决。
+ *
+ * 【为什么不能当成 expired】expired 是业务结论("没人批");这里是"不知道有没有人批"。
+ * 批准可能早已落地,只是读不到 —— 冒充成超时拒绝,审计上就成了"审批人批准了,系统说没人批"。
+ * 调用方应按基础设施故障处理(引擎侧按 fail-closed 拒绝本次工具调用,并如实说明原因)。
+ */
+export class ApprovalUnavailable extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ApprovalUnavailable";
+  }
+}
+
+/**
  * 人工审批端口。
  *
  * 跨进程是硬要求:agent 跑在 worker 里,裁决来自 web 请求 ——
@@ -35,9 +49,15 @@ export interface ApprovalPort {
    * 「被中止的运行数 × 10 分钟」持续累积;更糟的是界面上那条待审请求照常显示,
    * 用户点批准还能拿到 200「已裁决」,等于为一个不存在的运行授权了危险操作。
    */
+  /**
+   * 【必须】有界结束:基础设施不可用时以 ApprovalUnavailable 失败,而不是无限等待。
+   */
   request(req: ApprovalRequest, signal?: AbortSignal): Promise<ApprovalOutcome>;
-  /** 裁决一条待审请求。返回是否命中(已过期/不存在则 false)。 */
+  /**
+   * 裁决一条待审请求。返回是否命中(已过期/不存在则 false)。
+   * 裁决落地即返回 true,不等广播;落地本身无法确认时以 ApprovalUnavailable 有界失败。
+   */
   resolve(id: string, outcome: ApprovalOutcome): Promise<boolean>;
-  /** 列出某会话的待审请求,供界面展示。 */
+  /** 列出某会话的待审请求,供界面展示。基础设施不可用时以 ApprovalUnavailable 有界失败。 */
   listPending(sessionId: string): Promise<ApprovalRequest[]>;
 }

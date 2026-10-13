@@ -16,12 +16,40 @@ export interface Run {
 export interface NewRun {
   id: string;
   sessionId: string;
+  prompt?: string;
+  parentRunId?: string;
+  resumeAnchor?: string;
+  /** 入队时的智能体配置快照,worker 按它执行。 */
+  agentConfig?: unknown;
+  /** 请求级凭证覆盖,已加密。 */
+  overrideEnc?: string;
+  /** 幂等键(已带调用方作用域)。重复则 create 抛 DuplicateIdempotencyKey。 */
+  idempotencyKey?: string;
 }
+
+/** create 撞上已存在的幂等键。调用方据此回滚自己刚建的会话,并返回已有的任务。 */
+export class DuplicateIdempotencyKey extends Error {
+  constructor(readonly idempotencyKey: string) {
+    super(`duplicate idempotency key: ${idempotencyKey}`);
+    this.name = "DuplicateIdempotencyKey";
+  }
+}
+
+/** 孤儿回收时写进 error 的类型标记 —— 结果接口与 webhook 都能据此识别。 */
+export const WORKER_LOST = "worker_lost";
 
 /** 队列 + 仓储。MySQL 乐观锁认领 + 租约续期 + 孤儿回收,零中间件的可靠异步任务。 */
 export interface RunRepo {
   create(r: NewRun): Promise<Run>;
-  /** 认领一个可执行的 run(pending,或 running 但租约已过期)。 */
+  /**
+   * 认领一个可执行的 run。【只认领 pending】。
+   *
+   * 租约过期的 running 曾经也可认领(崩溃后由别的 worker 从头重跑)。但运行会产生
+   * 外部副作用(MCP 调用、Bash 里的网络请求),栅栏令牌只挡得住重复写结果,
+   * 挡不住重复执行 —— 重跑等于把副作用再做一遍,且 attempts 从未设上限,
+   * 一个让 worker 崩溃的任务会被无限重跑。现在的语义是【至多一次】:
+   * 失租的运行由 reclaimOrphans 判失败,要不要重试交给调用方决定。
+   */
   claimNext(leaseMs: number, now: number): Promise<Run | null>;
   /**
    * 续租,证明 worker 还活着。
@@ -48,9 +76,15 @@ export interface RunRepo {
    * 用户以为停了,其实没停;cancelled 是个不可达状态。
    */
   cancel(id: string): Promise<boolean>;
-  /** 把租约过期的 running 打回可认领,返回回收数量。 */
-  reclaimOrphans(now: number): Promise<number>;
+  /**
+   * 把租约过期的 running 判为 failed(error.kind = worker_lost),返回本次判定的运行。
+   * 多个 worker 同时回收时,每条运行只会出现在其中一个的返回值里 ——
+   * 调用方据此发布终态事件,不会重复。
+   */
+  reclaimOrphans(now: number): Promise<Run[]>;
   get(id: string): Promise<Run | null>;
+  /** 按幂等键找已受理的运行。 */
+  findByIdempotencyKey(key: string): Promise<Run | null>;
   /**
    * 按会话聚合运行情况,供会话列表展示。
    *

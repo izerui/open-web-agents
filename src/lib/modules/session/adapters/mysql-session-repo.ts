@@ -9,6 +9,7 @@ interface Row {
   agentId: string;
   ownerId: string | null;
   callerApiKeyId: string | null;
+  billingUserId: string | null;
   workspaceDir: string;
   sdkSessionId: string | null;
   title: string | null;
@@ -24,6 +25,7 @@ function toSession(r: Row): Session {
     agentId: r.agentId,
     ownerId: r.ownerId ?? undefined,
     callerApiKeyId: r.callerApiKeyId ?? undefined,
+    billingUserId: r.billingUserId ?? undefined,
     workspaceDir: r.workspaceDir,
     sdkSessionId: r.sdkSessionId ?? undefined,
     title: r.title ?? undefined,
@@ -39,6 +41,7 @@ const COLUMNS = {
   agentId: sessions.agentId,
   ownerId: sessions.ownerId,
   callerApiKeyId: sessions.callerApiKeyId,
+  billingUserId: sessions.billingUserId,
   workspaceDir: sessions.workspaceDir,
   sdkSessionId: sessions.sdkSessionId,
   title: sessions.title,
@@ -73,6 +76,7 @@ export class MysqlSessionRepo implements SessionRepo {
       agentId: s.agentId,
       ownerId: s.ownerId,
       callerApiKeyId: s.callerApiKeyId,
+      billingUserId: s.billingUserId ?? s.ownerId,
       workspaceDir: s.workspaceDir,
       title: s.title,
       unattended: s.unattended ? 1 : 0,
@@ -108,5 +112,9 @@ export class MysqlSessionRepo implements SessionRepo {
 
   async setSdkSessionId(id: string, sdkSessionId: string): Promise<void> {
     await this.db.update(sessions).set({ sdkSessionId }).where(eq(sessions.id, id));
+  }
+
+  async delete(id: string): Promise<void> {
+    await this.db.delete(sessions).where(eq(sessions.id, id));
   }
 }

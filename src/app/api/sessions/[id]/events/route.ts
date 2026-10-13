@@ -1,6 +1,7 @@
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { topicOf } from "@/lib/modules/run/application/orchestrator";
+import { watchTerminal } from "@/lib/modules/run/application/terminal-watch";
 import type { AgentEvent } from "@/lib/shared";
 
 export const runtime = "nodejs";
@@ -73,17 +74,27 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       try {
         await bus.ready?.();
         for (const run of selected) {
+          const settleRun = () => {
+            pending.delete(run.id);
+            if (pending.size === 0) finish();
+          };
           subscriptions.push(
             bus.subscribe(
               topicOf(id, run.id),
               (event, eventId) => {
                 send(event, eventId);
-                if (event.kind !== "result") return;
-                pending.delete(run.id);
-                if (pending.size === 0) finish();
+                if (event.kind === "result") settleRun();
               },
               { afterId: cursor },
             ),
+          );
+          // 事件流过期(24h)或终态事件丢失时,由数据库终态收尾,而不是让连接一直挂着
+          subscriptions.push(
+            watchTerminal(runs, run.id, (e) => {
+              if (!pending.has(run.id)) return;
+              send(e);
+              settleRun();
+            }),
           );
         }
       } catch {

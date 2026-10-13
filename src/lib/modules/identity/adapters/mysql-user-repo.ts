@@ -9,6 +9,7 @@ interface Row {
   role: string;
   defaultBaseUrl: string | null;
   anthropicKeyEnc: string | null;
+  webhookSecretEnc: string | null;
   disabled: number;
   monthlyQuotaMicroUsd: number | null;
   createdAt: Date;
@@ -20,6 +21,7 @@ const COLUMNS = {
   role: users.role,
   defaultBaseUrl: users.defaultBaseUrl,
   anthropicKeyEnc: users.anthropicKeyEnc,
+  webhookSecretEnc: users.webhookSecretEnc,
   disabled: users.disabled,
   monthlyQuotaMicroUsd: users.monthlyQuotaMicroUsd,
   createdAt: users.createdAt,
@@ -32,6 +34,7 @@ function toUser(r: Row): User {
     role: r.role === "admin" ? "admin" : "user",
     defaultBaseUrl: r.defaultBaseUrl ?? undefined,
     anthropicKeyEnc: r.anthropicKeyEnc ?? undefined,
+    webhookSecretEnc: r.webhookSecretEnc ?? undefined,
     // 存量行是 NULL(加列前就有的数据),按"未禁用"处理
     disabled: Number(r.disabled ?? 0) !== 0,
     monthlyQuotaMicroUsd: r.monthlyQuotaMicroUsd ?? undefined,
@@ -112,11 +115,16 @@ export class MysqlUserRepo implements UserRepo {
 
   async setCredentials(
     id: string,
-    v: { defaultBaseUrl?: string | null; anthropicKeyEnc?: string | null },
+    v: {
+      defaultBaseUrl?: string | null;
+      anthropicKeyEnc?: string | null;
+      webhookSecretEnc?: string | null;
+    },
   ): Promise<void> {
     const patch: Record<string, string | null> = {};
     if (v.defaultBaseUrl !== undefined) patch.defaultBaseUrl = v.defaultBaseUrl;
     if (v.anthropicKeyEnc !== undefined) patch.anthropicKeyEnc = v.anthropicKeyEnc;
+    if (v.webhookSecretEnc !== undefined) patch.webhookSecretEnc = v.webhookSecretEnc;
     if (Object.keys(patch).length === 0) return;
     await this.db.update(users).set(patch).where(eq(users.id, id));
   }

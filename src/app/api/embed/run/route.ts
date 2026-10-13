@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { getContainer } from "@/lib/container";
 import { extractEmbedToken, verifyEmbedToken } from "@/lib/modules/integration/domain/embed-token";
+import { PromptTooLarge, assertPromptSize } from "@/lib/modules/run/application/enqueue";
 import { topicOf } from "@/lib/modules/run/application/orchestrator";
+import { watchTerminal } from "@/lib/modules/run/application/terminal-watch";
+import { assertWithinQuota, quotaErrorResponse } from "@/lib/modules/usage/application/quota-guard";
 import type { AgentEvent } from "@/lib/shared";
 
 export const runtime = "nodejs";
@@ -14,7 +17,7 @@ export const dynamic = "force-dynamic";
  * 所以拿到令牌也换不到别人的会话。
  */
 export async function POST(req: Request) {
-  const { runs, bus, env } = getContainer();
+  const { runs, bus, env, sessions, users, usage, enqueuer } = getContainer();
 
   const token = extractEmbedToken(req.headers);
   const claims = token ? verifyEmbedToken(env.sessionSecret, token) : null;
@@ -26,7 +29,33 @@ export async function POST(req: Request) {
   const prompt = body.prompt?.trim();
   if (!prompt) return Response.json({ error: "prompt is required" }, { status: 400 });
 
+  try {
+    assertPromptSize(prompt);
+  } catch (err) {
+    if (err instanceof PromptTooLarge) {
+      return Response.json({ error: err.message }, { status: 413 });
+    }
+    throw err;
+  }
+
   const sessionId = claims.sessionId;
+  const session = await sessions.get(sessionId);
+  if (!session) return Response.json({ error: "session not found" }, { status: 404 });
+
+  /*
+   * 额度关卡。embed 曾经完全没有 —— 浏览器里的访客可以在令牌有效期内无限发起运行,
+   * 花费记在签发 key 的账号上却不受它的额度约束。
+   */
+  if (session.billingUserId) {
+    try {
+      await assertWithinQuota({ users, usage }, session.billingUserId);
+    } catch (err) {
+      const quota = quotaErrorResponse(err);
+      if (quota) return quota;
+      throw err;
+    }
+  }
+
   const runId = randomUUID().replace(/-/g, "").slice(0, 24);
   const encoder = new TextEncoder();
 
@@ -43,10 +72,12 @@ export async function POST(req: Request) {
         }
       };
 
+      let stopWatch = () => {};
       const finish = () => {
         if (closed) return;
         closed = true;
         unsubscribe();
+        stopWatch();
         try {
           controller.close();
         } catch {
@@ -74,8 +105,12 @@ export async function POST(req: Request) {
           busUsable = false;
           send({ kind: "status", label: "事件通道不可用,本次无实时过程", state: "degraded" });
         }
-        await runs.create({ id: runId, sessionId, prompt });
+        await enqueuer.enqueue({ runId, sessionId, prompt });
         send({ kind: "status", label: "已入队", state: "pending" });
+        stopWatch = watchTerminal(runs, runId, (e) => {
+          send(e);
+          finish();
+        });
 
         // 总线不可用时已知收不到事件,立即收流,别让客户端白等到超时。
         // status 用 unknown 而非 success —— 此刻任务才刚入队,结局根本还不知道,

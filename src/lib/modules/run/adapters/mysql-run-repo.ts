@@ -6,9 +6,16 @@
 import { randomUUID } from "node:crypto";
 import type { Db } from "@/lib/db/client";
 import { runs } from "@/lib/db/schema";
-import type { NewRun, Run, RunRepo, RunStats } from "@/lib/modules/run/ports";
+import {
+  DuplicateIdempotencyKey,
+  type NewRun,
+  type Run,
+  type RunRepo,
+  type RunStats,
+  WORKER_LOST,
+} from "@/lib/modules/run/ports";
 import type { RunState } from "@/lib/shared";
-import { and, count, eq, gte, inArray, lt, ne, or, sql } from "drizzle-orm";
+import { and, count, eq, gte, inArray, lt, lte, ne, or, sql } from "drizzle-orm";
 
 interface RunRow {
   id: string;
@@ -39,6 +46,22 @@ function fenceOf(fence?: string) {
   return fence ? [eq(runs.leaseOwner, fence)] : [];
 }
 
+/** 撞上唯一索引 uniq_runs_idempotency。mysql2 的错误可能被 drizzle 包一层,cause 里才是原始错误。 */
+function isDuplicateIdempotency(err: unknown): boolean {
+  for (let e = err as { code?: string; message?: string; cause?: unknown } | undefined; e; ) {
+    if (e.code === "ER_DUP_ENTRY" && /uniq_runs_idempotency/.test(e.message ?? "")) return true;
+    e = e.cause as typeof e;
+  }
+  return false;
+}
+
+/**
+ * 终态时同一条 UPDATE 里登记回调发件箱。
+ * 不在这里判断智能体有没有配 webhook —— RunRepo 不依赖 agents/sessions 表,
+ * 投递器取到后发现没配就标 skipped。
+ */
+const WEBHOOK_PENDING = { webhookState: "pending", webhookNextAt: 0 } as const;
+
 function toRun(row: RunRow): Run {
   return {
     id: row.id,
@@ -51,32 +74,52 @@ function toRun(row: RunRow): Run {
 export class MysqlRunRepo implements RunRepo {
   constructor(private readonly db: Db) {}
 
-  async create(
-    r: NewRun & { prompt?: string; parentRunId?: string; resumeAnchor?: string },
-  ): Promise<Run> {
-    await this.db.insert(runs).values({
-      id: r.id,
-      sessionId: r.sessionId,
-      status: "pending",
-      prompt: r.prompt ?? "",
-      parentRunId: r.parentRunId,
-      resumeAnchor: r.resumeAnchor,
-      leaseUntil: null,
-    });
+  async create(r: NewRun): Promise<Run> {
+    try {
+      await this.db.insert(runs).values({
+        id: r.id,
+        sessionId: r.sessionId,
+        status: "pending",
+        prompt: r.prompt ?? "",
+        parentRunId: r.parentRunId,
+        resumeAnchor: r.resumeAnchor,
+        agentConfig: r.agentConfig ?? null,
+        overrideEnc: r.overrideEnc,
+        idempotencyKey: r.idempotencyKey,
+        leaseUntil: null,
+      });
+    } catch (err) {
+      if (r.idempotencyKey && isDuplicateIdempotency(err)) {
+        throw new DuplicateIdempotencyKey(r.idempotencyKey);
+      }
+      throw err;
+    }
     return { id: r.id, sessionId: r.sessionId, state: "pending", leaseUntil: null };
   }
 
+  async findByIdempotencyKey(key: string): Promise<Run | null> {
+    const rows = await this.db
+      .select({
+        id: runs.id,
+        sessionId: runs.sessionId,
+        status: runs.status,
+        leaseUntil: runs.leaseUntil,
+      })
+      .from(runs)
+      .where(eq(runs.idempotencyKey, key))
+      .limit(1);
+    const row = rows[0];
+    return row ? toRun(row) : null;
+  }
+
   /**
-   * 认领一个可执行的 run:pending,或 running 但租约已过期(worker 崩了)。
+   * 认领一个可执行的 run:只认领 pending(至多一次语义,见 RunRepo.claimNext)。
    *
    * 单条 UPDATE 直接占位 —— 条件里带上认领前的状态,MySQL 行锁保证并发下只有一个 worker
    * 能把某一行从"可认领"改成"已占"。affectedRows=0 表示被别人抢先,重试下一个。
    */
   async claimNext(leaseMs: number, now: number): Promise<Run | null> {
-    const claimable = or(
-      eq(runs.status, "pending"),
-      and(eq(runs.status, "running"), lt(runs.leaseUntil, now)),
-    );
+    const claimable = eq(runs.status, "pending");
     const sessionIdle = sql`NOT EXISTS (
       SELECT 1 FROM runs active
       WHERE active.session_id = ${runs.sessionId}
@@ -169,7 +212,13 @@ export class MysqlRunRepo implements RunRepo {
   async complete(id: string, state: RunState, fence?: string): Promise<boolean> {
     const res = await this.db
       .update(runs)
-      .set({ status: state, leaseUntil: null, leaseOwner: null, endedAt: sql`NOW()` })
+      .set({
+        status: state,
+        leaseUntil: null,
+        leaseOwner: null,
+        endedAt: sql`NOW()`,
+        ...WEBHOOK_PENDING,
+      })
       .where(and(eq(runs.id, id), eq(runs.status, "running"), ...fenceOf(fence)));
     return affectedRows(res) > 0;
   }
@@ -188,18 +237,52 @@ export class MysqlRunRepo implements RunRepo {
   async cancel(id: string): Promise<boolean> {
     const res = await this.db
       .update(runs)
-      .set({ status: "cancelled", leaseUntil: null, leaseOwner: null, endedAt: sql`NOW()` })
+      .set({
+        status: "cancelled",
+        leaseUntil: null,
+        leaseOwner: null,
+        endedAt: sql`NOW()`,
+        ...WEBHOOK_PENDING,
+      })
       .where(and(eq(runs.id, id), inArray(runs.status, ["pending", "running"])));
     return affectedRows(res) > 0;
   }
 
-  /** 把租约过期的 running 打回 pending,让其它 worker 能接手。 */
-  async reclaimOrphans(now: number): Promise<number> {
-    const res = await this.db
-      .update(runs)
-      .set({ status: "pending", leaseUntil: null })
-      .where(and(eq(runs.status, "running"), lt(runs.leaseUntil, now)));
-    return affectedRows(res);
+  /**
+   * 把租约过期的 running 判为 failed(worker_lost)。
+   *
+   * 逐行 UPDATE 而不是一条批量 UPDATE:多个 worker 同时回收时,批量写法只知道
+   * "改了几行"、不知道是哪几行,于是没法保证每条运行的失败事件恰好发一次。
+   * 逐行带条件更新,affectedRows=1 的那一方才是这一行的回收者。
+   */
+  async reclaimOrphans(now: number): Promise<Run[]> {
+    const candidates = await this.db
+      .select({ id: runs.id, sessionId: runs.sessionId })
+      .from(runs)
+      .where(and(eq(runs.status, "running"), lt(runs.leaseUntil, now)))
+      .limit(200);
+
+    const reclaimed: Run[] = [];
+    for (const c of candidates) {
+      const res = await this.db
+        .update(runs)
+        .set({
+          status: "failed",
+          leaseUntil: null,
+          leaseOwner: null,
+          endedAt: sql`NOW()`,
+          errorInfo: {
+            kind: WORKER_LOST,
+            message: "执行该运行的 worker 失去响应(崩溃或被强制停止),运行已中止且不会自动重跑",
+          },
+          ...WEBHOOK_PENDING,
+        })
+        .where(and(eq(runs.id, c.id), eq(runs.status, "running"), lt(runs.leaseUntil, now)));
+      if (affectedRows(res) > 0) {
+        reclaimed.push({ id: c.id, sessionId: c.sessionId, state: "failed", leaseUntil: null });
+      }
+    }
+    return reclaimed;
   }
 
   async get(id: string): Promise<Run | null> {
@@ -217,14 +300,91 @@ export class MysqlRunRepo implements RunRepo {
     return row ? toRun(row) : null;
   }
 
-  /** 取待执行的 prompt(worker 从队列恢复运行时需要)。 */
-  async getPrompt(id: string): Promise<string | null> {
+  /** 取待执行的载荷(worker 认领后需要):输入、配置快照、加密的请求级覆盖。 */
+  async getPayload(
+    id: string,
+  ): Promise<{ prompt: string; agentConfig?: unknown; overrideEnc?: string } | null> {
     const rows = await this.db
-      .select({ prompt: runs.prompt })
+      .select({
+        prompt: runs.prompt,
+        agentConfig: runs.agentConfig,
+        overrideEnc: runs.overrideEnc,
+      })
       .from(runs)
       .where(eq(runs.id, id))
       .limit(1);
-    return rows[0]?.prompt ?? null;
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      prompt: row.prompt,
+      agentConfig: row.agentConfig ?? undefined,
+      overrideEnc: row.overrideEnc ?? undefined,
+    };
+  }
+
+  // ─────────────── 回调发件箱(WebhookOutbox 端口,见 integration 模块) ───────────────
+
+  /**
+   * 认领一条到期的待投递回调。投递中的行把 webhook_next_at 当租约用:
+   * 投递进程崩了,租约过期后会被重新认领 —— 回调因此是【至少一次】,
+   * 接收方按 deliveryId 去重(这与运行本身的至多一次不矛盾:重发通知无副作用)。
+   */
+  async claimWebhook(
+    now: number,
+    leaseMs: number,
+  ): Promise<{ runId: string; sessionId: string; attempts: number } | null> {
+    const due = or(
+      and(eq(runs.webhookState, "pending"), lte(runs.webhookNextAt, now)),
+      and(eq(runs.webhookState, "delivering"), lt(runs.webhookNextAt, now)),
+    );
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const rows = await this.db
+        .select({
+          id: runs.id,
+          sessionId: runs.sessionId,
+          attempts: runs.webhookAttempts,
+          state: runs.webhookState,
+          nextAt: runs.webhookNextAt,
+        })
+        .from(runs)
+        .where(due)
+        .orderBy(runs.webhookNextAt)
+        .limit(1);
+      const row = rows[0];
+      if (!row) return null;
+
+      // 条件里带上读到的旧值:被别人抢先改过就 affectedRows=0,换下一条
+      const res = await this.db
+        .update(runs)
+        .set({
+          webhookState: "delivering",
+          webhookNextAt: now + leaseMs,
+          webhookAttempts: sql`${runs.webhookAttempts} + 1`,
+        })
+        .where(
+          and(
+            eq(runs.id, row.id),
+            eq(runs.webhookState, row.state ?? ""),
+            eq(runs.webhookNextAt, Number(row.nextAt ?? 0)),
+          ),
+        );
+      if (affectedRows(res) > 0) {
+        return { runId: row.id, sessionId: row.sessionId, attempts: row.attempts + 1 };
+      }
+    }
+    return null;
+  }
+
+  /** 记下投递结局。retry 时 nextAt 是下一次可投递的时刻。 */
+  async markWebhook(
+    runId: string,
+    state: "delivered" | "failed" | "skipped" | "pending",
+    nextAt?: number,
+  ): Promise<void> {
+    await this.db
+      .update(runs)
+      .set({ webhookState: state, webhookNextAt: state === "pending" ? (nextAt ?? 0) : null })
+      .where(eq(runs.id, runId));
   }
 
   /**

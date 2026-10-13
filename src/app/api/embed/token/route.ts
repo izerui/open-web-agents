@@ -59,6 +59,8 @@ export async function POST(req: Request) {
     workspaceDir,
     title: body.title ?? "embed",
     callerApiKeyId: principal.type === "apiKey" ? principal.keyId : undefined,
+    // 访客在浏览器里花的钱,记在签发这把 key 的账号上
+    billingUserId: principal.type === "apiKey" ? principal.ownerId : principal.userId,
   });
 
   const token = issueEmbedToken(

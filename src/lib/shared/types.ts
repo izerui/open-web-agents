@@ -6,6 +6,12 @@
 /** 模型别名槽:平台只暴露角色化的别名,真实 modelId 由网关映射。 */
 export type ModelAlias = "fable" | "opus" | "sonnet" | "haiku";
 
+export const MODEL_ALIASES: readonly ModelAlias[] = ["fable", "opus", "sonnet", "haiku"];
+
+export function isModelAlias(v: string): v is ModelAlias {
+  return (MODEL_ALIASES as readonly string[]).includes(v);
+}
+
 export interface ModelSelection {
   alias: ModelAlias;
 }

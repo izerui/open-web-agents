@@ -2,7 +2,8 @@
 
 import { randomUUID } from "node:crypto";
 import { RedisApproval } from "@/lib/modules/approval/adapters/redis-approval";
-import type { ApprovalRequest } from "@/lib/modules/approval/ports";
+import { type ApprovalRequest, ApprovalUnavailable } from "@/lib/modules/approval/ports";
+import Redis from "ioredis";
 import { afterAll, describe, expect, it } from "vitest";
 
 const URL = process.env.OWA_TEST_REDIS_URL;
@@ -35,6 +36,35 @@ if (!URL) {
     };
   };
 
+  /**
+   * 一个"连接在第一条命令之后就断了"的审批方:第一条 Redis 命令成功,之后全部失败。
+   * 用来模拟裁决落地后进程退出 / 网络中断,广播因此丢失。
+   */
+  async function flakyApprover(): Promise<{
+    approver: RedisApproval;
+    restore: () => Promise<void>;
+  }> {
+    const approver = new RedisApproval(URL as string);
+    await approver.listPending("warm-up"); // 先把连接建好,握手命令不算在故障预算里
+    const cmd = (approver as unknown as { cmd: Redis }).cmd;
+    const send = cmd.sendCommand.bind(cmd);
+    let sent = 0;
+    cmd.sendCommand = ((c: Parameters<Redis["sendCommand"]>[0]) => {
+      if (sent++ >= 1) {
+        c.reject(new Error("connection lost"));
+        return c.promise;
+      }
+      return send(c);
+    }) as Redis["sendCommand"];
+    return {
+      approver,
+      restore: async () => {
+        cmd.sendCommand = send;
+        await approver.close();
+      },
+    };
+  }
+
   /** 等到条件成立,避免固定 sleep 带来的 flaky。 */
   async function waitFor(cond: () => boolean | Promise<boolean>, timeoutMs = 5000) {
     const start = Date.now();
@@ -47,6 +77,156 @@ if (!URL) {
   // 这些用例做真实 Redis 往返 + 轮询,与构建等任务并发时会明显变慢。
   // 曾观察到一次未能复现的失败,故给足超时预算而非让它偶发地红。
   describe("RedisApproval", { timeout: 20_000 }, () => {
+    it("【裁决不丢】审批方的连接在第一条命令之后就断了:裁决照样送达等待方", async () => {
+      // 故障模型与实现无关:审批方发出的第一条 Redis 命令成功,之后的全部失败
+      // (进程退出 / 网络中断)。曾经的实现第一条是 GETDEL —— 待审被删,
+      // 紧接着的 SET 裁决失败,裁决就此丢失,等待方只能等到超时被拒。
+      const r = req({ expiresAt: Date.now() + 8_000 });
+      const pending = approval.request(r);
+      await waitFor(async () => (await approval.listPending(r.sessionId)).length === 1);
+
+      const { approver, restore } = await flakyApprover();
+
+      // 裁决已原子落地,广播失败不该让审批人以为没批成
+      expect(await approver.resolve(r.id, { decision: "approved", by: "admin" })).toBe(true);
+      expect(await pending).toMatchObject({ decision: "approved", by: "admin" });
+      await restore();
+    });
+
+    it("【裁决不丢】最后一次轮询之后、到期之前批准,且广播丢失:到期收尾采用已落地的批准", async () => {
+      // 轮询间隔远大于审批有效期 —— 整个有效期都是"最后一次轮询之后"的窗口,
+      // 裁决只能靠到期那一刻的原子收尾拿到
+      const waiter = new RedisApproval(URL, { pollMs: 60_000 });
+      const start = Date.now();
+      const r = req({ expiresAt: start + 1500 });
+      const pending = waiter.request(r);
+      await waitFor(async () => (await waiter.listPending(r.sessionId)).length === 1);
+
+      const { approver, restore } = await flakyApprover();
+      expect(await approver.resolve(r.id, { decision: "approved", by: "admin" })).toBe(true);
+
+      // 曾经这里是 expired:超时回调直接判过期,随后 cleanup 把已落地的 approved 一起删了
+      expect(await pending).toMatchObject({ decision: "approved", by: "admin" });
+      // 确实是在到期收尾时拿到的,不是靠广播或轮询
+      expect(Date.now() - start).toBeGreaterThanOrEqual(1400);
+      await restore();
+      await waiter.close();
+    });
+
+    it("【裁决不丢】批准已落地、广播丢失、到期时等待方 Redis 不可用:有界结束,报基础设施错误,批准记录保留", async () => {
+      const waiter = new RedisApproval(URL, { pollMs: 60_000, commandTimeoutMs: 300 });
+      const start = Date.now();
+      const r = req({ expiresAt: start + 1500 });
+      const pending = waiter.request(r);
+      // 先挂上 catch,免得断言之前出现未处理的拒绝
+      const settled = pending.then(
+        (v) => ({ ok: true as const, v }),
+        (e: unknown) => ({ ok: false as const, e }),
+      );
+      await waitFor(async () => (await waiter.listPending(r.sessionId)).length === 1);
+
+      // 批准落地,广播丢失
+      const { approver, restore } = await flakyApprover();
+      expect(await approver.resolve(r.id, { decision: "approved", by: "admin" })).toBe(true);
+      await restore();
+
+      // 等待方的 Redis 在到期收尾时不可用:maxRetriesPerRequest=null 下命令进离线队列、
+      // 永不返回。只让 EVAL 卡住、其它命令照常 —— 这样若实现在失败后仍去清理,
+      // 删除真的会发生,下面"批准记录保留"的断言才有意义
+      const cmd = (waiter as unknown as { cmd: Redis }).cmd;
+      const send = cmd.sendCommand.bind(cmd);
+      cmd.sendCommand = ((c: Parameters<Redis["sendCommand"]>[0]) => {
+        if ((c as unknown as { name: string }).name === "eval") return c.promise; // 永不结束
+        return send(c);
+      }) as Redis["sendCommand"];
+
+      const result = await settled;
+      // 有界结束:到期(1.5s)+ 命令上限(0.3s),而不是一直挂着
+      expect(Date.now() - start).toBeLessThan(3_000);
+      // 明确报基础设施错误,不冒充业务上的超时拒绝
+      expect(result.ok).toBe(false);
+      expect(result.ok ? null : result.e).toBeInstanceOf(ApprovalUnavailable);
+
+      // 批准记录没有被删,留给 TTL 回收
+      await new Promise((res) => setTimeout(res, 200));
+      const raw = new Redis(URL);
+      expect(JSON.parse((await raw.get(`owa:approval:decided:${r.id}`)) ?? "null")).toMatchObject({
+        decision: "approved",
+        by: "admin",
+      });
+      expect(await raw.pttl(`owa:approval:decided:${r.id}`)).toBeGreaterThan(0);
+      await raw.quit();
+
+      cmd.sendCommand = send;
+      await waiter.close();
+    });
+
+    it("【有界返回】裁决 EVAL 成功、广播永不兑现:resolve 有界返回成功,等待方照样拿到批准", async () => {
+      const r = req({ expiresAt: Date.now() + 10_000 });
+      const pending = approval.request(r);
+      await waitFor(async () => (await approval.listPending(r.sessionId)).length === 1);
+
+      // 审批方:EVAL 正常落地,之后的 PUBLISH 进离线队列、永不返回
+      const approver = new RedisApproval(URL, { commandTimeoutMs: 300 });
+      await approver.listPending("warm-up");
+      const cmd = (approver as unknown as { cmd: Redis }).cmd;
+      const send = cmd.sendCommand.bind(cmd);
+      cmd.sendCommand = ((c: Parameters<Redis["sendCommand"]>[0]) => {
+        if ((c as unknown as { name: string }).name === "publish") return c.promise; // 永不结束
+        return send(c);
+      }) as Redis["sendCommand"];
+
+      const start = Date.now();
+      expect(await approver.resolve(r.id, { decision: "approved", by: "admin" })).toBe(true);
+      expect(Date.now() - start).toBeLessThan(1_500);
+      // 广播没发出去,等待方靠轮询拿到已落地的批准
+      expect(await pending).toMatchObject({ decision: "approved", by: "admin" });
+
+      cmd.sendCommand = send;
+      await approver.close();
+    });
+
+    it("【有界返回】读待审列表时 Redis 不可用:以 ApprovalUnavailable 有界失败", async () => {
+      const reader = new RedisApproval(URL, { commandTimeoutMs: 300 });
+      await reader.listPending("warm-up");
+      const cmd = (reader as unknown as { cmd: Redis }).cmd;
+      const send = cmd.sendCommand.bind(cmd);
+      cmd.sendCommand = ((c: Parameters<Redis["sendCommand"]>[0]) =>
+        c.promise) as Redis["sendCommand"];
+
+      const start = Date.now();
+      await expect(reader.listPending("any")).rejects.toBeInstanceOf(ApprovalUnavailable);
+      expect(Date.now() - start).toBeLessThan(1_500);
+
+      cmd.sendCommand = send;
+      await reader.close();
+    });
+
+    it("登记待审时 Redis 不可用:有界失败,报基础设施错误", async () => {
+      const waiter = new RedisApproval(URL, { commandTimeoutMs: 300 });
+      await waiter.listPending("warm-up");
+      const cmd = (waiter as unknown as { cmd: Redis }).cmd;
+      const send = cmd.sendCommand.bind(cmd);
+      cmd.sendCommand = ((c: Parameters<Redis["sendCommand"]>[0]) =>
+        c.promise) as Redis["sendCommand"];
+
+      const start = Date.now();
+      await expect(waiter.request(req())).rejects.toBeInstanceOf(ApprovalUnavailable);
+      expect(Date.now() - start).toBeLessThan(2_000);
+
+      cmd.sendCommand = send;
+      await waiter.close();
+    });
+
+    it("到期时没有裁决:判过期,且待审被关闭,之后的批准一律落空", async () => {
+      const waiter = new RedisApproval(URL, { pollMs: 60_000 });
+      const r = req({ expiresAt: Date.now() + 1000 });
+      expect(await waiter.request(r)).toEqual({ decision: "expired" });
+      expect(await approval.resolve(r.id, { decision: "approved" })).toBe(false);
+      expect(await approval.listPending(r.sessionId)).toEqual([]);
+      await waiter.close();
+    });
+
     it("批准后 request 兑现为 approved", async () => {
       const r = req();
       const pending = approval.request(r);

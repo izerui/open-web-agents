@@ -25,6 +25,8 @@ export interface AgentSummary {
   isPublic?: boolean;
   /** 当前用户能否修改 */
   canWrite?: boolean;
+  /** 当前用户能否查看与设置 webhook(仅所有者与管理员) */
+  canManageWebhook?: boolean;
 }
 
 export interface FileNode {

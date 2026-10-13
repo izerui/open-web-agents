@@ -8,6 +8,8 @@ export interface User {
   defaultBaseUrl?: string;
   /** 已加密;取用前须经 SecretBox 解密。 */
   anthropicKeyEnc?: string;
+  /** Webhook 签名密钥,已加密。该用户名下智能体的回调都用它签名。 */
+  webhookSecretEnc?: string;
   defaultModel?: ModelAlias;
   /** 禁用的账号不能登录,已登录的会话也立即失效。 */
   disabled: boolean;
@@ -28,10 +30,14 @@ export interface UserRepo {
   findByEmail(email: string): Promise<(User & { passwordHash: string }) | null>;
   get(id: string): Promise<User | null>;
   count(): Promise<number>;
-  /** 更新用户自带凭证。传 null 表示清除。 */
+  /** 更新用户自带凭证与 webhook 签名密钥。传 null 表示清除,不传表示不动。 */
   setCredentials(
     id: string,
-    v: { defaultBaseUrl?: string | null; anthropicKeyEnc?: string | null },
+    v: {
+      defaultBaseUrl?: string | null;
+      anthropicKeyEnc?: string | null;
+      webhookSecretEnc?: string | null;
+    },
   ): Promise<void>;
 
   /**

@@ -156,7 +156,7 @@ if (!TEST_DB_URL) {
       expect(claims.filter((c) => c !== null)).toHaveLength(1);
     });
 
-    it("worker 崩溃后任务被其它 worker 接手,且最终只成功一次", async () => {
+    it("【至多一次】worker 崩溃后任务判失败,存活的 worker 不会重跑", async () => {
       const SESSION = "s-crash";
       await sessions.create({ id: SESSION, agentId: "a1", workspaceDir: "/ws" });
       const id = randomUUID().replace(/-/g, "").slice(0, 24);
@@ -167,49 +167,86 @@ if (!TEST_DB_URL) {
       await repo.claimNext(1000, now);
       expect((await repo.get(id))?.state).toBe("running");
 
-      // 租约过期后由存活的 worker 回收并接手
+      // 租约过期后由存活的 worker 回收:判失败,而不是从头再跑一遍
       const w = makeWorker("survivor");
-      expect(await repo.reclaimOrphans(now + 5000)).toBe(1);
-      expect(await w.tick()).toBe(true);
+      expect((await repo.reclaimOrphans(now + 5000)).map((r) => r.id)).toEqual([id]);
+      expect(await w.tick()).toBe(false);
 
-      expect((await repo.get(id))?.state).toBe("success");
-      expect(executions.get("crash-task")).toBe(1);
+      const final = await repo.getResult(id);
+      expect(final?.status).toBe("failed");
+      expect((final?.error as { kind?: string } | null)?.kind).toBe("worker_lost");
+      expect(executions.get("crash-task")).toBeUndefined();
     });
 
     // 栅栏令牌(fencing token)。
     //
-    // 上面那条"worker 崩溃后被接手"只覆盖了崩溃进程【不再写库】的情形。真实的坏情况是
-    // 进程还活着:DB 抖动导致续租连续失败,租约悄悄过期被回收,而它自己毫不知情 ——
-    // 继续跑、跑完、然后把结果写进去,覆盖掉接手者已经写好的正确结果。
+    // 真实的坏情况是进程还活着:DB 抖动导致续租连续失败,租约悄悄过期被回收,
+    // 而它自己毫不知情 —— 继续跑、跑完、然后把结果写进去。
     // 光靠租约时间挡不住,必须让写入本身带上"我是当前持有者"的凭证。
-    it("【双执行回归】僵尸 worker 拿旧令牌写不进结果,接手者的结果不被覆盖", async () => {
+    it("【双执行回归】被判为孤儿后,僵尸 worker 拿旧令牌写不进结果", async () => {
       const id = randomUUID().replace(/-/g, "").slice(0, 24);
       await repo.create({ id, sessionId: "s-fence", prompt: "fence-task" });
 
       const now = Date.now();
       const zombie = await repo.claimNext(1000, now); // A 认领,随后失联
       expect(zombie?.fence).toBeTruthy();
-
-      const taker = await repo.claimNext(30_000, now + 5000); // 租约过期,B 接手
-      expect(taker?.id).toBe(id);
-      expect(taker?.fence).not.toBe(zombie?.fence);
+      expect((await repo.reclaimOrphans(now + 5000)).map((r) => r.id)).toEqual([id]);
 
       // A 的续租此刻必须返回 false —— 这是 worker 侧中止本轮的唯一信号
       expect(await repo.touch(id, now + 60_000, zombie?.fence)).toBe(false);
-      // B 的续租正常
-      expect(await repo.touch(id, now + 60_000, taker?.fence)).toBe(true);
-
-      // B 先写完
-      await repo.saveResult(id, { structured: { from: "taker" } }, taker?.fence);
-      expect(await repo.complete(id, "success", taker?.fence)).toBe(true);
 
       // A 姗姗来迟,试图写自己的结果 —— 两处都必须是空操作
       await repo.saveResult(id, { structured: { from: "zombie" } }, zombie?.fence);
-      expect(await repo.complete(id, "failed", zombie?.fence)).toBe(false);
+      expect(await repo.complete(id, "success", zombie?.fence)).toBe(false);
 
       const final = await repo.getResult(id);
-      expect(final?.status).toBe("success");
-      expect(final?.structured).toEqual({ from: "taker" });
+      expect(final?.status).toBe("failed");
+      expect(final?.structured).toBeNull();
+    });
+
+    it("终态登记回调发件箱,投递器认领后别人拿不到", async () => {
+      const id = randomUUID().replace(/-/g, "").slice(0, 24);
+      await repo.create({ id, sessionId: "s-hook", prompt: "t" });
+      const c = await repo.claimNext(30_000, Date.now());
+      expect(await repo.complete(id, "success", c?.fence)).toBe(true);
+
+      const now = Date.now();
+      const [a, b] = await Promise.all([
+        repo.claimWebhook(now, 60_000),
+        repo.claimWebhook(now, 60_000),
+      ]);
+      const claimed = [a, b].filter((x) => x !== null);
+      expect(claimed.map((x) => x?.runId)).toEqual([id]);
+      expect(claimed[0]?.attempts).toBe(1);
+
+      // 投递中租约未过期:拿不到
+      expect(await repo.claimWebhook(now + 1000, 60_000)).toBeNull();
+      // 安排重试:到期前拿不到,到期后能拿到,attempts 累加
+      await repo.markWebhook(id, "pending", now + 10_000);
+      expect(await repo.claimWebhook(now + 5_000, 60_000)).toBeNull();
+      expect((await repo.claimWebhook(now + 10_000, 60_000))?.attempts).toBe(2);
+      // 投递中的进程崩了:租约过期后可被重新认领
+      expect((await repo.claimWebhook(now + 80_000, 60_000))?.attempts).toBe(3);
+      await repo.markWebhook(id, "delivered");
+      expect(await repo.claimWebhook(now + 999_999, 60_000)).toBeNull();
+    });
+
+    it("取消与孤儿回收同样登记回调 —— 等回调的系统不能永远等下去", async () => {
+      const a = randomUUID().replace(/-/g, "").slice(0, 24);
+      const b = randomUUID().replace(/-/g, "").slice(0, 24);
+      await repo.create({ id: a, sessionId: "s-c1", prompt: "t" });
+      await repo.create({ id: b, sessionId: "s-c2", prompt: "t" });
+      await repo.cancel(a);
+      const now = Date.now();
+      await repo.claimNext(1000, now);
+      await repo.reclaimOrphans(now + 5000);
+
+      const got = new Set<string>();
+      for (let i = 0; i < 2; i++) {
+        const j = await repo.claimWebhook(now + 6000, 60_000);
+        if (j) got.add(j.runId);
+      }
+      expect(got).toEqual(new Set([a, b]));
     });
 
     it("终态不可被任何后续写入翻转 —— 包括不带令牌的直接调用", async () => {

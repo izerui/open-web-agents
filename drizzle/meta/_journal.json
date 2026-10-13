@@ -71,6 +71,13 @@
       "when": 1787290697652,
       "tag": "0009_mean_cloak",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1791787231951,
+      "tag": "0010_design_fixes",
+      "breakpoints": true
     }
   ]
 }

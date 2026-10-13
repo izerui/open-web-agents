@@ -19,7 +19,7 @@ import type { EnginePort, TranscriptPort } from "@/lib/modules/agent-engine/port
 import { MysqlAgentRepo } from "@/lib/modules/agent/adapters/mysql-agent-repo";
 import type { AgentRepo } from "@/lib/modules/agent/ports";
 import { RedisApproval } from "@/lib/modules/approval/adapters/redis-approval";
-import type { ApprovalPort } from "@/lib/modules/approval/ports";
+import { type ApprovalPort, ApprovalUnavailable } from "@/lib/modules/approval/ports";
 import { LocalFsStorage } from "@/lib/modules/artifacts/adapters/local-fs-storage";
 import { WorkspaceGc } from "@/lib/modules/artifacts/application/gc";
 import type { StoragePort } from "@/lib/modules/artifacts/ports";
@@ -31,17 +31,27 @@ import { AuthService } from "@/lib/modules/identity/application/auth-service";
 import { SecretBox } from "@/lib/modules/identity/domain/secret-box";
 import type { ApiKeyRepo } from "@/lib/modules/identity/ports";
 import type { UserRepo } from "@/lib/modules/identity/user-ports";
+import { createGuardedSender } from "@/lib/modules/integration/adapters/guarded-http-sender";
 import { deliverWebhook } from "@/lib/modules/integration/application/webhook";
+import { WebhookDispatcher } from "@/lib/modules/integration/application/webhook-dispatcher";
+import { isAddressAllowed } from "@/lib/modules/integration/domain/webhook-policy";
 import { MysqlKnowledgeRepo } from "@/lib/modules/knowledge/adapters/mysql-knowledge-repo";
+import { ChunkCache } from "@/lib/modules/knowledge/application/chunk-cache";
 import { formatContext, retrieve } from "@/lib/modules/knowledge/domain/retrieval";
 import { EnvModelGateway } from "@/lib/modules/model-gateway/adapters/env-gateway";
 import type { ModelGatewayPort } from "@/lib/modules/model-gateway/ports";
 import { MysqlRunRepo } from "@/lib/modules/run/adapters/mysql-run-repo";
-import { RunOrchestrator, topicOf } from "@/lib/modules/run/application/orchestrator";
+import { RunEnqueuer } from "@/lib/modules/run/application/enqueue";
+import {
+  type RunCommand,
+  RunOrchestrator,
+  topicOf,
+} from "@/lib/modules/run/application/orchestrator";
 import { RunWorker } from "@/lib/modules/run/application/worker";
 import { MysqlSessionRepo } from "@/lib/modules/session/adapters/mysql-session-repo";
 import type { SessionRepo } from "@/lib/modules/session/ports";
 import { MysqlUsageRepo } from "@/lib/modules/usage/adapters/mysql-usage-repo";
+import { QuotaExceeded, assertWithinQuota } from "@/lib/modules/usage/application/quota-guard";
 
 export interface Container {
   env: Env;
@@ -67,7 +77,11 @@ export interface Container {
   usage: MysqlUsageRepo;
   knowledge: MysqlKnowledgeRepo;
   orchestrator: RunOrchestrator;
+  /** 所有发起运行的入口都经它入队(限长、配置快照、加密覆盖、幂等)。 */
+  enqueuer: RunEnqueuer;
   worker: RunWorker;
+  /** 回调发件箱投递器。与 worker 同进程启动。 */
+  webhooks: WebhookDispatcher;
 }
 
 /** 人工审批的等待上限。到点自动拒绝,避免 worker 被无人值守的审批永久占住。 */
@@ -146,6 +160,7 @@ function build(): Container {
   const approval = new RedisApproval(env.redisUrl);
   const usage = new MysqlUsageRepo(db);
   const knowledge = new MysqlKnowledgeRepo(db);
+  const knowledgeChunks = new ChunkCache(knowledge);
   const apiKeys = new MysqlApiKeyRepo(db);
   const grants = new MysqlGrantRepo(db);
   const groupRepo = new MysqlGroupRepo(db);
@@ -179,21 +194,37 @@ function build(): Container {
       })
       .catch(() => {});
 
-    const outcome = await approval.request(
-      {
-        id,
-        sessionId: r.sessionId,
-        runId: r.runId,
-        toolName: r.toolName,
-        summary: r.summary,
-        reason: r.reason,
-        createdAt: Date.now(),
-        expiresAt,
-      },
-      // 运行被取消/超时中止时,这条待审请求要立刻收场并清掉 Redis 记录 ——
-      // 否则界面上它还挂着,用户点批准还会收到"已裁决",而运行早就没了
-      signal,
-    );
+    let outcome: Awaited<ReturnType<typeof approval.request>>;
+    try {
+      outcome = await approval.request(
+        {
+          id,
+          sessionId: r.sessionId,
+          runId: r.runId,
+          toolName: r.toolName,
+          summary: r.summary,
+          reason: r.reason,
+          createdAt: Date.now(),
+          expiresAt,
+        },
+        // 运行被取消/超时中止时,这条待审请求要立刻收场并清掉 Redis 记录 ——
+        // 否则界面上它还挂着,用户点批准还会收到"已裁决",而运行早就没了
+        signal,
+      );
+    } catch (err) {
+      // 审批服务不可用:如实标成"无法确认",不冒充超时拒绝。异常继续抛给引擎,
+      // 由它按 fail-closed 拒绝这次工具调用并带上原因
+      if (err instanceof ApprovalUnavailable) {
+        await bus
+          .publish(topicOf(r.sessionId, r.runId), {
+            kind: "status",
+            label: `审批结果无法确认(审批服务不可用):${r.toolName}`,
+            state: "approval_unavailable",
+          })
+          .catch(() => {});
+      }
+      throw err;
+    }
 
     const label =
       outcome.decision === "approved"
@@ -237,9 +268,18 @@ function build(): Container {
     recordRunAnchor: (runId, anchor) => runs.setResumeAnchor(runId, anchor),
     // 知识检索:没有文档或没命中都返回空串,上层据此决定不注入
     retrieveKnowledge: async (agentId, query) => {
-      const chunks = await knowledge.chunksOf(agentId);
+      const chunks = await knowledgeChunks.chunksOf(agentId);
       if (chunks.length === 0) return "";
       return formatContext(retrieve(query, chunks));
+    },
+    quotaCheck: async (userId) => {
+      try {
+        await assertWithinQuota({ users, usage }, userId);
+        return { allowed: true };
+      } catch (err) {
+        if (err instanceof QuotaExceeded) return { allowed: false, reason: err.message };
+        throw err;
+      }
     },
     // 用户自带凭证:未配置时返回空对象并回落平台默认;已配置却无法解密时必须失败,
     // 避免在用户不知情时改用平台共享 key、造成计费归属错误。
@@ -254,27 +294,83 @@ function build(): Container {
       }
       return { baseUrl: u.defaultBaseUrl, key };
     },
-    // 智能体配了 webhookUrl 就在终态推一次;失败不影响 run 状态(可轮询兜底)
-    onComplete: ({ runId, agentId, result }) => {
-      void (async () => {
-        const a = await agents.get(agentId);
-        const url = a?.webhookUrl;
-        if (!url || !runId) return;
-        await deliverWebhook(url, {
-          taskId: runId,
-          status: result.status,
-          structured: result.structured,
-          summary: result.summary,
-          error: result.error,
-        }).catch(() => {});
-      })();
-    },
   });
 
   // 同进程内起 worker。拆成独立进程时,web 侧用 OWA_EMBEDDED_WORKER=0 关掉,
   // 由 worker 入口(src/worker.ts)单独起 —— worker 无本地状态,代码完全不变。
-  const worker = new RunWorker(runs, orchestrator);
-  if (process.env.OWA_EMBEDDED_WORKER !== "0") worker.start();
+  const enqueuer = new RunEnqueuer({
+    runs,
+    sessions,
+    agents,
+    encryptOverride: (o) => secrets.encrypt(JSON.stringify(o)),
+  });
+
+  const worker = new RunWorker(
+    runs,
+    orchestrator,
+    { concurrency: env.workerConcurrency },
+    {
+      decodeOverride: (enc) => {
+        const plain = secrets.decrypt(enc);
+        // 解不开就失败,绝不悄悄回落到平台凭证 —— 那会让调用方的花费记错账
+        if (plain === null) throw new Error("请求级凭证覆盖无法解密(主密钥可能已更换)");
+        return JSON.parse(plain) as RunCommand["override"];
+      },
+      // 终态已落库,再发布 result 事件:SSE 看到的结局与数据库一致
+      onFinalized: async ({ runId, sessionId, state, result }) => {
+        await bus.publish(topicOf(sessionId, runId), {
+          kind: "result",
+          status: state === "success" ? "success" : state === "cancelled" ? "cancelled" : "failed",
+          structured: result.structured,
+          summary: result.summary ?? result.error?.message,
+          runId,
+        });
+      },
+    },
+  );
+
+  // 地址校验接在连接自己的 DNS lookup 上:被检查的地址就是被连接的地址
+  const webhookSender = createGuardedSender({
+    allowAddress: (ip) => isAddressAllowed(ip, env.webhookAllowPrivate),
+  });
+  const webhooks = new WebhookDispatcher({
+    outbox: runs,
+    loadTarget: async (sessionId) => {
+      const session = await sessions.get(sessionId);
+      const agent = session ? await agents.get(session.agentId) : null;
+      if (!agent?.webhookUrl) return null;
+      // 用智能体所有者的签名密钥。配置了却解不开就抛错 —— 不能退化成不签名照发
+      const owner = await users.get(agent.ownerId);
+      if (!owner?.webhookSecretEnc) return { url: agent.webhookUrl };
+      const secret = secrets.decrypt(owner.webhookSecretEnc);
+      if (secret === null) throw new Error(`webhook 签名密钥无法解密(user=${agent.ownerId})`);
+      return { url: agent.webhookUrl, secret };
+    },
+    loadPayload: async (runId, sessionId) => {
+      const r = await runs.getResult(runId);
+      if (!r) return null;
+      const session = await sessions.get(sessionId);
+      return {
+        deliveryId: runId,
+        event: "run.finished",
+        taskId: runId,
+        sessionId,
+        agentId: session?.agentId,
+        status: r.status,
+        structured: r.structured ?? undefined,
+        summary: r.summary ?? undefined,
+        error: r.error ?? undefined,
+        cost: r.cost ?? undefined,
+      };
+    },
+    deliver: (url, payload, secret) =>
+      deliverWebhook(url, payload, { secret, maxAttempts: 2, send: webhookSender }),
+  });
+
+  if (process.env.OWA_EMBEDDED_WORKER !== "0") {
+    worker.start();
+    webhooks.start();
+  }
 
   // 工作空间 GC:定期两层回收,防磁盘无界增长。失败只记日志,绝不影响主流程。
   const gc = new WorkspaceGc({
@@ -320,7 +416,9 @@ function build(): Container {
     usage,
     knowledge,
     orchestrator,
+    enqueuer,
     worker,
+    webhooks,
   };
 }
 

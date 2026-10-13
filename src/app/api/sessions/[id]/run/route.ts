@@ -2,7 +2,13 @@ import { randomUUID } from "node:crypto";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import type { BusPort } from "@/lib/modules/events/ports";
+import {
+  type EnqueueRequest,
+  PromptTooLarge,
+  assertPromptSize,
+} from "@/lib/modules/run/application/enqueue";
 import { topicOf } from "@/lib/modules/run/application/orchestrator";
+import { type TerminalSource, watchTerminal } from "@/lib/modules/run/application/terminal-watch";
 import { assertWithinQuota, quotaErrorResponse } from "@/lib/modules/usage/application/quota-guard";
 import type { AgentEvent } from "@/lib/shared";
 
@@ -25,24 +31,30 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { runs, bus, sessions, auth, users, usage } = getContainer();
+  const { runs, bus, sessions, auth, users, usage, enqueuer } = getContainer();
 
   try {
     const principal = await auth.resolveWeb(req);
     await auth.assertSessionAccess(principal, id);
 
+    const session = await sessions.get(id);
+    if (!session) return Response.json({ error: "session not found" }, { status: 404 });
+
     /*
      * 额度关卡。
      *
-     * 【为什么在这里,而不是在 worker 里】拦在发起之前才叫"上限" ——
+     * 【为什么在这里,而不是只在 worker 里】拦在发起之前才叫"上限" ——
      * 一次运行可能跑很久、烧掉可观的花费,等 worker 跑完再发现超支
-     * 只能追认。这里多一次查询,换的是超支根本不会发生。
+     * 只能追认。worker 执行前还会再复核一次(队列里可能积压了很多)。
      *
-     * 【为什么按 principal 的归属人算,而不是会话归属】会话可能是
-     * 别人分享/系统建的,但花费永远记在发起这次运行的账号头上。
+     * 【为什么按会话的计费账号算】花费记在会话的计费账号上(worker 也按它取凭证),
+     * 额度必须查同一个账号 —— 查的和记的不是同一个人,额度就形同虚设。
      */
-    const ownerId = principal.type === "web" ? principal.userId : principal.ownerId;
-    if (ownerId) await assertWithinQuota({ users, usage }, ownerId);
+    const billingUserId =
+      session.billingUserId ??
+      session.ownerId ??
+      (principal.type === "web" ? principal.userId : principal.ownerId);
+    if (billingUserId) await assertWithinQuota({ users, usage }, billingUserId);
   } catch (err) {
     const quota = quotaErrorResponse(err);
     if (quota) return quota;
@@ -51,34 +63,43 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     throw err;
   }
 
-  if (!(await sessions.get(id))) {
-    return Response.json({ error: "session not found" }, { status: 404 });
-  }
-
   const body = (await req.json().catch(() => ({}))) as {
     prompt?: string;
     stream?: boolean;
   };
   const prompt = body.prompt?.trim();
   if (!prompt) return Response.json({ error: "prompt is required" }, { status: 400 });
+  try {
+    assertPromptSize(prompt);
+  } catch (err) {
+    if (err instanceof PromptTooLarge) {
+      return Response.json({ error: err.message }, { status: 413 });
+    }
+    throw err;
+  }
 
   // stream 默认 true —— Web 前端不用额外传参;API 调用方传 stream:false 拿 JSON。
   const streaming = body.stream !== false;
   const runId = randomUUID().replace(/-/g, "").slice(0, 24);
 
-  if (streaming) {
-    return handleStreaming(req, { id, runId, prompt, runs, bus });
-  }
-  return handleBlocking(req, { id, runId, prompt, runs, bus });
+  const ctx: RunRouteContext = {
+    id,
+    runId,
+    prompt,
+    enqueue: (r) => enqueuer.enqueue(r),
+    results: runs,
+    bus,
+  };
+  return streaming ? handleStreaming(req, ctx) : handleBlocking(req, ctx);
 }
 
 interface RunRouteContext {
   id: string;
   runId: string;
   prompt: string;
-  runs: {
-    create(input: { id: string; sessionId: string; prompt: string }): Promise<unknown>;
-  };
+  enqueue(r: EnqueueRequest): Promise<unknown>;
+  /** 终态兜底:事件总线上的 result 丢了也能从库里收尾。 */
+  results: TerminalSource;
   bus: BusPort;
 }
 
@@ -86,7 +107,7 @@ interface RunRouteContext {
 
 /** stream: true → 逐事件 SSE 推送,Web 页面实时打字机效果。 */
 function handleStreaming(req: Request, ctx: RunRouteContext) {
-  const { id, runId, prompt, runs, bus } = ctx;
+  const { id, runId, prompt, enqueue, results, bus } = ctx;
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream<Uint8Array>({
@@ -102,10 +123,12 @@ function handleStreaming(req: Request, ctx: RunRouteContext) {
         }
       };
 
+      let stopWatch = () => {};
       const finish = () => {
         if (closed) return;
         closed = true;
         unsubscribe();
+        stopWatch();
         try {
           controller.close();
         } catch {
@@ -132,8 +155,12 @@ function handleStreaming(req: Request, ctx: RunRouteContext) {
           busUsable = false;
           send({ kind: "status", label: "事件通道不可用,本次无实时过程", state: "degraded" });
         }
-        await runs.create({ id: runId, sessionId: id, prompt });
+        await enqueue({ runId, sessionId: id, prompt });
         send({ kind: "status", label: "已入队", state: "pending" });
+        stopWatch = watchTerminal(results, runId, (e) => {
+          send(e);
+          finish();
+        });
 
         if (!busUsable) {
           send({
@@ -200,39 +227,42 @@ interface BlockingResponse {
 
 /** stream: false → 等运行完成,返回单个 JSON。适合程序调用。 */
 function handleBlocking(req: Request, ctx: RunRouteContext): Promise<Response> {
-  const { id, runId, prompt, runs, bus } = ctx;
+  const { id, runId, prompt, enqueue, results, bus } = ctx;
 
   return new Promise<Response>((resolve) => {
     const events: AgentEvent[] = [];
     let settled = false;
+    let stopWatch = () => {};
 
     const settle = (resp: Response) => {
       if (settled) return;
       settled = true;
       unsubscribe();
+      stopWatch();
       resolve(resp);
+    };
+
+    const settleWithResult = (e: Extract<AgentEvent, { kind: "result" }>) => {
+      settle(
+        Response.json(assembleBlockingResponse(runId, events), {
+          status:
+            e.status === "success"
+              ? 200
+              : e.status === "unknown"
+                ? 202
+                : e.status === "cancelled"
+                  ? 409
+                  : 500,
+          headers: { "X-Run-Id": runId },
+        }),
+      );
     };
 
     const unsubscribe = bus.subscribe(
       topicOf(id, runId),
       (e: AgentEvent) => {
         events.push(e);
-
-        if (e.kind === "result") {
-          settle(
-            Response.json(assembleBlockingResponse(runId, events), {
-              status:
-                e.status === "success"
-                  ? 200
-                  : e.status === "unknown"
-                    ? 202
-                    : e.status === "cancelled"
-                      ? 409
-                      : 500,
-              headers: { "X-Run-Id": runId },
-            }),
-          );
-        }
+        if (e.kind === "result") settleWithResult(e);
       },
       { afterId: "0-0" },
     );
@@ -260,7 +290,12 @@ function handleBlocking(req: Request, ctx: RunRouteContext): Promise<Response> {
           );
           return;
         }
-        await runs.create({ id: runId, sessionId: id, prompt });
+        await enqueue({ runId, sessionId: id, prompt });
+        // 总线上的 result 丢了也不能让请求永远挂着:库里有终态就用库里的收尾
+        stopWatch = watchTerminal(results, runId, (e) => {
+          events.push(e);
+          settleWithResult(e);
+        });
       } catch (err) {
         settle(
           Response.json(
@@ -289,6 +324,7 @@ function assembleBlockingResponse(runId: string, events: AgentEvent[]): Blocking
   let structured: unknown;
   let status = "unknown";
   let error: string | undefined;
+  let summary: string | undefined;
   let inputTokens = 0;
   let outputTokens = 0;
 
@@ -325,6 +361,7 @@ function assembleBlockingResponse(runId: string, events: AgentEvent[]): Blocking
       case "result":
         status = e.status;
         structured = e.structured;
+        summary = e.summary;
         if (e.status !== "success" && e.summary) error = e.summary;
         break;
     }
@@ -333,7 +370,8 @@ function assembleBlockingResponse(runId: string, events: AgentEvent[]): Blocking
   const resp: BlockingResponse = {
     runId,
     status,
-    text: textParts.join(""),
+    // 过程事件丢失(事件通道故障、由数据库兜底收尾)时,至少给出库里的最终文本
+    text: textParts.join("") || (status === "success" ? (summary ?? "") : ""),
     toolCalls,
     usage: { input: inputTokens, output: outputTokens },
   };

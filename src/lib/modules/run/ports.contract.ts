@@ -5,7 +5,7 @@
 //
 // 时间一律由调用方传入(now 参数),不读系统时钟,故契约可确定性地断言租约边界。
 
-import type { RunRepo } from "@/lib/modules/run/ports";
+import { DuplicateIdempotencyKey, type RunRepo } from "@/lib/modules/run/ports";
 import { describe, expect, it } from "vitest";
 
 export interface ContractHarness {
@@ -45,12 +45,20 @@ export function runRepoContract(name: string, harness: ContractHarness): void {
       expect(await repo.claimNext(1000, 500)).toBeNull();
     });
 
-    it("租约过期后可被重新认领(worker 崩溃兜底)", async () => {
+    it("【至多一次】租约过期的 running 不会被重新认领 —— 重跑会重放外部副作用", async () => {
       const repo = await harness.makeRepo();
       await repo.create({ id: "r1", sessionId: "s1" });
       await repo.claimNext(1000, 100);
-      const again = await repo.claimNext(1000, 2000);
-      expect(again?.id).toBe("r1");
+      expect(await repo.claimNext(1000, 2000)).toBeNull();
+    });
+
+    it("租约过期的 running 不阻塞同会话的下一轮", async () => {
+      const repo = await harness.makeRepo();
+      await repo.create({ id: "r1", sessionId: "s1" });
+      await repo.claimNext(1000, 100);
+      await new Promise((r) => setTimeout(r, 1100)); // MySQL created_at 精度到秒,保证先后
+      await repo.create({ id: "r2", sessionId: "s1" });
+      expect((await repo.claimNext(1000, 2000))?.id).toBe("r2");
     });
 
     it("并发认领同一个 run 只有一个成功(乐观锁)", async () => {
@@ -83,19 +91,42 @@ export function runRepoContract(name: string, harness: ContractHarness): void {
       expect(await repo.claimNext(1000, 9999)).toBeNull();
     });
 
-    it("reclaimOrphans 把过期 running 打回 pending", async () => {
+    it("reclaimOrphans 把过期 running 判为 failed,并返回被判定的运行", async () => {
       const repo = await harness.makeRepo();
       await repo.create({ id: "r1", sessionId: "s1" });
       await repo.claimNext(1000, 100);
-      expect(await repo.reclaimOrphans(2000)).toBe(1);
-      expect((await repo.get("r1"))?.state).toBe("pending");
+      const reclaimed = await repo.reclaimOrphans(2000);
+      expect(reclaimed.map((r) => [r.id, r.sessionId])).toEqual([["r1", "s1"]]);
+      expect((await repo.get("r1"))?.state).toBe("failed");
+      // 判了失败就不会再被认领,也不会被第二次回收
+      expect(await repo.claimNext(1000, 3000)).toBeNull();
+      expect(await repo.reclaimOrphans(3000)).toEqual([]);
+    });
+
+    it("并发回收时每条运行只归一个回收者(失败事件恰好发一次)", async () => {
+      const repo = await harness.makeRepo();
+      await repo.create({ id: "r1", sessionId: "s1" });
+      await repo.create({ id: "r2", sessionId: "s2" });
+      await repo.claimNext(1000, 100);
+      await repo.claimNext(1000, 100);
+      const results = await Promise.all([
+        repo.reclaimOrphans(2000),
+        repo.reclaimOrphans(2000),
+        repo.reclaimOrphans(2000),
+      ]);
+      expect(
+        results
+          .flat()
+          .map((r) => r.id)
+          .sort(),
+      ).toEqual(["r1", "r2"]);
     });
 
     it("reclaimOrphans 不动租约内的 running", async () => {
       const repo = await harness.makeRepo();
       await repo.create({ id: "r1", sessionId: "s1" });
       await repo.claimNext(1000, 100);
-      expect(await repo.reclaimOrphans(500)).toBe(0);
+      expect(await repo.reclaimOrphans(500)).toEqual([]);
     });
 
     it("reclaimOrphans 不动已完成的 run", async () => {
@@ -103,7 +134,25 @@ export function runRepoContract(name: string, harness: ContractHarness): void {
       await repo.create({ id: "r1", sessionId: "s1" });
       await repo.claimNext(1000, 100);
       await repo.complete("r1", "success");
-      expect(await repo.reclaimOrphans(99999)).toBe(0);
+      expect(await repo.reclaimOrphans(99999)).toEqual([]);
+    });
+
+    it("幂等键:重复 create 抛 DuplicateIdempotencyKey,且能按键找回原运行", async () => {
+      const repo = await harness.makeRepo();
+      await repo.create({ id: "r1", sessionId: "s1", idempotencyKey: "k:abc" });
+      await expect(
+        repo.create({ id: "r2", sessionId: "s2", idempotencyKey: "k:abc" }),
+      ).rejects.toBeInstanceOf(DuplicateIdempotencyKey);
+      expect((await repo.findByIdempotencyKey("k:abc"))?.id).toBe("r1");
+      expect(await repo.get("r2")).toBeNull();
+      expect(await repo.findByIdempotencyKey("k:none")).toBeNull();
+    });
+
+    it("不带幂等键的运行互不冲突", async () => {
+      const repo = await harness.makeRepo();
+      await repo.create({ id: "r1", sessionId: "s1" });
+      await repo.create({ id: "r2", sessionId: "s1" });
+      expect(await repo.get("r2")).not.toBeNull();
     });
 
     it("同一会话串行认领,不同会话仍可并行", async () => {

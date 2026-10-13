@@ -1,7 +1,7 @@
 import type { Db } from "@/lib/db/client";
 import { knowledgeDocs } from "@/lib/db/schema";
 import { type Chunk, chunkText } from "@/lib/modules/knowledge/domain/retrieval";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 
 export interface KnowledgeDoc {
   id: string;
@@ -69,6 +69,24 @@ export class MysqlKnowledgeRepo {
 
   async delete(id: string): Promise<void> {
     await this.db.delete(knowledgeDocs).where(eq(knowledgeDocs.id, id));
+  }
+
+  /**
+   * 该智能体文档集合的指纹:数量 + 最新创建时间 + 全部 id 的 CRC 异或。
+   * 只碰 id 与时间列,不读正文 —— 每次运行都要查一次,必须足够便宜。
+   * 文档只有增删、没有原地修改,这三项足以判断"集合变没变"。
+   */
+  async signatureOf(agentId: string): Promise<string> {
+    const rows = await this.db
+      .select({
+        n: sql<number>`COUNT(*)`,
+        latest: sql<string>`COALESCE(MAX(${knowledgeDocs.createdAt}), '')`,
+        ids: sql<number>`COALESCE(BIT_XOR(CRC32(${knowledgeDocs.id})), 0)`,
+      })
+      .from(knowledgeDocs)
+      .where(eq(knowledgeDocs.agentId, agentId));
+    const r = rows[0];
+    return `${Number(r?.n ?? 0)}:${String(r?.latest ?? "")}:${Number(r?.ids ?? 0)}`;
   }
 
   /**

@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
+import { PromptTooLarge } from "@/lib/modules/run/application/enqueue";
 import { type BranchMode, anchorForBranch } from "@/lib/modules/run/domain/branching";
+import { assertWithinQuota, quotaErrorResponse } from "@/lib/modules/usage/application/quota-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,12 +42,17 @@ interface Body {
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { runs, auth } = getContainer();
+  const { runs, auth, sessions, users, usage, enqueuer } = getContainer();
 
   try {
     const principal = await auth.resolveWeb(req);
     await auth.assertSessionAccess(principal, id);
+    // 重跑同样花钱 —— 这条入口曾经绕过了额度关卡
+    const session = await sessions.get(id);
+    if (session?.billingUserId) await assertWithinQuota({ users, usage }, session.billingUserId);
   } catch (err) {
+    const quota = quotaErrorResponse(err);
+    if (quota) return quota;
     const res = authErrorResponse(err);
     if (res) return res;
     throw err;
@@ -68,13 +75,20 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!anchor.ok) return Response.json({ error: anchor.reason }, { status: 409 });
 
   const runId = randomUUID().replace(/-/g, "").slice(0, 24);
-  await runs.create({
-    id: runId,
-    sessionId: id,
-    prompt,
-    parentRunId: anchor.parentRunId,
-    resumeAnchor: anchor.resumeAnchor,
-  });
+  try {
+    await enqueuer.enqueue({
+      runId,
+      sessionId: id,
+      prompt,
+      parentRunId: anchor.parentRunId,
+      resumeAnchor: anchor.resumeAnchor,
+    });
+  } catch (err) {
+    if (err instanceof PromptTooLarge) {
+      return Response.json({ error: err.message }, { status: 413 });
+    }
+    throw err;
+  }
 
   return Response.json(
     { runId, parentRunId: anchor.parentRunId, mode, resumeAnchor: anchor.resumeAnchor ?? null },

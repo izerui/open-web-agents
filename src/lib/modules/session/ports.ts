@@ -8,6 +8,11 @@ export interface Session {
   ownerId?: string;
   /** 系统 invoke 时发起该会话的 API Key;归属校验靠它。 */
   callerApiKeyId?: string;
+  /**
+   * 计费归属账号:花费记给谁、额度按谁算、用谁自带的模型凭证。
+   * 与 ownerId 分开 —— API Key / embed 会话没有人用归属,但花费必须有主。
+   */
+  billingUserId?: string;
   workspaceDir: string;
   /** 上一轮 SDK session id,多轮 resume 用。 */
   sdkSessionId?: string;
@@ -28,6 +33,8 @@ export interface NewSession {
   title?: string;
   ownerId?: string;
   callerApiKeyId?: string;
+  /** 不传则取 ownerId。API Key / embed 入口必须显式传签发 key 的账号。 */
+  billingUserId?: string;
   /** 无人值守(接口 invoke)。不传则默认有人。 */
   unattended?: boolean;
 }
@@ -46,4 +53,6 @@ export interface SessionRepo {
   list(filter?: { ownerId?: string; callerApiKeyId?: string }): Promise<Session[]>;
   /** 每轮结束后记下 SDK session id,供下一轮 resume。 */
   setSdkSessionId(id: string, sdkSessionId: string): Promise<void>;
+  /** 删除一条还没有任何运行的会话(入队失败或幂等冲突时回滚刚建的会话)。 */
+  delete(id: string): Promise<void>;
 }

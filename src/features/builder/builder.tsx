@@ -265,6 +265,8 @@ export function Builder() {
 
   const selectedAgent = list.find((agent) => agent.id === draft.id);
   const canWrite = selectedAgent?.canWrite !== false;
+  // 新建时自己就是所有者;已有的看服务端给的判定
+  const canManageWebhook = selectedAgent?.canManageWebhook !== false;
   const canSave =
     canWrite &&
     dirty &&
@@ -866,11 +868,16 @@ export function Builder() {
       </div>
 
       <label className="block space-y-1">
-        <span className="text-xs text-muted-foreground">Webhook 回调(可选)—— 运行终态时推结果</span>
+        <span className="text-xs text-muted-foreground">
+          {canManageWebhook
+            ? "Webhook 回调(可选)—— 运行终态时推结果,用你在「模型凭证」页设置的密钥签名"
+            : "Webhook 回调 —— 仅智能体所有者可查看和设置"}
+        </span>
         <Input
           value={draft.webhookUrl}
           onChange={(e) => setDraft({ ...draft, webhookUrl: e.target.value })}
-          placeholder="https://your-system/callback"
+          placeholder={canManageWebhook ? "https://your-system/callback" : "(已隐藏)"}
+          disabled={!canManageWebhook}
         />
       </label>
 
