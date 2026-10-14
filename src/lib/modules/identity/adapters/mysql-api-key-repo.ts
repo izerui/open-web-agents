@@ -9,6 +9,7 @@ interface Row {
   agentId: string | null;
   name: string | null;
   rateLimitPerMinute: number | null;
+  expiresAt: Date | null;
   createdAt: Date;
   lastUsedAt: Date | null;
 }
@@ -19,6 +20,7 @@ const COLUMNS = {
   agentId: apiKeys.agentId,
   name: apiKeys.name,
   rateLimitPerMinute: apiKeys.rateLimitPerMinute,
+  expiresAt: apiKeys.expiresAt,
   createdAt: apiKeys.createdAt,
   lastUsedAt: apiKeys.lastUsedAt,
 };
@@ -30,6 +32,7 @@ function toRecord(r: Row): ApiKeyRecord {
     agentId: r.agentId ?? undefined,
     name: r.name ?? undefined,
     rateLimitPerMinute: r.rateLimitPerMinute ?? undefined,
+    expiresAt: r.expiresAt?.getTime(),
     createdAt: r.createdAt.getTime(),
     lastUsedAt: r.lastUsedAt?.getTime(),
   };
@@ -45,6 +48,7 @@ export class MysqlApiKeyRepo implements ApiKeyRepo {
       agentId: k.agentId,
       name: k.name,
       rateLimitPerMinute: k.rateLimitPerMinute ?? null,
+      expiresAt: k.expiresAt ? new Date(k.expiresAt) : null,
       hashedKey: k.hashedKey,
     });
     const rows = await this.db.select(COLUMNS).from(apiKeys).where(eq(apiKeys.id, k.id)).limit(1);
@@ -85,6 +89,13 @@ export class MysqlApiKeyRepo implements ApiKeyRepo {
 
   async setRateLimit(id: string, perMinute: number | null): Promise<void> {
     await this.db.update(apiKeys).set({ rateLimitPerMinute: perMinute }).where(eq(apiKeys.id, id));
+  }
+
+  async setExpiry(id: string, at: number | null): Promise<void> {
+    await this.db
+      .update(apiKeys)
+      .set({ expiresAt: at === null ? null : new Date(at) })
+      .where(eq(apiKeys.id, id));
   }
 
   async touch(id: string, at: number): Promise<void> {

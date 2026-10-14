@@ -3,7 +3,11 @@ import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { hasResourceAccess } from "@/lib/modules/access/domain/grants";
 import { validateKeyRateLimit } from "@/lib/modules/identity/application/invoke-rate-limit";
-import { generateApiKey, hashApiKey } from "@/lib/modules/identity/domain/api-key";
+import {
+  generateApiKey,
+  hashApiKey,
+  parseExpiresInDays,
+} from "@/lib/modules/identity/domain/api-key";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -75,6 +79,8 @@ export async function POST(req: Request) {
     assistantId?: string;
     /** 每分钟新调用上限;不传 = 平台默认 */
     rateLimitPerMinute?: number | null;
+    /** 有效天数;不传 = 不过期 */
+    expiresInDays?: number;
   };
   const body = { name: raw.name, agentId: raw.agentId ?? raw.assistantId };
 
@@ -87,6 +93,10 @@ export async function POST(req: Request) {
     if (!v.ok) return Response.json({ error: v.reason, code: "invalid_request" }, { status: 400 });
     rateLimitPerMinute = v.value ?? undefined;
   }
+
+  const expiry = parseExpiresInDays(raw.expiresInDays);
+  if (!expiry.ok)
+    return Response.json({ error: expiry.reason, code: "invalid_request" }, { status: 400 });
 
   // 绑定到具体智能体时,不仅要确认它存在,还要确认签发人对它有权限 ——
   // 否则等于把「越权运行他人智能体」从一次性利用固化成一把长期有效的专用凭证,
@@ -111,6 +121,7 @@ export async function POST(req: Request) {
     agentId: body.agentId,
     name: body.name,
     rateLimitPerMinute,
+    ...(expiry.days ? { expiresAt: Date.now() + expiry.days * 86_400_000 } : {}),
     hashedKey: hashApiKey(plain),
   });
 
@@ -126,6 +137,7 @@ export async function POST(req: Request) {
       // 名称快照:智能体日后改名或删除,审计里仍看得懂
       boundAgentName,
       rateLimitPerMinute: record.rateLimitPerMinute,
+      ...(record.expiresAt ? { expiresAt: new Date(record.expiresAt).toISOString() } : {}),
     },
     req,
   });

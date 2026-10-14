@@ -300,7 +300,8 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 | GET/POST/DELETE | `/api/agents/{id}/share`                   | cookie(write)          | 分享给用户 / 组 / 公开      |
 | GET/POST/DELETE | `/api/agents/{id}/knowledge`               | cookie(读 read、写 write) | 知识文档                |
 | GET/POST        | `/api/groups` · `/api/groups/{id}/members` | cookie                 | 用户组与成员              |
-| GET/POST/DELETE/PATCH | `/api/keys`                          | cookie                 | API Key(明文仅签发时返回一次);PATCH 调整每分钟调用上限 |
+| GET/POST/DELETE/PATCH | `/api/keys`                          | cookie                 | API Key(明文仅签发时返回一次;`expiresInDays` 设有效期);PATCH 调整每分钟调用上限 |
+| POST            | `/api/keys/{id}/rotate`                    | cookie                 | 轮换:签发同名同绑定同限额的新 Key,旧 Key 再有效 `graceHours`(默认 24,0~168)后失效 |
 | GET/POST        | `/api/sessions`                            | cookie / key           | 会话列表与创建             |
 | POST            | `/api/sessions/{id}/run`                   | cookie / key           | 发起一轮,SSE 流式返回;用 Key 建的会话里,声明了 inputSchema 的智能体须传符合它的 `input` |
 | GET             | `/api/sessions/{id}/events`                | cookie / key           | joinStream 断线重连     |

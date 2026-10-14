@@ -24,8 +24,21 @@ interface KeyRecord {
   name?: string;
   agentId?: string;
   rateLimitPerMinute?: number;
+  /** 到期时刻(ms);没有 = 不过期 */
+  expiresAt?: number;
   createdAt: number;
   lastUsedAt?: number;
+}
+
+/** 到期说明:已过期 / 还剩多久 / 不过期 */
+function expiryText(k: KeyRecord, now: number): { text: string; urgent: boolean } | null {
+  if (!k.expiresAt) return null;
+  const left = k.expiresAt - now;
+  if (left <= 0) return { text: "已过期", urgent: true };
+  const hours = Math.ceil(left / 3_600_000);
+  return hours <= 48
+    ? { text: `${hours} 小时后过期`, urgent: true }
+    : { text: `${new Date(k.expiresAt).toLocaleDateString()} 过期`, urgent: false };
 }
 
 /**
@@ -40,6 +53,8 @@ export function AccessCenterView() {
   const [keyName, setKeyName] = useState("");
   const [keyAgent, setKeyAgent] = useState("");
   const [keyLimit, setKeyLimit] = useState("");
+  /** 有效天数;空 = 不过期 */
+  const [keyDays, setKeyDays] = useState("");
   const [limits, setLimits] = useState<PlatformRateLimits>({
     perKeyPerMinute: 0,
     perAgentPerMinute: 0,
@@ -95,15 +110,47 @@ export function AccessCenterView() {
           name: keyName.trim() || undefined,
           agentId: keyAgent || undefined,
           rateLimitPerMinute: keyLimit.trim() ? Number(keyLimit) : undefined,
+          expiresInDays: keyDays ? Number(keyDays) : undefined,
         }),
       });
       if (!data.plaintext || !data.key?.id) throw new Error("接口没有返回新密钥");
       setIssued({ id: data.key.id, plaintext: data.plaintext });
       setKeyName("");
       setKeyLimit("");
+      setKeyDays("");
       await reload();
     } catch (error) {
       toast.error(`签发失败:${errorText(error)}`);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** 轮换:签发同名同绑定的新 Key,旧 Key 再有效 24 小时 —— 期间把对接方换上新 Key */
+  async function rotateKey(k: KeyRecord) {
+    if (
+      !window.confirm(
+        `轮换「${k.name || "未命名"}」:立即签发一把新 Key,旧 Key 在 24 小时后失效。请在此期间把对接方换成新 Key。`,
+      )
+    )
+      return;
+    if (busy) return;
+    setBusy(k.id);
+    try {
+      const data = await fetchJson<{ plaintext?: string; key?: { id?: string } }>(
+        `/api/keys/${encodeURIComponent(k.id)}/rotate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ graceHours: 24 }),
+        },
+      );
+      if (!data.plaintext || !data.key?.id) throw new Error("接口没有返回新密钥");
+      setIssued({ id: data.key.id, plaintext: data.plaintext });
+      await reload();
+      toast.success("已签发新 Key,旧 Key 24 小时后失效");
+    } catch (error) {
+      toast.error(`轮换失败:${errorText(error)}`);
     } finally {
       setBusy(null);
     }
@@ -172,6 +219,17 @@ export function AccessCenterView() {
               aria-label="每分钟调用上限"
               className="w-52 shrink-0"
             />
+            <Select
+              value={keyDays}
+              onChange={(e) => setKeyDays(e.target.value)}
+              aria-label="有效期"
+              className="w-32 shrink-0"
+            >
+              <option value="">不过期</option>
+              <option value="30">30 天</option>
+              <option value="90">90 天</option>
+              <option value="365">1 年</option>
+            </Select>
             <Select value={keyAgent} onChange={(e) => setKeyAgent(e.target.value)}>
               <option value="">不限智能体</option>
               {agents.map((a) => (
@@ -244,6 +302,25 @@ export function AccessCenterView() {
                     ? `最近使用 ${new Date(k.lastUsedAt).toLocaleDateString()}`
                     : "从未使用"}
                 </span>
+                {(() => {
+                  const e = expiryText(k, Date.now());
+                  return e ? (
+                    <span className={e.urgent ? "text-destructive" : "text-muted-foreground"}>
+                      {e.text}
+                    </span>
+                  ) : null;
+                })()}
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="h-8 shrink-0 px-2"
+                  disabled={
+                    busy !== null || (k.expiresAt !== undefined && k.expiresAt <= Date.now())
+                  }
+                  onClick={() => void rotateKey(k)}
+                >
+                  轮换
+                </Button>
                 {/*
                   【为什么不是 h-auto p-0】那样按钮只有文字那么高(约 20px),
                   低于 24px 的最小触控尺寸,手机上很难点准 —— 而这是【吊销】,

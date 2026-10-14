@@ -16,6 +16,7 @@ export const ACTION_LABEL: Record<AuditAction, string> = {
   "knowledge.delete": "删除知识文档",
   "api_key.issue": "签发 API Key",
   "api_key.revoke": "吊销 API Key",
+  "api_key.rotate": "轮换 API Key",
   "api_key.rate_limit": "调整 Key 限额",
   "approval.decide": "审批",
   "approval.revoke_grant": "撤销同类授权",
@@ -100,6 +101,8 @@ export function describeAudit(e: AuditItem): string {
       }`;
     case "api_key.revoke":
       return `「${s(d.name) || "未命名"}」`;
+    case "api_key.rotate":
+      return `「${s(d.name) || "未命名"}」签发新 Key,旧 Key 于 ${s(d.oldExpiresAt)} 失效`;
     case "api_key.rate_limit":
       return `「${s(d.name) || "未命名"}」每分钟上限 ${d.from ?? "默认"} → ${d.to ?? "默认"}`;
     case "approval.decide":

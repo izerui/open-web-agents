@@ -46,6 +46,18 @@ describe("Authorizer 凭证状态复查", () => {
     await expect(auth.requireApiKey(req())).rejects.toBeInstanceOf(Unauthorized);
   });
 
+  it("Key 到期:API Key 与由它换出的嵌入令牌一起失效;还没到期照常可用", async () => {
+    const { auth, keys, req } = setup();
+    const k = keys.get("k1") as ApiKeyRecord;
+    keys.set("k1", { ...k, expiresAt: Date.now() + 60_000 });
+    await expect(auth.requireApiKey(req())).resolves.toMatchObject({ keyId: "k1" });
+    keys.set("k1", { ...k, expiresAt: Date.now() - 1 });
+    await expect(auth.requireApiKey(req())).rejects.toThrow(/expired/);
+    await expect(auth.resolveEmbed({ keyId: "k1", agentId: "mine" })).rejects.toBeInstanceOf(
+      Unauthorized,
+    );
+  });
+
   it("嵌入令牌:签发它的 Key 被吊销后失效", async () => {
     const { auth, keys } = setup();
     await expect(auth.resolveEmbed({ keyId: "k1", agentId: "mine" })).resolves.toBeTruthy();

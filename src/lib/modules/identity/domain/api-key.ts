@@ -47,3 +47,46 @@ export function extractApiKey(headers: {
   }
   return null;
 }
+
+/** 已过期:到期时刻已到(含正好到点)。没有到期时刻的 Key 不过期。 */
+export function isKeyExpired(k: { expiresAt?: number }, now: number): boolean {
+  return k.expiresAt !== undefined && k.expiresAt <= now;
+}
+
+/** 签发时的有效天数:不传 = 不过期;1~3650 天。 */
+export function parseExpiresInDays(
+  raw: unknown,
+): { ok: true; days?: number } | { ok: false; reason: string } {
+  if (raw === undefined || raw === null) return { ok: true };
+  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 1 || raw > 3650) {
+    return { ok: false, reason: "expiresInDays 须为 1~3650 的整数" };
+  }
+  return { ok: true, days: raw };
+}
+
+/** 轮换的重叠期:旧 Key 再有效多久(小时),默认 24,0~168。 */
+export function parseGraceHours(
+  raw: unknown,
+): { ok: true; hours: number } | { ok: false; reason: string } {
+  if (raw === undefined || raw === null) return { ok: true, hours: 24 };
+  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 0 || raw > 168) {
+    return { ok: false, reason: "graceHours 须为 0~168 的整数" };
+  }
+  return { ok: true, hours: raw };
+}
+
+/**
+ * 轮换:新 Key 沿用旧 Key 的有效时长(旧的不过期,新的也不过期);旧 Key 的到期时刻提前到
+ * "现在 + 重叠期",但不会因此延长 —— 本来就更早到期的保持不变。
+ */
+export function rotationPlan(
+  old: { createdAt: number; expiresAt?: number },
+  now: number,
+  graceHours: number,
+): { newExpiresAt?: number; oldExpiresAt: number } {
+  const graceEnd = now + graceHours * 3_600_000;
+  return {
+    newExpiresAt: old.expiresAt === undefined ? undefined : now + (old.expiresAt - old.createdAt),
+    oldExpiresAt: old.expiresAt === undefined ? graceEnd : Math.min(old.expiresAt, graceEnd),
+  };
+}

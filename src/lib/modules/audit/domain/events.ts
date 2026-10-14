@@ -16,6 +16,7 @@ export const AUDIT_ACTIONS = [
   "knowledge.delete",
   "api_key.issue",
   "api_key.revoke",
+  "api_key.rotate",
   "api_key.rate_limit",
   "approval.decide",
   "approval.revoke_grant",

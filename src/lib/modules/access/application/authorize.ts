@@ -12,7 +12,12 @@ import {
 } from "@/lib/modules/access/domain/principal";
 import type { GrantRepo } from "@/lib/modules/access/ports";
 import type { AgentRepo } from "@/lib/modules/agent/ports";
-import { extractApiKey, hashApiKey, looksLikeApiKey } from "@/lib/modules/identity/domain/api-key";
+import {
+  extractApiKey,
+  hashApiKey,
+  isKeyExpired,
+  looksLikeApiKey,
+} from "@/lib/modules/identity/domain/api-key";
 import type { ApiKeyRepo } from "@/lib/modules/identity/ports";
 import type { SessionRepo } from "@/lib/modules/session/ports";
 import { BrandedError } from "@/lib/shared";
@@ -66,6 +71,8 @@ export class Authorizer {
 
     const record = await this.deps.apiKeys.findByHash(hashApiKey(plain));
     if (!record) throw new Unauthorized("invalid API key");
+    // 到期(含轮换后重叠期结束的旧 Key)与吊销同等对待
+    if (isKeyExpired(record, Date.now())) throw new Unauthorized("API key expired");
     // 曾经只按哈希查 key:账号停用只拦得住 cookie,签出去的 key 照常可用
     if (this.deps.isUserActive && !(await this.deps.isUserActive(record.ownerId))) {
       throw new Unauthorized("API key owner is disabled");
@@ -91,6 +98,8 @@ export class Authorizer {
   async resolveEmbed(claims: { keyId: string; agentId: string }): Promise<Principal> {
     const record = await this.deps.apiKeys.get(claims.keyId);
     if (!record) throw new Unauthorized("embed token revoked");
+    // Key 过期,由它换出来的嵌入令牌也随之失效
+    if (isKeyExpired(record, Date.now())) throw new Unauthorized("embed token's API key expired");
     if (this.deps.isUserActive && !(await this.deps.isUserActive(record.ownerId))) {
       throw new Unauthorized("embed token owner is disabled");
     }

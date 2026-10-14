@@ -304,6 +304,9 @@ export const apiKeys = mysqlTable(
     name: varchar("name", { length: 255 }),
     /** 这把 Key 每分钟的新调用上限;NULL = 用平台默认(OWA_INVOKE_RATE_LIMIT_PER_KEY) */
     rateLimitPerMinute: int("rate_limit_per_minute"),
+    /** 到期时刻;NULL = 不过期。轮换时旧 Key 被设成"再用一段时间就失效" */
+    // 毫秒精度:秒精度下 MySQL 会把小数秒四舍五入,"立即失效"可能晚半秒才生效
+    expiresAt: timestamp("expires_at", { fsp: 3 }),
     lastUsedAt: timestamp("last_used_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },

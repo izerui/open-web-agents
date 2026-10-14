@@ -6,6 +6,8 @@ export interface ApiKeyRecord {
   name?: string;
   /** 每分钟新调用上限;undefined = 平台默认。 */
   rateLimitPerMinute?: number;
+  /** 到期时刻(ms);undefined = 不过期 */
+  expiresAt?: number;
   createdAt: number;
   lastUsedAt?: number;
 }
@@ -16,6 +18,7 @@ export interface NewApiKey {
   agentId?: string;
   name?: string;
   rateLimitPerMinute?: number;
+  expiresAt?: number;
   /** 已哈希;明文绝不入库。 */
   hashedKey: string;
 }
@@ -30,6 +33,8 @@ export interface ApiKeyRepo {
   revoke(id: string): Promise<void>;
   /** 调整每分钟上限;null = 恢复平台默认。 */
   setRateLimit(id: string, perMinute: number | null): Promise<void>;
+  /** 设到期时刻;null = 不过期。 */
+  setExpiry(id: string, at: number | null): Promise<void>;
   touch(id: string, at: number): Promise<void>;
 }
 
