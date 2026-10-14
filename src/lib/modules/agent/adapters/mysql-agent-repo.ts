@@ -1,10 +1,10 @@
 import type { Db } from "@/lib/db/client";
 import { agents } from "@/lib/db/schema";
 import type { AgentConfig } from "@/lib/modules/agent/domain/config";
-import type { Agent, AgentRepo } from "@/lib/modules/agent/ports";
+import type { Agent, AgentRepo, AgentRowOps } from "@/lib/modules/agent/ports";
 import type { AgentListFilter } from "@/lib/modules/agent/ports";
 import type { JsonSchema } from "@/lib/shared";
-import { type SQL, and, count, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { type SQL, and, count, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 
 interface Row {
   id: string;
@@ -138,6 +138,14 @@ export class MysqlAgentRepo implements AgentRepo {
     const saved = await this.get(a.id);
     if (!saved) throw new Error(`agent upsert failed: ${a.id}`);
     return saved;
+  }
+
+  async withRowLock<T>(id: string, fn: (repo: AgentRowOps) => Promise<T>): Promise<T> {
+    return this.db.transaction(async (tx) => {
+      // 行不存在时 FOR UPDATE 锁住的是这个键所在的间隙,同 id 的插入同样要等
+      await tx.execute(sql`SELECT id FROM agents WHERE id = ${id} FOR UPDATE`);
+      return fn(new MysqlAgentRepo(tx as unknown as Db, this.defaultOwnerId));
+    });
   }
 
   async setSeedHash(id: string, hash: string): Promise<void> {

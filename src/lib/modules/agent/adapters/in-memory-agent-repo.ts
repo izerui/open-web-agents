@@ -1,4 +1,4 @@
-import type { Agent, AgentListFilter, AgentRepo } from "@/lib/modules/agent/ports";
+import type { Agent, AgentListFilter, AgentRepo, AgentRowOps } from "@/lib/modules/agent/ports";
 
 /** 内存智能体仓储。垂直切片先内置一个通用智能体,构建器与 MySQL adapter 后续接入。 */
 export class InMemoryAgentRepo implements AgentRepo {
@@ -46,6 +46,21 @@ export class InMemoryAgentRepo implements AgentRepo {
     };
     this.items.set(a.id, next);
     return structuredClone(next);
+  }
+
+  /** 单进程内存实现:同一 id 的行锁事务排队执行(没有数据库的行锁,其它写入不受约束) */
+  private readonly locks = new Map<string, Promise<unknown>>();
+  async withRowLock<T>(id: string, fn: (repo: AgentRowOps) => Promise<T>): Promise<T> {
+    const prev = this.locks.get(id) ?? Promise.resolve();
+    const run = prev.then(
+      () => fn(this),
+      () => fn(this),
+    );
+    this.locks.set(
+      id,
+      run.catch(() => {}),
+    );
+    return run;
   }
 
   async setSeedHash(id: string, hash: string): Promise<void> {

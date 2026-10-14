@@ -64,6 +64,9 @@ export interface AgentListFilter {
   ids?: string[];
 }
 
+/** 行锁事务里可用的操作 */
+export type AgentRowOps = Pick<AgentRepo, "get" | "upsert" | "setSeedHash" | "idTaken">;
+
 export interface AgentRepo {
   get(id: string): Promise<Agent | null>;
   /**
@@ -80,6 +83,12 @@ export interface AgentRepo {
   upsert(a: Agent): Promise<Agent>;
   /** 记下内置智能体的种子摘要。 */
   setSeedHash(id: string, hash: string): Promise<void>;
+  /**
+   * 锁住这个智能体的行,在同一个事务里执行 fn(fn 拿到的仓储走这个事务)。
+   * 期间其它对这一行的写入(管理员保存、载入版本、应用设计)等它提交后再执行 ——
+   * 内置智能体的"读取 → 判定 → 写定义 → 读回 → 记摘要"因此不会和人的保存交错。
+   */
+  withRowLock<T>(id: string, fn: (repo: AgentRowOps) => Promise<T>): Promise<T>;
   /**
    * 软删除:之后 get / list / countByOwner 都当它不存在。返回是否删除了(已删除或不存在为 false)。
    * 行保留,历史会话与运行记录照常显示名称;id 不能被复用(见 idTaken)。

@@ -99,5 +99,69 @@ if (!TEST_DB_URL) {
       expect(await seedBuiltin(deps, def(edited))).toBe("keep-unknown");
       expect((await repo.get(edited))?.config.systemPrompt).toBe("管理员改的");
     });
+
+    describe("播种与管理员保存并发:行锁让两者串行,管理员的修改不丢", () => {
+      const gate = () => {
+        let open!: () => void;
+        const opened = new Promise<void>((r) => {
+          open = r;
+        });
+        return { open, opened };
+      };
+
+      for (const point of ["decided", "written"] as const) {
+        it(`播种停在「${point === "decided" ? "判定之后" : "写入定义之后、读回之前"}」时管理员保存:保存等播种提交后才落库,最终保留;再启动也不覆盖`, async () => {
+          const id = `builtin-race-${point}-${randomUUID().slice(0, 6)}`;
+          ids.push(id);
+          const v1: Agent = {
+            id,
+            ownerId: "system",
+            name: "内置",
+            config: { systemPrompt: "v1", model: "sonnet" },
+          };
+          const v2: Agent = { ...v1, config: { ...v1.config, systemPrompt: "v2" } };
+          expect(await seedBuiltin(deps, v1)).toBe("insert");
+          // 管理员打开了编辑页(拿到的是 v1)
+          const seen = await repo.get(id);
+          if (!seen) throw new Error("missing");
+
+          const reached = gate();
+          const release = gate();
+          const seeding = seedBuiltin(
+            {
+              ...deps,
+              pauseAt: async (p) => {
+                if (p !== point) return;
+                reached.open();
+                await release.opened;
+              },
+            },
+            v2,
+          );
+          await reached.opened;
+
+          // 播种还在事务里:管理员保存(另一条连接)
+          const admin = new MysqlAgentRepo(db);
+          let saved = false;
+          const saving = admin
+            .upsert({ ...seen, config: { ...seen.config, systemPrompt: "管理员改的" } })
+            .then(() => {
+              saved = true;
+            });
+          await new Promise((ok) => setTimeout(ok, 400));
+          expect(saved).toBe(false); // 被行锁挡着,等播种提交
+
+          release.open();
+          expect(await seeding).toBe("upgrade");
+          await saving;
+          expect((await repo.get(id))?.config.systemPrompt).toBe("管理员改的");
+
+          // 再启动一次(代码里的定义又更新了):判为改过,保留
+          const v3: Agent = { ...v1, config: { ...v1.config, systemPrompt: "v3" } };
+          expect(await seedBuiltin(deps, v3)).toBe("keep-modified");
+          expect((await repo.get(id))?.config.systemPrompt).toBe("管理员改的");
+        });
+      }
+    });
   });
 }
