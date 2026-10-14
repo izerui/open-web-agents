@@ -31,7 +31,7 @@ describe("版本对比", () => {
           {
             name: "docs",
             type: "http",
-            url: "https://mcp.example.com/mcp",
+            url: "https://mcp.example.com/mcp?token=URL-SECRET-7",
             env: { TOKEN: token },
           },
         ],
@@ -87,6 +87,16 @@ describe("版本对比", () => {
     expect((await diff(stranger, "1", "2")).status).toBe(404);
     expect((await diff(owner, "x", "2")).status).toBe(400);
     expect((await diff(owner, "1", "99")).status).toBe(404);
+  });
+
+  it("只读协作者的智能体列表:看得到 MCP 连到哪,看不到地址里的令牌与环境变量", async () => {
+    const list = await reader.get<{
+      agents?: { id: string; config?: { mcpServers?: { url?: string }[] } }[];
+    }>("/api/agents");
+    const mine = list.body.agents?.find((a) => a.id === agentId);
+    expect(mine?.config?.mcpServers?.[0]?.url).toBe("https://mcp.example.com/mcp?***");
+    const json = JSON.stringify(mine);
+    for (const s of ["URL-SECRET-7", SECRET_V1, SECRET_NOW]) expect(json).not.toContain(s);
   });
 
   it("对比是只读的:不改变发布版本与草稿", async () => {

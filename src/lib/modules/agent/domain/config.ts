@@ -98,15 +98,31 @@ export function pickAgentConfig(raw: Partial<AgentConfig>): Partial<AgentConfig>
 }
 
 /**
- * 给只读者看的配置:去掉 MCP 的环境变量(常放密钥)与逃生舱。
+ * 给只读者看的配置:去掉逃生舱,并把 MCP 里可能藏着密钥的地方打码 ——
+ * 环境变量的值、地址里的查询串与账号密码(常见 `?token=…`、`https://user:pass@…`)、
+ * stdio 程序的参数(常见 `--token=…`)。只读者仍看得到用了哪些 MCP、连到哪个主机。
  * 能改这个智能体的人才看得到完整配置。
  */
 export function redactAgentConfigForReader(cfg: AgentConfig): AgentConfig {
   const { escapeHatch: _hatch, ...rest } = cfg;
   return {
     ...rest,
-    mcpServers: cfg.mcpServers?.map((m) =>
-      m.env ? { ...m, env: Object.fromEntries(Object.keys(m.env).map((k) => [k, "***"])) } : m,
-    ),
+    mcpServers: cfg.mcpServers?.map((m) => ({
+      ...m,
+      ...(m.env ? { env: Object.fromEntries(Object.keys(m.env).map((k) => [k, "***"])) } : {}),
+      ...(m.url !== undefined ? { url: redactUrl(m.url) } : {}),
+      ...(m.args ? { args: m.args.map(() => "***") } : {}),
+    })),
   };
+}
+
+/** 地址只留协议、主机、路径;带了查询串或账号密码就标 *** 提示"这里有被隐去的内容" */
+function redactUrl(raw: string): string {
+  try {
+    const u = new URL(raw);
+    const hidden = u.search !== "" || u.username !== "" || u.password !== "" || u.hash !== "";
+    return `${u.protocol}//${u.host}${u.pathname}${hidden ? "?***" : ""}`;
+  } catch {
+    return "***";
+  }
 }
