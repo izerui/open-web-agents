@@ -262,6 +262,30 @@ describe("执行隔离进入 SDK options", () => {
  * 对照隔壁 skills 还做了 Array.isArray 检查)。所以传错形状不会报错,
  * 只是子代理静默不生效:构建器里配了、存下来了、界面也显示着。
  */
+describe("从某一轮重来:resumeSessionAt + forkSession", () => {
+  it("给了起点消息:在那条消息之后接着跑,并分到新会话(不改写原对话)", () => {
+    const o = buildSdkOptions(specOf(), { ...ctx, resumeSessionAt: "msg-9" }, deps());
+    expect(o.resume).toBe("sess_9");
+    expect(o.resumeSessionAt).toBe("msg-9");
+    expect(o.forkSession).toBe(true);
+  });
+
+  it("没给起点消息:照常续接最新状态,不分会话", () => {
+    const o = buildSdkOptions(specOf(), ctx, deps());
+    expect("resumeSessionAt" in o).toBe(false);
+    expect("forkSession" in o).toBe(false);
+  });
+
+  it("没有要续接的会话时,起点消息无意义,不传", () => {
+    const o = buildSdkOptions(
+      specOf(),
+      { ...ctx, resumeSessionId: undefined, resumeSessionAt: "msg-9" },
+      deps(),
+    );
+    expect("resumeSessionAt" in o).toBe(false);
+  });
+});
+
 describe("子代理传给 SDK 的形状", () => {
   const agentsOf = (subagents: AgentSpec["subagents"]) =>
     buildSdkOptions(specOf({ subagents }), ctx, deps()).agents as

@@ -85,6 +85,7 @@ export class MysqlRunRepo implements RunRepo {
         prompt: r.prompt ?? "",
         parentRunId: r.parentRunId,
         resumeAnchor: r.resumeAnchor,
+        resumeAt: r.resumeAt,
         agentConfig: r.agentConfig ?? null,
         agentVersion: r.agentVersion ?? null,
         overrideEnc: r.overrideEnc,
@@ -446,16 +447,28 @@ export class MysqlRunRepo implements RunRepo {
    * 返回 { anchored: true } 表示该运行有自己的锚点意图(含"首轮从零开始"),
    * 上层就不该再回退到会话的最新锚点 —— 否则分支会串回主线。
    */
-  async getResumeAnchor(id: string): Promise<{ anchored: boolean; anchor?: string }> {
+  async getResumeAnchor(
+    id: string,
+  ): Promise<{ anchored: boolean; anchor?: string; resumeAt?: string }> {
     const rows = await this.db
-      .select({ anchor: runs.resumeAnchor, parentRunId: runs.parentRunId })
+      .select({
+        anchor: runs.resumeAnchor,
+        resumeAt: runs.resumeAt,
+        parentRunId: runs.parentRunId,
+      })
       .from(runs)
       .where(eq(runs.id, id))
       .limit(1);
     const row = rows[0];
     if (!row) return { anchored: false };
     // 有父运行 = 这是分支,它的锚点意图是明确的(哪怕锚点为空表示从零重开)
-    if (row.parentRunId) return { anchored: true, anchor: row.anchor ?? undefined };
+    if (row.parentRunId) {
+      return {
+        anchored: true,
+        anchor: row.anchor ?? undefined,
+        ...(row.resumeAt ? { resumeAt: row.resumeAt } : {}),
+      };
+    }
     return row.anchor ? { anchored: true, anchor: row.anchor } : { anchored: false };
   }
 
@@ -487,6 +500,7 @@ export class MysqlRunRepo implements RunRepo {
       prompt: string;
       parentRunId?: string;
       resumeAnchor?: string;
+      resumeAt?: string;
       sdkSessionId?: string;
       transcriptRange?: { first: string; last: string };
       createdAt: number;
@@ -499,6 +513,7 @@ export class MysqlRunRepo implements RunRepo {
         prompt: runs.prompt,
         parentRunId: runs.parentRunId,
         resumeAnchor: runs.resumeAnchor,
+        resumeAt: runs.resumeAt,
         sdkSessionId: runs.sdkSessionId,
         transcriptFirstUuid: runs.transcriptFirstUuid,
         transcriptLastUuid: runs.transcriptLastUuid,
@@ -514,6 +529,7 @@ export class MysqlRunRepo implements RunRepo {
       prompt: r.prompt,
       parentRunId: r.parentRunId ?? undefined,
       resumeAnchor: r.resumeAnchor ?? undefined,
+      resumeAt: r.resumeAt ?? undefined,
       sdkSessionId: r.sdkSessionId ?? undefined,
       transcriptRange:
         r.transcriptFirstUuid && r.transcriptLastUuid

@@ -36,6 +36,8 @@ export interface EnqueueRequest {
   prompt: string;
   parentRunId?: string;
   resumeAnchor?: string;
+  /** 见 NewRun.resumeAt */
+  resumeAt?: string;
   /** 请求级凭证覆盖。含明文 key,入库前加密。 */
   override?: RunCommand["override"];
   /**
@@ -96,6 +98,7 @@ export class RunEnqueuer {
       prompt: req.prompt,
       parentRunId: req.parentRunId,
       resumeAnchor: req.resumeAnchor,
+      resumeAt: req.resumeAt,
       agentConfig: release.config,
       agentVersion: release.version ?? undefined,
       overrideEnc,

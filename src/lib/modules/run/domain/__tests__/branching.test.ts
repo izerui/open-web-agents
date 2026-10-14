@@ -99,3 +99,73 @@ describe("hasBranches", () => {
     expect(hasBranches("r2", runs)).toBe(false);
   });
 });
+
+describe("anchorForBranch(rewind:从某一轮重来)", () => {
+  // 主线三轮:同一个 SDK 会话 S,依次写进同一份 transcript
+  const r1 = {
+    id: "r1",
+    sdkSessionId: "S",
+    transcriptRange: { first: "a1", last: "z1" },
+    createdAt: 1,
+  };
+  const r2 = {
+    id: "r2",
+    resumeAnchor: "S",
+    sdkSessionId: "S",
+    transcriptRange: { first: "a2", last: "z2" },
+    createdAt: 2,
+  };
+  const r3 = {
+    id: "r3",
+    resumeAnchor: "S",
+    sdkSessionId: "S",
+    transcriptRange: { first: "a3", last: "z3" },
+    createdAt: 3,
+  };
+  const all = [r1, r2, r3];
+
+  it("重来第 3 轮:回到第 2 轮的最后一条消息之后", () => {
+    expect(anchorForBranch(r3, "rewind", all)).toEqual({
+      ok: true,
+      parentRunId: "r3",
+      resumeAnchor: "S",
+      resumeAt: "z2",
+    });
+  });
+
+  it("重来第 2 轮:回到第 1 轮之后 —— 不是「最近一轮」,而是目标之前的那一轮", () => {
+    expect(anchorForBranch(r2, "rewind", all)).toMatchObject({ resumeAnchor: "S", resumeAt: "z1" });
+  });
+
+  it("重来首轮:之前没有对话,等同从零重开", () => {
+    expect(anchorForBranch(r1, "rewind", all)).toEqual({
+      ok: true,
+      parentRunId: "r1",
+      resumeAnchor: undefined,
+    });
+  });
+
+  it("目标本身是「从某一轮重来」的分支:它之前的状态就是它自己的起点", () => {
+    const b = { id: "b", resumeAnchor: "S", resumeAt: "z1", sdkSessionId: "F", createdAt: 9 };
+    expect(anchorForBranch(b, "rewind", [...all, b])).toMatchObject({
+      resumeAnchor: "S",
+      resumeAt: "z1",
+    });
+  });
+
+  it("只在同一份会话里找前一轮:别的会话(fork 出去的分支)不算", () => {
+    const other = {
+      id: "o",
+      sdkSessionId: "F",
+      transcriptRange: { first: "x", last: "zz" },
+      createdAt: 2.5,
+    };
+    expect(anchorForBranch(r3, "rewind", [...all, other])).toMatchObject({ resumeAt: "z2" });
+  });
+
+  it("前一轮没有记录范围(旧数据):如实拒绝并给出代码,不猜", () => {
+    const legacy = { ...r2, transcriptRange: undefined };
+    const r = anchorForBranch(r3, "rewind", [r1, legacy, r3]);
+    expect(r).toMatchObject({ ok: false, code: "rewind_unavailable" });
+  });
+});

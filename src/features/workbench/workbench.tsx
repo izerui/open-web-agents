@@ -720,8 +720,9 @@ export function Workbench() {
   }
 
   /**
-   * 重跑某一轮:入队一个【不 resume 的干净运行】,再挂上事件流看它跑。
-   * 已有记录原样保留,不被覆盖。
+   * 重跑某一轮:回到那一轮【之前】的状态重来(之前的对话都在,那一轮及之后的不在),
+   * 再挂上事件流看它跑。已有记录原样保留,不被覆盖。
+   * 较早的记录定位不了那一轮之前的状态时,改为干净上下文重跑,并如实提示。
    */
   async function rerun(fromRunId: string, prompt: string) {
     if (!sessionId || running) return;
@@ -754,16 +755,24 @@ export function Workbench() {
     activeRunRef.current = rerunHandle;
 
     try {
-      const res = await fetch(`/api/sessions/${targetSessionId}/branch`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fromRunId, mode: "fresh", prompt }),
-        signal: abort.signal,
-      });
-      const data = (await res.json().catch(() => null)) as {
+      const branch = (mode: "rewind" | "fresh") =>
+        fetch(`/api/sessions/${targetSessionId}/branch`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fromRunId, mode, prompt }),
+          signal: abort.signal,
+        });
+      let res = await branch("rewind");
+      let data = (await res.json().catch(() => null)) as {
         runId?: string;
         error?: string;
+        code?: string;
       } | null;
+      if (res.status === 409 && data?.code === "rewind_unavailable") {
+        toast.message("这一轮之前的对话状态无法精确定位(较早的记录),改为干净上下文重跑");
+        res = await branch("fresh");
+        data = (await res.json().catch(() => null)) as typeof data;
+      }
       if (!res.ok || !data?.runId) {
         throw new Error(data?.error ?? `重跑失败(HTTP ${res.status})`);
       }

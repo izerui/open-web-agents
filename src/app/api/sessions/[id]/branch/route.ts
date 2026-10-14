@@ -62,7 +62,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   const body = (await req.json().catch(() => ({}))) as Body & { input?: unknown };
   if (!body.fromRunId) return apiError(400, "invalid_request", "fromRunId is required");
-  const mode: BranchMode = body.mode === "continue" ? "continue" : "fresh";
+  const mode: BranchMode =
+    body.mode === "continue" ? "continue" : body.mode === "rewind" ? "rewind" : "fresh";
 
   // 重跑同样花钱、同样要守契约 —— 与对话、嵌入走同一个受理关卡
   let prompt: string;
@@ -84,8 +85,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const target = list.find((r) => r.id === body.fromRunId);
   if (!target) return apiError(404, "not_found", "该运行不属于本会话或不存在");
 
-  const anchor = anchorForBranch(target, mode);
-  if (!anchor.ok) return apiError(409, "invalid_request", anchor.reason);
+  const anchor = anchorForBranch(target, mode, list);
+  if (!anchor.ok) return apiError(409, anchor.code ?? "invalid_request", anchor.reason);
 
   const runId = randomUUID().replace(/-/g, "").slice(0, 24);
   try {
@@ -95,6 +96,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       prompt,
       parentRunId: anchor.parentRunId,
       resumeAnchor: anchor.resumeAnchor,
+      resumeAt: anchor.resumeAt,
     });
   } catch (err) {
     if (err instanceof PromptTooLarge) return apiError(413, "prompt_too_large", err.message);

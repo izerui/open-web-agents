@@ -24,6 +24,33 @@ if (!TEST_DB_URL) {
   });
 
   describe("transcript 范围(真实 MySQL)", () => {
+    it("从某一轮重来的分支:起点消息随锚点落库、读出", async () => {
+      const sessionId = `s-rw-${randomUUID().slice(0, 8)}`;
+      const parent = randomUUID().replace(/-/g, "").slice(0, 24);
+      const branch = randomUUID().replace(/-/g, "").slice(0, 24);
+      await repo.create({ id: parent, sessionId, prompt: "一" });
+      await repo.create({
+        id: branch,
+        sessionId,
+        prompt: "换个说法",
+        parentRunId: parent,
+        resumeAnchor: "S",
+        resumeAt: "z1",
+      });
+      await db.execute(sql`UPDATE runs SET status = 'success' WHERE session_id = ${sessionId}`);
+      try {
+        expect(await repo.getResumeAnchor(branch)).toEqual({
+          anchored: true,
+          anchor: "S",
+          resumeAt: "z1",
+        });
+        const rows = await repo.listBySession(sessionId);
+        expect(rows.find((r) => r.id === branch)?.resumeAt).toBe("z1");
+      } finally {
+        await db.execute(sql`DELETE FROM runs WHERE session_id = ${sessionId}`);
+      }
+    });
+
     it("记下范围后列表带出;没记范围的旧行为 undefined", async () => {
       const sessionId = `s-tr-${randomUUID().slice(0, 8)}`;
       const withRange = randomUUID().replace(/-/g, "").slice(0, 24);

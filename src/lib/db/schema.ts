@@ -215,6 +215,11 @@ export const runs = mysqlTable(
      * 必须逐轮记录 —— 只存会话的最新锚点就回不到中间某轮,分支重跑无从谈起。
      */
     resumeAnchor: varchar("resume_anchor", { length: 128 }),
+    /**
+     * 在 resume_anchor 那份会话里,从哪条消息之后接着跑(SDK 的 resumeSessionAt,配 forkSession)。
+     * 只有"从某一轮重来"的分支才有:回到那一轮之前的状态,分到新文件,不动原对话。
+     */
+    resumeAt: varchar("resume_at", { length: 64 }),
     /** 这一轮跑完产生的 SDK 会话,供后续轮次/分支续接。 */
     sdkSessionId: varchar("sdk_session_id", { length: 128 }),
     /**

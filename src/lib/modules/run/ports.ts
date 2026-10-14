@@ -35,6 +35,8 @@ export interface NewRun {
   prompt?: string;
   parentRunId?: string;
   resumeAnchor?: string;
+  /** 在 resumeAnchor 那份会话里从哪条消息之后接着跑(配 forkSession);只有"从某一轮重来"才有 */
+  resumeAt?: string;
   /** 入队时的智能体配置快照,worker 按它执行。 */
   agentConfig?: unknown;
   /** 执行的智能体版本;不传 = 草稿。 */

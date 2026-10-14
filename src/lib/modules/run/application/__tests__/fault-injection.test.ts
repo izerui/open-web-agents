@@ -126,6 +126,20 @@ describe("故障注入 / 审计与回调", () => {
     ).resolves.toMatchObject({ status: "success" });
   });
 
+  it("从某一轮重来:锚点带的起点消息交给引擎;没有锚点会话时不传", async () => {
+    const withAt = await setup({
+      runAnchor: async () => ({ anchored: true, anchor: "S", resumeAt: "z1" }),
+    });
+    await withAt.orch.execute({ sessionId: "s1", prompt: "hi", runId: "r1" }, signal());
+    expect(withAt.engine.lastCtx).toMatchObject({ resumeSessionId: "S", resumeSessionAt: "z1" });
+
+    const fresh = await setup({
+      runAnchor: async () => ({ anchored: true, anchor: undefined, resumeAt: "z1" }),
+    });
+    await fresh.orch.execute({ sessionId: "s1", prompt: "hi", runId: "r1" }, signal());
+    expect(fresh.engine.lastCtx?.resumeSessionAt).toBeUndefined();
+  });
+
   it("本轮在 transcript 里的范围随 SDK 会话一起记到运行上(历史回放按它截取)", async () => {
     const engine = new OkEngine();
     engine.run = async () => ({

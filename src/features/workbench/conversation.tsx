@@ -931,7 +931,10 @@ const TurnView = memo(function TurnView({
               type="button"
               className="flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
               onClick={() => {
-                const next = window.prompt("重跑这一轮(干净上下文),换个说法:", turn.prompt);
+                const next = window.prompt(
+                  "从这一轮重来(之前的对话保留,这一轮及之后的不算),换个说法:",
+                  turn.prompt,
+                );
                 if (next?.trim() && turn.runId) onRerunAction(turn.runId, next.trim());
               }}
             >

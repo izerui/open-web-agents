@@ -51,7 +51,7 @@ export interface OrchestratorDeps {
    * anchored=true 时【必须】用它给出的锚点 —— 包括"从零重开"的空锚点;
    * 否则回退到会话最新锚点,分支就会串回主线。
    */
-  runAnchor?: (runId: string) => Promise<{ anchored: boolean; anchor?: string }>;
+  runAnchor?: (runId: string) => Promise<{ anchored: boolean; anchor?: string; resumeAt?: string }>;
   /**
    * 记录本轮产生的 SDK 会话到该运行上,供后续分支续接;
    * range 是本轮在 transcript 里的那一段,供历史回放只读本轮(见 RunResult.transcriptRange)。
@@ -142,13 +142,18 @@ export class RunOrchestrator {
 
     // 分支重跑:优先用该运行自己的锚点。只有它没有明确意图时才回退到会话最新状态
     let resumeSessionId = session.sdkSessionId;
+    // "从某一轮重来":在那份会话里从这条消息之后接着跑,并分到新会话(不动原对话)
+    let resumeSessionAt: string | undefined;
     if (cmd.runId && this.deps.runAnchor) {
       // 【读失败不能当成"没有锚点意图"】—— 那会落回会话最新锚点,于是"从零重开"
       // 的分支恢复了完整历史对话,悄悄串回主线(见本文件顶部对锚点语义的说明),
       // 而且随后还会把这个错误锚点写进审计轨迹,事后无从诊断。
       // DB 读失败在这里不是可降级条件,宁可让这一轮失败。
       const a = await this.deps.runAnchor(cmd.runId);
-      if (a.anchored) resumeSessionId = a.anchor;
+      if (a.anchored) {
+        resumeSessionId = a.anchor;
+        resumeSessionAt = a.anchor ? a.resumeAt : undefined;
+      }
     }
 
     // 如实记下这一轮到底从哪儿起跑 —— 事后排查"为什么它记得/不记得某件事"全靠它
@@ -164,6 +169,7 @@ export class RunOrchestrator {
       workspaceDir: session.workspaceDir,
       prompt: cmd.prompt,
       resumeSessionId,
+      ...(resumeSessionAt ? { resumeSessionAt } : {}),
       unattended: session.unattended === true,
       // 有没有人能审批取决于入口:接口调用没人;嵌入组件里的访客不是审批人
       approvalPolicy:

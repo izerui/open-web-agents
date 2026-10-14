@@ -273,6 +273,11 @@ export function buildSdkOptions(
 
     // ③ 续跑 + 环境
     resume: ctx.resumeSessionId,
+    // 从某条消息之后接着跑时必须分到新会话:不分的话新的一轮会写进原文件,原对话就被改写了
+    // (scripts/sdk-probe/branch-resume-at.mjs 实测:模型只看到那条消息之前的对话)
+    ...(ctx.resumeSessionId && ctx.resumeSessionAt
+      ? { resumeSessionAt: ctx.resumeSessionAt, forkSession: true }
+      : {}),
     env: {
       ...ctx.env,
       ...aliasEnv(ctx.credentials, deps.slots),

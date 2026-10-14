@@ -135,6 +135,11 @@ export interface RunContext {
   /** 上一轮的 SDK session id,用于多轮 resume。 */
   resumeSessionId?: string;
   /**
+   * 在 resumeSessionId 那份会话里从这条消息之后接着跑,并分到新会话(SDK 的 resumeSessionAt +
+   * forkSession)。用于"从某一轮重来":回到那一轮之前的状态,原对话不受影响。
+   */
+  resumeSessionAt?: string;
+  /**
    * 无人值守。
    *
    * 接口 invoke 是一次调用拿结果,没有人能在中途确认任何东西 ——
