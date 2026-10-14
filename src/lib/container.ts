@@ -83,6 +83,7 @@ import { workspacePathFor } from "@/lib/modules/session/domain/workspace";
 import type { SessionRepo } from "@/lib/modules/session/ports";
 import { MysqlUsageRepo } from "@/lib/modules/usage/adapters/mysql-usage-repo";
 import { QuotaExceeded, assertWithinQuota } from "@/lib/modules/usage/application/quota-guard";
+import { mysqlSeedInRowLock } from "@/lib/seed-in-row-lock";
 
 export interface Container {
   env: Env;
@@ -199,22 +200,18 @@ function build(): Container {
   const agents = new MysqlAgentRepo(db);
   const releases = new AgentReleases(agents, new MysqlAgentVersionRepo(db));
   // 内置智能体:首次写入定义;之后没人改过就升级到代码里的新定义,有人改过就保留(见 seed-builtin.ts)。
-  // 它们归 system 所有,首次写入时授予公开只读 —— 否则新注册用户在列表里看不到
+  // 它们归 system 所有,首次写入时(同一事务里)授予公开只读 —— 否则新注册用户在列表里看不到
   const seedPublic = (definition: Agent, grantId: string) =>
     seedBuiltin(
       {
-        agents,
-        grantPublicRead: () =>
-          grants
-            .grant({
-              id: grantId,
-              resourceType: "agent",
-              resourceId: definition.id,
-              principalType: "*",
-              principalId: PUBLIC_PRINCIPAL,
-              permission: "read",
-            })
-            .then(() => {}),
+        inRowLock: mysqlSeedInRowLock(db, {
+          id: grantId,
+          resourceType: "agent",
+          resourceId: definition.id,
+          principalType: "*",
+          principalId: PUBLIC_PRINCIPAL,
+          permission: "read",
+        }),
       },
       definition,
     ).catch((err) =>

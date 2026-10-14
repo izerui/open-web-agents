@@ -1,7 +1,7 @@
 // 内置智能体的启动写入:首次写入、没人改过就升级、有人改过就保留。
 
 import { InMemoryAgentRepo } from "@/lib/modules/agent/adapters/in-memory-agent-repo";
-import { seedBuiltin } from "@/lib/modules/agent/application/seed-builtin";
+import { type SeedTx, seedBuiltin } from "@/lib/modules/agent/application/seed-builtin";
 import { decideSeed } from "@/lib/modules/agent/domain/builtin-seed";
 import type { Agent } from "@/lib/modules/agent/ports";
 import { describe, expect, it } from "vitest";
@@ -18,10 +18,14 @@ function setup(agents = new InMemoryAgentRepo()) {
   let grants = 0;
   const warnings: string[] = [];
   const deps = {
-    agents,
-    grantPublicRead: async () => {
-      grants++;
-    },
+    // 内存实现没有事务:回滚语义由真实 MySQL 的测试覆盖(seed-builtin.mysql.test.ts)
+    inRowLock: <T>(fn: (tx: SeedTx) => Promise<T>) =>
+      fn({
+        agents,
+        grantPublicRead: async () => {
+          grants++;
+        },
+      }),
     warn: (m: string) => warnings.push(m),
   };
   return { agents, deps, warnings, grants: () => grants };

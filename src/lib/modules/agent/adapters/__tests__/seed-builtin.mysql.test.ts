@@ -3,10 +3,14 @@
 
 import { randomUUID } from "node:crypto";
 import { createDb } from "@/lib/db/client";
-import { agents as agentsTable } from "@/lib/db/schema";
+import { accessGrants, agents as agentsTable } from "@/lib/db/schema";
+import { MysqlGrantRepo } from "@/lib/modules/access/adapters/mysql-grant-repo";
+import { PUBLIC_PRINCIPAL } from "@/lib/modules/access/domain/grants";
+import type { NewGrant } from "@/lib/modules/access/ports";
 import { MysqlAgentRepo } from "@/lib/modules/agent/adapters/mysql-agent-repo";
 import { seedBuiltin } from "@/lib/modules/agent/application/seed-builtin";
 import type { Agent } from "@/lib/modules/agent/ports";
+import { mysqlSeedInRowLock } from "@/lib/seed-in-row-lock";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 
@@ -23,13 +27,34 @@ if (!TEST_DB_URL) {
   }
   const { db, pool } = createDb(TEST_DB_URL);
   const repo = new MysqlAgentRepo(db);
+  const grantRepo = new MysqlGrantRepo(db);
   const ids: string[] = [];
   afterAll(async () => {
-    for (const id of ids) await db.delete(agentsTable).where(eq(agentsTable.id, id));
+    for (const id of ids) {
+      await db.delete(agentsTable).where(eq(agentsTable.id, id));
+      await db.delete(accessGrants).where(eq(accessGrants.resourceId, id));
+    }
+    await db.delete(accessGrants).where(eq(accessGrants.resourceId, "seed-test-blocker"));
     await pool.end();
   });
 
-  const deps = { agents: repo, grantPublicRead: async () => {}, warn: () => {} };
+  // 与组装根(container.ts)同一套接线:智能体行与公开授权走同一个事务
+  const publicGrant = (id: string, grantId = `grant-${id}`): NewGrant => ({
+    id: grantId,
+    resourceType: "agent",
+    resourceId: id,
+    principalType: "*",
+    principalId: PUBLIC_PRINCIPAL,
+    permission: "read",
+  });
+  const depsFor = (id: string, grantId?: string) => ({
+    inRowLock: mysqlSeedInRowLock(db, publicGrant(id, grantId)),
+    warn: () => {},
+  });
+  const publicGrantsOf = async (id: string) =>
+    (await grantRepo.listForResource("agent", id)).filter(
+      (g) => g.principalType === "*" && g.principalId === PUBLIC_PRINCIPAL,
+    );
 
   describe("内置智能体种子(真实 MySQL)", () => {
     it("没人改过:代码里的定义更新后能升级;管理员改过:保留", async () => {
@@ -52,16 +77,16 @@ if (!TEST_DB_URL) {
       };
       const v2: Agent = { ...v1, config: { ...v1.config, systemPrompt: "v2" } };
 
-      expect(await seedBuiltin(deps, v1)).toBe("insert");
-      expect(await seedBuiltin(deps, v2)).toBe("upgrade");
+      expect(await seedBuiltin(depsFor(id), v1)).toBe("insert");
+      expect(await seedBuiltin(depsFor(id), v2)).toBe("upgrade");
       expect((await repo.get(id))?.config.systemPrompt).toBe("v2");
 
       const cur = await repo.get(id);
       if (!cur) throw new Error("missing");
       await repo.upsert({ ...cur, config: { ...cur.config, systemPrompt: "管理员改的" } });
-      expect(await seedBuiltin(deps, { ...v2, config: { ...v2.config, systemPrompt: "v3" } })).toBe(
-        "keep-modified",
-      );
+      expect(
+        await seedBuiltin(depsFor(id), { ...v2, config: { ...v2.config, systemPrompt: "v3" } }),
+      ).toBe("keep-modified");
       expect((await repo.get(id))?.config.systemPrompt).toBe("管理员改的");
     });
 
@@ -87,17 +112,58 @@ if (!TEST_DB_URL) {
       });
 
       // 存取规整(空值、契约拆列、JSON 键序)不能让"内容等于定义"判成不等
-      expect(await seedBuiltin(deps, def(same))).toBe("adopt");
+      expect(await seedBuiltin(depsFor(same), def(same))).toBe("adopt");
       expect((await repo.get(same))?.seedHash).toBeTruthy();
       expect(
-        await seedBuiltin(deps, {
+        await seedBuiltin(depsFor(same), {
           ...def(same),
           config: { ...def(same).config, systemPrompt: "新定义" },
         }),
       ).toBe("upgrade");
 
-      expect(await seedBuiltin(deps, def(edited))).toBe("keep-unknown");
+      expect(await seedBuiltin(depsFor(edited), def(edited))).toBe("keep-unknown");
       expect((await repo.get(edited))?.config.systemPrompt).toBe("管理员改的");
+    });
+
+    describe("首次创建与公开授权在同一个事务里", () => {
+      const def = (id: string, prompt = "v1"): Agent => ({
+        id,
+        ownerId: "system",
+        name: "内置",
+        config: { systemPrompt: prompt, model: "sonnet" },
+      });
+
+      it("授权写入失败:首次初始化整体回滚(不留智能体、不留摘要);再次启动完成创建和授权", async () => {
+        const id = `builtin-grant-${randomUUID().slice(0, 8)}`;
+        const grantId = `grant-blocked-${randomUUID().slice(0, 8)}`;
+        ids.push(id);
+        // 让授权写入在数据库层真实失败:同 id 的授权已被别的资源占用 → 主键冲突
+        await grantRepo.grant(publicGrant("seed-test-blocker", grantId));
+
+        await expect(seedBuiltin(depsFor(id, grantId), def(id))).rejects.toThrow();
+        expect(await repo.get(id)).toBeNull();
+        expect(await repo.idTaken(id)).toBe(false); // 连行都没有 —— 智能体与摘要一起回滚了
+        expect(await publicGrantsOf(id)).toEqual([]);
+
+        // 障碍消失后再启动:仍判为首次写入,创建和授权一起完成
+        await grantRepo.revoke(grantId);
+        expect(await seedBuiltin(depsFor(id, grantId), def(id))).toBe("insert");
+        expect((await repo.get(id))?.seedHash).toBeTruthy();
+        expect(await publicGrantsOf(id)).toHaveLength(1);
+      });
+
+      it("初始化成功后管理员撤掉公开授权:之后的启动不会加回来", async () => {
+        const id = `builtin-revoke-${randomUUID().slice(0, 8)}`;
+        ids.push(id);
+        expect(await seedBuiltin(depsFor(id), def(id))).toBe("insert");
+        const [g] = await publicGrantsOf(id);
+        if (!g) throw new Error("首次初始化应授予公开只读");
+        await grantRepo.revoke(g.id);
+
+        expect(await seedBuiltin(depsFor(id), def(id, "v2"))).toBe("upgrade");
+        expect(await seedBuiltin(depsFor(id), def(id, "v2"))).toBe("upgrade");
+        expect(await publicGrantsOf(id)).toEqual([]);
+      });
     });
 
     describe("播种与管理员保存并发:行锁让两者串行,管理员的修改不丢", () => {
@@ -120,7 +186,7 @@ if (!TEST_DB_URL) {
             config: { systemPrompt: "v1", model: "sonnet" },
           };
           const v2: Agent = { ...v1, config: { ...v1.config, systemPrompt: "v2" } };
-          expect(await seedBuiltin(deps, v1)).toBe("insert");
+          expect(await seedBuiltin(depsFor(id), v1)).toBe("insert");
           // 管理员打开了编辑页(拿到的是 v1)
           const seen = await repo.get(id);
           if (!seen) throw new Error("missing");
@@ -129,7 +195,7 @@ if (!TEST_DB_URL) {
           const release = gate();
           const seeding = seedBuiltin(
             {
-              ...deps,
+              ...depsFor(id),
               pauseAt: async (p) => {
                 if (p !== point) return;
                 reached.open();
@@ -158,7 +224,7 @@ if (!TEST_DB_URL) {
 
           // 再启动一次(代码里的定义又更新了):判为改过,保留
           const v3: Agent = { ...v1, config: { ...v1.config, systemPrompt: "v3" } };
-          expect(await seedBuiltin(deps, v3)).toBe("keep-modified");
+          expect(await seedBuiltin(depsFor(id), v3)).toBe("keep-modified");
           expect((await repo.get(id))?.config.systemPrompt).toBe("管理员改的");
         });
       }
