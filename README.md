@@ -322,6 +322,8 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 | POST            | `/api/agents/{id}/versions/{v}/activate`   | cookie(write)          | 把发布指针切到该版本(回滚)    |
 | POST            | `/api/agents/{id}/versions/{v}/restore`    | cookie(write)          | 把该版本载入草稿            |
 | GET             | `/api/agents/{id}/versions/diff?from=&to=` | cookie / key           | 两个版本(或与 `draft`)的差异:提示词给行级差异,子代理 / MCP / 技能按名字对齐;只读者同样脱敏 |
+| GET/POST/PUT/DELETE | `/api/agents/{id}/evals/cases[/{caseId}]` | cookie(write)      | 评测用例:标准输入 + 规则断言 |
+| GET/POST        | `/api/agents/{id}/evals/runs[/{runId}]`    | cookie(write)          | 发起评测(`{ target: "draft" \| 版本号 }`)/ 最近评测 / 评测详情 |
 | POST            | `/api/embed/token`                         | **key**                | 换短时效嵌入令牌(服务端调)      |
 | POST            | `/api/embed/run`                           | **embed token**        | widget 发起运行         |
 | GET             | `/api/embed/script`                        | —                      | 嵌入脚本                |
@@ -382,6 +384,18 @@ SSE 传输是裸 `data: <AgentEvent JSON>\n\n`。前端用 `fetch + getReader` �
 - 只有 `not_accepting` / `dropped` 是"可以重发"的定局。工作台据此自动改为本轮结束后发送;
   多次重试仍不确定时只提示"未确认",不自动重发。
 - 需要 Redis 可用:Redis 持续不可用时,已受理消息的结局可能一直是 `pending`。
+
+### 智能体评测
+
+在构建器的「评测」卡片里给智能体配一组用例:标准输入(文本,或按 inputSchema 的 JSON 对象)+ 规则断言
+—— 运行成功(或期望失败)、正文包含 / 不包含、结构化结果的字段等于、花费与耗时上限。对草稿或某个
+已发布版本「运行评测」,看通过率与每个用例没通过的原因。
+
+- **只在手动点击时运行**:每个用例真正调用一次模型,花费记在发起人名下、计入额度
+- 评测里的运行与接口调用走同一个运行内核,但不推回调、不进工作台会话列表;运行记录里来源显示为「评测」
+- 入参不符合该版本 inputSchema 的用例不发起运行,直接判「未能运行」
+- 用例的输入与断言在开跑时快照:之后改了用例,历史评测仍按当时的标准显示
+- 断言只用确定、可复现的规则,不用模型打分
 
 ### 统一的运行结果
 

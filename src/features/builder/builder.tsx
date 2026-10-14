@@ -14,6 +14,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { Textarea } from "@/components/ui/textarea";
+import { EvalPanel } from "@/features/builder/eval-panel";
 import { KnowledgePanel } from "@/features/builder/knowledge-panel";
 import { ReleasePanel } from "@/features/builder/release-panel";
 import { SharePanel } from "@/features/builder/share-panel";
@@ -1273,6 +1274,14 @@ export function Builder() {
             // 草稿内容换了,表单重新从服务端读一遍
             edit(selectedAgent);
           }}
+        />
+      )}
+
+      {openedId && selectedAgent && canWrite && (
+        <EvalPanel
+          agentId={openedId}
+          publishedVersion={selectedAgent.publishedVersion ?? null}
+          hasInputSchema={Boolean(parsedInputSchema)}
         />
       )}
 
