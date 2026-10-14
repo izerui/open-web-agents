@@ -51,7 +51,8 @@ vi.mock("@/lib/container", () => {
       sessions: { get: (id: string) => state.sessionGet(id) },
       storage: { tree: async () => [] },
       admission: { admit: async () => ({ prompt: "hi" }) },
-      runs: {
+      // 阻塞模式的补读走有时限的结果读取源(runResults),不再直接用 runs
+      runResults: {
         getResult: (id: string) => {
           state.reads++;
           return state.getResult(id);
@@ -137,7 +138,8 @@ describe("阻塞模式:终态之后补读结果记录", () => {
       startedAt: null, // 兜底:起止时间只有库里有
       error: null,
     });
-    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/底层查询未取消/));
+    // 这里只是响应不再等;底层查询由结果读取源自己限时结束(见 bounded-result-reader)
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/改用事件拼装响应/));
     warn.mockRestore();
   });
 

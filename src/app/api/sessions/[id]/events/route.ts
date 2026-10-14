@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { bus, auth, runs } = getContainer();
+  const { bus, auth, runs, runResults } = getContainer();
 
   try {
     const principal = await auth.resolveWeb(req);
@@ -90,7 +90,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
           );
           // 事件流过期(24h)或终态事件丢失时,由数据库终态收尾,而不是让连接一直挂着
           subscriptions.push(
-            watchTerminal(runs, run.id, (e) => {
+            watchTerminal(runResults, run.id, (e) => {
               if (!pending.has(run.id)) return;
               send(e);
               settleRun();
