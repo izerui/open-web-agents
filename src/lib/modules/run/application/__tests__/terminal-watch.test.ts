@@ -11,7 +11,7 @@ describe("watchTerminal", () => {
         getResult: async () => ({
           status,
           structured: null,
-          summary: null,
+          finalText: null,
           error: { kind: "worker_lost", message: "worker 失联" },
         }),
       },
@@ -38,7 +38,9 @@ describe("watchTerminal", () => {
   it("取消后不再回调", async () => {
     const got: unknown[] = [];
     const stop = watchTerminal(
-      { getResult: async () => ({ status: "success", structured: 1, summary: "ok", error: null }) },
+      {
+        getResult: async () => ({ status: "success", structured: 1, finalText: "ok", error: null }),
+      },
       "r1",
       (e) => got.push(e),
       5,

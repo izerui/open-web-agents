@@ -176,6 +176,13 @@
       "when": 1791948829688,
       "tag": "0024_agent_soft_delete",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "5",
+      "when": 1791949515162,
+      "tag": "0025_structured_salvaged",
+      "breakpoints": true
     }
   ]
 }

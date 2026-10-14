@@ -40,7 +40,7 @@ curl -X POST localhost:5678/api/agents/<智能体id>/invoke \
   -d '{"input":"……"}'
 # → { "taskId": "..." }
 curl localhost:5678/api/agents/<taskId>/result -H "X-Api-Key: <key>"
-# → { "status": "success", "structured": { ... } }
+# → { "taskId": "...", "status": "success", "done": true, "structured": { ... }, ... }
 ```
 
 ---
@@ -328,6 +328,28 @@ SSE 传输是裸 `data: <AgentEvent JSON>\n\n`。前端用 `fetch + getReader` �
 那条事件若丢失,SSE 与 `stream:false` 阻塞请求会从数据库读到终态收尾,不会一直挂着。
 
 输入(`prompt` / `invoke` 的 `input`)上限 200,000 字符,超出返回 413。
+
+### 统一的运行结果
+
+`GET /api/agents/{taskId}/result`、`stream:false` 阻塞响应、Webhook 的 `run.finished` 载荷
+都由同一份数据库记录、经同一个函数组装,共有这些字段:
+
+| 字段 | 说明 |
+|---|---|
+| `taskId` | 运行 id |
+| `status` / `done` | `pending` / `running` / `success` / `failed` / `cancelled`;后三者 `done=true` |
+| `agentVersion` | 本次运行用的已发布版本号;跑草稿时为 `null` |
+| `structured` | 结构化结果(定义了 `outputSchema` 才有) |
+| `salvaged` | `true` 表示结构化结果是从模型正文里补救解析出来的,而不是经结构化输出工具交付 |
+| `text` | 最终正文 |
+| `error` | `null` 或 `{ kind, message, status? }` |
+| `cost` | `null` 或 `{ usd?, input, output, partial? }` |
+| `startedAt` / `endedAt` | ISO 时间 |
+
+另有各自的附加字段:`/result` 与 Webhook 保留旧字段 `summary`(同 `text`,已弃用);阻塞响应
+带 `runId`、`thinking`、`toolCalls`、`usage`;Webhook 带 `deliveryId`、`event`、`sessionId`、`agentId`。
+
+> **不兼容变更**:阻塞响应的 `error` 以前是字符串,现在与另两处一致,是 `{ kind, message }` 对象。
 
 ### 调用限流
 

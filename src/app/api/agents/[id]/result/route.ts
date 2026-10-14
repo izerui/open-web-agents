@@ -1,6 +1,7 @@
 import { apiError } from "@/lib/api-error";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
+import { toRunResult } from "@/lib/modules/run/domain/run-result";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,18 +37,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const run = await runs.getResult(taskId);
   if (!run) return apiError(404, "not_found", "task not found");
 
-  const done = run.status === "success" || run.status === "failed" || run.status === "cancelled";
-
+  // 与阻塞模式、webhook 同一份结果契约(run/domain/run-result.ts)
+  const result = toRunResult(run);
   return Response.json({
-    taskId: run.id,
-    status: run.status,
-    done,
-    structured: run.structured ?? null,
-    text: run.summary,
-    summary: run.summary,
-    cost: run.cost ?? null,
-    error: run.error ?? null,
-    /** 执行的智能体版本;null = 草稿 */
-    agentVersion: run.agentVersion ?? null,
+    ...result,
+    /** 已废弃:同 text,保留给老的集成方 */
+    summary: result.text,
   });
 }

@@ -225,6 +225,8 @@ export const runs = mysqlTable(
     /** 被认领的次数,用于识别反复崩溃的任务 */
     attempts: int("attempts").notNull().default(0),
     structuredResult: json("structured_result"),
+    /** 结构化结果是从最终文本里提取的(非原生 structured_output)。对外结果的 salvaged 字段 */
+    structuredSalvaged: int("structured_salvaged"),
     /**
      * 本轮最终 Assistant 文本的查询投影;完整过程仍以 SDK jsonl 为准。
      * MEDIUMTEXT:TEXT 只有 64KB,长回答写不进去会让一次成功的运行在落库时失败。

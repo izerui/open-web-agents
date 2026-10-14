@@ -70,7 +70,13 @@ export interface RunPayloadSource {
   /** 落终态结果,供轮询接口读取(内存 fake 可不实现)。只写传进来的字段。 */
   saveResult?(
     id: string,
-    data: { finalText?: string; structured?: unknown; cost?: unknown; error?: unknown },
+    data: {
+      finalText?: string;
+      structured?: unknown;
+      salvaged?: boolean;
+      cost?: unknown;
+      error?: unknown;
+    },
     fence?: string,
   ): Promise<void>;
 }
@@ -229,6 +235,7 @@ export class RunWorker {
         {
           finalText: result.summary,
           structured: result.structured,
+          salvaged: result.salvagedFromText === true,
           cost: result.cost,
           error: result.error,
         },

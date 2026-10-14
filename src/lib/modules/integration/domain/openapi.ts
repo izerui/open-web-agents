@@ -177,7 +177,7 @@ export function buildAgentOpenApi(agent: OpenApiAgent, origin: string): Record<s
       "/api/agents/{taskId}/result": {
         get: {
           operationId: "getResult",
-          summary: "查询结果(轮询直到 done=true)",
+          summary: "查询结果(轮询直到 done=true)。字段与 webhook 回调、阻塞模式的响应相同",
           parameters: [{ name: "taskId", in: "path", required: true, schema: { type: "string" } }],
           responses: {
             "200": {
@@ -198,12 +198,36 @@ export function buildAgentOpenApi(agent: OpenApiAgent, origin: string): Record<s
                         description: "实际执行的版本;null = 草稿",
                       },
                       structured,
-                      text: { type: ["string", "null"] },
-                      cost: { type: ["object", "null"] },
+                      salvaged: {
+                        type: "boolean",
+                        description:
+                          "structured 是从最终文本里提取的,而非模型原生的结构化输出(兼容网关的降级路径)",
+                      },
+                      text: { type: ["string", "null"], description: "最终回答文本" },
+                      summary: {
+                        type: ["string", "null"],
+                        description: "已废弃:同 text",
+                        deprecated: true,
+                      },
+                      cost: {
+                        type: ["object", "null"],
+                        properties: {
+                          usd: { type: "number" },
+                          input: { type: "integer" },
+                          output: { type: "integer" },
+                          partial: {
+                            type: "boolean",
+                            description:
+                              "运行被中止、没等到结算时为 true:token 为已收到部分,usd 可能缺失",
+                          },
+                        },
+                      },
                       error: {
                         type: ["object", "null"],
                         properties: { kind: { type: "string" }, message: { type: "string" } },
                       },
+                      startedAt: { type: ["string", "null"], format: "date-time" },
+                      endedAt: { type: ["string", "null"], format: "date-time" },
                     },
                   },
                 },

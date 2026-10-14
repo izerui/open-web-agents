@@ -47,7 +47,7 @@ import type { ApiKeyRepo } from "@/lib/modules/identity/ports";
 import type { UserRepo } from "@/lib/modules/identity/user-ports";
 import { createGuardedSender } from "@/lib/modules/integration/adapters/guarded-http-sender";
 import { MysqlWebhookDeliveryLog } from "@/lib/modules/integration/adapters/mysql-webhook-delivery-log";
-import { deliverWebhook } from "@/lib/modules/integration/application/webhook";
+import { deliverWebhook, runFinishedPayload } from "@/lib/modules/integration/application/webhook";
 import { WebhookConsole } from "@/lib/modules/integration/application/webhook-console";
 import { WebhookDispatcher } from "@/lib/modules/integration/application/webhook-dispatcher";
 import { isAddressAllowed } from "@/lib/modules/integration/domain/webhook-policy";
@@ -439,19 +439,8 @@ function build(): Container {
       const r = await runs.getResult(runId);
       if (!r) return null;
       const session = await sessions.get(sessionId);
-      return {
-        deliveryId: runId,
-        event: "run.finished",
-        taskId: runId,
-        sessionId,
-        agentId: session?.agentId,
-        agentVersion: r.agentVersion ?? undefined,
-        status: r.status,
-        structured: r.structured ?? undefined,
-        summary: r.summary ?? undefined,
-        error: r.error ?? undefined,
-        cost: r.cost ?? undefined,
-      };
+      // 与 /result、阻塞模式同一份结果契约
+      return runFinishedPayload(r, { sessionId, agentId: session?.agentId });
     },
     deliver: (url, payload, secret) =>
       deliverWebhook(url, payload, { secret, maxAttempts: 2, send: webhookSender }),

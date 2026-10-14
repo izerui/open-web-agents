@@ -6,6 +6,7 @@
 import { randomUUID } from "node:crypto";
 import type { Db } from "@/lib/db/client";
 import { runs } from "@/lib/db/schema";
+import type { RunRecord } from "@/lib/modules/run/domain/run-result";
 import {
   DuplicateIdempotencyKey,
   type NewRun,
@@ -499,7 +500,13 @@ export class MysqlRunRepo implements RunRepo {
   /** 记录终态结果,供轮询接口读取。 */
   async saveResult(
     id: string,
-    data: { finalText?: string; structured?: unknown; cost?: unknown; error?: unknown },
+    data: {
+      finalText?: string;
+      structured?: unknown;
+      salvaged?: boolean;
+      cost?: unknown;
+      error?: unknown;
+    },
     fence?: string,
   ): Promise<void> {
     // 【只写传进来的字段】。曾经是无条件 `?? null` 三连,于是异常路径调用
@@ -508,6 +515,7 @@ export class MysqlRunRepo implements RunRepo {
     const patch: Record<string, unknown> = {};
     if ("finalText" in data) patch.finalText = data.finalText ?? null;
     if ("structured" in data) patch.structuredResult = data.structured ?? null;
+    if ("salvaged" in data) patch.structuredSalvaged = data.salvaged ? 1 : 0;
     if ("cost" in data) patch.cost = data.cost ?? null;
     if ("error" in data) patch.errorInfo = data.error ?? null;
     if (Object.keys(patch).length === 0) return;
@@ -518,25 +526,20 @@ export class MysqlRunRepo implements RunRepo {
       .where(and(eq(runs.id, id), ...fenceOf(fence)));
   }
 
-  /** 取完整运行状态与结果,供对外轮询接口使用。 */
-  async getResult(id: string): Promise<{
-    id: string;
-    status: RunState;
-    structured: unknown;
-    cost: unknown;
-    error: unknown;
-    summary: string | null;
-    agentVersion: number | null;
-  } | null> {
+  /** 取完整运行状态与结果(对外结果契约的数据源,见 run/domain/run-result.ts)。 */
+  async getResult(id: string): Promise<RunRecord | null> {
     const rows = await this.db
       .select({
         id: runs.id,
         status: runs.status,
         structured: runs.structuredResult,
+        salvaged: runs.structuredSalvaged,
         finalText: runs.finalText,
         cost: runs.cost,
         error: runs.errorInfo,
         agentVersion: runs.agentVersion,
+        startedAt: runs.startedAt,
+        endedAt: runs.endedAt,
       })
       .from(runs)
       .where(eq(runs.id, id))
@@ -544,13 +547,9 @@ export class MysqlRunRepo implements RunRepo {
     const row = rows[0];
     if (!row) return null;
     return {
-      id: row.id,
+      ...row,
       status: row.status as RunState,
-      structured: row.structured,
-      cost: row.cost,
-      error: row.error,
-      summary: row.finalText,
-      agentVersion: row.agentVersion,
+      salvaged: row.salvaged === null ? null : row.salvaged === 1,
     };
   }
 

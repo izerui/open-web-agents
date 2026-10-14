@@ -10,7 +10,7 @@ export interface TerminalSource {
   getResult(id: string): Promise<{
     status: RunState;
     structured: unknown;
-    summary: string | null;
+    finalText: string | null;
     error: unknown;
   } | null>;
 }
@@ -27,7 +27,7 @@ export function resultEventFromRow(
   row: {
     status: "success" | "failed" | "cancelled";
     structured: unknown;
-    summary: string | null;
+    finalText: string | null;
     error: unknown;
   },
 ): ResultEvent {
@@ -36,7 +36,7 @@ export function resultEventFromRow(
     kind: "result",
     status: row.status,
     structured: row.structured ?? undefined,
-    summary: row.summary ?? errMsg ?? undefined,
+    summary: row.finalText ?? errMsg ?? undefined,
     runId,
   };
 }

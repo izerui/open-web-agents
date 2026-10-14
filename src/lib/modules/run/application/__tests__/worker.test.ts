@@ -18,7 +18,13 @@ class TestRepo extends InMemoryRunRepo {
   }
   readonly savedResults = new Map<
     string,
-    { finalText?: string; structured?: unknown; cost?: unknown; error?: unknown }
+    {
+      finalText?: string;
+      structured?: unknown;
+      salvaged?: boolean;
+      cost?: unknown;
+      error?: unknown;
+    }
   >();
 
   async createWithPrompt(id: string, sessionId: string, prompt: string) {
@@ -27,7 +33,13 @@ class TestRepo extends InMemoryRunRepo {
 
   async saveResult(
     id: string,
-    data: { finalText?: string; structured?: unknown; cost?: unknown; error?: unknown },
+    data: {
+      finalText?: string;
+      structured?: unknown;
+      salvaged?: boolean;
+      cost?: unknown;
+      error?: unknown;
+    },
   ): Promise<void> {
     this.savedResults.set(id, data);
   }
@@ -120,6 +132,20 @@ describe("RunWorker.tick", () => {
     await repo.createWithPrompt("r1", "s1", "go");
     await worker.tick();
     expect(repo.savedResults.get("r1")?.finalText).toBe("最终回答");
+  });
+
+  it("结构化结果是从文本里提取的:salvaged 一并落库(对外结果契约要带上这条降级信号)", async () => {
+    const { repo, worker } = await setup(
+      new FakeEngine({
+        status: "success",
+        summary: '{"ok":1}',
+        structured: { ok: 1 },
+        salvagedFromText: true,
+      }),
+    );
+    await repo.createWithPrompt("r1", "s1", "go");
+    await worker.tick();
+    expect(repo.savedResults.get("r1")).toMatchObject({ structured: { ok: 1 }, salvaged: true });
   });
 
   it("引擎返回失败时 run 落 failed", async () => {

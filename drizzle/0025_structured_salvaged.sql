@@ -1,0 +1,1 @@
+ALTER TABLE `runs` ADD `structured_salvaged` int;

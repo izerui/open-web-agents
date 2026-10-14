@@ -7,7 +7,8 @@ import type { Principal } from "@/lib/modules/access/domain/principal";
 import type { BusPort } from "@/lib/modules/events/ports";
 import type { EnqueueRequest } from "@/lib/modules/run/application/enqueue";
 import { topicOf } from "@/lib/modules/run/application/orchestrator";
-import { type TerminalSource, watchTerminal } from "@/lib/modules/run/application/terminal-watch";
+import { watchTerminal } from "@/lib/modules/run/application/terminal-watch";
+import { type RunRecord, type RunResult, toRunResult } from "@/lib/modules/run/domain/run-result";
 import type { AgentEvent } from "@/lib/shared";
 import { streamRun } from "../../../_lib/run-stream";
 
@@ -92,8 +93,8 @@ interface RunRouteContext {
   runId: string;
   prompt: string;
   enqueue(r: EnqueueRequest): Promise<unknown>;
-  /** 终态兜底:事件总线上的 result 丢了也能从库里收尾。 */
-  results: TerminalSource;
+  /** 终态兜底与结果契约的数据源:事件总线上的 result 丢了也能从库里收尾。 */
+  results: { getResult(id: string): Promise<RunRecord | null> };
   bus: BusPort;
 }
 
@@ -114,18 +115,12 @@ function handleStreaming(req: Request, ctx: RunRouteContext) {
 // ─────────────────────────── 阻塞模式(JSON) ───────────────────────────
 
 /**
- * 汇聚后的 JSON 响应形状。
- *
- * 设计参考 OpenAI / Anthropic 的非流式响应:
- * 一个请求一个 JSON,包含完整结果、过程记录和元数据。
+ * 阻塞模式的 JSON 响应 = 对外运行结果契约(与 /result、webhook 同一份字段,
+ * 见 run/domain/run-result.ts)+ 过程信息(工具调用、思考、token 用量)。
  */
-interface BlockingResponse {
-  /** 运行 ID */
+type BlockingResponse = RunResult & {
+  /** 运行 ID(= taskId) */
   runId: string;
-  /** 终态:success / failed / unknown */
-  status: string;
-  /** 完整回复文本(所有 text 事件拼接) */
-  text: string;
   /** 思考过程(所有 thinking 事件拼接;无则省略) */
   thinking?: string;
   /** 工具调用记录 */
@@ -136,13 +131,9 @@ interface BlockingResponse {
     result?: string;
     isError?: boolean;
   }[];
-  /** 结构化输出(智能体配了 outputSchema 时才有) */
-  structured?: unknown;
-  /** 错误摘要(失败时) */
-  error?: string;
-  /** token 用量 */
+  /** 本轮各次模型调用的 token 用量合计 */
   usage: { input: number; output: number };
-}
+};
 
 /** stream: false → 等运行完成,返回单个 JSON。适合程序调用。 */
 function handleBlocking(req: Request, ctx: RunRouteContext): Promise<Response> {
@@ -161,9 +152,12 @@ function handleBlocking(req: Request, ctx: RunRouteContext): Promise<Response> {
       resolve(resp);
     };
 
-    const settleWithResult = (e: Extract<AgentEvent, { kind: "result" }>) => {
+    const settleWithResult = async (e: Extract<AgentEvent, { kind: "result" }>) => {
+      // 结果契约以库为准(worker 先落库再发 result 事件,这里读到的必是终态);
+      // 读不到时退回用事件拼,不让一次已经结束的运行因为读库失败而报错
+      const record = await results.getResult(runId).catch(() => null);
       settle(
-        Response.json(assembleBlockingResponse(runId, events), {
+        Response.json(assembleBlockingResponse(runId, events, record), {
           status:
             e.status === "success"
               ? 200
@@ -181,7 +175,7 @@ function handleBlocking(req: Request, ctx: RunRouteContext): Promise<Response> {
       topicOf(id, runId),
       (e: AgentEvent) => {
         events.push(e);
-        if (e.kind === "result") settleWithResult(e);
+        if (e.kind === "result") void settleWithResult(e);
       },
       { afterId: "0-0" },
     );
@@ -203,16 +197,21 @@ function handleBlocking(req: Request, ctx: RunRouteContext): Promise<Response> {
         // 总线上的 result 丢了也不能让请求永远挂着:库里有终态就用库里的收尾
         stopWatch = watchTerminal(results, runId, (e) => {
           events.push(e);
-          settleWithResult(e);
+          void settleWithResult(e);
         });
       } catch (err) {
         settle(
           Response.json(
             {
               runId,
+              taskId: runId,
               status: "failed",
-              error: err instanceof Error ? err.message : String(err),
-              text: "",
+              done: true,
+              error: {
+                kind: "enqueue_failed",
+                message: err instanceof Error ? err.message : String(err),
+              },
+              text: null,
               toolCalls: [],
               usage: { input: 0, output: 0 },
             },
@@ -224,18 +223,19 @@ function handleBlocking(req: Request, ctx: RunRouteContext): Promise<Response> {
   });
 }
 
-/** 把收集到的事件流组装成一个 BlockingResponse。 */
-function assembleBlockingResponse(runId: string, events: AgentEvent[]): BlockingResponse {
+/** 结果契约取自库里的记录(record),过程信息取自事件流;记录缺失时用事件兜底。 */
+function assembleBlockingResponse(
+  runId: string,
+  events: AgentEvent[],
+  record: RunRecord | null,
+): BlockingResponse {
   const textParts: string[] = [];
   const thinkingParts: string[] = [];
   const toolCalls: BlockingResponse["toolCalls"] = [];
   const toolMap = new Map<string, (typeof toolCalls)[number]>();
-  let structured: unknown;
-  let status = "unknown";
-  let error: string | undefined;
-  let summary: string | undefined;
   let inputTokens = 0;
   let outputTokens = 0;
+  let last: Extract<AgentEvent, { kind: "result" }> | undefined;
 
   for (const e of events) {
     switch (e.kind) {
@@ -246,11 +246,7 @@ function assembleBlockingResponse(runId: string, events: AgentEvent[]): Blocking
         thinkingParts.push(e.text);
         break;
       case "tool_use": {
-        const call = {
-          tool: e.tool,
-          input: e.input,
-          toolUseId: e.toolUseId,
-        };
+        const call = { tool: e.tool, input: e.input, toolUseId: e.toolUseId };
         if (e.toolUseId) toolMap.set(e.toolUseId, call);
         toolCalls.push(call);
         break;
@@ -268,24 +264,39 @@ function assembleBlockingResponse(runId: string, events: AgentEvent[]): Blocking
         outputTokens += e.output;
         break;
       case "result":
-        status = e.status;
-        structured = e.structured;
-        summary = e.summary;
-        if (e.status !== "success" && e.summary) error = e.summary;
+        last = e;
         break;
     }
   }
 
+  const base: RunResult = record
+    ? toRunResult(record)
+    : {
+        // 读库失败时的兜底:只有事件里拿得到的字段
+        taskId: runId,
+        // 结局未知(unknown)对外就是"还没结束":done=false,调用方可再按 taskId 轮询
+        status: !last || last.status === "unknown" ? "running" : last.status,
+        done: !!last && last.status !== "unknown",
+        agentVersion: null,
+        structured: last?.structured ?? null,
+        salvaged: false,
+        text: textParts.join("") || null,
+        error:
+          last && last.status !== "success"
+            ? { kind: "unknown", message: last.summary ?? "运行未成功" }
+            : null,
+        cost: null,
+        startedAt: null,
+        endedAt: null,
+      };
   const resp: BlockingResponse = {
+    ...base,
     runId,
-    status,
-    // 过程事件丢失(事件通道故障、由数据库兜底收尾)时,至少给出库里的最终文本
-    text: textParts.join("") || (status === "success" ? (summary ?? "") : ""),
+    // 以库里的最终回答为准;库里没有时用过程文本拼出来
+    text: base.text ?? (textParts.join("") || null),
     toolCalls,
     usage: { input: inputTokens, output: outputTokens },
   };
   if (thinkingParts.length > 0) resp.thinking = thinkingParts.join("");
-  if (structured !== undefined && structured !== null) resp.structured = structured;
-  if (error) resp.error = error;
   return resp;
 }

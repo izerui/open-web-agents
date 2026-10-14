@@ -4,8 +4,13 @@
 // 绝不因为回调打不通而影响 run 的最终状态 —— 结果已经在库里,调用方随时能轮询兜底。
 
 import { signWebhook } from "@/lib/modules/integration/domain/webhook-policy";
+import { type RunRecord, toRunResult } from "@/lib/modules/run/domain/run-result";
 import { BrandedError } from "@/lib/shared";
 
+/**
+ * 回调载荷 = 投递元信息 + 对外运行结果契约(与 /result、阻塞模式同一份字段,
+ * 见 run/domain/run-result.ts)。
+ */
 export interface WebhookPayload {
   /** 投递标识(= taskId)。重发时不变,接收方据此去重。 */
   deliveryId?: string;
@@ -13,13 +18,36 @@ export interface WebhookPayload {
   taskId: string;
   sessionId?: string;
   agentId?: string;
-  /** 执行的智能体版本;缺省 = 草稿 */
-  agentVersion?: number;
   status: string;
+  done?: boolean;
+  /** 执行的智能体版本;null = 草稿 */
+  agentVersion?: number | null;
   structured?: unknown;
-  summary?: string;
+  /** structured 是从最终文本里提取的(非原生结构化输出) */
+  salvaged?: boolean;
+  text?: string | null;
+  /** 已废弃:同 text,保留给老的接收方 */
+  summary?: string | null;
   error?: unknown;
   cost?: unknown;
+  startedAt?: string | null;
+  endedAt?: string | null;
+}
+
+/** 运行结束的回调载荷:投递元信息 + 对外运行结果契约(与 /result、阻塞模式同一个函数组装)。 */
+export function runFinishedPayload(
+  record: RunRecord,
+  meta: { sessionId: string; agentId?: string },
+): WebhookPayload {
+  const result = toRunResult(record);
+  return {
+    deliveryId: record.id,
+    event: "run.finished",
+    sessionId: meta.sessionId,
+    agentId: meta.agentId,
+    ...result,
+    summary: result.text,
+  };
 }
 
 export interface WebhookResult {
