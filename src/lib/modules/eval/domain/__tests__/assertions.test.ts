@@ -1,4 +1,11 @@
-import { gradeRun, parsePath, validateAssertions } from "@/lib/modules/eval/domain/assertions";
+import {
+  OUTPUT_STRUCTURED_MAX,
+  OUTPUT_TEXT_MAX,
+  gradeRun,
+  parsePath,
+  snapshotOutput,
+  validateAssertions,
+} from "@/lib/modules/eval/domain/assertions";
 import { describe, expect, it } from "vitest";
 
 const ok = {
@@ -102,5 +109,48 @@ describe("validateAssertions / parsePath", () => {
     expect(parsePath("items[1][2]")).toEqual(["items", 1, 2]);
     expect(parsePath("a b")).toBeNull();
     expect(parsePath("")).toBeNull();
+  });
+});
+
+describe("snapshotOutput(判分时看到的输出)", () => {
+  it("原样保存状态、正文、结构化结果与错误", () => {
+    expect(
+      snapshotOutput({
+        status: "failed",
+        text: "回复",
+        structured: { verdict: "pass" },
+        error: { message: "上游 503" },
+      }),
+    ).toEqual({
+      status: "failed",
+      text: "回复",
+      structured: { verdict: "pass" },
+      error: "上游 503",
+    });
+    expect(
+      snapshotOutput({ status: "success", text: null, structured: null, error: null }),
+    ).toEqual({
+      status: "success",
+    });
+  });
+
+  it("正文超长按字符截断并标明;不把表情(代理对)切成半个", () => {
+    const text = `${"字".repeat(OUTPUT_TEXT_MAX - 1)}😀尾巴`;
+    const s = snapshotOutput({ status: "success", text, structured: null, error: null });
+    expect(s.textTruncated).toBe(true);
+    expect(Array.from(s.text ?? "")).toHaveLength(OUTPUT_TEXT_MAX);
+    expect(s.text?.endsWith("😀")).toBe(true);
+    expect(
+      snapshotOutput({ status: "success", text: "短", structured: null, error: null })
+        .textTruncated,
+    ).toBeUndefined();
+  });
+
+  it("结构化结果过大:不存原对象,只存序列化后的开头", () => {
+    const big = { items: Array.from({ length: 2_000 }, (_, i) => `item-${i}`) };
+    const s = snapshotOutput({ status: "success", text: null, structured: big, error: null });
+    expect(s.structured).toBeUndefined();
+    expect(s.structuredPreview).toHaveLength(OUTPUT_STRUCTURED_MAX);
+    expect(JSON.stringify(big).startsWith(s.structuredPreview ?? "x")).toBe(true);
   });
 });

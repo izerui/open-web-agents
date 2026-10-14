@@ -109,14 +109,25 @@ if (!TEST_DB_URL) {
         total: 2,
       });
 
+      const output = {
+        status: "success",
+        text: "回复正文",
+        textTruncated: true,
+        structured: { verdict: "pass", score: 0.9, issues: [{ level: "high" }] },
+      };
       await repo.gradeResult(runId, "c1", {
         status: "passed",
         failures: [],
+        output,
         costMicroUsd: 12_345,
         durationMs: 900,
       });
       // 已有结论的不会被再次判分改掉
-      await repo.gradeResult(runId, "c1", { status: "failed", failures: ["x"] });
+      await repo.gradeResult(runId, "c1", {
+        status: "failed",
+        failures: ["x"],
+        output: { status: "failed", text: "后来的" },
+      });
       await repo.gradeResult(runId, "c2", { status: "passed", failures: [] });
       const res = await repo.results(runId);
       expect(res.find((r) => r.caseId === "c1")).toMatchObject({
@@ -124,6 +135,10 @@ if (!TEST_DB_URL) {
         costMicroUsd: 12_345,
         durationMs: 900,
       });
+      // 快照原样往返;后来的重复判分不会改掉它
+      expect(res.find((r) => r.caseId === "c1")?.output).toEqual(output);
+      // 没能发起运行、建评测时就判了 error 的用例没有快照
+      expect(res.find((r) => r.caseId === "c2")?.output).toBeUndefined();
       expect(res.find((r) => r.caseId === "c2")).toMatchObject({
         status: "error",
         failures: ["入参不符"],

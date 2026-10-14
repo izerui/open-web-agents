@@ -39,11 +39,22 @@ interface EvalRun {
   createdAt: number;
 }
 
+/** 与服务端 EvalOutput 同形(见 eval/domain/assertions.ts) */
+interface EvalOutput {
+  status: string;
+  text?: string;
+  textTruncated?: boolean;
+  structured?: unknown;
+  structuredPreview?: string;
+  error?: string;
+}
+
 interface EvalResult {
   caseId: string;
   caseName: string;
   status: "pending" | "passed" | "failed" | "error";
   failures?: string[];
+  output?: EvalOutput;
   taskId?: string;
   costMicroUsd?: number;
   durationMs?: number;
@@ -389,11 +400,47 @@ export function EvalPanel({
                     · {x}
                   </p>
                 ))}
+                {r.output && <OutputSnapshot output={r.output} open={r.status !== "passed"} />}
               </div>
             ))}
           </div>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/** 判分时看到的输出:没通过的默认展开 —— 看清模型回了什么,才分得清是智能体的问题还是断言写错了 */
+function OutputSnapshot({ output, open }: { output: EvalOutput; open: boolean }) {
+  return (
+    <details open={open} className="pl-2">
+      <summary className="cursor-pointer text-muted-foreground select-none">
+        判分时的输出(运行状态 {output.status})
+      </summary>
+      <div className="mt-1 space-y-1">
+        {output.error && <p className="text-destructive">错误:{output.error}</p>}
+        {output.text && (
+          <pre className="max-h-48 overflow-auto rounded bg-background p-2 whitespace-pre-wrap break-words">
+            {output.text}
+            {output.textTruncated && <span className="text-muted-foreground">…(已截断)</span>}
+          </pre>
+        )}
+        {output.structured !== undefined && (
+          <pre className="max-h-48 overflow-auto rounded bg-background p-2 font-mono">
+            {JSON.stringify(output.structured, null, 2)}
+          </pre>
+        )}
+        {output.structuredPreview && (
+          <pre className="max-h-48 overflow-auto rounded bg-background p-2 font-mono break-all whitespace-pre-wrap">
+            {output.structuredPreview}
+            <span className="text-muted-foreground">…(结构化结果过大,已截断)</span>
+          </pre>
+        )}
+        {!output.error &&
+          !output.text &&
+          output.structured === undefined &&
+          !output.structuredPreview && <p className="text-muted-foreground">没有正文输出</p>}
+      </div>
+    </details>
   );
 }

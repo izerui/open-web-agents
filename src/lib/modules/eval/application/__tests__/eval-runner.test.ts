@@ -188,18 +188,25 @@ describe("readEvalRun", () => {
       status: "passed",
       costMicroUsd: 10_000,
       durationMs: 2_000,
+      output: { status: "success", text: "完成" },
     });
     expect(r?.run.status).toBe("running");
 
     t.finish(e2?.runId ?? "", { status: "failed", error: { kind: "x", message: "上游 503" } });
     r = await readEvalRun(t.deps, id);
     expect(r?.results.find((x) => x.caseId === "c2")?.failures?.[0]).toMatch(/上游 503/);
+    // 判分依据的输出一并保存:失败时能看到当时的状态与错误
+    expect(r?.results.find((x) => x.caseId === "c2")?.output).toMatchObject({
+      status: "failed",
+      error: "上游 503",
+    });
     expect(r?.run).toMatchObject({ status: "done", passed: 1, failed: 1 });
 
     // 判过的不再改:运行记录后来变了也一样
     t.finish(e2?.runId ?? "", { status: "success" });
     r = await readEvalRun(t.deps, id);
     expect(r?.results.find((x) => x.caseId === "c2")?.status).toBe("failed");
+    expect(r?.results.find((x) => x.caseId === "c2")?.output?.status).toBe("failed");
     expect(r?.run).toMatchObject({ passed: 1, failed: 1 });
   });
 });

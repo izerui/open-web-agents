@@ -517,6 +517,8 @@ export const evalResults = mysqlTable(
     /** pending / passed / failed / error */
     status: varchar("status", { length: 16 }).notNull(),
     failures: json("failures"),
+    /** 判分时看到的输出快照(状态、截断后的正文、结构化结果、错误) */
+    output: json("output"),
     /** 花费,微美元(金额一律整数) */
     costMicroUsd: bigint("cost_micro_usd", { mode: "number" }),
     durationMs: int("duration_ms"),

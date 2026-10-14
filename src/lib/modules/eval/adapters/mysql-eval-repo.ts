@@ -1,6 +1,6 @@
 import type { Db } from "@/lib/db/client";
 import { evalCases, evalResults, evalRuns } from "@/lib/db/schema";
-import type { EvalAssertions } from "@/lib/modules/eval/domain/assertions";
+import type { EvalAssertions, EvalOutput } from "@/lib/modules/eval/domain/assertions";
 import type { EvalCase, EvalRepo, EvalResult, EvalRun } from "@/lib/modules/eval/ports";
 import { and, asc, desc, eq } from "drizzle-orm";
 
@@ -43,6 +43,7 @@ const toResult = (r: ResultRow): EvalResult => ({
   sessionId: r.sessionId ?? undefined,
   status: r.status as EvalResult["status"],
   failures: (r.failures as string[] | null) ?? undefined,
+  output: (r.output as EvalOutput | null) ?? undefined,
   costMicroUsd: r.costMicroUsd ?? undefined,
   durationMs: r.durationMs ?? undefined,
   gradedAt: r.gradedAt?.getTime(),
@@ -124,6 +125,7 @@ export class MysqlEvalRepo implements EvalRepo {
             sessionId: r.sessionId ?? null,
             status: r.status,
             failures: r.failures ?? null,
+            output: r.output ?? null,
             gradedAt: r.gradedAt ? new Date(r.gradedAt) : null,
           })),
         );
@@ -161,6 +163,7 @@ export class MysqlEvalRepo implements EvalRepo {
     g: {
       status: "passed" | "failed" | "error";
       failures: string[];
+      output?: EvalOutput;
       costMicroUsd?: number;
       durationMs?: number;
     },
@@ -170,6 +173,7 @@ export class MysqlEvalRepo implements EvalRepo {
       .set({
         status: g.status,
         failures: g.failures,
+        output: g.output ?? null,
         costMicroUsd: g.costMicroUsd ?? null,
         durationMs: g.durationMs ?? null,
         gradedAt: new Date(),

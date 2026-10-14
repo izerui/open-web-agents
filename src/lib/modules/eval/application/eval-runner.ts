@@ -15,7 +15,7 @@ import type { EnqueueRequest } from "@/lib/modules/run/application/enqueue";
 import { checkPromptSize } from "@/lib/modules/run/domain/limits";
 import { type RunRecord, toRunResult } from "@/lib/modules/run/domain/run-result";
 import type { SessionRepo } from "@/lib/modules/session/ports";
-import { gradeRun } from "../domain/assertions";
+import { gradeRun, snapshotOutput } from "../domain/assertions";
 import type { EvalRepo, EvalResult, EvalRun } from "../ports";
 
 export const MAX_EVAL_CASES = 100;
@@ -156,17 +156,19 @@ export async function readEvalRun(
     const out = toRunResult(rec);
     const durationMs =
       rec.startedAt && rec.endedAt ? rec.endedAt.getTime() - rec.startedAt.getTime() : null;
-    const g = gradeRun(r.assertions, {
+    const seen = {
       status: out.status,
       structured: out.structured,
       text: out.text,
       error: out.error,
       cost: out.cost,
       durationMs,
-    });
+    };
+    const g = gradeRun(r.assertions, seen);
     await deps.evals.gradeResult(evalRunId, r.caseId, {
       status: g.passed ? "passed" : "failed",
       failures: g.failures,
+      output: snapshotOutput(seen),
       ...(out.cost?.usd !== undefined ? { costMicroUsd: Math.round(out.cost.usd * 1e6) } : {}),
       ...(durationMs !== null ? { durationMs } : {}),
     });

@@ -1,4 +1,4 @@
-import type { EvalAssertions } from "./domain/assertions";
+import type { EvalAssertions, EvalOutput } from "./domain/assertions";
 
 export interface EvalCase {
   id: string;
@@ -24,6 +24,8 @@ export interface EvalResult {
   sessionId?: string;
   status: EvalResultStatus;
   failures?: string[];
+  /** 判分时看到的输出(旧记录没有) */
+  output?: EvalOutput;
   costMicroUsd?: number;
   durationMs?: number;
   gradedAt?: number;
@@ -67,6 +69,7 @@ export interface EvalRepo {
     g: {
       status: "passed" | "failed" | "error";
       failures: string[];
+      output?: EvalOutput;
       costMicroUsd?: number;
       durationMs?: number;
     },

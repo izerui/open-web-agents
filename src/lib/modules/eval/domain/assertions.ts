@@ -136,6 +136,50 @@ const show = (v: unknown) => {
   return s.length > 120 ? `${s.slice(0, 120)}…` : s;
 };
 
+/**
+ * 判分时看到的输出 —— 与结论一起保存,失败时能看到模型到底回了什么,
+ * 而不必去翻那次运行(运行记录可能已被清理,且这里展示的必须正是判分依据的那一份)。
+ * 正文与结构化结果都有长度上限,超出截断并标明。
+ */
+export interface EvalOutput {
+  status: string;
+  text?: string;
+  textTruncated?: boolean;
+  structured?: unknown;
+  /** 结构化结果过大时只留序列化后的开头 */
+  structuredPreview?: string;
+  error?: string;
+}
+
+export const OUTPUT_TEXT_MAX = 4_000;
+export const OUTPUT_STRUCTURED_MAX = 8_000;
+
+/** 按字符(而非 UTF-16 码元)截断,不把代理对切成半个 */
+const headChars = (s: string, n: number) => {
+  const chars = Array.from(s);
+  return chars.length > n
+    ? { head: chars.slice(0, n).join(""), cut: true }
+    : { head: s, cut: false };
+};
+
+export function snapshotOutput(
+  r: Pick<GradedRun, "status" | "text" | "structured" | "error">,
+): EvalOutput {
+  const out: EvalOutput = { status: r.status };
+  if (r.text) {
+    const { head, cut } = headChars(r.text, OUTPUT_TEXT_MAX);
+    out.text = head;
+    if (cut) out.textTruncated = true;
+  }
+  if (r.structured !== undefined && r.structured !== null) {
+    const json = JSON.stringify(r.structured);
+    if (json.length <= OUTPUT_STRUCTURED_MAX) out.structured = r.structured;
+    else out.structuredPreview = headChars(json, OUTPUT_STRUCTURED_MAX).head;
+  }
+  if (r.error?.message) out.error = headChars(r.error.message, OUTPUT_TEXT_MAX).head;
+  return out;
+}
+
 export function gradeRun(a: EvalAssertions, r: GradedRun): Grade {
   const failures: string[] = [];
   const expectSuccess = a.expectSuccess ?? true;

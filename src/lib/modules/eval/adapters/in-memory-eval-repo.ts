@@ -1,6 +1,6 @@
 // EvalRepo 的内存实现:单测用,语义与 MySQL 实现一致。
 
-import type { EvalAssertions } from "@/lib/modules/eval/domain/assertions";
+import type { EvalAssertions, EvalOutput } from "@/lib/modules/eval/domain/assertions";
 import type { EvalCase, EvalRepo, EvalResult, EvalRun } from "@/lib/modules/eval/ports";
 
 export class InMemoryEvalRepo implements EvalRepo {
@@ -58,6 +58,7 @@ export class InMemoryEvalRepo implements EvalRepo {
     g: {
       status: "passed" | "failed" | "error";
       failures: string[];
+      output?: EvalOutput;
       costMicroUsd?: number;
       durationMs?: number;
     },
