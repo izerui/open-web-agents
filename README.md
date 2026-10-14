@@ -295,6 +295,7 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 | POST            | `/api/embed/cancel`                        | **embed token**        | 停止嵌入会话里的运行         |
 | POST/PATCH      | `/api/admin/accounts`                      | cookie(admin)          | 建号、改角色/停用/额度、重置密码 |
 | GET/POST        | `/api/agents`                              | cookie                 | 列出可见智能体 / 创建更新       |
+| DELETE          | `/api/agents/{id}`                         | cookie(所有者 / 管理员) | 软删除:调用、嵌入、分享、绑定的 Key 随之失效;历史会话与运行记录保留,id 不可复用;内置智能体不可删 |
 | GET/POST/DELETE | `/api/agents/{id}/share`                   | cookie(write)          | 分享给用户 / 组 / 公开      |
 | GET/POST/DELETE | `/api/agents/{id}/knowledge`               | cookie(读 read、写 write) | 知识文档                |
 | GET/POST        | `/api/groups` · `/api/groups/{id}/members` | cookie                 | 用户组与成员              |

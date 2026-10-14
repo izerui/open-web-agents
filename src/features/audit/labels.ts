@@ -6,6 +6,7 @@ import type { AuditAction } from "@/lib/modules/audit/domain/events";
 export const ACTION_LABEL: Record<AuditAction, string> = {
   "agent.create": "创建智能体",
   "agent.update": "修改智能体",
+  "agent.delete": "删除智能体",
   "agent.publish": "发布版本",
   "agent.activate_version": "切换发布版本",
   "agent.restore_version": "载入版本到草稿",
@@ -76,6 +77,8 @@ export function describeAudit(e: AuditItem): string {
       const via = d.via === "designer" ? "(通过 AI 设计师)" : "";
       return `「${s(d.name)}」${via}${changed.length ? `:改动 ${changed.join("、")}` : ""}`;
     }
+    case "agent.delete":
+      return `「${s(d.name)}」`;
     case "agent.publish":
       return `发布 v${s(d.version)}${d.note ? `:${s(d.note)}` : ""}`;
     case "agent.activate_version":

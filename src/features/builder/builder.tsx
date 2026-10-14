@@ -209,6 +209,13 @@ function parseSkills(text: string): string[] {
   ];
 }
 
+/**
+ * 平台内置、不能删除的智能体(与 DELETE /api/agents/{id} 的判定一致)。
+ * 本地写常量而不是引 agent/domain/architect:那里带着整段设计师提示词与包解析逻辑,
+ * 不该进前端包(工作台同样如此)。
+ */
+const BUILT_IN_AGENT_IDS = ["default", "agent-architect"];
+
 export function Builder() {
   const [list, setList] = useState<AgentSummary[]>([]);
   const [allowStdioMcp, setAllowStdioMcp] = useState(false);
@@ -467,6 +474,27 @@ export function Builder() {
     }
   }
 
+  /** 软删除:接口调用、嵌入、分享随之失效;历史会话与运行记录保留。 */
+  async function removeAgent(id: string, name: string) {
+    if (
+      !window.confirm(
+        `删除「${name}」?\n\n删除后:接口调用、嵌入组件、分享立即失效,绑定它的 API Key 也调不通了;历史会话与运行记录保留。此操作不能在界面上撤销。`,
+      )
+    )
+      return;
+    try {
+      await fetchJson(`/api/agents/${encodeURIComponent(id)}`, { method: "DELETE" });
+      toast.success(`已删除「${name}」`);
+      editSeqRef.current += 1;
+      setCleanDraft(EMPTY);
+      setOpenedId(null);
+      loadedConfigRef.current = {};
+      await reload();
+    } catch (e) {
+      toast.error(`删除失败:${errorText(e)}`);
+    }
+  }
+
   function edit(a: AgentSummary) {
     if (a.id !== openedId && !confirmDiscard()) return;
     const seq = ++editSeqRef.current;
@@ -709,6 +737,17 @@ export function Builder() {
             <Sparkles className="size-3.5" />
             {designing ? "准备中…" : openedId ? "用 AI 修改" : "用 AI 设计"}
           </Button>
+          {selectedAgent?.canManageWebhook && !BUILT_IN_AGENT_IDS.includes(selectedAgent.id) && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-destructive"
+              onClick={() => void removeAgent(selectedAgent.id, selectedAgent.name)}
+            >
+              <Trash2 className="size-3.5" />
+              删除
+            </Button>
+          )}
           {selectedAgent && canWrite && (
             <Badge
               variant={selectedAgent.hasUnpublishedChanges ? "warning" : "secondary"}

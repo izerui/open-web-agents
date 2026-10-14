@@ -65,6 +65,12 @@ export const agents = mysqlTable(
     publishedVersion: int("published_version"),
     /** 已发布版本的内容摘要,用来判断"草稿有没有未发布的修改",免得每次都去读快照 */
     publishedHash: varchar("published_hash", { length: 64 }),
+    /**
+     * 软删除时刻(ms);非空即"已删除":列表、调用、嵌入、分享、继续对话都当它不存在。
+     * 行保留 —— 历史会话、运行记录(按 JOIN 显示名称)、审计、版本都还要引用它。
+     * id 也因此不能被新智能体复用。
+     */
+    deletedAt: bigint("deleted_at", { mode: "number" }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
   },

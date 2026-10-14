@@ -4,7 +4,7 @@ import type { AgentConfig } from "@/lib/modules/agent/domain/config";
 import type { Agent, AgentRepo } from "@/lib/modules/agent/ports";
 import type { AgentListFilter } from "@/lib/modules/agent/ports";
 import type { JsonSchema } from "@/lib/shared";
-import { type SQL, count, desc, eq, inArray, or } from "drizzle-orm";
+import { type SQL, and, count, desc, eq, inArray, isNull, or } from "drizzle-orm";
 
 interface Row {
   id: string;
@@ -63,7 +63,11 @@ export class MysqlAgentRepo implements AgentRepo {
   ) {}
 
   async get(id: string): Promise<Agent | null> {
-    const rows = await this.db.select(COLUMNS).from(agents).where(eq(agents.id, id)).limit(1);
+    const rows = await this.db
+      .select(COLUMNS)
+      .from(agents)
+      .where(and(eq(agents.id, id), isNull(agents.deletedAt)))
+      .limit(1);
     const row = rows[0];
     return row ? toAgent(row) : null;
   }
@@ -73,6 +77,7 @@ export class MysqlAgentRepo implements AgentRepo {
       const rows = await this.db
         .select(COLUMNS)
         .from(agents)
+        .where(isNull(agents.deletedAt))
         .orderBy(desc(agents.updatedAt))
         .limit(200);
       return rows.map(toAgent);
@@ -84,7 +89,7 @@ export class MysqlAgentRepo implements AgentRepo {
     const rows = await this.db
       .select(COLUMNS)
       .from(agents)
-      .where(or(...conds))
+      .where(and(or(...conds), isNull(agents.deletedAt)))
       .orderBy(desc(agents.updatedAt))
       // 已按可见范围过滤,这里的上限只是防呆,不再会把别人的智能体挤出去
       .limit(1000);
@@ -95,6 +100,7 @@ export class MysqlAgentRepo implements AgentRepo {
     const rows = await this.db
       .select({ ownerId: agents.ownerId, n: count() })
       .from(agents)
+      .where(isNull(agents.deletedAt))
       .groupBy(agents.ownerId);
     return new Map(rows.map((r) => [r.ownerId, Number(r.n)]));
   }
@@ -131,7 +137,20 @@ export class MysqlAgentRepo implements AgentRepo {
     return saved;
   }
 
-  async delete(id: string): Promise<void> {
-    await this.db.delete(agents).where(eq(agents.id, id));
+  async softDelete(id: string, at: number): Promise<boolean> {
+    const res = await this.db
+      .update(agents)
+      .set({ deletedAt: at })
+      .where(and(eq(agents.id, id), isNull(agents.deletedAt)));
+    return ((res as unknown as [{ affectedRows: number }])[0]?.affectedRows ?? 0) > 0;
+  }
+
+  async idTaken(id: string): Promise<boolean> {
+    const rows = await this.db
+      .select({ id: agents.id })
+      .from(agents)
+      .where(eq(agents.id, id))
+      .limit(1);
+    return rows.length > 0;
   }
 }

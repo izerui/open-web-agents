@@ -6,6 +6,7 @@
 export const AUDIT_ACTIONS = [
   "agent.create",
   "agent.update",
+  "agent.delete",
   "agent.publish",
   "agent.activate_version",
   "agent.restore_version",

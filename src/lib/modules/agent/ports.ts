@@ -76,5 +76,11 @@ export interface AgentRepo {
   /** 每个所有者名下的智能体数量(管理页统计用,不受列表条数上限影响)。 */
   countByOwner(): Promise<Map<string, number>>;
   upsert(a: Agent): Promise<Agent>;
-  delete?(id: string): Promise<void>;
+  /**
+   * 软删除:之后 get / list / countByOwner 都当它不存在。返回是否删除了(已删除或不存在为 false)。
+   * 行保留,历史会话与运行记录照常显示名称;id 不能被复用(见 idTaken)。
+   */
+  softDelete(id: string, at: number): Promise<boolean>;
+  /** 这个 id 是否已被占用(含已删除的)—— 新建时用,防止撞上已删除的智能体。 */
+  idTaken(id: string): Promise<boolean>;
 }

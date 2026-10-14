@@ -169,6 +169,16 @@ export async function POST(req: Request) {
   if (targetId) {
     const existing = await agents.get(targetId);
     before = existing;
+    // 已删除的智能体对 get 不可见,但行还在:不拦的话会落进"更新已有行"再读不回来,变成 500
+    if (!existing && (await agents.idTaken(targetId))) {
+      return Response.json(
+        {
+          error: `ID「${targetId}」已被使用(可能属于已删除的智能体),请换一个`,
+          code: "invalid_request",
+        },
+        { status: 409 },
+      );
+    }
     if (existing) {
       const list = await grants.listForResource("agent", targetId);
       // 连读都无权时返回 404 —— 用 403 会向调用方确认"这个 id 确实存在",是信息泄露

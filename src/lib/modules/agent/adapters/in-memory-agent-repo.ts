@@ -10,12 +10,13 @@ export class InMemoryAgentRepo implements AgentRepo {
   }
 
   async get(id: string): Promise<Agent | null> {
+    if (this.deleted.has(id)) return null;
     const a = this.items.get(id);
     return a ? structuredClone(a) : null;
   }
 
   async list(filter?: AgentListFilter): Promise<Agent[]> {
-    const all = [...this.items.values()];
+    const all = [...this.items.values()].filter((a) => !this.deleted.has(a.id));
     const picked = filter
       ? all.filter(
           (a) =>
@@ -28,7 +29,9 @@ export class InMemoryAgentRepo implements AgentRepo {
 
   async countByOwner(): Promise<Map<string, number>> {
     const m = new Map<string, number>();
-    for (const a of this.items.values()) m.set(a.ownerId, (m.get(a.ownerId) ?? 0) + 1);
+    for (const a of this.items.values()) {
+      if (!this.deleted.has(a.id)) m.set(a.ownerId, (m.get(a.ownerId) ?? 0) + 1);
+    }
     return m;
   }
 
@@ -52,7 +55,15 @@ export class InMemoryAgentRepo implements AgentRepo {
     a.publishedHash = hash;
   }
 
-  async delete(id: string): Promise<void> {
-    this.items.delete(id);
+  private deleted = new Set<string>();
+
+  async softDelete(id: string, _at: number): Promise<boolean> {
+    if (!this.items.has(id) || this.deleted.has(id)) return false;
+    this.deleted.add(id);
+    return true;
+  }
+
+  async idTaken(id: string): Promise<boolean> {
+    return this.items.has(id);
   }
 }

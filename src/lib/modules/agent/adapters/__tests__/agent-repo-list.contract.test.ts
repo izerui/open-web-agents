@@ -39,6 +39,32 @@ function contract(name: string, make: () => AgentRepo) {
         expect(await repo.list({})).toEqual([]);
       },
     );
+
+    it("软删除:get / list / 计数都当它不存在;id 仍被占用;重复删除返回 false", async () => {
+      const repo = make();
+      const tag = randomUUID().replace(/-/g, "").slice(0, 10);
+      const owner = `o-${tag}`;
+      const mk = (id: string) =>
+        repo.upsert({
+          id,
+          ownerId: owner,
+          name: id,
+          config: { systemPrompt: "p", model: "sonnet" },
+        });
+      await mk(`keep-${tag}`);
+      await mk(`gone-${tag}`);
+
+      expect(await repo.softDelete(`gone-${tag}`, 1000)).toBe(true);
+      expect(await repo.softDelete(`gone-${tag}`, 2000)).toBe(false);
+      expect(await repo.softDelete(`nope-${tag}`, 1000)).toBe(false);
+
+      expect(await repo.get(`gone-${tag}`)).toBeNull();
+      expect((await repo.list({ ownerId: owner })).map((a) => a.id)).toEqual([`keep-${tag}`]);
+      expect((await repo.list({ ids: [`gone-${tag}`] })).length).toBe(0);
+      expect((await repo.countByOwner()).get(owner)).toBe(1);
+      expect(await repo.idTaken(`gone-${tag}`)).toBe(true);
+      expect(await repo.idTaken(`never-${tag}`)).toBe(false);
+    });
   });
 }
 
