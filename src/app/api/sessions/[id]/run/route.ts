@@ -4,6 +4,7 @@ import { apiError } from "@/lib/api-error";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import type { Principal } from "@/lib/modules/access/domain/principal";
+import { type TaskFile, taskFilesForResult } from "@/lib/modules/artifacts/application/task-files";
 import type { BusPort } from "@/lib/modules/events/ports";
 import type { EnqueueRequest } from "@/lib/modules/run/application/enqueue";
 import { topicOf } from "@/lib/modules/run/application/orchestrator";
@@ -31,7 +32,7 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { runs, bus, sessions, auth, enqueuer, admission } = getContainer();
+  const { runs, bus, sessions, auth, enqueuer, admission, storage } = getContainer();
 
   let principal: Principal;
   try {
@@ -84,6 +85,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     enqueue: (r) => enqueuer.enqueue(r),
     results: runs,
     bus,
+    // 查会话也在清单的等待上限之内:数据库不返回时阻塞响应不能被它挂住
+    files: () =>
+      taskFilesForResult(storage, () =>
+        sessions.get(id).then((s) => (s ? { sessionId: id, workspaceDir: s.workspaceDir } : null)),
+      ),
   };
   return streaming ? handleStreaming(req, ctx) : handleBlocking(req, ctx);
 }
@@ -95,6 +101,8 @@ interface RunRouteContext {
   enqueue(r: EnqueueRequest): Promise<unknown>;
   /** 终态兜底与结果契约的数据源:事件总线上的 result 丢了也能从库里收尾。 */
   results: { getResult(id: string): Promise<RunRecord | null> };
+  /** 工作目录的文件清单(阻塞响应附带;有等待上限,失败为 null) */
+  files(): Promise<{ files: TaskFile[] | null; filesTruncated: boolean }>;
   bus: BusPort;
 }
 
@@ -156,18 +164,22 @@ function handleBlocking(req: Request, ctx: RunRouteContext): Promise<Response> {
       // 结果契约以库为准(worker 先落库再发 result 事件,这里读到的必是终态);
       // 读失败或超过等待上限都退回用事件拼 —— 运行已经结束,不能因为读库慢就让请求挂着
       const record = await readRecordBounded(results, runId);
+      const files = await ctx.files();
       settle(
-        Response.json(assembleBlockingResponse(runId, events, record), {
-          status:
-            e.status === "success"
-              ? 200
-              : e.status === "unknown"
-                ? 202
-                : e.status === "cancelled"
-                  ? 409
-                  : 500,
-          headers: { "X-Run-Id": runId },
-        }),
+        Response.json(
+          { ...assembleBlockingResponse(runId, events, record), ...files },
+          {
+            status:
+              e.status === "success"
+                ? 200
+                : e.status === "unknown"
+                  ? 202
+                  : e.status === "cancelled"
+                    ? 409
+                    : 500,
+            headers: { "X-Run-Id": runId },
+          },
+        ),
       );
     };
 

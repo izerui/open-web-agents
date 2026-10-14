@@ -22,11 +22,17 @@ const RECORD = {
 const state: {
   getResult: (id: string) => Promise<unknown>;
   reads: number;
+  sessionGet: (id: string) => Promise<unknown>;
   /** worker 发到总线上的事件(runId 由测试替换) */
   events: (runId: string) => AgentEvent[];
 } = {
   getResult: async () => null,
   reads: 0,
+  sessionGet: async (_id: string): Promise<unknown> => ({
+    id: "s1",
+    agentId: "a1",
+    workspaceDir: "/ws",
+  }),
   events: (runId) => [
     { kind: "text", text: "事件里的正文" } as AgentEvent,
     { kind: "result", status: "success", runId } as AgentEvent,
@@ -42,7 +48,8 @@ vi.mock("@/lib/container", () => {
         assertSessionAccess: async () => {},
         assertCanInvoke: async () => {},
       },
-      sessions: { get: async () => ({ id: "s1", agentId: "a1" }) },
+      sessions: { get: (id: string) => state.sessionGet(id) },
+      storage: { tree: async () => [] },
       admission: { admit: async () => ({ prompt: "hi" }) },
       runs: {
         getResult: (id: string) => {
@@ -86,10 +93,30 @@ async function runBlocking() {
 
 describe("阻塞模式:终态之后补读结果记录", () => {
   const defaultEvents = state.events;
+  const defaultSessionGet = state.sessionGet;
   beforeEach(() => {
     state.reads = 0;
     state.events = defaultEvents;
+    state.sessionGet = defaultSessionGet;
   });
+
+  it(
+    "附上工作目录的文件清单;查会话永不返回时清单为 null,响应仍在上限内结束",
+    { timeout: 10_000 },
+    async () => {
+      state.getResult = async () => RECORD;
+      const ok = await (await runBlocking()).json();
+      expect(ok).toMatchObject({ files: [], filesTruncated: false });
+
+      // 鉴权时查会话照常返回;之后为文件清单查会话时数据库不返回
+      let calls = 0;
+      state.sessionGet = (id) => (calls++ === 0 ? defaultSessionGet(id) : new Promise(() => {}));
+      const t0 = Date.now();
+      const res = await runBlocking();
+      expect(Date.now() - t0).toBeLessThan(3_500);
+      expect(await res.json()).toMatchObject({ status: "success", files: null });
+    },
+  );
 
   it("补读永不兑现:仍在等待上限内结束,用事件兜底收尾", { timeout: 10_000 }, async () => {
     state.getResult = () => new Promise(() => {}); // 数据库不返回

@@ -6,6 +6,7 @@ import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { VersionNotFound } from "@/lib/modules/agent/application/releases";
 import { parseVersion } from "@/lib/modules/agent/domain/release";
 import { validateInput } from "@/lib/modules/agent/domain/validate-output";
+import { resolveInWorkspace } from "@/lib/modules/artifacts/domain/safe-path";
 import {
   checkInvokeRate,
   rateLimitHeaders,
@@ -30,7 +31,13 @@ interface InvokeBody {
   version?: number;
   /** 本次结果回调到这个地址(代替智能体配置的地址),用调用方自己的签名密钥签名。 */
   callbackUrl?: string;
+  /** 随这次调用交给智能体的文件:写进这次任务的工作目录,并在提示词里列出 */
+  files?: { name?: unknown; content?: unknown }[];
 }
+
+/** 一次调用最多带的文件数与总大小(解码后) */
+const MAX_INPUT_FILES = 20;
+const MAX_INPUT_BYTES = 10 * 1024 * 1024;
 
 /**
  * 对外触发接口:第三方系统(Java/Go/Python/C)调这里跑一次智能体。
@@ -45,8 +52,19 @@ interface InvokeBody {
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id: agentId } = await params;
-  const { agents, sessions, runs, env, auth, users, usage, enqueuer, releases, rateLimiter } =
-    getContainer();
+  const {
+    agents,
+    sessions,
+    runs,
+    env,
+    auth,
+    users,
+    usage,
+    enqueuer,
+    releases,
+    rateLimiter,
+    storage,
+  } = getContainer();
 
   /*
    * 关卡顺序:
@@ -97,14 +115,20 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const callback = parseCallbackUrl(body.callbackUrl, env.webhookAllowPrivate);
   if (!callback.ok) return apiError(400, "invalid_request", callback.reason);
 
-  // 同键重放时用来判断"是不是同一个请求";请求体里的 version、callbackUrl 也算请求内容。
-  // callbackUrl 只在给了时才放进去:不带它的请求摘要与引入它之前完全一致
+  const inputFiles = parseInputFiles(body.files);
+  if (!inputFiles.ok) return apiError(inputFiles.status, "invalid_request", inputFiles.reason);
+
+  // 同键重放时用来判断"是不是同一个请求";请求体里的 version、callbackUrl、文件内容也算请求内容。
+  // 后两者只在给了时才放进去:不带它们的请求摘要与引入它们之前完全一致
   const requestHash = sha256(
     JSON.stringify({
       prompt,
       override: override.value ?? null,
       version: requested.value ?? null,
       ...(callback.value ? { callbackUrl: callback.value } : {}),
+      ...(inputFiles.value.length
+        ? { files: inputFiles.value.map((f) => [f.name, sha256Bytes(f.bytes)]) }
+        : {}),
     }),
   );
 
@@ -217,8 +241,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     }
   }
 
+  // 带了文件:与工作台的附件同一个约定 —— 在提示词末尾列出放在工作区里的文件名
+  const runPrompt = inputFiles.value.length
+    ? `${prompt}\n\n已上传到当前工作区的附件:\n${inputFiles.value.map((f) => `- ${f.name}`).join("\n")}`
+    : prompt;
+
   try {
-    assertPromptSize(prompt);
+    assertPromptSize(runPrompt);
   } catch (err) {
     if (err instanceof PromptTooLarge) {
       return apiError(413, "prompt_too_large", err.message);
@@ -246,10 +275,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   const taskId = randomUUID().replace(/-/g, "").slice(0, 24);
   try {
+    for (const f of inputFiles.value) await storage.write(workspaceDir, f.name, f.bytes);
     await enqueuer.enqueue({
       runId: taskId,
       sessionId,
-      prompt,
+      prompt: runPrompt,
       override: override.value,
       callbackUrl: callback.value,
       idempotencyKey,
@@ -369,6 +399,60 @@ function parseCallbackUrl(
   const v = validateWebhookUrl(raw, { allowPrivate });
   if (!v.ok) return { ok: false, reason: v.reason.replace(/^webhookUrl/, "callbackUrl") };
   return { ok: true, value: raw };
+}
+
+type InputFile = { name: string; bytes: Buffer };
+
+function parseInputFiles(
+  raw: unknown,
+): { ok: true; value: InputFile[] } | { ok: false; status: 400 | 413; reason: string } {
+  if (raw === undefined || raw === null) return { ok: true, value: [] };
+  if (!Array.isArray(raw)) return { ok: false, status: 400, reason: "files 必须是数组" };
+  if (raw.length > MAX_INPUT_FILES) {
+    return { ok: false, status: 413, reason: `一次最多带 ${MAX_INPUT_FILES} 个文件` };
+  }
+  const out: InputFile[] = [];
+  const names = new Set<string>();
+  let total = 0;
+  for (const [i, f] of raw.entries()) {
+    const name: string = typeof f?.name === "string" ? f.name.trim() : "";
+    if (!name || name.length > 255) {
+      return { ok: false, status: 400, reason: `files[${i}].name 须为 1~255 字符` };
+    }
+    // 与工作区上传同一道路径守卫:不能越出工作目录,也不能写进隐藏目录(SDK 的状态在那里)
+    if (
+      name
+        .split("/")
+        .some((seg) => seg === "" || seg === "." || seg === ".." || seg.startsWith("."))
+    ) {
+      return { ok: false, status: 400, reason: `files[${i}].name 不是合法的相对路径:${name}` };
+    }
+    try {
+      resolveInWorkspace("/workspace", name);
+    } catch {
+      return { ok: false, status: 400, reason: `files[${i}].name 不是合法的相对路径:${name}` };
+    }
+    if (names.has(name)) return { ok: false, status: 400, reason: `文件重名:${name}` };
+    names.add(name);
+    if (typeof f?.content !== "string" || !/^[A-Za-z0-9+/]*={0,2}$/.test(f.content)) {
+      return { ok: false, status: 400, reason: `files[${i}].content 须为 base64 字符串` };
+    }
+    const bytes = Buffer.from(f.content, "base64");
+    total += bytes.length;
+    if (total > MAX_INPUT_BYTES) {
+      return {
+        ok: false,
+        status: 413,
+        reason: `文件合计不能超过 ${MAX_INPUT_BYTES / 1024 / 1024}MB`,
+      };
+    }
+    out.push({ name, bytes });
+  }
+  return { ok: true, value: out };
+}
+
+function sha256Bytes(b: Buffer): string {
+  return createHash("sha256").update(b).digest("hex");
 }
 
 function sha256(text: string): string {

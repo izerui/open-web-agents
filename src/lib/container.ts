@@ -32,6 +32,7 @@ import { type ApprovalPort, ApprovalUnavailable } from "@/lib/modules/approval/p
 import { LocalFsStorage } from "@/lib/modules/artifacts/adapters/local-fs-storage";
 import { RedisGcLock } from "@/lib/modules/artifacts/adapters/redis-gc-lock";
 import { WorkspaceGc } from "@/lib/modules/artifacts/application/gc";
+import { taskFilesForResult } from "@/lib/modules/artifacts/application/task-files";
 import type { StoragePort } from "@/lib/modules/artifacts/ports";
 import { MysqlAuditRepo } from "@/lib/modules/audit/adapters/mysql-audit-repo";
 import { AuditLog } from "@/lib/modules/audit/application/audit-log";
@@ -410,8 +411,14 @@ function build(): Container {
       const r = await runs.getResult(runId);
       if (!r) return null;
       const session = await sessions.get(sessionId);
-      // 与 /result、阻塞模式同一份结果契约
-      return runFinishedPayload(r, { sessionId, agentId: session?.agentId });
+      // 与 /result、阻塞模式同一份结果契约,并附上工作目录的文件清单(产物)
+      return {
+        ...runFinishedPayload(r, { sessionId, agentId: session?.agentId }),
+        ...(await taskFilesForResult(
+          storage,
+          session ? { sessionId, workspaceDir: session.workspaceDir } : null,
+        )),
+      };
     },
     deliver: (url, payload, secret) =>
       deliverWebhook(url, payload, { secret, maxAttempts: 2, send: webhookSender }),

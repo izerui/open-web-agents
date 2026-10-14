@@ -97,6 +97,21 @@ export function buildAgentOpenApi(agent: OpenApiAgent, origin: string): Record<s
                         ? `锁定智能体版本;不传 = 当前发布的版本(本文档对应 v${agent.version})`
                         : "锁定智能体版本;该智能体尚未发布,不传则使用草稿",
                     },
+                    files: {
+                      type: "array",
+                      maxItems: 20,
+                      description:
+                        "随这次调用交给智能体的文件(合计不超过 10MB):写进这次任务的工作目录,并在提示词末尾列出。" +
+                        "name 是相对路径(不能含 ..、不能以 . 开头),content 是 base64",
+                      items: {
+                        type: "object",
+                        required: ["name", "content"],
+                        properties: {
+                          name: { type: "string", maxLength: 255 },
+                          content: { type: "string", contentEncoding: "base64" },
+                        },
+                      },
+                    },
                     callbackUrl: {
                       type: "string",
                       format: "uri",
@@ -236,6 +251,24 @@ export function buildAgentOpenApi(agent: OpenApiAgent, origin: string): Record<s
                       },
                       startedAt: { type: ["string", "null"], format: "date-time" },
                       endedAt: { type: ["string", "null"], format: "date-time" },
+                      files: {
+                        type: ["array", "null"],
+                        description:
+                          "结束后附上这次任务工作目录里的文件(输入与产物),最多 200 个;还在跑或读取失败时为 null。" +
+                          "download 是相对本服务的下载路径,用同一把 Key 访问",
+                        items: {
+                          type: "object",
+                          properties: {
+                            path: { type: "string" },
+                            size: { type: "integer" },
+                            download: { type: "string" },
+                          },
+                        },
+                      },
+                      filesTruncated: {
+                        type: "boolean",
+                        description: "文件太多或目录太深,清单不完整(完整内容走文件接口)",
+                      },
                     },
                   },
                 },

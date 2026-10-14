@@ -1,6 +1,7 @@
 import { apiError } from "@/lib/api-error";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
+import { taskFilesForResult } from "@/lib/modules/artifacts/application/task-files";
 import { toRunResult } from "@/lib/modules/run/domain/run-result";
 
 export const runtime = "nodejs";
@@ -20,14 +21,16 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id: taskId } = await params;
-  const { runs, auth } = getContainer();
+  const { runs, auth, sessions, storage } = getContainer();
 
   // 先鉴权再查库:曾经先查库,未登录的人也能凭 404 / 401 的差别探测任务 id 是否存在
+  let sessionId: string;
   try {
     const principal = await auth.requireApiKey(req);
     const owning = await runs.get(taskId);
     if (!owning) return apiError(404, "not_found", "task not found");
     await auth.assertSessionAccess(principal, owning.sessionId);
+    sessionId = owning.sessionId;
   } catch (err) {
     const res = authErrorResponse(err);
     if (res) return res;
@@ -39,9 +42,22 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
   // 与阻塞模式、webhook 同一份结果契约(run/domain/run-result.ts)
   const result = toRunResult(run);
+  // 结束之后附上工作目录的文件清单(产物);还在跑时清单不完整,不给
+  const files = result.done
+    ? await taskFilesForResult(storage, () => workspaceOf(sessions, sessionId))
+    : { files: null, filesTruncated: false };
   return Response.json({
     ...result,
+    ...files,
     /** 已废弃:同 text,保留给老的集成方 */
     summary: result.text,
   });
+}
+
+async function workspaceOf(
+  sessions: { get(id: string): Promise<{ id: string; workspaceDir: string } | null> },
+  sessionId: string,
+) {
+  const s = await sessions.get(sessionId).catch(() => null);
+  return s ? { sessionId: s.id, workspaceDir: s.workspaceDir } : null;
 }

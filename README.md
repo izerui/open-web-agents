@@ -344,6 +344,14 @@ SSE 传输是裸 `data: <AgentEvent JSON>\n\n`。前端用 `fetch + getReader` �
 
 别的 Key(包括同一账号的另一把)访问这些接口一律 403/404。OpenAPI 文档与接入中心的示例都写了这两条。
 
+**带文件调用**:`invoke` 请求体加 `files: [{ name, content }]`(content 为 base64,最多 20 个、合计 10MB),
+文件写进这次任务的工作目录,并在提示词末尾列出(与工作台附件同一约定)。name 是相对路径,
+不能含 `..`、不能以 `.` 开头。文件内容也算幂等请求内容:同一个 `Idempotency-Key` 换了文件按冲突处理。
+
+**结果附产物清单**:任务结束后,`/result`、阻塞响应与 Webhook 都带 `files: [{ path, size, download }]`
+(工作目录里的文件,最多 200 个;`filesTruncated` 表示清单不完整)。`download` 是相对本服务的路径,
+用同一把 Key 访问。清单读取有 2 秒上限,失败或超时为 `null`,不影响结果本身。
+
 ### 运行中途追加消息
 
 工作台与 API 会话的运行在进行中也能继续补充:`POST /api/sessions/{id}/steer`,`{ runId, text, id }`。
