@@ -9,6 +9,9 @@ interface Row {
   role: string;
   defaultBaseUrl: string | null;
   anthropicKeyEnc: string | null;
+  webhookSecretEnc: string | null;
+  webhookSecretPrevEnc: string | null;
+  webhookSecretPrevUntil: Date | null;
   disabled: number;
   monthlyQuotaMicroUsd: number | null;
   createdAt: Date;
@@ -20,6 +23,9 @@ const COLUMNS = {
   role: users.role,
   defaultBaseUrl: users.defaultBaseUrl,
   anthropicKeyEnc: users.anthropicKeyEnc,
+  webhookSecretEnc: users.webhookSecretEnc,
+  webhookSecretPrevEnc: users.webhookSecretPrevEnc,
+  webhookSecretPrevUntil: users.webhookSecretPrevUntil,
   disabled: users.disabled,
   monthlyQuotaMicroUsd: users.monthlyQuotaMicroUsd,
   createdAt: users.createdAt,
@@ -32,6 +38,9 @@ function toUser(r: Row): User {
     role: r.role === "admin" ? "admin" : "user",
     defaultBaseUrl: r.defaultBaseUrl ?? undefined,
     anthropicKeyEnc: r.anthropicKeyEnc ?? undefined,
+    webhookSecretEnc: r.webhookSecretEnc ?? undefined,
+    webhookSecretPrevEnc: r.webhookSecretPrevEnc ?? undefined,
+    webhookSecretPrevUntil: r.webhookSecretPrevUntil?.getTime(),
     // 存量行是 NULL(加列前就有的数据),按"未禁用"处理
     disabled: Number(r.disabled ?? 0) !== 0,
     monthlyQuotaMicroUsd: r.monthlyQuotaMicroUsd ?? undefined,
@@ -57,6 +66,28 @@ export class MysqlUserRepo implements UserRepo {
     const created = await this.get(u.id);
     if (!created) throw new Error(`user insert failed: ${u.id}`);
     return created;
+  }
+
+  async registerSelf(
+    u: Omit<NewUser, "role">,
+    opts: { allowOthers: boolean },
+  ): Promise<User | null> {
+    const created = await this.db.transaction(async (tx) => {
+      // 主键唯一:并发的注册里只有一个事务插得进,其余等它提交后得到"已存在"
+      const res = await tx.execute(
+        sql`INSERT IGNORE INTO platform_state (k, v) VALUES ('first_admin', ${u.id})`,
+      );
+      const first = affectedRows(res) === 1;
+      if (!first && !opts.allowOthers) return false;
+      await tx.insert(users).values({
+        id: u.id,
+        email: normalizeEmail(u.email),
+        passwordHash: u.passwordHash,
+        role: first ? "admin" : "user",
+      });
+      return true;
+    });
+    return created ? this.get(u.id) : null;
   }
 
   async findByEmail(email: string): Promise<(User & { passwordHash: string }) | null> {
@@ -110,14 +141,48 @@ export class MysqlUserRepo implements UserRepo {
     return Number(rows[0]?.n ?? 0);
   }
 
+  async setPasswordHash(id: string, passwordHash: string): Promise<void> {
+    await this.db.update(users).set({ passwordHash }).where(eq(users.id, id));
+  }
+
+  async getWithPassword(id: string): Promise<(User & { passwordHash: string }) | null> {
+    const rows = await this.db
+      .select({ ...COLUMNS, passwordHash: users.passwordHash })
+      .from(users)
+      .where(eq(users.id, id))
+      .limit(1);
+    const row = rows[0];
+    return row ? { ...toUser(row), passwordHash: row.passwordHash } : null;
+  }
+
   async setCredentials(
     id: string,
-    v: { defaultBaseUrl?: string | null; anthropicKeyEnc?: string | null },
+    v: {
+      defaultBaseUrl?: string | null;
+      anthropicKeyEnc?: string | null;
+      webhookSecretEnc?: string | null;
+      webhookSecretPrevEnc?: string | null;
+      webhookSecretPrevUntil?: number | null;
+    },
   ): Promise<void> {
-    const patch: Record<string, string | null> = {};
+    const patch: Record<string, string | Date | null> = {};
     if (v.defaultBaseUrl !== undefined) patch.defaultBaseUrl = v.defaultBaseUrl;
     if (v.anthropicKeyEnc !== undefined) patch.anthropicKeyEnc = v.anthropicKeyEnc;
+    if (v.webhookSecretEnc !== undefined) patch.webhookSecretEnc = v.webhookSecretEnc;
+    if (v.webhookSecretPrevEnc !== undefined) patch.webhookSecretPrevEnc = v.webhookSecretPrevEnc;
+    if (v.webhookSecretPrevUntil !== undefined) {
+      patch.webhookSecretPrevUntil =
+        v.webhookSecretPrevUntil === null ? null : new Date(v.webhookSecretPrevUntil);
+    }
     if (Object.keys(patch).length === 0) return;
     await this.db.update(users).set(patch).where(eq(users.id, id));
   }
+}
+
+/** drizzle 的 mysql2 driver 返回 `[ResultSetHeader, FieldPacket[]]`,affectedRows 在 res[0] 上 */
+function affectedRows(res: unknown): number {
+  if (Array.isArray(res)) {
+    return (res[0] as { affectedRows?: number } | undefined)?.affectedRows ?? 0;
+  }
+  return (res as { affectedRows?: number } | null)?.affectedRows ?? 0;
 }

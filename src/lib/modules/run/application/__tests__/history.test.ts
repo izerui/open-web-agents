@@ -14,6 +14,7 @@ type RunRow = {
   prompt: string;
   parentRunId?: string;
   sdkSessionId?: string;
+  transcriptRange?: { first: string; last: string };
   createdAt: number;
 };
 
@@ -21,12 +22,12 @@ function deps(args: {
   runs?: RunRow[];
   session?: { workspaceDir: string } | null;
   byTranscript?: Record<string, AgentEvent[]>;
-  onRead?: (sdkSessionId: string) => void;
+  onRead?: (sdkSessionId: string, range?: { first: string; last: string }) => void;
 }) {
   const table = args.byTranscript ?? {};
   const transcript: TranscriptPort = {
-    async read({ sdkSessionId }) {
-      args.onRead?.(sdkSessionId);
+    async read({ sdkSessionId, range }) {
+      args.onRead?.(sdkSessionId, range);
       return table[sdkSessionId] ?? [];
     },
   };
@@ -209,5 +210,37 @@ describe("loadSessionHistory", () => {
     );
     expect(h?.turns[0]?.events).toEqual([]);
     expect(h?.turns[1]?.events).toEqual([textEvent("好的")]);
+  });
+
+  it("续接同一 SDK 会话的各轮共用一份 transcript:每轮按自己的范围读", async () => {
+    const reads: unknown[] = [];
+    await loadSessionHistory(
+      deps({
+        runs: [
+          {
+            id: "r1",
+            status: "success",
+            prompt: "一",
+            sdkSessionId: "same",
+            transcriptRange: { first: "a1", last: "a1" },
+            createdAt: 1,
+          },
+          {
+            id: "r2",
+            status: "success",
+            prompt: "二",
+            sdkSessionId: "same",
+            transcriptRange: { first: "a2", last: "a3" },
+            createdAt: 2,
+          },
+        ],
+        onRead: (sid, range) => reads.push({ sid, range }),
+      }),
+      "s1",
+    );
+    expect(reads).toEqual([
+      { sid: "same", range: { first: "a1", last: "a1" } },
+      { sid: "same", range: { first: "a2", last: "a3" } },
+    ]);
   });
 });

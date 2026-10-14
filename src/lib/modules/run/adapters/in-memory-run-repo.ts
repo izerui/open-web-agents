@@ -1,4 +1,10 @@
-import type { NewRun, Run, RunRepo, RunStats } from "@/lib/modules/run/ports";
+import {
+  DuplicateIdempotencyKey,
+  type NewRun,
+  type Run,
+  type RunRepo,
+  type RunStats,
+} from "@/lib/modules/run/ports";
 import type { RunState } from "@/lib/shared";
 
 /** 内存队列 fake。application 层测试用,不碰真 IO。 */
@@ -10,19 +16,57 @@ export class InMemoryRunRepo implements RunRepo {
    */
   private createdAt = new Map<string, number>();
   private fenceSeq = 0;
+  private payloads = new Map<string, NewRun>();
+  private idempotency = new Map<string, string>();
 
   async create(r: NewRun): Promise<Run> {
+    if (r.idempotencyKey) {
+      if (this.idempotency.has(r.idempotencyKey)) {
+        throw new DuplicateIdempotencyKey(r.idempotencyKey);
+      }
+      this.idempotency.set(r.idempotencyKey, r.id);
+    }
     const run: Run = { id: r.id, sessionId: r.sessionId, state: "pending", leaseUntil: null };
     this.runs.set(r.id, run);
+    this.payloads.set(r.id, r);
     this.createdAt.set(r.id, Date.now());
-    return run;
+    return { ...run };
+  }
+
+  async findByIdempotencyKey(key: string): Promise<Run | null> {
+    const id = this.idempotency.get(key);
+    const run = id ? await this.get(id) : null;
+    if (!run || !id) return null;
+    const p = this.payloads.get(id);
+    const cfg = p?.agentConfig as { outputSchema?: unknown } | undefined;
+    return {
+      ...run,
+      idempotencyHash: p?.idempotencyHash,
+      agentVersion: p?.agentVersion,
+      hasOutputSchema: cfg ? cfg.outputSchema !== undefined : undefined,
+    };
+  }
+
+  async getPayload(id: string): Promise<{
+    prompt: string;
+    agentConfig?: unknown;
+    overrideEnc?: string;
+    agentVersion?: number;
+  } | null> {
+    const p = this.payloads.get(id);
+    if (!p) return null;
+    return {
+      prompt: p.prompt ?? "",
+      agentConfig: p.agentConfig,
+      overrideEnc: p.overrideEnc,
+      agentVersion: p.agentVersion,
+    };
   }
 
   async claimNext(leaseMs: number, now: number): Promise<Run | null> {
     for (const run of this.runs.values()) {
-      const claimable =
-        run.state === "pending" ||
-        (run.state === "running" && run.leaseUntil !== null && run.leaseUntil < now);
+      // 至多一次:只认领 pending,失租的 running 由 reclaimOrphans 判失败
+      const claimable = run.state === "pending";
       const sessionBusy = [...this.runs.values()].some(
         (other) =>
           other.id !== run.id &&
@@ -70,16 +114,17 @@ export class InMemoryRunRepo implements RunRepo {
     return true;
   }
 
-  async reclaimOrphans(now: number): Promise<number> {
-    let n = 0;
+  async reclaimOrphans(now: number): Promise<Run[]> {
+    const out: Run[] = [];
     for (const run of this.runs.values()) {
       if (run.state === "running" && run.leaseUntil !== null && run.leaseUntil < now) {
-        run.state = "pending";
+        run.state = "failed";
         run.leaseUntil = null;
-        n++;
+        run.fence = undefined;
+        out.push({ ...run });
       }
     }
-    return n;
+    return out;
   }
 
   async get(id: string): Promise<Run | null> {

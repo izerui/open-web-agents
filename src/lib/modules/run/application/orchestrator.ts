@@ -5,13 +5,17 @@ import {
   resolveCredentials,
   resolveModelAlias,
 } from "@/lib/modules/agent-engine/domain/resolve-credentials";
-import type { EnginePort, RunResult } from "@/lib/modules/agent-engine/ports";
+import type { EnginePort, RunResult, TranscriptRange } from "@/lib/modules/agent-engine/ports";
 import { buildSpec } from "@/lib/modules/agent/domain/build-spec";
+import type { AgentConfig } from "@/lib/modules/agent/domain/config";
 import { validateStructured } from "@/lib/modules/agent/domain/validate-output";
 import type { AgentRepo } from "@/lib/modules/agent/ports";
 import type { BusPort } from "@/lib/modules/events/ports";
+import type { SteerChannel } from "@/lib/modules/run/ports";
 import type { SessionRepo } from "@/lib/modules/session/ports";
 import type { AgentEvent, CredentialChain, ModelAlias } from "@/lib/shared";
+import { EventCoalescer } from "./event-coalescer";
+import { ChannelSteerInbox } from "./steer-inbox";
 
 /** 一次运行请求。人用对话与系统 invoke 都收敛成这一个 Command。 */
 export interface RunCommand {
@@ -21,6 +25,11 @@ export interface RunCommand {
   runId?: string;
   /** 请求级覆盖(三级链最高优先)。 */
   override?: { baseUrl?: string; key?: string; model?: ModelAlias };
+  /**
+   * 入队时的智能体配置快照。有就按它跑,而不是读执行时的"当前配置" ——
+   * 排队期间配置被改,不该改变已经受理的任务。迁移前的旧任务没有快照,回退到当前配置。
+   */
+  agentConfig?: AgentConfig;
 }
 
 export interface OrchestratorDeps {
@@ -42,23 +51,39 @@ export interface OrchestratorDeps {
    * anchored=true 时【必须】用它给出的锚点 —— 包括"从零重开"的空锚点;
    * 否则回退到会话最新锚点,分支就会串回主线。
    */
-  runAnchor?: (runId: string) => Promise<{ anchored: boolean; anchor?: string }>;
-  /** 记录本轮产生的 SDK 会话到该运行上,供后续分支续接。 */
-  recordRunSession?: (runId: string, sdkSessionId: string) => Promise<void>;
+  runAnchor?: (runId: string) => Promise<{ anchored: boolean; anchor?: string; resumeAt?: string }>;
+  /**
+   * 记录本轮产生的 SDK 会话到该运行上,供后续分支续接;
+   * range 是本轮在 transcript 里的那一段,供历史回放只读本轮(见 RunResult.transcriptRange)。
+   */
+  recordRunSession?: (
+    runId: string,
+    sdkSessionId: string,
+    range?: TranscriptRange,
+  ) => Promise<void>;
+  /** 运行中途追加消息的通道;不给则所有运行都是一次性输入。 */
+  steerChannel?: SteerChannel;
   /** 记录本轮实际使用的起跑锚点,供审计。 */
   recordRunAnchor?: (runId: string, anchor: string | null) => Promise<void>;
+  /**
+   * 运行前确保工作目录存在。目录可能已被 GC 整体清理(会话超过保留期未活动):
+   * 会话与对话历史还在,只是文件没了 —— 在同一路径重建空目录继续,而不是让这一轮
+   * 因为 cwd 不存在而失败。
+   */
+  ensureWorkspace?: (sessionId: string, dir: string) => Promise<void>;
   /**
    * 按本轮输入检索智能体知识库,返回可直接注入提示词的文本(无命中则空串)。
    * 检索失败不该让整轮运行失败 —— 降级成"没有知识库"继续跑。
    */
   retrieveKnowledge?: (agentId: string, query: string) => Promise<string>;
-  /** 终态时投递 webhook(可选)。 */
-  onComplete?: (info: {
-    runId?: string;
-    sessionId: string;
-    agentId: string;
-    result: RunResult;
-  }) => void;
+  /**
+   * 执行前的额度复核(按会话的计费账号)。
+   *
+   * 入口处已经查过一次,这里再查是因为两者之间隔着队列:额度内一口气入队 1000 个
+   * 任务,入口会全部放行,真正花钱的是之后逐个执行的时候。查不动(DB 故障)就抛错,
+   * 让本轮失败 —— 额度是计费边界,不能"查不了就当没超"。
+   */
+  quotaCheck?: (userId: string) => Promise<{ allowed: boolean; reason?: string }>;
 }
 
 /** 每个运行一条 Stream,避免并发运行的事件和游标相互污染。 */
@@ -77,35 +102,58 @@ export class RunOrchestrator {
     const session = await this.deps.sessions.get(cmd.sessionId);
     if (!session) throw new Error(`session not found: ${cmd.sessionId}`);
 
-    const agent = await this.deps.agents.get(session.agentId);
-    if (!agent) throw new Error(`agent not found: ${session.agentId}`);
+    let config = cmd.agentConfig;
+    if (!config) {
+      const agent = await this.deps.agents.get(session.agentId);
+      if (!agent) throw new Error(`agent not found: ${session.agentId}`);
+      config = agent.config;
+    }
+
+    // 计费账号:花费记给谁,就用谁的额度、谁自带的凭证。
+    // 曾经只看 ownerId,于是 API Key / embed 会话(没有人用归属)既不受额度约束,
+    // 也永远用不上签发人自己的 key,一律落到平台默认凭证上。
+    const billingUserId = session.billingUserId ?? session.ownerId;
+
+    if (billingUserId && this.deps.quotaCheck) {
+      const verdict = await this.deps.quotaCheck(billingUserId);
+      if (!verdict.allowed) {
+        return {
+          status: "failed",
+          error: { kind: "quota_exceeded", message: verdict.reason ?? "超出月度额度" },
+        };
+      }
+    }
 
     // 用户级凭证是计费边界,读取失败不能静默改用平台共享 key。
     // “用户未配置”由实现返回空对象表达;DB 故障、密文损坏或主密钥不匹配必须抛出,
     // 由 worker 将本轮落为 failed。
     let userCreds: { baseUrl?: string; key?: string } | undefined;
-    if (session.ownerId && this.deps.userCredentials) {
-      userCreds = await this.deps.userCredentials(session.ownerId);
+    if (billingUserId && this.deps.userCredentials) {
+      userCreds = await this.deps.userCredentials(billingUserId);
     }
 
     const chain: CredentialChain = {
       platform: this.deps.platformCredentials,
       user: userCreds,
-      session: { baseUrl: session.baseUrl, key: session.key, model: session.model },
       request: cmd.override,
     };
     const credentials = resolveCredentials(chain);
-    const model = resolveModelAlias(chain, agent.config.model);
+    const model = resolveModelAlias(chain, config.model);
 
     // 分支重跑:优先用该运行自己的锚点。只有它没有明确意图时才回退到会话最新状态
     let resumeSessionId = session.sdkSessionId;
+    // "从某一轮重来":在那份会话里从这条消息之后接着跑,并分到新会话(不动原对话)
+    let resumeSessionAt: string | undefined;
     if (cmd.runId && this.deps.runAnchor) {
       // 【读失败不能当成"没有锚点意图"】—— 那会落回会话最新锚点,于是"从零重开"
       // 的分支恢复了完整历史对话,悄悄串回主线(见本文件顶部对锚点语义的说明),
       // 而且随后还会把这个错误锚点写进审计轨迹,事后无从诊断。
       // DB 读失败在这里不是可降级条件,宁可让这一轮失败。
       const a = await this.deps.runAnchor(cmd.runId);
-      if (a.anchored) resumeSessionId = a.anchor;
+      if (a.anchored) {
+        resumeSessionId = a.anchor;
+        resumeSessionAt = a.anchor ? a.resumeAt : undefined;
+      }
     }
 
     // 如实记下这一轮到底从哪儿起跑 —— 事后排查"为什么它记得/不记得某件事"全靠它
@@ -113,13 +161,24 @@ export class RunOrchestrator {
       await this.deps.recordRunAnchor?.(cmd.runId, resumeSessionId ?? null).catch(() => {});
     }
 
+    await this.deps.ensureWorkspace?.(session.id, session.workspaceDir);
+
     const ctx = {
       sessionId: cmd.sessionId,
       runId: cmd.runId,
       workspaceDir: session.workspaceDir,
       prompt: cmd.prompt,
       resumeSessionId,
+      ...(resumeSessionAt ? { resumeSessionAt } : {}),
       unattended: session.unattended === true,
+      // 有没有人能审批取决于入口:接口调用没人;嵌入组件里的访客不是审批人
+      approvalPolicy:
+        // 评测与接口调用一样无人值守:按智能体对无人值守的配置走
+        session.source === "invoke" || session.source === "eval"
+          ? (config.unattendedApproval ?? "allow")
+          : session.source === "embed"
+            ? (config.unattendedApproval ?? "deny")
+            : ("ask" as const),
       credentials,
       env: this.deps.baseEnv ?? {},
     };
@@ -128,14 +187,15 @@ export class RunOrchestrator {
       ? await this.deps.retrieveKnowledge(session.agentId, cmd.prompt).catch(() => "")
       : "";
 
-    const spec = buildSpec(agent.config, ctx, { model, knowledgeContext });
+    const spec = buildSpec(config, ctx, { model, knowledgeContext });
 
     const topic = topicOf(cmd.sessionId, cmd.runId);
 
     // 事件投递是辅助能力:Redis 暂时不可用只影响实时过程,不能让已经执行的任务失败。
-    const publish = (e: AgentEvent) => {
+    const coalescer = new EventCoalescer((e) => {
       void this.deps.bus.publish(topic, e).catch(() => {});
-    };
+    });
+    const publish = (e: AgentEvent) => coalescer.push(e);
 
     publish({ kind: "status", label: "运行中", state: "running" });
     // 让用户看得到"这次回答参考了知识库",而不是凭空多出一些内容
@@ -143,7 +203,31 @@ export class RunOrchestrator {
       publish({ kind: "status", label: "已引用知识库资料", state: "knowledge" });
     }
 
-    let result = await this.deps.engine.run(spec, ctx, publish, signal);
+    // 准备阶段(查库、检索)期间就被取消或超时了:不要再启动引擎去花钱
+    if (signal.aborted) {
+      return { status: "failed", error: { kind: "aborted", message: "运行在启动前已被中止" } };
+    }
+
+    // 运行中途追加消息:只给有人在对话的入口(工作台、API 会话)。接口调用与嵌入组件是一次性输入。
+    // 开不了(通道不可用)就不接受追加,运行照常
+    const steer =
+      cmd.runId && this.deps.steerChannel && (session.source === "web" || session.source === "api")
+        ? await ChannelSteerInbox.open(this.deps.steerChannel, cmd.runId)
+        : null;
+
+    let result: RunResult;
+    try {
+      result = await this.deps.engine.run(spec, steer ? { ...ctx, steer } : ctx, publish, signal);
+    } finally {
+      // 引擎正常会自己收尾;它中途抛出时这里兜底:还没交出去的追加消息记为未送达
+      if (steer) {
+        for (const m of await steer.abandon()) {
+          publish({ kind: "steer", id: m.id, text: m.text, outcome: "dropped" });
+        }
+      }
+      // 最后一段攒着的文本必须冲出去,否则回答会少个尾巴
+      coalescer.flush();
+    }
 
     if (result.sessionId) {
       // 会话的"当前位置"跟着最新一次运行走。
@@ -162,7 +246,9 @@ export class RunOrchestrator {
       }
       // 同时记到本次运行上 —— 将来要从这一轮分叉时需要它
       if (cmd.runId) {
-        await this.deps.recordRunSession?.(cmd.runId, result.sessionId).catch(() => {});
+        await this.deps
+          .recordRunSession?.(cmd.runId, result.sessionId, result.transcriptRange)
+          .catch(() => {});
       }
     }
 
@@ -186,28 +272,9 @@ export class RunOrchestrator {
       }
     }
 
-    publish({
-      kind: "result",
-      status: result.status,
-      structured: result.structured,
-      summary: result.summary ?? result.error?.message,
-      // 带上 runId,各条 SSE 才认得出哪条终态是自己的 —— 否则同会话并发时
-      // 先跑完的那轮会把另一轮的流提前关掉
-      runId: cmd.runId,
-    });
-
-    // 终态回调(webhook 等)。失败不影响 run 的最终状态 —— 结果已在库里,可轮询兜底
-    try {
-      this.deps.onComplete?.({
-        runId: cmd.runId,
-        sessionId: cmd.sessionId,
-        agentId: session.agentId,
-        result,
-      });
-    } catch {
-      // 回调注册方自己的问题,不牵连运行
-    }
-
+    // 【这里不发布 result 事件,也不触发 webhook】—— 终态以数据库为准:
+    // worker 把终态写进库之后才通知(见 worker.ts 的 onFinalized)。
+    // 曾经在这里发,早于落库,且分不清本轮是不是已被取消或失租。
     return result;
   }
 }

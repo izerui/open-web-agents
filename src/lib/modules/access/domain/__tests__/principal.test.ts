@@ -2,6 +2,7 @@ import type { Grant, Subject } from "@/lib/modules/access/domain/grants";
 import {
   type Principal,
   type SessionOwnership,
+  agentAccessLevel,
   canAccessSession,
   canAdministerPlatform,
   canInvokeAgent,
@@ -38,6 +39,19 @@ describe("canAccessSession / web 用户", () => {
     const d = canAccessSession(webA, sess());
     expect(d.allowed).toBe(false);
     expect(d.allowed === false && d.reason).toMatch(/no owner/);
+  });
+
+  it("签发 key 的人能看用自己 key 发起的接口会话(没有人用归属)", () => {
+    const invoke = sess({ callerApiKeyId: "k1", billingUserId: "u1" });
+    expect(canAccessSession(webA, invoke).allowed).toBe(true);
+    // 别人用自己的 key 发起的,看不到
+    expect(canAccessSession(webB, invoke).allowed).toBe(false);
+  });
+
+  it("计费归属不能用来读别人工作台里的会话", () => {
+    expect(canAccessSession(webB, sess({ ownerId: "u1", billingUserId: "u2" })).allowed).toBe(
+      false,
+    );
   });
 
   it("admin 也不能越权读别人【有明确归属】的会话", () => {
@@ -128,6 +142,41 @@ describe("canInvokeAgent", () => {
   it("绑定的 key 即便指向的智能体已不再有权,也拒绝", () => {
     const bound: Principal = { type: "apiKey", keyId: "k4", ownerId: "u2", agentId: "a1" };
     expect(canInvokeAgent(bound, a1, subj("u2"), []).allowed).toBe(false);
+  });
+});
+
+describe("agentAccessLevel(读写智能体相关资源的统一判定)", () => {
+  const a1 = { id: "a1", ownerId: "u1" };
+  const a2 = { id: "a2", ownerId: "u1" };
+  const owner: Subject = { userId: "u1" };
+  const readGrant: Grant[] = [
+    {
+      id: "g",
+      resourceType: "agent",
+      resourceId: "a1",
+      principalType: "user",
+      principalId: "u2",
+      permission: "read",
+    },
+  ];
+
+  it("网页登录按资源授权:所有者 write,被分享 read 的人 read,无关的人 none", () => {
+    expect(agentAccessLevel(webA, a1, owner, [])).toBe("write");
+    expect(agentAccessLevel(webB, a1, { userId: "u2" }, readGrant)).toBe("read");
+    expect(agentAccessLevel(webB, a2, { userId: "u2" }, readGrant)).toBe("none");
+  });
+
+  it("绑定 A 的 Key 读不到签发人名下的 B", () => {
+    expect(agentAccessLevel(keyBound, a2, owner, [])).toBe("none");
+  });
+
+  it("Key 最多 read:签发人是所有者也不把 write 传给 Key", () => {
+    expect(agentAccessLevel(keyBound, a1, owner, [])).toBe("read");
+    expect(agentAccessLevel(keyA, a2, owner, [])).toBe("read");
+  });
+
+  it("签发人自己都读不到的,Key 也读不到", () => {
+    expect(agentAccessLevel(keyA, { id: "x", ownerId: "other" }, owner, [])).toBe("none");
   });
 });
 

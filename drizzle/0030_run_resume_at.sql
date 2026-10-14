@@ -1,0 +1,1 @@
+ALTER TABLE `runs` ADD `resume_at` varchar(64);

@@ -8,6 +8,11 @@ export interface User {
   defaultBaseUrl?: string;
   /** 已加密;取用前须经 SecretBox 解密。 */
   anthropicKeyEnc?: string;
+  /** Webhook 签名密钥,已加密。该用户名下智能体的回调都用它签名。 */
+  webhookSecretEnc?: string;
+  /** 换密钥后的旧密钥(重叠期内仍签名)与重叠期结束时刻(ms) */
+  webhookSecretPrevEnc?: string;
+  webhookSecretPrevUntil?: number;
   defaultModel?: ModelAlias;
   /** 禁用的账号不能登录,已登录的会话也立即失效。 */
   disabled: boolean;
@@ -25,13 +30,25 @@ export interface NewUser {
 
 export interface UserRepo {
   create(u: NewUser): Promise<User>;
+  /**
+   * 自助注册:"是不是第一个用户"的判定与建号在同一个事务里,并发注册也只有一个成为管理员。
+   * 第一个注册的成为 admin;不是第一个且 allowOthers=false(未开放注册)时不建号,返回 null。
+   * 建号失败(如邮箱已存在)时整体回滚,不会出现"第一个的名额被占了却没有管理员"。
+   */
+  registerSelf(u: Omit<NewUser, "role">, opts: { allowOthers: boolean }): Promise<User | null>;
   findByEmail(email: string): Promise<(User & { passwordHash: string }) | null>;
   get(id: string): Promise<User | null>;
   count(): Promise<number>;
-  /** 更新用户自带凭证。传 null 表示清除。 */
+  /** 更新用户自带凭证与 webhook 签名密钥。传 null 表示清除,不传表示不动。 */
   setCredentials(
     id: string,
-    v: { defaultBaseUrl?: string | null; anthropicKeyEnc?: string | null },
+    v: {
+      defaultBaseUrl?: string | null;
+      anthropicKeyEnc?: string | null;
+      webhookSecretEnc?: string | null;
+      webhookSecretPrevEnc?: string | null;
+      webhookSecretPrevUntil?: number | null;
+    },
   ): Promise<void>;
 
   /**
@@ -55,4 +72,10 @@ export interface UserRepo {
 
   /** 当前管理员数量 —— 用来挡住"把最后一个管理员降级/禁用"。 */
   countAdmins(): Promise<number>;
+
+  /** 改密码(传入已哈希的值)。 */
+  setPasswordHash(id: string, passwordHash: string): Promise<void>;
+
+  /** 按 id 取带密码哈希的记录(改密码时校验旧密码用)。 */
+  getWithPassword(id: string): Promise<(User & { passwordHash: string }) | null>;
 }

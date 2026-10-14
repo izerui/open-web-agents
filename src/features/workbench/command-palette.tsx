@@ -11,7 +11,19 @@ import {
   CommandShortcut,
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
-import { BarChart3, Bot, KeyRound, MessageSquare, Plus, Terminal, Users } from "lucide-react";
+import {
+  BarChart3,
+  Bot,
+  History,
+  KeyRound,
+  Lock,
+  MessageSquare,
+  Plus,
+  ScrollText,
+  Terminal,
+  Users,
+} from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { activityOf, relativeTime } from "./session-groups";
 import type { AgentSummary, SessionSummary } from "./types";
@@ -25,9 +37,12 @@ import type { AgentSummary, SessionSummary } from "./types";
  */
 const PAGES = [
   { href: "/agents", label: "我的智能体", icon: Bot },
-  { href: "/settings/keys", label: "接入与 API Key", icon: Terminal },
+  { href: "/settings/runs", label: "运行记录", icon: History },
+  { href: "/settings/keys", label: "接入中心", icon: Terminal },
+  { href: "/settings/audit", label: "审计日志", icon: ScrollText },
   { href: "/settings/usage", label: "用量与成本", icon: BarChart3 },
   { href: "/settings/credentials", label: "模型凭证", icon: KeyRound },
+  { href: "/settings/account", label: "账号安全", icon: Lock },
 ] as const;
 
 /**
@@ -57,6 +72,7 @@ export function CommandPalette({
   onNewSessionAction: () => void;
   onPickAgentAction: (id: string) => void;
 }) {
+  const router = useRouter();
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
@@ -146,7 +162,8 @@ export function CommandPalette({
             <CommandItem
               key={p.href}
               value={`前往 ${p.label} ${p.href}`}
-              onSelect={() => run(() => window.location.assign(p.href))}
+              // 客户端路由跳转:曾经是 window.location.assign 整页刷新,工作台状态全丢
+              onSelect={() => run(() => router.push(p.href))}
             >
               <p.icon />
               <span>{p.label}</span>

@@ -44,8 +44,30 @@ if (!TEST_DB_URL) {
 
   /** 记录每个 run 被执行了几次 —— 并发正确性的核心断言。 */
   const executions = new Map<string, number>();
-  /** 记录每个任务是被哪个 worker 执行的 —— 用来证明并发【真的发生了】。 */
+  /** 记录每个任务是被哪个 worker 执行的。 */
   const executedBy = new Map<string, string>();
+  /** 正在执行的运行:任务 → worker。用来度量真实的并行度与同会话重叠。 */
+  const inFlight = new Map<string, { workerId: string; sessionId: string }>();
+  /** 执行期间同时在跑的不同 worker 数的峰值 —— 证明并发【真的发生了】。 */
+  let peakWorkers = 0;
+  /** 同一会话的两个运行在执行期间重叠 —— 会话内必须串行(同一工作目录、同一份 SDK 会话)。 */
+  const sessionOverlaps: string[] = [];
+  /**
+   * 汇合点:运行先等到至少两个不同的 worker 同时在执行,再往下走(最多等 5 秒)。
+   * 原先只断言"多个 worker 都执行过",而且全部任务都在同一个会话里 —— 会话内串行,
+   * 实际从没有两个运行同时在执行,"恰好执行一次"也就没在真正的并行下检验过。
+   * 现在任务分散在多个会话,并要求不同 worker 确实同时在执行:只要多 worker 并行可行就必然达成,
+   * 达不成说明认领本身有问题,而不是靠执行窗口碰运气。
+   */
+  const newRendezvous = () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  };
+  let rendezvous = newRendezvous();
+  const distinctWorkersInFlight = () => new Set([...inFlight.values()].map((r) => r.workerId)).size;
 
   class RecordingEngine implements EnginePort {
     constructor(
@@ -62,9 +84,20 @@ if (!TEST_DB_URL) {
       const key = ctx.prompt;
       executions.set(key, (executions.get(key) ?? 0) + 1);
       executedBy.set(key, this.workerId);
-      // 留出真实的执行窗口,让并发有机会撞车
-      await new Promise((r) => setTimeout(r, this.delayMs));
-      return { status: "success", summary: "ok" };
+      if ([...inFlight.values()].some((r) => r.sessionId === ctx.sessionId)) {
+        sessionOverlaps.push(`${ctx.sessionId}:${key}`);
+      }
+      inFlight.set(key, { workerId: this.workerId, sessionId: ctx.sessionId });
+      peakWorkers = Math.max(peakWorkers, distinctWorkersInFlight());
+      if (peakWorkers >= 2) rendezvous.resolve();
+      try {
+        await Promise.race([rendezvous.promise, new Promise((r) => setTimeout(r, 5_000))]);
+        // 留出真实的执行窗口,让并发有机会撞车
+        await new Promise((r) => setTimeout(r, this.delayMs));
+        return { status: "success", summary: "ok" };
+      } finally {
+        inFlight.delete(key);
+      }
     }
   }
 
@@ -78,7 +111,11 @@ if (!TEST_DB_URL) {
     },
   ]);
 
-  function makeWorker(workerId: string, engineDelayMs = 5) {
+  function makeWorker(
+    workerId: string,
+    engineDelayMs = 5,
+    opts: { runRepo?: MysqlRunRepo; concurrency?: number } = {},
+  ) {
     const orchestrator = new RunOrchestrator({
       sessions,
       agents,
@@ -86,17 +123,49 @@ if (!TEST_DB_URL) {
       bus: new InMemoryBus(),
       platformCredentials: { baseUrl: "b", key: "k" },
     });
-    return new RunWorker(repo, orchestrator, {
+    return new RunWorker(opts.runRepo ?? repo, orchestrator, {
       leaseMs: 30_000,
       heartbeatMs: 10_000,
       idleMs: 5,
+      ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
     });
+  }
+
+  /**
+   * 启动 worker 跑完 body,无论成败都先 stop 全部 worker、再等 drain 成功才返回。
+   *
+   * stop() 不等在途的认领 / 执行 / 回收(见 worker.ts)。只 stop 就结束用例的话,
+   * 下一条用例的 beforeEach 随即清空运行表、重置计数,上一条还没退出的操作会碰到新用例的数据;
+   * body 中途抛错时甚至走不到 stop。所以收尾放进 finally,且 drain 不成功就让用例失败。
+   */
+  async function withWorkers<T>(workers: RunWorker[], body: () => Promise<T>): Promise<T> {
+    for (const w of workers) w.start();
+    let failure: unknown;
+    try {
+      return await body();
+    } catch (err) {
+      failure = err;
+      throw err;
+    } finally {
+      for (const w of workers) w.stop();
+      const drained = await Promise.all(workers.map((w) => w.drain(10_000)));
+      if (drained.some((ok) => !ok)) {
+        // 别让收尾失败吞掉 body 自己的错误
+        const msg = `worker 未能在 10 秒内排空:${JSON.stringify(drained)}`;
+        // biome-ignore lint/correctness/noUnsafeFinally: 收尾失败必须让用例失败
+        throw failure ? new AggregateError([failure], msg) : new Error(msg);
+      }
+    }
   }
 
   beforeEach(async () => {
     await repo._truncate(dbName);
     executions.clear();
     executedBy.clear();
+    inFlight.clear();
+    peakWorkers = 0;
+    sessionOverlaps.length = 0;
+    rendezvous = newRendezvous();
   });
 
   afterAll(async () => {
@@ -106,29 +175,40 @@ if (!TEST_DB_URL) {
 
   describe("多 worker 并发", { timeout: 60_000 }, () => {
     it("N 个 worker 抢同一队列:每个任务恰好执行一次,不重不漏", async () => {
-      const SESSION = "s-conc";
-      await sessions.create({ id: SESSION, agentId: "a1", workspaceDir: "/ws" });
+      // 任务分散在多个会话里:同一会话内是串行的,只有跨会话才会真的并行执行。
+      // 会话数(6)多于单个 worker 的槽位数(默认 4),一个 worker 吃不下全部 —— 别的 worker 必然参与。
+      // 按块分配(连续 4 个任务同一会话):最早的几个任务同属一个会话,认领必须跳过忙碌的会话
+      // 去拿别的会话的任务 —— 会话互斥一旦失效,同会话的任务会被同时认领,重叠必然出现
+      const SESSIONS = ["s-conc-0", "s-conc-1", "s-conc-2", "s-conc-3", "s-conc-4", "s-conc-5"];
+      for (const sid of SESSIONS) {
+        await sessions.create({ id: sid, agentId: "a1", workspaceDir: `/ws/${sid}` });
+      }
 
       const TASKS = 24;
       const ids: string[] = [];
       for (let i = 0; i < TASKS; i++) {
         const id = randomUUID().replace(/-/g, "").slice(0, 24);
         ids.push(id);
-        await repo.create({ id, sessionId: SESSION, prompt: `task-${i}` });
+        await repo.create({
+          id,
+          sessionId: SESSIONS[Math.floor(i / 4)] as string,
+          prompt: `task-${i}`,
+        });
       }
 
       // 4 个 worker 同时抢
-      const workers = ["w1", "w2", "w3", "w4"].map((id) => makeWorker(id));
-      for (const w of workers) w.start();
-
-      // 等队列排空
-      const deadline = Date.now() + 40_000;
-      while (Date.now() < deadline) {
-        const states = await Promise.all(ids.map((id) => repo.get(id)));
-        if (states.every((s) => s?.state === "success")) break;
-        await new Promise((r) => setTimeout(r, 50));
-      }
-      for (const w of workers) w.stop();
+      // 执行时长要明显长于一次认领(一次数据库事务),运行之间才会真的重叠;
+      // 只停 5ms 时绝大多数时刻只有一个运行在执行,会话互斥失效也撞不出来
+      const workers = ["w1", "w2", "w3", "w4"].map((id) => makeWorker(id, 100));
+      await withWorkers(workers, async () => {
+        // 等队列排空
+        const deadline = Date.now() + 40_000;
+        while (Date.now() < deadline) {
+          const states = await Promise.all(ids.map((id) => repo.get(id)));
+          if (states.every((s) => s?.state === "success")) break;
+          await new Promise((r) => setTimeout(r, 50));
+        }
+      });
 
       // 全部完成
       const finalStates = await Promise.all(ids.map((id) => repo.get(id)));
@@ -140,9 +220,10 @@ if (!TEST_DB_URL) {
       // 也没有漏掉的
       expect(executions.size).toBe(TASKS);
 
-      // 【并发真的发生了】否则这个测试只是"单 worker 顺序跑完",证明不了任何并发正确性
-      const participatingWorkers = new Set(executedBy.values());
-      expect(participatingWorkers.size).toBeGreaterThan(1);
+      // 【并发真的发生了】不同 worker 同时在执行 —— 否则这个测试只是"顺序跑完",证明不了并发正确性
+      expect(peakWorkers).toBeGreaterThan(1);
+      // 并行只发生在会话之间:同一会话的运行从不重叠
+      expect(sessionOverlaps).toEqual([]);
     });
 
     it("并发认领同一个任务:只有一个 worker 拿到", async () => {
@@ -156,7 +237,7 @@ if (!TEST_DB_URL) {
       expect(claims.filter((c) => c !== null)).toHaveLength(1);
     });
 
-    it("worker 崩溃后任务被其它 worker 接手,且最终只成功一次", async () => {
+    it("【至多一次】worker 崩溃后任务判失败,存活的 worker 不会重跑", async () => {
       const SESSION = "s-crash";
       await sessions.create({ id: SESSION, agentId: "a1", workspaceDir: "/ws" });
       const id = randomUUID().replace(/-/g, "").slice(0, 24);
@@ -167,49 +248,99 @@ if (!TEST_DB_URL) {
       await repo.claimNext(1000, now);
       expect((await repo.get(id))?.state).toBe("running");
 
-      // 租约过期后由存活的 worker 回收并接手
+      // 租约过期后由存活的 worker 回收:判失败,而不是从头再跑一遍
       const w = makeWorker("survivor");
-      expect(await repo.reclaimOrphans(now + 5000)).toBe(1);
-      expect(await w.tick()).toBe(true);
+      expect((await repo.reclaimOrphans(now + 5000)).map((r) => r.id)).toEqual([id]);
+      expect(await w.tick()).toBe(false);
 
-      expect((await repo.get(id))?.state).toBe("success");
-      expect(executions.get("crash-task")).toBe(1);
+      const final = await repo.getResult(id);
+      expect(final?.status).toBe("failed");
+      expect((final?.error as { kind?: string } | null)?.kind).toBe("worker_lost");
+      expect(executions.get("crash-task")).toBeUndefined();
     });
 
     // 栅栏令牌(fencing token)。
     //
-    // 上面那条"worker 崩溃后被接手"只覆盖了崩溃进程【不再写库】的情形。真实的坏情况是
-    // 进程还活着:DB 抖动导致续租连续失败,租约悄悄过期被回收,而它自己毫不知情 ——
-    // 继续跑、跑完、然后把结果写进去,覆盖掉接手者已经写好的正确结果。
+    // 真实的坏情况是进程还活着:DB 抖动导致续租连续失败,租约悄悄过期被回收,
+    // 而它自己毫不知情 —— 继续跑、跑完、然后把结果写进去。
     // 光靠租约时间挡不住,必须让写入本身带上"我是当前持有者"的凭证。
-    it("【双执行回归】僵尸 worker 拿旧令牌写不进结果,接手者的结果不被覆盖", async () => {
+    it("【双执行回归】被判为孤儿后,僵尸 worker 拿旧令牌写不进结果", async () => {
       const id = randomUUID().replace(/-/g, "").slice(0, 24);
       await repo.create({ id, sessionId: "s-fence", prompt: "fence-task" });
 
       const now = Date.now();
       const zombie = await repo.claimNext(1000, now); // A 认领,随后失联
       expect(zombie?.fence).toBeTruthy();
-
-      const taker = await repo.claimNext(30_000, now + 5000); // 租约过期,B 接手
-      expect(taker?.id).toBe(id);
-      expect(taker?.fence).not.toBe(zombie?.fence);
+      expect((await repo.reclaimOrphans(now + 5000)).map((r) => r.id)).toEqual([id]);
 
       // A 的续租此刻必须返回 false —— 这是 worker 侧中止本轮的唯一信号
       expect(await repo.touch(id, now + 60_000, zombie?.fence)).toBe(false);
-      // B 的续租正常
-      expect(await repo.touch(id, now + 60_000, taker?.fence)).toBe(true);
-
-      // B 先写完
-      await repo.saveResult(id, { structured: { from: "taker" } }, taker?.fence);
-      expect(await repo.complete(id, "success", taker?.fence)).toBe(true);
 
       // A 姗姗来迟,试图写自己的结果 —— 两处都必须是空操作
       await repo.saveResult(id, { structured: { from: "zombie" } }, zombie?.fence);
-      expect(await repo.complete(id, "failed", zombie?.fence)).toBe(false);
+      expect(await repo.complete(id, "success", zombie?.fence)).toBe(false);
 
       const final = await repo.getResult(id);
-      expect(final?.status).toBe("success");
-      expect(final?.structured).toEqual({ from: "taker" });
+      expect(final?.status).toBe("failed");
+      expect(final?.structured).toBeNull();
+    });
+
+    it("终态登记回调发件箱,投递器认领后别人拿不到", async () => {
+      const id = randomUUID().replace(/-/g, "").slice(0, 24);
+      await repo.create({ id, sessionId: "s-hook", prompt: "t" });
+      const c = await repo.claimNext(30_000, Date.now());
+      expect(await repo.complete(id, "success", c?.fence)).toBe(true);
+
+      const now = Date.now();
+      const [a, b] = await Promise.all([
+        repo.claimWebhook(now, 60_000),
+        repo.claimWebhook(now, 60_000),
+      ]);
+      const claimed = [a, b].filter((x) => x !== null);
+      expect(claimed.map((x) => x?.runId)).toEqual([id]);
+      expect(claimed[0]?.attempts).toBe(1);
+
+      // 投递中租约未过期:拿不到
+      expect(await repo.claimWebhook(now + 1000, 60_000)).toBeNull();
+      // 安排重试:到期前拿不到,到期后能拿到,attempts 累加
+      expect(await repo.markWebhook(id, claimed[0]?.lease ?? "", "pending", now + 10_000)).toBe(
+        true,
+      );
+      expect(await repo.claimWebhook(now + 5_000, 60_000)).toBeNull();
+      expect((await repo.claimWebhook(now + 10_000, 60_000))?.attempts).toBe(2);
+      // 投递中的进程崩了:租约过期后可被重新认领
+      const third = await repo.claimWebhook(now + 80_000, 60_000);
+      expect(third?.attempts).toBe(3);
+      expect(await repo.markWebhook(id, third?.lease ?? "", "delivered")).toBe(true);
+      expect(await repo.claimWebhook(now + 999_999, 60_000)).toBeNull();
+    });
+
+    it("被取消的运行补记花费:不需要令牌,且不覆盖已结算的数据", async () => {
+      const id = randomUUID().replace(/-/g, "").slice(0, 24);
+      await repo.create({ id, sessionId: "s-cost", prompt: "t" });
+      await repo.claimNext(30_000, Date.now());
+      await repo.cancel(id);
+      await repo.recordCost(id, { input: 10, output: 2, partial: true });
+      await repo.recordCost(id, { input: 99, output: 99 });
+      expect((await repo.getResult(id))?.cost).toEqual({ input: 10, output: 2, partial: true });
+    });
+
+    it("取消与孤儿回收同样登记回调 —— 等回调的系统不能永远等下去", async () => {
+      const a = randomUUID().replace(/-/g, "").slice(0, 24);
+      const b = randomUUID().replace(/-/g, "").slice(0, 24);
+      await repo.create({ id: a, sessionId: "s-c1", prompt: "t" });
+      await repo.create({ id: b, sessionId: "s-c2", prompt: "t" });
+      await repo.cancel(a);
+      const now = Date.now();
+      await repo.claimNext(1000, now);
+      await repo.reclaimOrphans(now + 5000);
+
+      const got = new Set<string>();
+      for (let i = 0; i < 2; i++) {
+        const j = await repo.claimWebhook(now + 6000, 60_000);
+        if (j) got.add(j.runId);
+      }
+      expect(got).toEqual(new Set([a, b]));
     });
 
     it("终态不可被任何后续写入翻转 —— 包括不带令牌的直接调用", async () => {
@@ -249,36 +380,87 @@ if (!TEST_DB_URL) {
       expect(others.every((o) => o === null)).toBe(true);
     });
 
-    it("持续入队时多 worker 也不重复执行(边跑边加)", async () => {
-      const SESSION = "s-stream";
+    it("stop 时正停在认领里:drain 要等这次认领(及它认领到的运行)退出,之后不再有写入", async () => {
+      const SESSION = "s-drain";
       await sessions.create({ id: SESSION, agentId: "a1", workspaceDir: "/ws" });
+      const id = randomUUID().replace(/-/g, "").slice(0, 24);
+      await repo.create({ id, sessionId: SESSION, prompt: "drain-task" });
+      rendezvous.resolve(); // 单个 worker,不需要等别的 worker 汇合
 
-      const workers = ["s1", "s2", "s3"].map((id) => makeWorker(id, 2));
-      for (const w of workers) w.start();
+      // 认领在真正查库之前停住,直到放行
+      const gate = () => {
+        let open!: () => void;
+        const opened = new Promise<void>((r) => {
+          open = r;
+        });
+        return { open, opened };
+      };
+      const entered = gate();
+      const release = gate();
+      const paused = Object.create(repo) as MysqlRunRepo;
+      paused.claimNext = async (leaseMs, now) => {
+        entered.open();
+        await release.opened;
+        return repo.claimNext(leaseMs, now);
+      };
+      const w = makeWorker("drainer", 5, { runRepo: paused, concurrency: 1 });
 
+      w.start();
+      await entered.opened;
+      w.stop();
+      // 认领还停着:stop 之后 drain 不能宣称已排空
+      expect(await w.drain(300)).toBe(false);
+      expect((await repo.get(id))?.state).toBe("pending");
+
+      // 放行:这次认领照常拿到任务并跑完 —— drain 等到它真正落终态才算排空
+      release.open();
+      expect(await w.drain(10_000)).toBe(true);
+      const settled = await repo.get(id);
+      expect(settled?.state).toBe("success");
+      expect(executions.get("drain-task")).toBe(1);
+
+      // 排空之后不再有任何写入
+      await new Promise((r) => setTimeout(r, 200));
+      expect(await repo.get(id)).toEqual(settled);
+    });
+
+    it("持续入队时多 worker 也不重复执行(边跑边加)", async () => {
+      // 同上:分散到多个会话才有真正的并行执行;按块分配,连续 4 个任务同一会话
+      const SESSIONS = ["s-stream-0", "s-stream-1", "s-stream-2", "s-stream-3", "s-stream-4"];
+      for (const sid of SESSIONS) {
+        await sessions.create({ id: sid, agentId: "a1", workspaceDir: `/ws/${sid}` });
+      }
+
+      const workers = ["s1", "s2", "s3"].map((id) => makeWorker(id, 60));
       const ids: string[] = [];
-      // 分批入队,模拟真实的持续负载
-      for (let batch = 0; batch < 4; batch++) {
-        for (let i = 0; i < 5; i++) {
-          const id = randomUUID().replace(/-/g, "").slice(0, 24);
-          ids.push(id);
-          await repo.create({ id, sessionId: SESSION, prompt: `stream-${batch}-${i}` });
+      await withWorkers(workers, async () => {
+        // 分批入队,模拟真实的持续负载
+        for (let batch = 0; batch < 4; batch++) {
+          for (let i = 0; i < 5; i++) {
+            const id = randomUUID().replace(/-/g, "").slice(0, 24);
+            ids.push(id);
+            await repo.create({
+              id,
+              sessionId: SESSIONS[Math.floor((batch * 5 + i) / 4)] as string,
+              prompt: `stream-${batch}-${i}`,
+            });
+          }
+          await new Promise((r) => setTimeout(r, 30));
         }
-        await new Promise((r) => setTimeout(r, 30));
-      }
 
-      const deadline = Date.now() + 30_000;
-      while (Date.now() < deadline) {
-        const states = await Promise.all(ids.map((id) => repo.get(id)));
-        if (states.every((s) => s?.state === "success")) break;
-        await new Promise((r) => setTimeout(r, 50));
-      }
-      for (const w of workers) w.stop();
+        const deadline = Date.now() + 30_000;
+        while (Date.now() < deadline) {
+          const states = await Promise.all(ids.map((id) => repo.get(id)));
+          if (states.every((s) => s?.state === "success")) break;
+          await new Promise((r) => setTimeout(r, 50));
+        }
+      });
 
       expect([...executions.values()].filter((n) => n > 1)).toEqual([]);
       expect(executions.size).toBe(ids.length);
-      // 同样要确认多个 worker 都参与了
-      expect(new Set(executedBy.values()).size).toBeGreaterThan(1);
+      // 同样要确认不同 worker 同时在执行,且同一会话从不重叠
+      expect(peakWorkers).toBeGreaterThan(1);
+      expect(sessionOverlaps).toEqual([]);
     });
   });
 }

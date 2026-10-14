@@ -26,13 +26,15 @@ pnpm db:migrate                   # 建表
 pnpm dev                          # http://localhost:5678
 ```
 
-首次打开会引导注册 —— **第一个注册的用户自动成为 admin**,自托管无需额外的初始化脚本。
+首次打开会引导注册 —— **第一个注册的用户自动成为 admin**(并发注册也只有一个),自托管无需额外的初始化脚本。
+内置智能体(通用助手、AI 智能体设计师)可以由管理员修改;改过的不会被平台升级覆盖,没改过的随版本自动升级。
+早于修改跟踪的部署:内容与当前内置定义一致的从此开始跟踪;不一致的(无从判断是否被改过)保留现有内容并在日志里提示。
 
 ### 一分钟体验闭环
 
 1. `/builder` 建一个智能体,填提示词;想让它能被系统调用就再填 `outputSchema`
 2. `/` 工作台里跟它对话,右侧看它在独立工作目录里生成的文件
-3. `/settings` 签发 API Key,然后:
+3. 「设置 → 接入中心」(`/settings/keys`)签发 API Key,并按智能体复制 curl / Python / Node / 嵌入代码;或者直接:
 
 ```bash
 curl -X POST localhost:5678/api/agents/<智能体id>/invoke \
@@ -40,7 +42,7 @@ curl -X POST localhost:5678/api/agents/<智能体id>/invoke \
   -d '{"input":"……"}'
 # → { "taskId": "..." }
 curl localhost:5678/api/agents/<taskId>/result -H "X-Api-Key: <key>"
-# → { "status": "success", "structured": { ... } }
+# → { "taskId": "...", "status": "success", "done": true, "structured": { ... }, ... }
 ```
 
 ---
@@ -49,20 +51,79 @@ curl localhost:5678/api/agents/<taskId>/result -H "X-Api-Key: <key>"
 
 | 能力         | 说明                                                                                       |
 |------------|------------------------------------------------------------------------------------------|
-| 智能体构建器      | 提示词 / 模型 / 轮次 / Skills / MCP / 子代理 / 工具白名单 / inputSchema / outputSchema / 审批规则 / Webhook |
+| 智能体构建器      | 提示词 / 模型 / 轮次 / 技能包 / MCP / 子代理(可单独指定模型)/ 工具白名单 / inputSchema / outputSchema / 审批规则 / Webhook |
+| **AI 智能体设计师** | 用对话设计智能体:设计师在会话工作目录里编辑智能体包(提示词、技能、MCP、契约),用户点「应用」后经正式校验写入,一键试运行,不满意继续对话迭代 |
+| 技能包         | 智能体自带的 Skill(SKILL.md + 脚本/模板),运行时作为平台只读插件加载,agent 自己改不了 |
 | 统一运行接口     | 网页对话与系统 invoke **共用同一个运行内核**                                                             |
 | 结构化输出      | 定义了 `outputSchema` 才算「接口型智能体」;结果经 JSON Schema 校验,不合格判失败                                   |
 | 入参契约       | 定义了 `inputSchema` 则 `invoke` 的入参必须符合它,否则 400 并指出是哪个字段                                    |
 | 工作空间       | 每会话一个独立目录,文件树 / 预览 / 下载                                                                  |
 | 执行隔离       | OS 内核沙箱(Bash)+ 路径守卫(文件工具),见下文限制                                                          |
-| 人工审批(HITL) | 按工具名或命令模式挂起等人确认,超时自动拒绝                                                                   |
+| 人工审批(HITL) | 按工具名或命令模式挂起等人确认,超时自动拒绝;审批服务不可用时按故障拒绝并如实标注,不记为超时。三档裁决:批准一次 / 批准并授权本会话内同类不再询问(可撤销;一条命令命中多个高风险模式时,须每一类都已授权才自动放行)/ 拒绝(可附说明,作为原因交给智能体)。接口调用、嵌入组件没有审批人,按智能体配置直接放行或拒绝 |
+| 会话管理       | 重命名 / 归档 / 删除;签发 Key 的人能在"接口调用"视图里看到自己 Key 发起的会话                           |
+| 账号安全       | 注册开关、登录限流、管理员建号与重置密码、自助改密码                                                    |
 | 知识库        | 智能体级文档,运行时按问题检索片段注入提示词(BM25)                                                              |
 | 权限         | 登录 / 每用户凭证 / API Key / 智能体分享 / 用户组                                                        |
 | 可嵌入 widget | 一行 `<script>` 挂到企业页面;**API Key 不下发浏览器**                                                  |
 | 用量监控       | 按智能体 / 按天的花费与 token,队列积压提示                                                                |
-| 队列与扩容      | MySQL 租约队列 + Redis 事件总线 + 可独立扩容的 worker                                                  |
+| 队列与扩容      | MySQL 租约队列 + Redis 事件总线 + 可独立扩容的 worker;运行**至多执行一次**                               |
+| 结果回调       | 终态 webhook 走数据库发件箱,失败按退避重试;按所有者的密钥做 HMAC 签名                                      |
+| 幂等调用       | `invoke` 支持 `Idempotency-Key`,超时重试拿回同一个任务,不重复执行与计费                                  |
 
 ---
+
+## AI 智能体设计师
+
+在「我的智能体」里点 **用 AI 设计**(新建)或 **用 AI 修改**(已有智能体),会开一个与内置
+"AI 智能体设计师"的对话。设计师不直接改平台配置,而是编辑会话工作目录里的**智能体包**:
+
+```
+agent/agent.json               名称、描述、模型、轮次、MCP、子代理、审批、输入输出契约、开场建议
+agent/system-prompt.md         系统提示词
+agent/skills/<名称>/SKILL.md    技能(frontmatter 的 description 写"何时使用")
+agent/skills/<名称>/...         技能附带的脚本、模板
+```
+
+工作台上方的 **应用到智能体** 会解析这些文件,走与构建器保存完全相同的校验后创建或更新智能体;
+校验不通过时可一键把问题发回给设计师修复。回调地址、逃生舱、归属不在包里,应用时沿用原值。
+应用后点 **试运行** 打开新智能体,把不满意的地方告诉设计师继续改。
+
+技能在运行时写入 `dataDir/.skills/<内容哈希>/` 作为本地插件交给 SDK —— 不放开 `settingSources`,
+agent 也写不进这个目录(沙箱只放开工作目录,文件写工具受路径守卫限制)。
+
+## 版本与发布
+
+智能体分**草稿**与**已发布版本**。构建器保存、AI 设计师「应用」改的都是草稿;
+在构建器下方的「版本与发布」里把草稿发布为 v1、v2……
+
+| 入口 | 跑哪一版 |
+|---|---|
+| 接口调用 `invoke` | 当前发布的版本;请求体可用 `"version": N` 锁定某一版 |
+| 嵌入组件、API Key 建的会话 | 当前发布的版本 |
+| 网页工作台 | 能修改该智能体的人(作者)跟随草稿,便于试运行;其他人用已发布版本 |
+| 从未发布过的智能体 | 一律草稿(与发布功能上线前的行为相同) |
+
+- 版本在**建会话时锁定**,同一会话的每一轮都用同一版;发布或回滚只影响之后新建的会话。
+- **回滚**是把发布指针指回旧版本,不新建版本;**载入草稿**把旧版本内容放回草稿继续改。
+- 入参校验、结构化结果、OpenAPI 文档都以实际使用的版本为准;结果接口、运行记录与 webhook 带 `agentVersion`(`null` = 草稿)。
+- 回调地址不属于版本内容;切换到逃生舱不同的版本只有平台管理员能做。
+
+## 审计日志
+
+「设置 → 审计日志」记录谁在什么时候对什么做了什么:智能体的创建 / 修改(只记改了哪些字段,
+不记内容)/ 发布 / 回滚 / 载入草稿、分享、知识文档、API Key 的签发 / 吊销 / 限额、审批裁决、
+账号管理、登录与登录失败、个人凭证与签名密钥的变更、用户组。
+
+- **谁看得到**:资源归属人与操作者本人;管理员可看全平台。别人改了你分享出去的智能体、
+  有人试图登录你的账号,你都看得到。
+- **机密不进日志**:Key 明文、密码、签名密钥、模型 Key、提示词内容一律不记;审批只记
+  工具名与裁决,不记工具调用原文(Bash 命令里可能带令牌)和审批备注;登录失败只在账号存在时记邮箱
+  (防止误输进邮箱框的密码落库);另有按字段名的兜底打码。用户自己起的名称与说明
+  (智能体名、Key 名、版本说明、文档标题)按原样记录,请勿在其中填写机密。
+- **有界**:每次记录(查操作者快照 + 写入)总等待上限 1 秒,超时按尽力记录处理、请求照常返回;
+  超时只是不再等,底层写入并未取消,之后仍可能落库。
+- **已知取舍**:审计在业务操作成功之后单独写入,写失败只记错误日志、不回滚业务。
+  两次写入之间进程崩溃或审计写失败,这条审计会丢;需要强保证时应改为同库同事务的发件箱。
 
 ## 架构
 
@@ -113,7 +174,7 @@ const bus = new RedisBus(env.redisUrl); // 曾是 InMemoryBus
 | `OWA_REDIS_URL`                                     | Redis 连接串                                  |
 | `OWA_DATA_DIR`                                      | 会话工作空间根目录(**会被解析成绝对路径**)                   |
 | `OWA_ANTHROPIC_BASE_URL` / `_API_KEY`               | 平台默认凭证(三级链兜底)                              |
-| `OWA_MODEL` 与 `OWA_MODEL_{OPUS,SONNET,HAIKU,FABLE}` | 别名槽 → 真实 modelId                           |
+| `OWA_MODEL` 与 `OWA_MODEL_{OPUS,SONNET,HAIKU,FABLE}` | 别名槽 → 真实 modelId。优先级:单独配置的槽 > `OWA_MODEL` > 各别名的官方模型 id;都不填即用官方模型。`/api/health` 显示每个别名实际用哪个模型 |
 | `OWA_SESSION_SECRET`                                | 登录会话签名。**生产未设置会拒绝启动**                      |
 | `OWA_SECRET_KEY`                                    | 用户凭证加密主密钥。**生产未设置会拒绝启动**                   |
 | `OWA_AUTH_REQUIRED`                                 | 是否要求登录,默认 1;仅本地开发可设 0                      |
@@ -121,12 +182,30 @@ const bus = new RedisBus(env.redisUrl); // 曾是 InMemoryBus
 | `OWA_ALLOW_STDIO_MCP`                               | 是否允许 stdio MCP,默认 0;开启后智能体可在宿主机启动程序,仅可信部署使用 |
 | `OWA_EMBEDDED_WORKER`                               | 设 0 关掉 web 进程内嵌的 worker(拆进程部署时用)           |
 | `OWA_SHUTDOWN_GRACE_MS`                             | worker 收到 SIGTERM 后等在途任务的上限,默认 60000       |
+| `OWA_WORKER_CONCURRENCY`                            | 单个 worker 进程同时执行的运行数,默认 4(同一会话仍串行)     |
+| `OWA_WEBHOOK_ALLOW_PRIVATE`                         | webhook 允许投递到内网私有网段,默认 0;回环与云元数据地址始终禁止 |
+| `OWA_ALLOW_SIGNUP`                                  | 是否开放自助注册,默认 1;第一个账号始终可注册并成为管理员       |
+| `OWA_AUTH_IP_RATE_LIMIT`                            | 同一地址每 15 分钟的登录/注册上限,默认 30,0 关闭;按账号限流始终开启 |
 
 ### 凭证三级覆盖
 
-`请求级 override > 会话级 > 用户自带 > 平台默认`,`baseUrl` 与 `key` 各自独立回退 ——
-允许用户只覆盖 key 而沿用平台网关。用户自带的 key 用 AES-256-GCM 加密入库,
+`请求级 override > 用户自带 > 平台默认`。允许只覆盖 key 而沿用上一层的网关(见下方同层绑定)。用户自带的 key 用 AES-256-GCM 加密入库,
 只在运行时解密注入 agent 子进程;界面只回掩码。
+
+请求级 override(`invoke` 的 `override` 字段)整体加密后随任务入队,只在 worker 执行时解密;
+解不开就让这一轮失败,不会悄悄回落到平台凭证。
+
+**同层绑定**:`baseUrl` 取最高优先的那一层,`key` 必须来自同一层或更高优先的层。
+只覆盖 key、沿用平台网关是允许的;**自定义了 baseUrl 却不给 key,会被拒绝** ——
+否则平台 key 会被发往调用方指定的地址。
+
+**逃生舱(`escapeHatch`)** 只有平台管理员能设置;沙箱、hooks、cwd、env、权限模式等
+安全边界字段不能通过它覆盖(保存时拒绝,运行时也强制以平台为准)。
+
+**计费账号**:每个会话有一个计费账号(`sessions.billing_user_id`)—— 网页会话是它的所有者,
+API Key / embed 会话是签发那把 key 的账号。花费记在它头上、额度按它算、"用户自带"这一层
+凭证也取它的。额度在入口查一次,worker 执行前再复核一次(两者之间隔着队列)。
+额度是**事前检查**而非预留:并发中的运行可能让实际花费略超上限,超出量以并发运行数为界。
 
 > `OWA_SECRET_KEY` 泄露 = 所有用户的 key 泄露。它是可逆加密(要原样取回注入子进程),不是哈希。
 
@@ -165,11 +244,33 @@ worker 进程会自己加载 `.env` / `.env.local`(与 web 同一套配置)。
 ### 滚动更新
 
 worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落终态**
-(上限 `OWA_SHUTDOWN_GRACE_MS`,默认 60 秒)。超时才强退,那些任务由租约过期后的
-孤儿回收接手 —— 栅栏令牌保证它们不会被重复写入结果。
+(上限 `OWA_SHUTDOWN_GRACE_MS`,默认 60 秒)。到点仍在跑的运行会被主动中止、落 `failed`。
+
+**运行是至多一次的**:worker 崩溃或失租时,租约过期后的孤儿回收把运行判为 `failed`
+(`error.kind = "worker_lost"`),**不会**交给别的 worker 从头重跑。原因是运行有外部副作用
+(MCP 调用、Bash 里的网络请求),栅栏令牌只挡得住重复写结果,挡不住重复执行。
+需要重试的调用方自行重新 `invoke`(配合 `Idempotency-Key` 防止重复受理)。
 
 编排系统的 `terminationGracePeriodSeconds` 要**大于**这个值,否则进程会被 SIGKILL
 打断,白等一场。
+
+### 工作目录回收
+
+每个进程每 30 分钟触发一次回收;Redis 锁让同一时刻只有一个进程去扫(只为省掉重复扫描)。
+
+- 会话结束 1 小时后清中间产物(`node_modules`、`.venv`、日志、临时文件),业务产出保留。
+- 最后活动超过 7 天整体删除工作目录。会话与对话历史不删;工作台提示"工作目录已自动清理",
+  继续对话时在原路径重建空目录。
+- **与新运行、上传的并发**:写工作目录的一方(运行启动、文件上传)动手前先锁住会话行,记下
+  "刚用过"并确保目录存在;GC 动手时锁住同一行,在锁内重新判定(保留期内无活动、没有刚用过的
+  记录、没有在执行的运行),成立才在锁内把目标改名挪进 `workspaces/.trash`,放锁后再删除。
+  两边在同一把行锁上串行,不存在"判定之后、动手之前"的窗口;正确性不依赖 Redis 锁。
+  清理标记在【确实挪走之后】于同一事务里记下;源目录已不在(另一个 GC 已挪走)视为未执行,
+  不记标记,不会覆盖先到那一批的清理时刻。
+- **文件操作不随事务回滚**:改名挪走之后若事务提交失败(或进程在两步之间退出),只有数据库
+  标记回滚,文件已在回收站里。回收站批次因此【先核对再删】,且核对也在该会话的行锁里做
+  (正在提交的批次会等它结束):库里的清理时刻与批次一致才删;否则挪回原处;原处已有新目录
+  则留存到 `workspaces/.orphaned` 并报错,需人工处理,GC 永不自动删除它。
 
 ### 健康检查
 
@@ -189,20 +290,41 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 | POST            | `/api/auth`                                | —                      | 登录 / 注册 / 登出        |
 | GET             | `/api/auth`                                | cookie                 | 当前登录态(key 只回掩码)     |
 | PUT             | `/api/me/credentials`                      | cookie                 | 设置自带 base_url / key |
+| POST/DELETE     | `/api/me/webhook-secret`                   | cookie                 | 设置或生成 / 清除 webhook 签名密钥 |
+| PUT             | `/api/me/password`                         | cookie                 | 修改自己的登录密码          |
+| PATCH/DELETE    | `/api/sessions/{id}`                       | cookie / key           | 重命名、归档 / 删除会话      |
+| GET             | `/api/sessions?view=integrations`          | cookie                 | 用自己 Key 发起的接口调用会话 |
+| POST            | `/api/embed/cancel`                        | **embed token**        | 停止嵌入会话里的运行         |
+| POST/PATCH      | `/api/admin/accounts`                      | cookie(admin)          | 建号、改角色/停用/额度、重置密码 |
 | GET/POST        | `/api/agents`                              | cookie                 | 列出可见智能体 / 创建更新       |
+| DELETE          | `/api/agents/{id}`                         | cookie(所有者 / 管理员) | 软删除:调用、嵌入、分享、绑定的 Key 随之失效;历史会话与运行记录保留,id 不可复用;内置智能体不可删 |
 | GET/POST/DELETE | `/api/agents/{id}/share`                   | cookie(write)          | 分享给用户 / 组 / 公开      |
 | GET/POST/DELETE | `/api/agents/{id}/knowledge`               | cookie(读 read、写 write) | 知识文档                |
 | GET/POST        | `/api/groups` · `/api/groups/{id}/members` | cookie                 | 用户组与成员              |
-| GET/POST/DELETE | `/api/keys`                                | cookie                 | API Key(明文仅签发时返回一次) |
+| GET/POST/DELETE/PATCH | `/api/keys`                          | cookie                 | API Key(明文仅签发时返回一次;`expiresInDays` 设有效期);PATCH 调整每分钟调用上限 |
+| POST            | `/api/keys/{id}/rotate`                    | cookie                 | 轮换:签发同名同绑定同限额的新 Key,旧 Key 再有效 `graceHours`(默认 24,0~168)后失效 |
 | GET/POST        | `/api/sessions`                            | cookie / key           | 会话列表与创建             |
-| POST            | `/api/sessions/{id}/run`                   | cookie / key           | 发起一轮,SSE 流式返回       |
+| POST            | `/api/sessions/{id}/run`                   | cookie / key           | 发起一轮,SSE 流式返回;用 Key 建的会话里,声明了 inputSchema 的智能体须传符合它的 `input` |
 | GET             | `/api/sessions/{id}/events`                | cookie / key           | joinStream 断线重连     |
 | GET             | `/api/sessions/{id}/files`                 | cookie / key           | 文件树 / 预览 / 下载       |
-| GET/POST        | `/api/sessions/{id}/approvals`             | cookie / key           | 待审列表 / 批准拒绝         |
+| GET/POST/DELETE | `/api/sessions/{id}/approvals`             | cookie / key           | 待审与同类授权列表 / 裁决(`remember:"session"` 授权同类,`message` 拒绝说明)/ 撤销同类授权(`?grant=`) |
 | GET/POST        | `/api/sessions/{id}/branch`                | cookie / key           | 运行列表 / 重跑           |
 | POST            | `/api/sessions/{id}/cancel`                | cookie / key           | 取消未完成的运行(见下方延迟说明)   |
-| POST            | `/api/agents/{id}/invoke`                  | **key**                | 对外触发,返回 taskId      |
+| POST            | `/api/sessions/{id}/steer`                 | cookie / key           | 运行中途追加一条消息(见下方)     |
+| POST            | `/api/agents/{id}/invoke`                  | **key**                | 对外触发,返回 taskId;支持 `Idempotency-Key`、单次 `callbackUrl` |
 | GET             | `/api/agents/{id}/result`                  | **key**                | 轮询结构化结果             |
+| GET             | `/api/agents/{id}/openapi.json`            | cookie / key           | 该智能体的 OpenAPI 3.1 文档(含入参与结果契约) |
+| GET             | `/api/agents/{id}/webhook/deliveries`      | cookie(所有者)          | 回调投递记录              |
+| POST            | `/api/agents/{id}/webhook/test`            | cookie(所有者)          | 测试投递                |
+| POST            | `/api/runs/{id}/webhook/redeliver`         | cookie(所有者)          | 手动重发回调              |
+| GET             | `/api/audit`                               | cookie                 | 审计日志(与自己相关的;管理员 `scope=all` 看全部) |
+| GET/POST        | `/api/agents/{id}/versions`                | 读:cookie / key;发布:cookie(write) | 版本列表 / 把草稿发布为新版本 |
+| GET             | `/api/agents/{id}/versions/{v}`            | cookie / key           | 某个版本的完整内容            |
+| POST            | `/api/agents/{id}/versions/{v}/activate`   | cookie(write)          | 把发布指针切到该版本(回滚)    |
+| POST            | `/api/agents/{id}/versions/{v}/restore`    | cookie(write)          | 把该版本载入草稿            |
+| GET             | `/api/agents/{id}/versions/diff?from=&to=` | cookie / key           | 两个版本(或与 `draft`)的差异:提示词给行级差异,子代理 / MCP / 技能按名字对齐;只读者同样脱敏 |
+| GET/POST/PUT/DELETE | `/api/agents/{id}/evals/cases[/{caseId}]` | cookie(write)      | 评测用例:标准输入 + 规则断言 |
+| GET/POST        | `/api/agents/{id}/evals/runs[/{runId}]`    | cookie(write)          | 发起评测(`{ target: "draft" \| 版本号 }`)/ 最近评测 / 评测详情 |
 | POST            | `/api/embed/token`                         | **key**                | 换短时效嵌入令牌(服务端调)      |
 | POST            | `/api/embed/run`                           | **embed token**        | widget 发起运行         |
 | GET             | `/api/embed/script`                        | —                      | 嵌入脚本                |
@@ -211,6 +333,143 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 
 SSE 传输是裸 `data: <AgentEvent JSON>\n\n`。前端用 `fetch + getReader` 手工拆帧,
 不能用原生 `EventSource` —— 后者带不了鉴权头。
+
+终态 `result` 事件在运行**落库之后**才发布,与数据库口径一致。事件总线是尽力而为的:
+那条事件若丢失,SSE 与 `stream:false` 阻塞请求会从数据库读到终态收尾,不会一直挂着。
+
+输入(`prompt` / `invoke` 的 `input`)上限 200,000 字符,超出返回 413。
+
+### 接口调用的产物与过程
+
+`invoke` 返回 `taskId` 与 `sessionId`。用**同一把** API Key 还能:
+
+- `GET /api/sessions/{sessionId}/files` 列出这次任务的工作目录,`?download=<路径>` 下载智能体产出的文件
+- `GET /api/sessions/{sessionId}/events?runId={taskId}` 以 SSE 跟随过程事件,收到 `result` 后服务端关流;
+  断线带 `Last-Event-ID` 头续读
+
+别的 Key(包括同一账号的另一把)访问这些接口一律 403/404。OpenAPI 文档与接入中心的示例都写了这两条。
+
+**带文件调用**:`invoke` 请求体加 `files: [{ name, content }]`(content 为 base64,最多 20 个、合计 10MB),
+文件写进这次任务的工作目录,并在提示词末尾列出(与工作台附件同一约定)。name 是相对路径,
+不能含 `..`、不能以 `.` 开头。文件内容也算幂等请求内容:同一个 `Idempotency-Key` 换了文件按冲突处理。
+
+**结果附产物清单**:任务结束后,`/result`、阻塞响应与 Webhook 都带 `files: [{ path, size, download }]`
+(工作目录里的文件,最多 200 个;`filesTruncated` 表示清单不完整)。`download` 是相对本服务的路径,
+用同一把 Key 访问。清单读取有 2 秒上限,失败或超时为 `null`,不影响结果本身。
+
+### 运行中途追加消息
+
+工作台与 API 会话的运行在进行中也能继续补充:`POST /api/sessions/{id}/steer`,`{ runId, text, id }`。
+`id` 是这条消息的稳定标识(8~64 个字母、数字、`-`、`_`),**重试时必须复用** —— 同一 id 只入队一次;
+不传则由服务端生成,此时无法安全重试。
+模型还在干活(之后还会调工具)时,这条会插进当前这一轮;已经在写最终回答时,会在这一轮回答之后
+再答一轮 —— 这一次运行的结局、正文与结构化结果以最后一轮为准,美元取最终累计值,token 按轮累加。
+接口调用(invoke)与嵌入组件是一次性输入,不接受追加。
+
+答复如实反映结局,不会在没确认送达时说成功:
+
+| 状态 | outcome / code | 含义 |
+|---|---|---|
+| 200 | `delivered` | 已交给模型 |
+| 202 | `pending` | 已受理,等待上限(5 秒)内没等到结局;最终结局看事件流里的 `steer` 事件(`delivered` / `dropped`) |
+| 202 | `unknown` | 受理请求本身没得到答复(超时 / 连接问题),这条**可能已经入队** —— 用同一个 `id` 再请求一次,不要改作新消息 |
+| 409 | `not_accepting` | 这一轮还没开始或已经收尾,这条**没有受理** —— 可以作为新消息发送 |
+| 409 | `dropped` | 受理了,但运行在交给模型前结束了 —— 可以作为新消息发送 |
+
+可靠性约定:
+- 受理与关闭输入检查同一个状态(Redis 里各一段 Lua):第一条结果到达时关闭输入,此前受理的仍会交给模型,
+  此后到达的一律不受理。
+- 读取只读不删,worker 记下结局(送达 / 未送达)时才删除 —— 读取的响应超时丢了,消息也还在,
+  收尾时会重新读到并给出结局。
+- 同一 `id` 的结论只定一次:没受理时也会留下记录,所以超时后才真正执行的同 `id` 受理不会再入队。
+- 只有 `not_accepting` / `dropped` 是"可以重发"的定局。工作台据此自动改为本轮结束后发送;
+  多次重试仍不确定时只提示"未确认",不自动重发。
+- 需要 Redis 可用:Redis 持续不可用时,已受理消息的结局可能一直是 `pending`。
+
+### 智能体评测
+
+在构建器的「评测」卡片里给智能体配一组用例:标准输入(文本,或按 inputSchema 的 JSON 对象)+ 规则断言
+—— 运行成功(或期望失败)、正文包含 / 不包含、结构化结果的字段等于、花费与耗时上限。对草稿或某个
+已发布版本「运行评测」,看通过率与每个用例没通过的原因。
+
+- **只在手动点击时运行**:每个用例真正调用一次模型,花费记在发起人名下、计入额度
+- 评测里的运行与接口调用走同一个运行内核,但不推回调、不进工作台会话列表;运行记录里来源显示为「评测」
+- 入参不符合该版本 inputSchema 的用例不发起运行,直接判「未能运行」
+- 用例的输入与断言在开跑时快照:之后改了用例,历史评测仍按当时的标准显示
+- 智能体配置也在开跑时固定:一次评测的所有用例跑同一份配置(评测途中保存草稿不影响它),
+  评测记录带这份配置的摘要,历史里据此认出两次跑的是不是同一份配置
+- 断言只用确定、可复现的规则,不用模型打分
+
+### 统一的运行结果
+
+`GET /api/agents/{taskId}/result`、`stream:false` 阻塞响应、Webhook 的 `run.finished` 载荷
+都由同一份数据库记录、经同一个函数组装,共有这些字段:
+
+| 字段 | 说明 |
+|---|---|
+| `taskId` | 运行 id |
+| `status` / `done` | `pending` / `running` / `success` / `failed` / `cancelled`;后三者 `done=true` |
+| `agentVersion` | 本次运行用的已发布版本号;跑草稿时为 `null` |
+| `structured` | 结构化结果(定义了 `outputSchema` 才有) |
+| `salvaged` | `true` 表示结构化结果是从模型正文里补救解析出来的,而不是经结构化输出工具交付 |
+| `text` | 最终正文 |
+| `error` | `null` 或 `{ kind, message, status? }` |
+| `cost` | `null` 或 `{ usd?, input, output, partial? }` |
+| `startedAt` / `endedAt` | ISO 时间 |
+
+另有各自的附加字段:`/result` 与 Webhook 保留旧字段 `summary`(同 `text`,已弃用);阻塞响应
+带 `runId`、`thinking`、`toolCalls`、`usage`;Webhook 带 `deliveryId`、`event`、`sessionId`、`agentId`。
+
+> **不兼容变更**:阻塞响应的 `error` 以前是字符串,现在与另两处一致,是 `{ kind, message }` 对象。
+
+### 调用限流
+
+用 API Key 发起的**新运行**都要限流 —— `invoke`、用 Key 建的会话里的 `/sessions/{id}/run` 与重跑、
+嵌入组件(访客的运行记在签发令牌的 Key 上)。用同一个 `Idempotency-Key` 重放已受理的任务不计入。两层固定窗口:
+
+- 每把 API Key 每分钟 `OWA_INVOKE_RATE_LIMIT_PER_KEY` 次(默认 60)。签发时或在接入中心可单独调低;只有管理员能调高。
+- 每个智能体每分钟 `OWA_INVOKE_RATE_LIMIT_PER_AGENT` 次(默认 600,所有 Key 合计)。
+
+超出返回 `429 rate_limited`,body 里 `scope` 为 `key` 或 `agent`,带 `Retry-After`;
+`202` 响应带 `X-RateLimit-Limit / Remaining / Reset`,调用方可据此自我节流。
+检查顺序:鉴权 → 幂等重放 → 限流 → 额度 → 版本与契约校验 → 入队。
+Redis 不可用时限流放行(花费仍受月度额度约束)。固定窗口在窗口交界处最多可能放过两倍的突发。
+
+### Webhook
+
+智能体配了回调地址,运行落终态(成功 / 失败 / 取消 / worker 失联)后会 `POST` 一次:
+
+```
+X-OWA-Delivery:  <taskId>          # 重发时不变,接收方据此去重
+X-OWA-Timestamp: <unix 秒>
+X-OWA-Signature: v1=<hex(HMAC-SHA256(密钥, "<timestamp>.<原始请求体>"))>
+```
+
+- 签名密钥按用户设置(设置 → 模型凭证 → Webhook 签名密钥),该用户名下所有智能体共用;
+  没配置则不带签名头。验签时用**原始请求体字节**,并拒绝时间戳过旧的请求以防重放。
+- **换密钥不中断验签**:设置新密钥时,旧密钥在重叠期内(`graceHours`,默认 24 小时,0~168;0 即刻作废)
+  仍额外签一份,放在 `X-OWA-Signature-Previous`。主签名头 `X-OWA-Signature` 始终用当前密钥,
+  已接入的接收方不受影响;还没换上新密钥的接收方在重叠期内改验 `X-OWA-Signature-Previous` 即可。
+- 投递是**至少一次**:失败按 30s / 2m / 10m / 30m / 2h 退避重试,4xx(408/429 除外)不重试。
+- 只有智能体所有者(与管理员)能查看和修改回调地址;有 write 权限的协作者也不行 ——
+  否则能把所有者名下全部调用的结果转发走。
+- 地址不能指向回环、链路本地(含云元数据 169.254.169.254)等网段;内网私有网段需
+  `OWA_WEBHOOK_ALLOW_PRIVATE=1`。保存时检查字面量;投递时的检查接在**建连自己的那次 DNS 解析**上,
+  被检查的地址就是被连接的地址 —— 域名两次解析返回不同地址(DNS rebinding)绕不过去。
+  请求仍以原始域名发出,Host 头与 TLS 证书校验照常针对域名;不复用连接,不跟随重定向。
+- **单次调用指定回调地址**:`invoke` 请求体带 `callbackUrl`,这次的结果就投到它(代替智能体配置的地址,
+  智能体没配回调也可以),用**调用方**(签发这把 Key 的账号)的签名密钥签名 —— 接收方是调用方自己;
+  调用方没配密钥则不签名,不会借用所有者的密钥。地址规则同上,不合规直接 400。
+  它也算请求内容:同一个 `Idempotency-Key` 换了地址按冲突处理(422)。
+- 没指定 `callbackUrl` 的运行投到智能体**投递时**配置的地址,不在受理时快照 ——
+  所有者修好配错的地址后点"重发",投的是修好的新地址。
+
+**投递记录、测试与重发**(接入中心,仅智能体所有者与管理员):每次投递记一行(第几次、对方状态码、
+错误、耗时、是否签名),回调地址只存协议 + 主机 + 路径(查询串常带令牌,不落库)。
+"发送测试"向当前地址发 `event: "webhook.test"`,签名与正式回调相同,同步返回结果。
+"重发"把某次运行的回调放回发件箱按正常流程发出,只对接口调用与 API 会话的运行开放,
+还在投递中的不重复入队。记录写入尽力而为、有 2 秒等待上限:写不进去不影响投递结果与接口返回
+(超时只是不再等,底层写入未取消)。
 
 ---
 
@@ -227,14 +486,31 @@ macOS 的 seatbelt 沙箱会**吞掉沙箱内 Bash 的 stdout** —— agent 跑
 但 Bash 执行任意命令,路径藏在命令文本里,引号/变量/拼接都能绕过匹配 ——
 只能靠内核沙箱。所以本地开发环境下不要跑不受信任的智能体。
 
-### SDK 的 session id 不是时间点快照
+### 会话之间没有读隔离
 
-同一会话连跑两轮,SDK 返回的 `session_id` **完全相同**,resume 它得到的是最新状态。
-所以「回到第 2 轮之前换个说法重做」做不到 —— 那样实现出来会是个看起来像分支、
-实际仍在主线继续的假功能。因此只提供两种语义真实的重跑:
+每个会话有独立工作目录,但**隔离的只是写入**。所有会话共享 `dataDir/.agent-home`
+作为 HOME,SDK 把每个会话未脱敏的完整过程(transcript)写在其下的 `.claude/projects/`;
+沙箱的禁读名单只覆盖宿主 HOME 的敏感目录,路径守卫也只拦写不拦读。所以任何会话的
+Bash 或 Read 工具都能读到其它会话的 transcript。`OWA_SANDBOX=0` 时 Bash 更是没有任何围栏。
 
-- `fresh` — 不 resume,干净上下文重来(跑歪了换个说法再试的正解)
-- `continue` — resume 当前状态,等价追加一轮
+这是项目明确接受的边界(见 `agents.md` §13.2),适合单租户或内部部署。
+对外多租户需按租户分离 SDK 状态,并对 Bash 和文件工具落实对应的文件访问边界。
+
+### 重跑:三种语义,都是真的
+
+同一会话连跑几轮,SDK 返回的 `session_id` **完全相同**,各轮写进同一份 transcript —— 只按
+session id 续接得到的是最新状态。要回到中间某一轮,还得给出"从哪条消息之后接着跑"
+(`resumeSessionAt`)并分到新会话(`forkSession`);平台为此逐轮记下每轮首尾消息的 uuid。
+`POST /api/sessions/{id}/branch` 的 `mode`:
+
+- `rewind`(工作台的「重跑」默认用它)—— 回到那一轮**之前**的状态重来:之前的对话都在,
+  那一轮及之后的都不在;分支之后接着聊就在分支上继续,原对话不受影响。
+  记录范围之前的旧运行无法精确定位,返回 409 `rewind_unavailable`(工作台随即改为 `fresh` 并提示)
+- `fresh` —— 不 resume,干净上下文重来
+- `continue` —— resume 当前状态,等价追加一轮
+
+`scripts/sdk-probe/rewind-e2e.ts` 用生产引擎 + 真实 SDK + 假模型验证了上述语义。
+注意工作台里分支之前展示的各轮仍按原样显示,分支那一轮标有「⑂ 从上文某轮分叉重跑」。
 
 ### 兼容网关对结构化输出的支持不一致
 
@@ -254,7 +530,7 @@ macOS 的 seatbelt 沙箱会**吞掉沙箱内 Bash 的 stdout** —— agent 跑
 (本地没有远端仓库)。
 
 已经验证的是每一条 `run:` 里的命令本身能跑通 —— `pnpm ci:dryrun` 会按 ci.yml 的
-步骤顺序在本机实跑一遍(建库、迁移两个库、typecheck、lint、645 单测、
+步骤顺序在本机实跑一遍(建库、迁移两个库、typecheck、lint、全部单测、
 **故意抽掉依赖确认跳过守卫真的会拦下**、build、e2e 53 条、服务被拆干净)。
 这个脚本在仓库里,谁都可以复现,不是一句"我验过了"。
 
@@ -277,15 +553,14 @@ macOS 的 seatbelt 沙箱会**吞掉沙箱内 Bash 的 stdout** —— agent 跑
 规模漂移,实测 50 篇文档时命中直接归零,也就是「知识库越完善越检索不到」。
 中文分词过滤了虚词单字,否则一个「的」就能让任意两段中文匹配上。
 
-### 取消有最多 15 秒延迟
+### 取消:通常立即生效,最坏 15 秒
 
-`POST /cancel` 把运行标记为 cancelled,正在执行的那个 worker 要到下一次心跳
-(默认 15 秒)才发现自己已被取消并中止。接口的响应里如实写了这一点 ——
-界面不应在点下去的瞬间就宣称「已停止」。
+`POST /cancel` 把运行标记为 cancelled 后,通过 Redis 通知正在执行它的 worker 立即中止。
+通知是"尽力而为"的(pub/sub 最多一次):丢了的话,worker 在下一次续租心跳(默认 15 秒)
+时也会发现并中止。被取消的运行已消耗的 token 照样入账(美元金额未知时只记 token)。
 
-**已知不一致**:取消时 SSE 末帧报 `status:"failed"`(摘要是 `aborted by user`),
-而数据库里是 `cancelled`。因为 result 事件由编排层发布,它区分不了这次中止来自
-取消还是故障;worker 知道但手上没有总线。数据库口径是准确的。
+取消时 SSE 末帧是 `status:"cancelled"`,与数据库一致。(曾经报 `failed`:result 事件由编排层
+在落库前发布,分不清中止来自取消还是故障。现在由真正写入终态的一方发布。)
 
 ---
 

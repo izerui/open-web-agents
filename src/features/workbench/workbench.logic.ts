@@ -5,6 +5,12 @@ export function sessionIdFromSearch(search: string): string | null {
   return value || null;
 }
 
+/** ?agent=<id>:打开工作台时直接选中某个智能体(构建器"试运行"、设计会话"去试运行"用)。 */
+export function agentIdFromSearch(search: string): string | null {
+  const value = new URLSearchParams(search).get("agent")?.trim();
+  return value || null;
+}
+
 export function withSessionInUrl(href: string, sessionId: string | null): string {
   try {
     const url = new URL(href);

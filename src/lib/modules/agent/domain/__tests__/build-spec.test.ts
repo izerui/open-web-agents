@@ -36,16 +36,14 @@ describe("buildSpec", () => {
     expect(spec.limits).toEqual({ maxTurns: 20, effort: "high" });
   });
 
-  it("outputSchema / verifyRules 透传", () => {
+  it("outputSchema 透传", () => {
     const cfg: AgentConfig = {
       systemPrompt: "p",
       model: "opus",
       outputSchema: { type: "object" },
-      verifyRules: [{ kind: "artifact_exists" }],
     };
     const spec = buildSpec(cfg, ctx);
     expect(spec.outputSchema).toEqual({ type: "object" });
-    expect(spec.verifyRules).toEqual([{ kind: "artifact_exists" }]);
   });
 
   it("escapeHatch 透传", () => {
@@ -56,18 +54,19 @@ describe("buildSpec", () => {
     expect(spec.escapeHatch).toEqual({ includePartialMessages: true });
   });
 
-  it("透传 skills/mcp/tools", () => {
+  it("透传技能包/mcp/tools", () => {
+    const pkg = { name: "render", description: "渲染视频", files: { "SKILL.md": "步骤…" } };
     const spec = buildSpec(
       {
         systemPrompt: "p",
         model: "sonnet",
-        skills: ["pdf"],
+        skillPackages: [pkg],
         mcpServers: [{ name: "fs", type: "http", url: "http://x" }],
         tools: [{ name: "render" }],
       },
       ctx,
     );
-    expect(spec.skills).toEqual(["pdf"]);
+    expect(spec.skillPackages).toEqual([pkg]);
     expect(spec.mcpServers?.[0]?.name).toBe("fs");
     expect(spec.tools?.[0]?.name).toBe("render");
   });

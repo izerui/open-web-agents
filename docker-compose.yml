@@ -45,7 +45,7 @@ services:
       OWA_ANTHROPIC_BASE_URL: >-
         ${OWA_ANTHROPIC_BASE_URL:-https://api.anthropic.com}
       OWA_ANTHROPIC_API_KEY: ${OWA_ANTHROPIC_API_KEY:-}
-      OWA_MODEL: ${OWA_MODEL:-sonnet}
+      OWA_MODEL: ${OWA_MODEL:-}
       # 生产必须显式设置,否则会话可被伪造、用户密钥可被解密
       OWA_SESSION_SECRET: ${OWA_SESSION_SECRET:?必须设置}
       OWA_SECRET_KEY: ${OWA_SECRET_KEY:?必须设置}

@@ -25,11 +25,15 @@ import { ApprovalBar } from "./approval-bar";
 import { CommandPalette } from "./command-palette";
 import { ContextWindowMeter } from "./context-window-meter";
 import { ChatThread, contextTokens, sumUsage, totalUsageTokens } from "./conversation";
+import { DesignBar } from "./design-bar";
 import { createEventBatcher } from "./event-batcher";
 import { FilePanel } from "./file-panel";
+import { SessionActions } from "./session-actions";
 import { activityOf, groupSessions, relativeTime } from "./session-groups";
+import { sendSteer } from "./steer-client";
 import type { AgentSummary, SessionSummary, Turn } from "./types";
 import {
+  agentIdFromSearch,
   filterSessionsForAgent,
   sessionIdFromSearch,
   updateTurnByLocalId,
@@ -76,6 +80,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
+import { Skeleton } from "@/components/ui/skeleton";
 
 import {
   Attachment,
@@ -290,15 +295,39 @@ async function uploadPromptFiles(
   return body.files;
 }
 
+/** 内置"AI 智能体设计师"的 id(与 agent/domain/architect.ts 一致;前端不引服务端模块)。 */
+const ARCHITECT_AGENT_ID = "agent-architect";
+
+/** 内置通用智能体的开场建议(它没有配置自己的)。 */
+const DEFAULT_AGENT_STARTERS = [
+  "在工作目录写一个 hello.py",
+  "帮我分析这个项目的架构",
+  "创建一个简单的 REST API",
+];
+
 export function Workbench() {
   const router = useRouter();
   const [agents, setAgents] = useState<AgentSummary[]>([]);
+  /**
+   * 智能体列表的加载状态。曾经失败只弹一个 toast:之后 agents 为空、输入框永久禁用,
+   * 页面上既没有原因也没有重试入口;还在加载时又和"真的没有智能体"长得一样。
+   */
+  const [agentsState, setAgentsState] = useState<"loading" | "ok" | "error">("loading");
   const [agentId, setAgentId] = useState("default");
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [running, setRunning] = useState(false);
+  /**
+   * 运行中提交的消息排在这里,本轮结束后依次发出(参照 Codex 的排队追问)。
+   *
+   * 曾经运行中按回车:send() 直接 return,输入框却以为提交成功,把文字和附件一起清空 ——
+   * 用户写的东西静默丢失,也不知道为什么没发出去。
+   */
+  const [queued, setQueued] = useState<{ id: string; text: string; files: FileUIPart[] }[]>([]);
+  /** 追加消息接口答"待定"(202)的那些:之后若在事件流里收到未送达,自动改为排队重发 */
+  const pendingSteerRef = useRef(new Set<string>());
   const [filesKey, setFilesKey] = useState(0);
   const [pickerOpen, setPickerOpen] = useState(false);
   /**
@@ -360,32 +389,45 @@ export function Workbench() {
     }
   }, []);
 
-  useEffect(() => {
+  const loadAgents = useCallback(() => {
+    setAgentsState("loading");
     void fetch("/api/agents")
       .then(async (r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return (await r.json()) as { agents?: AgentSummary[] };
       })
       .then((d) => {
+        setAgentsState("ok");
         const nextAgents = d.agents ?? [];
         setAgents(nextAgents);
-        setAgentId((currentId) =>
-          nextAgents.some((agent) => agent.id === currentId)
+        setAgentId((currentId) => {
+          // 从构建器"试运行"跳过来时 URL 带着 ?agent=,优先选中它
+          const wanted = agentIdFromSearch(window.location.search);
+          if (!currentId && wanted && nextAgents.some((agent) => agent.id === wanted)) {
+            return wanted;
+          }
+          return nextAgents.some((agent) => agent.id === currentId)
             ? currentId
-            : (nextAgents[0]?.id ?? ""),
-        );
+            : (nextAgents[0]?.id ?? "");
+        });
       })
       .catch((e: unknown) => {
         // 智能体拉不到不该连累会话列表 —— 原来两条链共用一个 effect 且都没 catch,
         // 任一失败都变成 unhandledRejection,两边一起空掉
         toast.error(`智能体列表加载失败:${e instanceof Error ? e.message : String(e)}`);
+        setAgentsState("error");
       });
+  }, []);
+
+  useEffect(() => {
+    loadAgents();
     void loadSessions();
-  }, [loadSessions]);
+  }, [loadAgents, loadSessions]);
 
   const newSession = useCallback(() => {
     if (running) return;
     openSeqRef.current += 1;
+    setQueued([]);
     abortRef.current?.abort();
     abortRef.current = null;
     activeRunRef.current = null;
@@ -474,6 +516,7 @@ export function Workbench() {
     setRunning(false);
 
     const seq = ++openSeqRef.current;
+    setQueued([]);
     const targetSession = sessions.find((session) => session.id === id);
     if (targetSession) setAgentId(targetSession.agentId);
     setSessionId(id);
@@ -556,12 +599,13 @@ export function Workbench() {
    * 建会话失败(未登录、库挂了)时 session 是 undefined,下一行立刻 TypeError,
    * 而这个异常发生在发送流程内部 —— 用户点了发送,界面毫无反应,也没有任何提示。
    */
-  async function ensureSession(): Promise<string> {
+  async function ensureSession(firstPrompt: string): Promise<string> {
     if (sessionId) return sessionId;
     const res = await fetch("/api/sessions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ agentId }),
+      // 用第一句话当标题:曾经不带标题,侧栏里一列全是看不出内容的 id
+      body: JSON.stringify({ agentId, title: firstPrompt.replace(/\s+/g, " ").slice(0, 40) }),
     });
     const body = (await res.json().catch(() => null)) as {
       session?: SessionSummary;
@@ -608,7 +652,7 @@ export function Workbench() {
     activeRunRef.current = sendHandle;
 
     try {
-      const id = await ensureSession();
+      const id = await ensureSession(prompt);
       abort.signal.throwIfAborted();
       if (seq !== openSeqRef.current) throw new Error("会话已经切换");
       const uploadedFiles = await uploadPromptFiles(id, files, abort.signal);
@@ -676,8 +720,9 @@ export function Workbench() {
   }
 
   /**
-   * 重跑某一轮:入队一个【不 resume 的干净运行】,再挂上事件流看它跑。
-   * 已有记录原样保留,不被覆盖。
+   * 重跑某一轮:回到那一轮【之前】的状态重来(之前的对话都在,那一轮及之后的不在),
+   * 再挂上事件流看它跑。已有记录原样保留,不被覆盖。
+   * 较早的记录定位不了那一轮之前的状态时,改为干净上下文重跑,并如实提示。
    */
   async function rerun(fromRunId: string, prompt: string) {
     if (!sessionId || running) return;
@@ -710,16 +755,24 @@ export function Workbench() {
     activeRunRef.current = rerunHandle;
 
     try {
-      const res = await fetch(`/api/sessions/${targetSessionId}/branch`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fromRunId, mode: "fresh", prompt }),
-        signal: abort.signal,
-      });
-      const data = (await res.json().catch(() => null)) as {
+      const branch = (mode: "rewind" | "fresh") =>
+        fetch(`/api/sessions/${targetSessionId}/branch`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fromRunId, mode, prompt }),
+          signal: abort.signal,
+        });
+      let res = await branch("rewind");
+      let data = (await res.json().catch(() => null)) as {
         runId?: string;
         error?: string;
+        code?: string;
       } | null;
+      if (res.status === 409 && data?.code === "rewind_unavailable") {
+        toast.message("这一轮之前的对话状态无法精确定位(较早的记录),改为干净上下文重跑");
+        res = await branch("fresh");
+        data = (await res.json().catch(() => null)) as typeof data;
+      }
       if (!res.ok || !data?.runId) {
         throw new Error(data?.error ?? `重跑失败(HTTP ${res.status})`);
       }
@@ -750,6 +803,9 @@ export function Workbench() {
   }
 
   const current = agents.find((a) => a.id === agentId);
+  // 开场建议按智能体配置;曾经写死成编程示例,对"发票抽取"之类的智能体毫无意义
+  const starters =
+    current?.config.starters ?? (current?.id === "default" ? DEFAULT_AGENT_STARTERS : []);
   // 一个智能体都没有时,agentId 还是兜底的 "default",不能拿它当名字显示
   const hasAgents = agents.length > 0;
   const sessionsForAgent = useMemo(
@@ -793,6 +849,17 @@ export function Workbench() {
     (message: PromptInputMessage) => {
       const text = message.text.trim() || (message.files.length > 0 ? "请查看附件。" : "");
       if (!text) return;
+      if (running) {
+        const runId = activeRunRef.current?.runId;
+        // 纯文本:直接追加进正在跑的这一轮;带附件的(追加只能带文本)或还拿不到 runId 时照旧排队
+        if (message.files.length === 0 && runId && sessionId) {
+          void steerOrQueue(sessionId, runId, text);
+          return;
+        }
+        setQueued((q) => [...q, { id: crypto.randomUUID(), text, files: message.files }]);
+        toast.message("已排队,本轮结束后发送");
+        return;
+      }
       return send(text, message.files, true);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -807,6 +874,57 @@ export function Workbench() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [running, input],
   );
+
+  /**
+   * 运行中追加一条消息(发送策略见 steer-client.ts)。
+   * 只有明确"没受理 / 没送达"才改为本轮结束后作为新消息发送;不确定时绝不自动重发 ——
+   * 那条可能已经交给了智能体,再发一遍就执行两次。
+   */
+  async function steerOrQueue(sid: string, runId: string, text: string) {
+    const r = await sendSteer({ sessionId: sid, runId, id: crypto.randomUUID(), text });
+    switch (r.kind) {
+      case "delivered":
+        toast.success("已交给智能体");
+        return;
+      case "pending":
+        pendingSteerRef.current.add(r.id);
+        toast.message("已提交,等待智能体接收");
+        return;
+      case "unconfirmed":
+        // 结局若之后从事件流里来(未送达),照样会自动改为排队
+        pendingSteerRef.current.add(r.id);
+        toast.warning("暂时无法确认这条是否已交给智能体,请留意它的回答;确认没收到再重新发送");
+        return;
+      case "invalid":
+        toast.error(r.message);
+        return;
+      case "resend":
+        setQueued((q) => [...q, { id: crypto.randomUUID(), text, files: [] }]);
+        toast.message("这一轮正在收尾,本轮结束后作为新消息发送");
+        return;
+    }
+  }
+
+  // 待定的追加消息最终没送达:改为排队,本轮结束后作为新消息发送
+  useEffect(() => {
+    for (const turn of turns) {
+      for (const e of turn.events) {
+        if (e.kind !== "steer" || e.outcome !== "dropped" || !e.id) continue;
+        if (!pendingSteerRef.current.delete(e.id)) continue;
+        setQueued((q) => [...q, { id: crypto.randomUUID(), text: e.text, files: [] }]);
+      }
+    }
+  }, [turns]);
+
+  // 本轮结束、且当前会话可以发送时,发出排在最前的一条
+  // biome-ignore lint/correctness/useExhaustiveDependencies: send 每次渲染都是新闭包,只在状态变化时触发
+  useEffect(() => {
+    if (running || historyLoading || historyError !== null) return;
+    const next = queued[0];
+    if (!next) return;
+    setQueued((q) => q.slice(1));
+    void send(next.text, next.files).catch(() => {});
+  }, [running, historyLoading, historyError, queued]);
 
   const sendRef = useRef(send);
   const rerunRef = useRef(rerun);
@@ -852,7 +970,8 @@ export function Workbench() {
       <CommandPalette
         open={paletteOpen}
         onOpenChangeAction={setPaletteOpen}
-        sessions={visibleSessions}
+        // 全部会话:命令面板是全局搜索,不该被当前智能体和侧栏搜索词收窄
+        sessions={sessions}
         agents={agents}
         currentAgentId={agentId}
         running={running}
@@ -1003,7 +1122,16 @@ export function Workbench() {
             </div>
           )}
 
-          {sessionsError === null && sessionsForAgent.length === 0 && (
+          {/* 首次加载:骨架而不是"还没有会话" —— 两者长得一样,用户会以为历史丢了 */}
+          {!sessionsLoaded && sessionsError === null && (
+            <div className="space-y-2 px-3 py-3 group-data-[collapsible=icon]:hidden" aria-busy>
+              {[0, 1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-8 w-full" />
+              ))}
+            </div>
+          )}
+
+          {sessionsLoaded && sessionsError === null && sessionsForAgent.length === 0 && (
             <div className="flex flex-col items-center gap-1.5 px-3 py-10 text-center group-data-[collapsible=icon]:hidden">
               <MessageSquare className="size-5 text-muted-foreground/30" />
               <p className="text-xs text-muted-foreground">还没有会话</p>
@@ -1067,6 +1195,15 @@ export function Workbench() {
                           <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-brand" />
                         )}
                       </SidebarMenuButton>
+                      <SessionActions
+                        session={s}
+                        onChanged={() => void loadSessions()}
+                        onRemoved={(removedId) => {
+                          setSessions((all) => all.filter((x) => x.id !== removedId));
+                          // 正打开着的会话被归档/删除了:回到空白新会话,而不是停在一个已不存在的会话上
+                          if (removedId === sessionId) newSession();
+                        }}
+                      />
                     </SidebarMenuItem>
                   );
                 })}
@@ -1134,7 +1271,7 @@ export function Workbench() {
                     <SheetDescription className="sr-only">
                       浏览、预览和下载当前会话文件
                     </SheetDescription>
-                    <FilePanel sessionId={sessionId} refreshKey={filesKey} />
+                    <FilePanel sessionId={sessionId} refreshKey={filesKey} live={running} />
                   </SheetContent>
                 </Sheet>
 
@@ -1168,30 +1305,29 @@ export function Workbench() {
                   </div>
                 )}
 
-                {/* 错误横幅 */}
-                {turns.length > 0 &&
-                  (() => {
-                    const last = turns[turns.length - 1];
-                    const resultEvt = last?.events.findLast((e) => e.kind === "result");
-                    if (!resultEvt || resultEvt.kind !== "result") return null;
-                    if (resultEvt.status === "success" || resultEvt.status === "cancelled") {
-                      return null;
-                    }
-                    const isUnknown = resultEvt.status === "unknown";
-                    return (
-                      <div
-                        className={cn(
-                          "shrink-0 border-l-4 px-4 py-3 text-sm",
-                          isUnknown
-                            ? "border-warning bg-warning/10 text-warning"
-                            : "border-destructive bg-destructive/10 text-destructive",
-                        )}
-                      >
-                        {resultEvt.summary ?? (isUnknown ? "运行结局未知" : "运行失败")}
-                      </div>
-                    );
-                  })()}
+                {sessionId && agentId === ARCHITECT_AGENT_ID && (
+                  <DesignBar
+                    key={sessionId}
+                    sessionId={sessionId}
+                    disabled={running}
+                    onAskFix={stableAnswerAction}
+                  />
+                )}
 
+                {(() => {
+                  const purgedAt = sessions.find((s) => s.id === sessionId)?.workspacePurgedAt;
+                  return purgedAt ? (
+                    <output className="mx-4 mt-3 block rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs">
+                      这个会话长期未活动,工作目录已于 {new Date(purgedAt).toLocaleString()}{" "}
+                      自动清理,之前生成的文件已不在。对话记录还在;继续对话会在新的空目录里进行。
+                    </output>
+                  ) : null;
+                })()}
+
+                {/*
+                  失败与"结局未知"由该轮自己的结果卡片展示。曾经顶部还有一条横幅显示同一段话,
+                  同一个失败出现两遍。
+                */}
                 {/* 对话区域 */}
                 <div className="relative flex min-h-0 flex-1 flex-col">
                   {historyLoading ? (
@@ -1215,11 +1351,41 @@ export function Workbench() {
                     </div>
                   ) : turns.length === 0 ? (
                     <div className="flex min-h-0 flex-1 items-center justify-center">
-                      <div className="flex flex-col items-center gap-3 text-center">
-                        <MessageSquare className="size-12 text-muted-foreground/20" />
-                        <h2 className="text-xl font-medium text-foreground">开始对话</h2>
-                        <p className="text-sm text-muted-foreground">发一句话试试...</p>
-                      </div>
+                      {agentsState === "error" ? (
+                        <div className="flex flex-col items-center gap-3 px-6 text-center">
+                          <AlertTriangle className="size-6 text-destructive" />
+                          <p className="text-sm text-destructive">智能体列表没读到</p>
+                          <Button variant="outline" size="sm" onClick={loadAgents}>
+                            <RefreshCw className="size-3.5" />
+                            重试
+                          </Button>
+                        </div>
+                      ) : agentsState === "ok" && !hasAgents ? (
+                        // 没有任何可用智能体时,"发一句话试试"配一个禁用的输入框是自相矛盾的
+                        <div className="flex flex-col items-center gap-3 px-6 text-center">
+                          <MessageSquare className="size-12 text-muted-foreground/20" />
+                          <h2 className="text-xl font-medium text-foreground">
+                            还没有可用的智能体
+                          </h2>
+                          <p className="text-sm text-muted-foreground">
+                            先创建一个智能体,或请管理员分享给你。
+                          </p>
+                          <Button size="sm" onClick={() => router.push("/agents")}>
+                            新建智能体
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="flex max-w-md flex-col items-center gap-3 px-6 text-center">
+                          <MessageSquare className="size-12 text-muted-foreground/20" />
+                          <h2 className="text-xl font-medium text-foreground">
+                            {current ? `和「${current.name}」开始对话` : "开始对话"}
+                          </h2>
+                          <p className="text-sm text-muted-foreground">
+                            {current?.description ||
+                              "描述你要它完成的事,它会在独立的工作目录里动手。"}
+                          </p>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <ChatThread
@@ -1237,20 +1403,15 @@ export function Workbench() {
                 <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20">
                   <div className="w-full px-3 sm:px-5">
                     <div className="pointer-events-auto mx-auto max-w-3xl">
-                      {turns.length === 0 && (
+                      {turns.length === 0 && starters.length > 0 && (
                         <Suggestions className="pb-3">
-                          <Suggestion
-                            suggestion="在工作目录写一个 hello.py"
-                            onClick={handleSuggestionClick}
-                          />
-                          <Suggestion
-                            suggestion="帮我分析这个项目的架构"
-                            onClick={handleSuggestionClick}
-                          />
-                          <Suggestion
-                            suggestion="创建一个简单的 REST API"
-                            onClick={handleSuggestionClick}
-                          />
+                          {starters.map((text) => (
+                            <Suggestion
+                              key={text}
+                              suggestion={text}
+                              onClick={handleSuggestionClick}
+                            />
+                          ))}
                         </Suggestions>
                       )}
                       <div className="pb-4">
@@ -1263,6 +1424,34 @@ export function Workbench() {
                             )}
                             onSelect={selectSlashCommand}
                           />
+                        )}
+                        {queued.length > 0 && (
+                          <ul className="mb-2 space-y-1" aria-label="排队中的消息">
+                            {queued.map((q, i) => (
+                              <li
+                                key={q.id}
+                                className="flex items-center gap-2 rounded-md border border-border bg-muted/40 px-2.5 py-1.5 text-xs"
+                              >
+                                <span className="shrink-0 text-muted-foreground">排队 {i + 1}</span>
+                                <span className="min-w-0 flex-1 truncate">{q.text}</span>
+                                {q.files.length > 0 && (
+                                  <span className="shrink-0 text-muted-foreground">
+                                    {q.files.length} 个附件
+                                  </span>
+                                )}
+                                <button
+                                  type="button"
+                                  className="shrink-0 rounded px-1 text-muted-foreground hover:text-foreground"
+                                  aria-label="取消这条排队消息"
+                                  onClick={() =>
+                                    setQueued((all) => all.filter((x) => x.id !== q.id))
+                                  }
+                                >
+                                  ×
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
                         )}
                         <PromptInput globalDrop multiple onSubmit={handlePromptSubmit}>
                           <PromptInputHeader>
@@ -1299,7 +1488,11 @@ export function Workbench() {
                                 }
                               }}
                               disabled={historyLoading || historyError !== null || !hasAgents}
-                              placeholder={running ? "运行中…" : "说点什么,或输入 /"}
+                              placeholder={
+                                running
+                                  ? "运行中也可以继续补充,会交给正在干活的智能体"
+                                  : "说点什么,或输入 /"
+                              }
                             />
                           </PromptInputBody>
                           <PromptInputFooter>
@@ -1348,7 +1541,11 @@ export function Workbench() {
               maxSize="45%"
               className="workbench-files-panel panel-edge min-w-0 bg-card/40"
             >
-              <FilePanel sessionId={mobileLayout ? null : sessionId} refreshKey={filesKey} />
+              <FilePanel
+                sessionId={mobileLayout ? null : sessionId}
+                refreshKey={filesKey}
+                live={running}
+              />
             </ResizablePanel>
           </ResizablePanelGroup>
         ) : (

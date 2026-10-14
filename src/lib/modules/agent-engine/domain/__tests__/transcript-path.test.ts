@@ -38,6 +38,20 @@ describe("projectDirNameFor", () => {
     );
   });
 
+  // scripts/sdk-probe/project-dir-encoding.mjs 让真实 SDK 在这些目录里各跑一次,盘上的目录名如下
+  it("字母数字以外的每个字符都换成一个短横线(真实 SDK 实测)", () => {
+    expect(projectDirNameFor("/r/a_b")).toBe("-r-a-b");
+    expect(projectDirNameFor("/r/sp ace")).toBe("-r-sp-ace");
+    expect(projectDirNameFor("/r/plus+at@")).toBe("-r-plus-at-");
+    expect(projectDirNameFor("/r/中文目录")).toBe("-r-----");
+    expect(projectDirNameFor("/r/tilde~x")).toBe("-r-tilde-x");
+    expect(projectDirNameFor("/r/MiXeD-09")).toBe("-r-MiXeD-09");
+  });
+
+  it("数据目录含下划线(部署配置就能触发)", () => {
+    expect(projectDirNameFor("/srv/owa_data/workspaces/s1")).toBe("-srv-owa-data-workspaces-s1");
+  });
+
   it("要求绝对路径 —— 相对路径推出来的目录名必然对不上盘上的", () => {
     expect(() => projectDirNameFor("data/workspaces/abc")).toThrow(/absolute/i);
   });

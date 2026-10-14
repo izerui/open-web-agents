@@ -1,7 +1,9 @@
 import { type QuotaVerdict, evaluateQuota } from "@/lib/modules/usage/domain/quota";
+import { BrandedError } from "@/lib/shared";
 
 /** 超出月度额度。路由把它翻成 402。 */
-export class QuotaExceeded extends Error {
+export class QuotaExceeded extends BrandedError {
+  static readonly brand = Symbol.for("owa.error.QuotaExceeded");
   constructor(
     message: string,
     readonly verdict: QuotaVerdict,
@@ -69,6 +71,7 @@ export function quotaErrorResponse(err: unknown): Response | null {
   return Response.json(
     {
       error: err.message,
+      code: "quota_exceeded",
       quota: {
         usedMicroUsd: err.verdict.usedMicroUsd,
         limitMicroUsd: err.verdict.limitMicroUsd,

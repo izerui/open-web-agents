@@ -4,7 +4,11 @@ import { type RunUsageRecord, toMicroUsd } from "@/lib/modules/usage/domain/aggr
 import { and, desc, eq, gte, isNotNull, sql } from "drizzle-orm";
 
 export interface UsageQuery {
-  /** 只统计该用户归属的会话;不传则统计全部(仅 admin 可用)。 */
+  /**
+   * 只统计该账号计费的会话;不传则统计全部(仅 admin 可用)。
+   * 口径是 sessions.billing_user_id —— 曾经按 owner_id 统计,API Key 与 embed
+   * 产生的花费(这两类会话没有 owner)不算在任何人头上,额度也就拦不住它们。
+   */
   ownerId?: string;
   /** 起始时间(ms)。 */
   since: number;
@@ -27,7 +31,7 @@ export class MysqlUsageRepo {
    */
   async isTruncated(q: UsageQuery): Promise<boolean> {
     const conds = [gte(runs.createdAt, new Date(q.since))];
-    if (q.ownerId) conds.push(eq(sessions.ownerId, q.ownerId));
+    if (q.ownerId) conds.push(eq(sessions.billingUserId, q.ownerId));
     const rows = await this.db
       .select({ n: sql<number>`COUNT(*)` })
       .from(runs)
@@ -45,7 +49,7 @@ export class MysqlUsageRepo {
    */
   async list(q: UsageQuery): Promise<RunUsageRecord[]> {
     const conds = [gte(runs.createdAt, new Date(q.since))];
-    if (q.ownerId) conds.push(eq(sessions.ownerId, q.ownerId));
+    if (q.ownerId) conds.push(eq(sessions.billingUserId, q.ownerId));
 
     const rows = await this.db
       .select({
@@ -54,7 +58,7 @@ export class MysqlUsageRepo {
         cost: runs.cost,
         agentId: sessions.agentId,
         agentName: agents.name,
-        ownerId: sessions.ownerId,
+        ownerId: sessions.billingUserId,
         endedAt: runs.endedAt,
         createdAt: runs.createdAt,
       })
@@ -99,18 +103,18 @@ export class MysqlUsageRepo {
   async costByOwner(since: number, ownerId?: string): Promise<Map<string, number>> {
     // 【为什么要能只查一个】额度检查在每次运行前都跑一次,
     // 那时只关心当前这一个账号 —— 为它去扫全平台的运行记录是白费的
-    const conds = [gte(runs.createdAt, new Date(since)), isNotNull(sessions.ownerId)];
-    if (ownerId) conds.push(eq(sessions.ownerId, ownerId));
+    const conds = [gte(runs.createdAt, new Date(since)), isNotNull(sessions.billingUserId)];
+    if (ownerId) conds.push(eq(sessions.billingUserId, ownerId));
 
     const rows = await this.db
       .select({
-        ownerId: sessions.ownerId,
+        ownerId: sessions.billingUserId,
         usd: sql<string>`COALESCE(SUM(CAST(JSON_EXTRACT(${runs.cost}, '$.usd') AS DECIMAL(24,10))), 0)`,
       })
       .from(runs)
       .innerJoin(sessions, eq(runs.sessionId, sessions.id))
       .where(and(...conds))
-      .groupBy(sessions.ownerId);
+      .groupBy(sessions.billingUserId);
 
     const out = new Map<string, number>();
     for (const r of rows) {

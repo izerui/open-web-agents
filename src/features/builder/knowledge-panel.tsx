@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { errorText, fetchJson } from "@/lib/fetch-json";
+import { cn } from "@/lib/utils";
 import { FileText, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -11,6 +12,14 @@ interface Doc {
   id: string;
   title: string;
   createdAt: number;
+  chars: number;
+  /** 是否参与检索(超出上限的旧文档不参与) */
+  searchable: boolean;
+}
+
+interface Usage {
+  usage: { docs: number; chars: number };
+  limits: { maxDocs: number; maxDocChars: number; maxTotalChars: number };
 }
 
 /**
@@ -26,12 +35,14 @@ export function KnowledgePanel({
   canWrite?: boolean;
 }) {
   const [docs, setDocs] = useState<Doc[]>([]);
+  const [usage, setUsage] = useState<Usage | null>(null);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [denied, setDenied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const reloadSeqRef = useRef(0);
 
   const reload = useCallback(async () => {
@@ -43,18 +54,22 @@ export function KnowledgePanel({
         return;
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as { docs?: Doc[] };
+      const data = (await res.json()) as { docs?: Doc[] } & Partial<Usage>;
       if (seq !== reloadSeqRef.current) return;
       setDenied(false);
       setDocs(data.docs ?? []);
+      setUsage(data.usage && data.limits ? { usage: data.usage, limits: data.limits } : null);
       setMsg(null);
     } catch (error) {
       if (seq === reloadSeqRef.current) setMsg(`知识库加载失败:${errorText(error)}`);
+    } finally {
+      if (seq === reloadSeqRef.current) setLoaded(true);
     }
   }, [agentId]);
 
   useEffect(() => {
     reloadSeqRef.current += 1;
+    setLoaded(false);
     setDocs([]);
     setTitle("");
     setContent("");
@@ -108,7 +123,20 @@ export function KnowledgePanel({
         <p className="text-xs opacity-55">
           智能体级、跨会话长存。运行时按用户问题检索相关片段注入提示词;没命中就不注入。
         </p>
+        {usage && (
+          <p className="text-xs text-muted-foreground">
+            已用 {usage.usage.docs} / {usage.limits.maxDocs} 篇,
+            {usage.usage.chars.toLocaleString()} / {usage.limits.maxTotalChars.toLocaleString()} 字
+            (单篇上限 {usage.limits.maxDocChars.toLocaleString()} 字)
+          </p>
+        )}
       </div>
+      {docs.some((d) => !d.searchable) && (
+        <p className="rounded-md border border-warning/40 bg-warning/10 p-2 text-xs">
+          有 {docs.filter((d) => !d.searchable).length} 篇文档超出 {usage?.limits.maxDocs}{" "}
+          篇上限,不参与检索(上限设立之前写入的)。删除不用的文档后,它们会按上传先后依次恢复。
+        </p>
+      )}
 
       {!canWrite && (
         <p className="text-xs opacity-45">
@@ -145,14 +173,23 @@ export function KnowledgePanel({
 
       {msg && <p className="text-xs text-destructive">{msg}</p>}
 
-      {docs.length === 0 && <p className="text-xs opacity-40">还没有知识文档</p>}
+      {!loaded && <p className="text-xs text-muted-foreground">载入中…</p>}
+      {loaded && !msg && docs.length === 0 && (
+        <p className="text-xs text-muted-foreground">还没有知识文档</p>
+      )}
       {docs.map((d) => (
         <div
           key={d.id}
           className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-xs"
         >
           <FileText className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="flex-1 truncate">{d.title}</span>
+          <span className={cn("flex-1 truncate", !d.searchable && "text-muted-foreground")}>
+            {d.title}
+          </span>
+          {!d.searchable && <span className="shrink-0 text-[11px] text-warning">不参与检索</span>}
+          <span className="shrink-0 text-[11px] text-muted-foreground">
+            {d.chars.toLocaleString()} 字
+          </span>
           {canWrite && (
             <Button
               type="button"

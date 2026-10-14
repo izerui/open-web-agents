@@ -2,8 +2,10 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
+import { hasResourceAccess } from "@/lib/modules/access/domain/grants";
 import { canAccessSession } from "@/lib/modules/access/domain/principal";
 import { workspacePathFor } from "@/lib/modules/session/domain/workspace";
+import type { SessionListFilter } from "@/lib/modules/session/ports";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -16,13 +18,21 @@ export async function GET(req: Request) {
     const principal = await auth.resolveWeb(req);
 
     // 归属条件下推到查询,避免「先取全局最新 100 条、再过滤」导致自己的会话被别人挤掉。
-    // admin 不加过滤 —— 它要能看到无归属的历史数据。
-    const filter =
+    //
+    // view:
+    //   (默认)        自己在工作台里的会话 —— 管理员也一样。曾经管理员默认看全部,
+    //                 侧栏里混着所有人的会话和一堆标题为 invoke 的接口调用
+    //   integrations  用自己的 key 发起的接口调用 / API / 嵌入会话
+    //   all           全部(仅管理员,含无归属的历史数据)
+    const view = new URL(req.url).searchParams.get("view");
+    const filter: SessionListFilter | undefined =
       principal.type === "apiKey"
         ? { callerApiKeyId: principal.keyId }
-        : principal.role === "admin"
-          ? undefined
-          : { ownerId: principal.userId };
+        : view === "integrations"
+          ? { billingUserId: principal.userId, sources: ["invoke", "api", "embed"] }
+          : view === "all" && principal.role === "admin"
+            ? undefined
+            : { ownerId: principal.userId };
 
     // 查询已经收窄,这里的 canAccessSession 是第二道闸:授权规则只有一处权威,
     // 万一查询条件写错也由它兜住,而不是让越权数据直接流出去。
@@ -34,6 +44,7 @@ export async function GET(req: Request) {
           agentId: s.agentId,
           ownerId: s.ownerId,
           callerApiKeyId: s.callerApiKeyId,
+          billingUserId: s.billingUserId,
         }).allowed,
     );
     /**
@@ -69,7 +80,7 @@ export async function GET(req: Request) {
 
 /** 新建会话:分配独立工作目录(= 项目 = 工作空间,一对一),并记下归属。 */
 export async function POST(req: Request) {
-  const { sessions, env, auth } = getContainer();
+  const { sessions, env, auth, agents, grants, releases } = getContainer();
 
   let principal: Awaited<ReturnType<typeof auth.resolveWeb>>;
   try {
@@ -97,6 +108,25 @@ export async function POST(req: Request) {
     throw err;
   }
 
+  /*
+   * 这个会话跑哪一版:
+   * - API Key 建的会话是对外调用,跑已发布版本;
+   * - 网页上,能改这个智能体的人(作者)跟随草稿 —— 改完马上能试;
+   *   其他人跑已发布版本,作者没发布的改动不会出现在他们的对话里。
+   * 从未发布的智能体一律跑草稿。
+   */
+  let agentVersion: number | undefined;
+  const agent = await agents.get(agentId);
+  if (agent?.publishedVersion !== undefined) {
+    let followDraft = false;
+    if (principal.type === "web") {
+      const subject = await auth.subjectOf(principal);
+      const list = await grants.listForResource("agent", agentId);
+      followDraft = hasResourceAccess(subject, agent, "write", list);
+    }
+    if (!followDraft) agentVersion = (await releases.resolve(agent)).version ?? undefined;
+  }
+
   const id = randomUUID().replace(/-/g, "").slice(0, 24);
   const workspaceDir = workspacePathFor(env.dataDir, id);
   await fs.mkdir(workspaceDir, { recursive: true });
@@ -108,6 +138,10 @@ export async function POST(req: Request) {
     title: body.title,
     ownerId: principal.type === "web" ? principal.userId : undefined,
     callerApiKeyId: principal.type === "apiKey" ? principal.keyId : undefined,
+    // API Key 建的会话没有人用归属,但花费要记在签发人头上
+    billingUserId: principal.type === "web" ? principal.userId : principal.ownerId,
+    source: principal.type === "web" ? "web" : "api",
+    agentVersion,
   });
 
   return NextResponse.json({ session }, { status: 201 });

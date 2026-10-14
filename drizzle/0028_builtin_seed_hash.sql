@@ -1,0 +1,1 @@
+ALTER TABLE `agents` ADD `seed_hash` varchar(64);

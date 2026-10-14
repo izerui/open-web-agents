@@ -1,0 +1,1 @@
+ALTER TABLE `eval_results` ADD `output` json;

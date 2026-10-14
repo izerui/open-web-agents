@@ -11,12 +11,7 @@
         "noLabelWithoutControl": {
           "level": "error",
           "options": {
-            "inputComponents": [
-              "Input",
-              "Textarea",
-              "NativeSelect",
-              "Select"
-            ]
+            "inputComponents": ["Input", "Textarea", "NativeSelect", "Select"]
           }
         }
       }
@@ -29,12 +24,40 @@
     "lineWidth": 100
   },
   "files": {
-    "ignore": [
-      "node_modules",
-      ".next",
-      "dist",
-      "data",
-      "drizzle"
-    ]
-  }
+    "ignore": ["node_modules", ".next", "dist", "data", "drizzle"]
+  },
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "overrides": [
+    {
+      "include": ["src/components/ui/**", "src/components/ai-elements/**"],
+      "formatter": {
+        "enabled": false
+      },
+      "organizeImports": {
+        "enabled": false
+      },
+      "linter": {
+        "rules": {
+          "a11y": {
+            "useSemanticElements": "off",
+            "noNoninteractiveTabindex": "off",
+            "useAltText": "off"
+          },
+          "correctness": {
+            "useExhaustiveDependencies": "off"
+          },
+          "style": {
+            "useImportType": "off"
+          },
+          "suspicious": {
+            "noExplicitAny": "off"
+          }
+        }
+      }
+    }
+  ]
 }

@@ -62,6 +62,14 @@ export async function POST(req: Request) {
       description: body.description?.trim() || undefined,
       ownerId: userId,
     });
+    await getContainer().audit.record({
+      actor: principal,
+      action: "group.create",
+      resource: { type: "group", id: g.id },
+      ownerId: userId,
+      details: { name: g.name },
+      req,
+    });
     return Response.json({ group: g }, { status: 201 });
   } catch (err) {
     const res = authErrorResponse(err);

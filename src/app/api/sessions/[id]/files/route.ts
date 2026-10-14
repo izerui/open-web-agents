@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { canRenderInline } from "@/lib/modules/artifacts/domain/mime";
@@ -40,6 +41,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (files.length === 0) return Response.json({ error: "files are required" }, { status: 400 });
   if (files.length > 20) return Response.json({ error: "too many files" }, { status: 413 });
 
+  // 显式 ?overwrite=1 才覆盖同名文件(例如手改后重新上传智能体定义);默认只新建,保护已有附件
+  const overwrite = new URL(req.url).searchParams.get("overwrite") === "1";
   const names = new Set<string>();
   try {
     // 先把整批可预见错误验完，再开始写。否则第 1 个文件已经落盘，
@@ -58,9 +61,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const prepared = await Promise.all(
       files.map(async (file) => ({ file, bytes: Buffer.from(await file.arrayBuffer()) })),
     );
+    /*
+     * 写之前先走工作目录协议:在会话行锁内记下"刚用过"并确保目录存在。
+     * 上传不产生运行 —— 不记这一笔,GC 只看运行时间,长期未活动的会话里刚上传的文件
+     * 可能马上被清掉;GC 正在改名挪走目录时,这里会等它挪完再建新目录。
+     */
+    await sessions.prepareWorkspace(id, { nowMs: Date.now() }, async () => {
+      await fs.mkdir(session.workspaceDir, { recursive: true });
+    });
     const uploaded: string[] = [];
     for (const { file, bytes } of prepared) {
-      await storage.write(session.workspaceDir, file.name, bytes);
+      await storage.write(session.workspaceDir, file.name, bytes, { overwrite });
       uploaded.push(file.name);
     }
     return Response.json({ files: uploaded }, { headers: NO_STORE_HEADERS });

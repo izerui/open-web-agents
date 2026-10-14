@@ -13,8 +13,9 @@ const schema = z.object({
   OWA_DATA_DIR: z.string().default("./data"),
   OWA_ANTHROPIC_BASE_URL: z.string().default("https://api.anthropic.com"),
   OWA_ANTHROPIC_API_KEY: z.string().default(""),
-  // 别名槽 → 真实 modelId。未单独配置的槽回退到 OWA_MODEL(单模型部署)
-  OWA_MODEL: z.string().default("sonnet"),
+  // 别名槽 → 真实 modelId。未单独配置的槽回退到 OWA_MODEL(单模型部署);
+  // 两者都没配则用各别名的官方模型 id(见 env-gateway.ts)
+  OWA_MODEL: z.string().default(""),
   OWA_MODEL_FABLE: z.string().default(""),
   OWA_MODEL_OPUS: z.string().default(""),
   OWA_MODEL_SONNET: z.string().default(""),
@@ -48,6 +49,43 @@ const schema = z.object({
       z.boolean(),
     )
     .default(false),
+  // webhook 允许投递到内网私有网段(RFC1918 / CGNAT / IPv6 ULA)。回环与云元数据地址始终禁止。
+  OWA_WEBHOOK_ALLOW_PRIVATE: z
+    .preprocess(
+      (v) => ["1", "true", "on", "yes"].includes(String(v ?? "").toLowerCase()),
+      z.boolean(),
+    )
+    .default(false),
+  // 是否开放自助注册(第一个账号始终可以注册,成为平台管理员)
+  OWA_ALLOW_SIGNUP: z
+    .preprocess(
+      (v) =>
+        v === undefined || v === ""
+          ? true
+          : !["0", "false", "off", "no"].includes(String(v).toLowerCase()),
+      z.boolean(),
+    )
+    .default(true),
+  // 同一来源地址的登录/注册次数上限(每窗口);0 关闭。按账号的登录限流始终开启
+  OWA_AUTH_IP_RATE_LIMIT: z.preprocess(
+    (v) => (v === undefined || v === "" ? undefined : Number(v)),
+    z.number().int().min(0).default(30),
+  ),
+  // invoke 每把 API Key 每分钟的新调用上限(Key 可单独设更低的值);0 关闭
+  OWA_INVOKE_RATE_LIMIT_PER_KEY: z.preprocess(
+    (v) => (v === undefined || v === "" ? undefined : Number(v)),
+    z.number().int().min(0).default(60),
+  ),
+  // invoke 每个智能体每分钟的新调用上限(所有 Key 合计);0 关闭
+  OWA_INVOKE_RATE_LIMIT_PER_AGENT: z.preprocess(
+    (v) => (v === undefined || v === "" ? undefined : Number(v)),
+    z.number().int().min(0).default(600),
+  ),
+  // 单个 worker 进程同时执行的运行数
+  OWA_WORKER_CONCURRENCY: z.preprocess(
+    (v) => (v === undefined || v === "" ? undefined : Number(v)),
+    z.number().int().min(1).max(64).default(4),
+  ),
 });
 
 export interface Env {
@@ -69,6 +107,18 @@ export interface Env {
   sandbox: boolean;
   /** 是否允许智能体配置在宿主机启动 stdio MCP 进程。 */
   allowStdioMcp: boolean;
+  /** webhook 是否允许投递到内网私有网段。 */
+  webhookAllowPrivate: boolean;
+  /** 单个 worker 进程的并发运行数。 */
+  workerConcurrency: number;
+  /** 是否开放自助注册。 */
+  allowSignup: boolean;
+  /** 同一来源地址的登录/注册次数上限;0 = 不按地址限流。 */
+  authIpRateLimit: number;
+  /** invoke 每把 Key 每分钟新调用的默认上限;0 = 不限。 */
+  invokeRateLimitPerKey: number;
+  /** invoke 每个智能体每分钟新调用上限(所有 Key 合计);0 = 不限。 */
+  invokeRateLimitPerAgent: number;
 }
 
 export function parseEnv(raw: Record<string, string | undefined>): Env {
@@ -92,6 +142,12 @@ export function parseEnv(raw: Record<string, string | undefined>): Env {
     authRequired: p.OWA_AUTH_REQUIRED,
     sandbox: p.OWA_SANDBOX,
     allowStdioMcp: p.OWA_ALLOW_STDIO_MCP,
+    webhookAllowPrivate: p.OWA_WEBHOOK_ALLOW_PRIVATE,
+    workerConcurrency: p.OWA_WORKER_CONCURRENCY,
+    allowSignup: p.OWA_ALLOW_SIGNUP,
+    authIpRateLimit: p.OWA_AUTH_IP_RATE_LIMIT,
+    invokeRateLimitPerKey: p.OWA_INVOKE_RATE_LIMIT_PER_KEY,
+    invokeRateLimitPerAgent: p.OWA_INVOKE_RATE_LIMIT_PER_AGENT,
   };
 }
 

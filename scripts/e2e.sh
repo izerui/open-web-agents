@@ -46,12 +46,21 @@ else
   fi
 
   echo "[e2e] 起服务(端口 $PORT,日志 $LOG)…"
-  PORT="$PORT" pnpm start >"$LOG" 2>&1 &
+  # 套件从同一地址注册几十个账号,按来源地址的登录/注册限流会误伤;按账号的限流照常生效
+  # 每个智能体的调用限流调低,好让限流用例几十次请求内就能撞上;已有用例对单个智能体
+  # 每分钟的调用远低于它。测试从 OWA_E2E_INVOKE_AGENT_LIMIT 得知这个值
+  export OWA_E2E_INVOKE_AGENT_LIMIT="${OWA_INVOKE_RATE_LIMIT_PER_AGENT:-20}"
+  OWA_INVOKE_RATE_LIMIT_PER_AGENT="$OWA_E2E_INVOKE_AGENT_LIMIT" \
+  OWA_AUTH_IP_RATE_LIMIT="${OWA_AUTH_IP_RATE_LIMIT:-0}" PORT="$PORT" pnpm start >"$LOG" 2>&1 &
   SERVER_PID=$!
 
   ready=""
+  # 第一个请求故意打【页面】而不是 /api/health:服务里同一个错误类会在页面与接口两套
+  # 模块图里各有一份,容器由先加载的那一份创建。生产上第一个请求多半是页面 —— 曾经因此
+  # 所有该 401/403/404 的接口都变成 500,而 e2e 一直先打 /api/health,从没测出来。
+  # 让整套 e2e 在"页面先加载"这种更严格的条件下跑
   for _ in $(seq 1 60); do
-    if curl -sf "${BASE}/api/health?probe=live" >/dev/null 2>&1; then ready=1; break; fi
+    if curl -sf "${BASE}/login" >/dev/null 2>&1; then ready=1; break; fi
     # 服务自己先挂了就别再空等
     kill -0 "$SERVER_PID" 2>/dev/null || break
     sleep 1
@@ -70,6 +79,11 @@ else
   fi
 
   export OWA_E2E_BASE_URL="$BASE"
+  # 少数用例需要直接改服务端库里【自己刚建的】账号(如把额度设为 0 模拟耗尽 —— e2e 建不出管理员)。
+  # 只有库地址来自环境变量时才导出:没设的话服务读的是 .env 文件,测试无从确知是哪个库,宁可跳过
+  if [ -n "${OWA_DATABASE_URL:-}" ]; then export OWA_E2E_DATABASE_URL="$OWA_DATABASE_URL"; fi
+  # 同理:审批用例要以 worker 的身份往服务用的 Redis 里发起一条待审请求
+  if [ -n "${OWA_REDIS_URL:-}" ]; then export OWA_E2E_REDIS_URL="$OWA_REDIS_URL"; fi
   echo "[e2e] 就绪:$BASE"
 fi
 

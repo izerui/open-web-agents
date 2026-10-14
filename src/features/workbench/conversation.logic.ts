@@ -20,7 +20,9 @@ export type ProcessBlock =
     }
   | { kind: "text"; text: string }
   | { kind: "status"; label: string; state?: string }
-  | { kind: "tool-result"; text: string; isError: boolean };
+  | { kind: "tool-result"; text: string; isError: boolean }
+  /** 运行中途追加的消息,按交给模型的时刻出现在过程里 */
+  | { kind: "steer"; text: string; outcome: "delivered" | "dropped" };
 
 export type ScrollMode = "following" | "anchoring" | "free";
 
@@ -126,6 +128,9 @@ export function processBlocks(items: Rendered[]): ProcessBlock[] {
     ) {
       flushActivity();
       blocks.push({ kind: "status", label: item.event.label, state: item.event.state });
+    } else if (item.event.kind === "steer") {
+      flushActivity();
+      blocks.push({ kind: "steer", text: item.event.text, outcome: item.event.outcome });
     } else if (item.event.kind === "tool_result") {
       flushActivity();
       blocks.push({
@@ -194,13 +199,23 @@ export function totalUsageTokens(usage: UsageTotals): number {
   return usage.input + usage.output + usage.cacheRead + usage.cacheCreation;
 }
 
+/**
+ * 当前上下文占用 = 【最近一次模型调用】的输入(含缓存读写)+ 输出。
+ *
+ * 每次调用都带着完整上下文,所以一轮里有几次调用(工具来回),输入就被重复算几次。
+ * 曾经把一轮里所有调用的 input 累加,5 步工具调用的一轮会显示成 5 倍上下文,
+ * 计量环动不动就虚报到 90% 以上。累加值是计费口径,不是占用口径。
+ */
 export function contextTokens(turns: Turn[]): number {
   for (let index = turns.length - 1; index >= 0; index--) {
     const turn = turns[index];
     if (!turn) continue;
-    const usage = sumUsage(turn.events);
-    const total = totalUsageTokens(usage);
-    if (total > 0) return total;
+    for (let i = turn.events.length - 1; i >= 0; i--) {
+      const e = turn.events[i];
+      if (e?.kind !== "usage") continue;
+      const total = e.input + (e.cacheRead ?? 0) + (e.cacheCreation ?? 0) + e.output;
+      if (total > 0) return total;
+    }
   }
   return 0;
 }

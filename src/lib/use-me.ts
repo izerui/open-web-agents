@@ -9,6 +9,8 @@ export interface MeUser {
   role: string;
   defaultBaseUrl: string | null;
   anthropicKeyMask: string | null;
+  /** Webhook 签名密钥的掩码;null = 未配置(回调不带签名)。 */
+  webhookSecretMask?: string | null;
 }
 
 export interface Me {

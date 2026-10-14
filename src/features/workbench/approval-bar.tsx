@@ -16,8 +16,16 @@ interface Pending {
   toolName: string;
   summary: string;
   reason: string;
+  /** 所属的全部类别;有才能"本会话内同类不再询问"(授权的是全部这些类) */
+  scopes?: { key: string; label: string }[];
   createdAt?: number;
   expiresAt: number;
+}
+
+/** 本会话的同类授权 */
+interface Grant {
+  key: string;
+  label: string;
 }
 
 /** 没有 createdAt 时的兜底总时长,与 container.ts 的 APPROVAL_TIMEOUT_MS 对齐。 */
@@ -42,6 +50,9 @@ export function ApprovalBar({
   running: boolean;
 }) {
   const [pending, setPending] = useState<Pending[]>([]);
+  const [grants, setGrants] = useState<Grant[]>([]);
+  /** 正在填拒绝说明的那条 */
+  const [denying, setDenying] = useState<{ id: string; text: string } | null>(null);
   const [pollError, setPollError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   /**
@@ -56,8 +67,11 @@ export function ApprovalBar({
   const poll = useCallback(async () => {
     if (!sessionId) return;
     try {
-      const data = await fetchJson<{ pending?: Pending[] }>(`/api/sessions/${sessionId}/approvals`);
+      const data = await fetchJson<{ pending?: Pending[]; grants?: Grant[] }>(
+        `/api/sessions/${sessionId}/approvals`,
+      );
       setPending(data.pending ?? []);
+      setGrants(data.grants ?? []);
       setPollError(null);
     } catch (error) {
       setPollError(errorText(error));
@@ -67,6 +81,7 @@ export function ApprovalBar({
   useEffect(() => {
     if (!sessionId) {
       setPending([]);
+      setGrants([]);
       setPollError(null);
       return;
     }
@@ -86,15 +101,21 @@ export function ApprovalBar({
   }, [pending.length]);
 
   const decide = useCallback(
-    async (id: string, decision: "approved" | "denied") => {
+    async (
+      id: string,
+      decision: "approved" | "denied",
+      extra: { remember?: "session"; message?: string } = {},
+    ) => {
       if (!sessionId) return;
       setBusy(id);
       try {
         await fetchJson(`/api/sessions/${sessionId}/approvals`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ approvalId: id, decision }),
+          body: JSON.stringify({ approvalId: id, decision, ...extra }),
         });
+        if (extra.remember) toast.success("已批准,本会话内同类不再询问(可随时撤销)");
+        setDenying(null);
         await poll();
       } catch (error) {
         toast.error(`提交审批失败:${errorText(error)}`);
@@ -146,93 +167,174 @@ export function ApprovalBar({
     [],
   );
 
-  if (pending.length === 0 && pollError === null) return null;
+  const revoke = async (g: Grant) => {
+    if (!sessionId) return;
+    try {
+      await fetchJson(`/api/sessions/${sessionId}/approvals?grant=${encodeURIComponent(g.key)}`, {
+        method: "DELETE",
+      });
+      toast.success(`已撤销:${g.label}将重新逐次审批`);
+      await poll();
+    } catch (error) {
+      toast.error(`撤销失败:${errorText(error)}`);
+    }
+  };
+
+  const grantStrip =
+    grants.length > 0 ? (
+      <div className="mx-3 mb-2 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+        <span>本会话已授权不再询问:</span>
+        {grants.map((g) => (
+          <span
+            key={g.key}
+            className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5"
+          >
+            {g.label}
+            <button
+              type="button"
+              className="rounded px-0.5 hover:text-foreground"
+              aria-label={`撤销授权:${g.label}`}
+              onClick={() => void revoke(g)}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+      </div>
+    ) : null;
+
+  if (pending.length === 0 && pollError === null) return grantStrip;
 
   return (
-    <Card className="mx-3 mb-36 max-h-[50vh] overflow-y-auto border-[var(--warning)]/40 bg-[var(--warning)]/5">
-      <CardContent className="space-y-3 p-3">
-        {pollError && (
-          <div className="flex items-center justify-between gap-3 text-xs text-destructive">
-            <span>审批状态读取失败:{pollError}</span>
-            <Button type="button" variant="outline" size="sm" onClick={() => void poll()}>
-              重试
-            </Button>
-          </div>
-        )}
-        {pending.map((p, idx) => {
-          const leftMs = Math.max(0, p.expiresAt - now);
-          const windowMs = p.createdAt ? p.expiresAt - p.createdAt : FALLBACK_WINDOW_MS;
-          const leftPct = windowMs > 0 ? (leftMs / windowMs) * 100 : 0;
-          const isUrgent = leftMs <= 30_000;
-
-          return (
-            <div key={p.id}>
-              {idx > 0 && <Separator className="mb-3" />}
-
-              {/* 标题行:图标 + 待确认标签 + 原因 + 倒计时 */}
-              <div className="flex items-center gap-2 text-xs">
-                <ShieldAlert
-                  className={cn(
-                    "size-4 shrink-0",
-                    isUrgent ? "text-destructive" : "text-[var(--warning)]",
-                  )}
-                />
-                <Badge variant="warning">待确认</Badge>
-                <span className="font-medium">agent 在等你确认 —— {p.reason}</span>
-                <span
-                  className={cn(
-                    "ml-auto flex shrink-0 items-center gap-1 font-mono text-muted-foreground",
-                    isUrgent && "text-destructive",
-                  )}
-                >
-                  <Clock className="size-3" />
-                  {leftMs > 0 ? `${formatLeft(leftMs)} 后自动拒绝` : "即将超时"}
-                </span>
-              </div>
-
-              {/* 剩余时间条 —— 数字要读,长度一眼就看见 */}
-              <Progress
-                value={leftPct}
-                className={cn("mt-2 h-1", isUrgent && "[&>*]:bg-destructive")}
-              />
-
-              {/* 工具调用摘要 */}
-              <div className="mt-2 flex items-start gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-2">
-                <Terminal className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-                <code className="flex-1 whitespace-pre-wrap break-all font-mono text-xs">
-                  <Badge variant="secondary" className="mr-1.5 align-middle">
-                    {p.toolName}
-                  </Badge>
-                  {p.summary}
-                </code>
-              </div>
-
-              {/* 操作按钮 */}
-              <div className="mt-2 flex gap-2">
-                <Button
-                  size="sm"
-                  onClick={() => void decide(p.id, "approved")}
-                  disabled={busy === p.id}
-                  className="gap-1.5"
-                >
-                  <CheckCircle2 className="size-3.5" />
-                  批准
-                </Button>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => void decide(p.id, "denied")}
-                  disabled={busy === p.id}
-                  className="gap-1.5"
-                >
-                  <XCircle className="size-3.5" />
-                  拒绝
-                </Button>
-              </div>
+    <>
+      {grantStrip}
+      <Card className="mx-3 mb-36 max-h-[50vh] overflow-y-auto border-[var(--warning)]/40 bg-[var(--warning)]/5">
+        <CardContent className="space-y-3 p-3">
+          {pollError && (
+            <div className="flex items-center justify-between gap-3 text-xs text-destructive">
+              <span>审批状态读取失败:{pollError}</span>
+              <Button type="button" variant="outline" size="sm" onClick={() => void poll()}>
+                重试
+              </Button>
             </div>
-          );
-        })}
-      </CardContent>
-    </Card>
+          )}
+          {pending.map((p, idx) => {
+            const leftMs = Math.max(0, p.expiresAt - now);
+            const windowMs = p.createdAt ? p.expiresAt - p.createdAt : FALLBACK_WINDOW_MS;
+            const leftPct = windowMs > 0 ? (leftMs / windowMs) * 100 : 0;
+            const isUrgent = leftMs <= 30_000;
+
+            return (
+              <div key={p.id}>
+                {idx > 0 && <Separator className="mb-3" />}
+
+                {/* 标题行:图标 + 待确认标签 + 原因 + 倒计时 */}
+                <div className="flex items-center gap-2 text-xs">
+                  <ShieldAlert
+                    className={cn(
+                      "size-4 shrink-0",
+                      isUrgent ? "text-destructive" : "text-[var(--warning)]",
+                    )}
+                  />
+                  <Badge variant="warning">待确认</Badge>
+                  <span className="font-medium">agent 在等你确认 —— {p.reason}</span>
+                  <span
+                    className={cn(
+                      "ml-auto flex shrink-0 items-center gap-1 font-mono text-muted-foreground",
+                      isUrgent && "text-destructive",
+                    )}
+                  >
+                    <Clock className="size-3" />
+                    {leftMs > 0 ? `${formatLeft(leftMs)} 后自动拒绝` : "即将超时"}
+                  </span>
+                </div>
+
+                {/* 剩余时间条 —— 数字要读,长度一眼就看见 */}
+                <Progress
+                  value={leftPct}
+                  className={cn("mt-2 h-1", isUrgent && "[&>*]:bg-destructive")}
+                />
+
+                {/* 工具调用摘要 */}
+                <div className="mt-2 flex items-start gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-2">
+                  <Terminal className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                  <code className="flex-1 whitespace-pre-wrap break-all font-mono text-xs">
+                    <Badge variant="secondary" className="mr-1.5 align-middle">
+                      {p.toolName}
+                    </Badge>
+                    {p.summary}
+                  </code>
+                </div>
+
+                {/* 操作按钮:批准一次 / 本会话内同类不再询问 / 拒绝(可附说明,会交给智能体) */}
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => void decide(p.id, "approved")}
+                    disabled={busy === p.id}
+                    className="gap-1.5"
+                  >
+                    <CheckCircle2 className="size-3.5" />
+                    批准
+                  </Button>
+                  {p.scopes && p.scopes.length > 0 && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void decide(p.id, "approved", { remember: "session" })}
+                      disabled={busy === p.id}
+                      title="之后本会话里同一类调用直接放行;可在上方随时撤销"
+                    >
+                      批准,本会话内{p.scopes.map((s) => s.label).join("、")}不再询问
+                    </Button>
+                  )}
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => void decide(p.id, "denied")}
+                    disabled={busy === p.id}
+                    className="gap-1.5"
+                  >
+                    <XCircle className="size-3.5" />
+                    拒绝
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setDenying({ id: p.id, text: "" })}
+                    disabled={busy === p.id}
+                  >
+                    拒绝并说明…
+                  </Button>
+                </div>
+                {denying?.id === p.id && (
+                  <div className="mt-2 flex gap-2">
+                    <textarea
+                      // biome-ignore lint/a11y/noAutofocus: 点了"拒绝并说明"就是要马上输入
+                      autoFocus
+                      rows={2}
+                      maxLength={2000}
+                      value={denying.text}
+                      onChange={(e) => setDenying({ id: p.id, text: e.target.value })}
+                      placeholder="告诉智能体为什么不行、该怎么改(会作为拒绝原因交给它)"
+                      aria-label="拒绝说明"
+                      className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-xs"
+                    />
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      disabled={busy === p.id || !denying.text.trim()}
+                      onClick={() => void decide(p.id, "denied", { message: denying.text.trim() })}
+                    >
+                      拒绝
+                    </Button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
+    </>
   );
 }

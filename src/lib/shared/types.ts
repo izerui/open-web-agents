@@ -6,15 +6,24 @@
 /** 模型别名槽:平台只暴露角色化的别名,真实 modelId 由网关映射。 */
 export type ModelAlias = "fable" | "opus" | "sonnet" | "haiku";
 
+export const MODEL_ALIASES: readonly ModelAlias[] = ["fable", "opus", "sonnet", "haiku"];
+
+export function isModelAlias(v: string): v is ModelAlias {
+  return (MODEL_ALIASES as readonly string[]).includes(v);
+}
+
 export interface ModelSelection {
   alias: ModelAlias;
 }
 
-/** 三级凭证链,优先级 request > session > user > 平台默认。 */
+/**
+ * 三级凭证链,优先级 request > user > 平台默认。
+ * (曾经还有一层"会话级凭证",但从没有任何代码写入它:base_url / model 读出来恒为空,
+ * key_enc 连读都没读 —— 半截链路只会让人误以为能按会话换网关,已删除。)
+ */
 export interface CredentialChain {
   platform?: { baseUrl?: string; key?: string };
   user?: { baseUrl?: string; key?: string };
-  session?: { baseUrl?: string; key?: string; model?: ModelAlias };
   request?: { baseUrl?: string; key?: string; model?: ModelAlias };
 }
 
@@ -51,16 +60,16 @@ export interface SubagentDef {
    */
   description?: string;
   prompt: string;
+  /**
+   * 这个子代理用的模型别名;不填 = 跟主 agent 一样。
+   * 只收别名,不收完整模型 id —— 别名经平台的模型映射(OWA_MODEL_*)落到真实模型,
+   * 子代理不该绕开它。典型用法:主 agent 用 opus,检索 / 汇总类子代理用 haiku 省钱。
+   */
+  model?: ModelAlias;
   background: false;
 }
 
 export type JsonSchema = Record<string, unknown>;
-
-/** 机械验收规则,防 agent 伪造成功(如产物文件必须存在)。 */
-export interface VerifyRule {
-  kind: string;
-  args?: Record<string, unknown>;
-}
 
 export type Effort = "low" | "medium" | "high";
 
@@ -96,14 +105,14 @@ export type PermissionMode = (typeof PERMISSION_MODES)[number];
 /** 运行契约:域内的 agent 规格,不含任何 SDK 类型。 */
 export interface AgentSpec {
   systemPrompt: string;
-  skills?: string[];
+  /** 智能体自带的技能包,运行时作为本地插件加载。 */
+  skillPackages?: import("./skill-package").SkillPackage[];
   mcpServers?: McpDef[];
   tools?: ToolDef[];
   subagents?: SubagentDef[];
   model: ModelSelection;
   /** 有则启用结构化输出 —— 决定该智能体能否被企业系统当接口消费。 */
   outputSchema?: JsonSchema;
-  verifyRules?: VerifyRule[];
   /** 人工审批规则(HITL);不配则不审批。 */
   approvalRules?: { tools?: string[]; commandPatterns?: string[]; all?: boolean };
   /** 权限模式;不配等同 "default"。 */
@@ -126,6 +135,11 @@ export interface RunContext {
   /** 上一轮的 SDK session id,用于多轮 resume。 */
   resumeSessionId?: string;
   /**
+   * 在 resumeSessionId 那份会话里从这条消息之后接着跑,并分到新会话(SDK 的 resumeSessionAt +
+   * forkSession)。用于"从某一轮重来":回到那一轮之前的状态,原对话不受影响。
+   */
+  resumeSessionAt?: string;
+  /**
    * 无人值守。
    *
    * 接口 invoke 是一次调用拿结果,没有人能在中途确认任何东西 ——
@@ -133,8 +147,39 @@ export interface RunContext {
    * 关口一律直接放行;路径围栏与工具白名单不受影响(那是安全边界,不是“要不要问人”)。
    */
   unattended?: boolean;
+  /**
+   * 命中审批规则时怎么办:ask 等人批 / allow 直接放行 / deny 直接拒绝。
+   * 不传时按 unattended 推断(无人值守放行,否则等人)。
+   * 嵌入组件里有人但不是审批人(终端访客不该替运营方批准危险操作),只能 allow 或 deny。
+   */
+  approvalPolicy?: "ask" | "allow" | "deny";
   credentials: ResolvedCredentials;
   env: Record<string, string>;
+  /** 运行中途追加消息的收件箱;不给 = 这一轮不接受追加(一次性输入)。 */
+  steer?: SteerInbox;
+}
+
+/** 一条追加消息。 */
+export interface SteerMessage {
+  id: string;
+  text: string;
+}
+
+/**
+ * 运行中途追加消息的收件箱(引擎侧看到的样子)。
+ *
+ * 【送达的定义】引擎从 next() 取到一条、交给模型输入流之前调 delivered() —— 之后它要么插进
+ * 当前这一轮,要么在本轮回答后再答一轮。close() 之后不再受理新消息,但已受理的仍会从 next()
+ * 取到;abandon() 是运行结束、模型不再读输入:还没取走的一律记为未送达。
+ */
+export interface SteerInbox {
+  /** 下一条;已关闭且取完返回 null。 */
+  next(): Promise<SteerMessage | null>;
+  delivered(m: SteerMessage): Promise<void>;
+  /** 停止受理(第一条 result 到达时调用)。幂等。 */
+  close(): Promise<void>;
+  /** 运行结束:剩下的记为未送达,并让挂着的 next() 返回 null。幂等。 */
+  abandon(): Promise<SteerMessage[]>;
 }
 
 // ─────────────────────────── 归一事件 ───────────────────────────
@@ -173,6 +218,11 @@ export type AgentEvent =
       }[];
     }
   | { kind: "status"; label: string; state?: string }
+  /**
+   * 运行中途用户追加的消息。delivered = 已交给模型(会插进当前这一轮,或在本轮回答后再答一轮);
+   * dropped = 运行已经结束、没能交给模型 —— 界面据此提示用户重新发送。
+   */
+  | { kind: "steer"; id?: string; text: string; outcome: "delivered" | "dropped" }
   | {
       kind: "usage";
       messageId?: string;

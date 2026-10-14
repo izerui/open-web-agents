@@ -10,7 +10,14 @@ import {
 /** 谁在调用。web = 平台内人类(当前单用户);apiKey = 第三方系统。 */
 export type Principal =
   | { type: "web"; userId: string; role?: "admin" | "user" }
-  | { type: "apiKey"; keyId: string; ownerId: string; agentId?: string };
+  | {
+      type: "apiKey";
+      keyId: string;
+      ownerId: string;
+      agentId?: string;
+      /** 这把 Key 单独设的每分钟上限;undefined = 平台默认。 */
+      rateLimitPerMinute?: number;
+    };
 
 /** 资源的归属信息(从库里读出后传入)。 */
 export interface SessionOwnership {
@@ -18,6 +25,8 @@ export interface SessionOwnership {
   agentId: string;
   ownerId?: string;
   callerApiKeyId?: string;
+  /** 计费账号。API Key / 嵌入会话没有 owner,签发 key 的人凭它查看用自己 key 发起的运行。 */
+  billingUserId?: string;
 }
 
 export type Decision = { allowed: true } | { allowed: false; reason: string };
@@ -37,6 +46,9 @@ const deny = (reason: string): Decision => ({ allowed: false, reason });
 export function canAccessSession(p: Principal, s: SessionOwnership): Decision {
   if (p.type === "web") {
     if (!s.ownerId) {
+      // 用自己的 key 发起的接口调用 / 嵌入会话:签发人能看到全过程。
+      // 曾经只有管理员看得到 —— 集成方对自己调用的"全程过程监控"实际不可用
+      if (s.billingUserId && s.billingUserId === p.userId) return ALLOW;
       // 无归属的历史数据(单用户时期创建)。开了登录之后若一律放行,任何新用户都能
       // 读到这些会话 —— 故只对 admin 开放:既不丢旧数据,也不构成跨用户泄露。
       return p.role === "admin" ? ALLOW : deny("session has no owner");
@@ -75,6 +87,31 @@ export function canInvokeAgent(
     return deny("no access to this agent");
   }
   return ALLOW;
+}
+
+/**
+ * 主体对某个智能体能做到哪一级:none / read / write。所有"读智能体相关资源"的路由都走它。
+ *
+ * 【为什么不能只看签发人】API Key 曾在这些路由里被 subjectOf 换成签发人的身份,
+ * 只按签发人的资源授权判定 —— Key 自己绑定的 agentId 被丢掉了:给第三方的 A 专用 Key
+ * 能读到签发人名下 B 的完整配置,甚至能改 B 的知识库与分享设置。
+ *
+ * 规则:
+ * - Key 绑定了别的智能体 → none(与"不存在"不可区分);
+ * - Key 最多 read:它是给系统调用智能体用的,不是管理凭证,签发人的 write 不传给它 ——
+ *   于是也拿不到 MCP 环境变量、逃生舱这些只给可写者看的配置;
+ * - 网页登录按资源授权判定。
+ */
+export function agentAccessLevel(
+  p: Principal,
+  agent: OwnedResource,
+  subject: Subject,
+  grants: Grant[],
+): "none" | "read" | "write" {
+  if (p.type === "apiKey" && p.agentId && p.agentId !== agent.id) return "none";
+  if (!hasResourceAccess(subject, agent, "read", grants)) return "none";
+  if (p.type === "apiKey") return "read";
+  return hasResourceAccess(subject, agent, "write", grants) ? "write" : "read";
 }
 
 /** 能否管理智能体定义(创建/修改)。对外 key 一律不行,防止调用方改提示词。 */

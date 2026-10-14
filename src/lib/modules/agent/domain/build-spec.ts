@@ -19,14 +19,13 @@ export function buildSpec(
   const knowledge = overrides?.knowledgeContext?.trim();
   return {
     systemPrompt: knowledge ? `${cfg.systemPrompt}\n\n${knowledge}` : cfg.systemPrompt,
-    skills: cfg.skills,
+    skillPackages: cfg.skillPackages,
     mcpServers: cfg.mcpServers,
     tools: cfg.tools,
     // 平台强制子代理同步执行,保证过程全程可监控
     subagents: cfg.subagents?.map((s) => ({ ...s, background: false as const })),
     model: { alias: overrides?.model ?? cfg.model },
     outputSchema: cfg.outputSchema,
-    verifyRules: cfg.verifyRules,
     approvalRules: cfg.approvalRules,
     permissionMode: cfg.permissionMode,
     limits: { maxTurns: cfg.maxTurns, effort: cfg.effort },

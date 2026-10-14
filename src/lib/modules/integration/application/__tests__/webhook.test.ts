@@ -1,4 +1,9 @@
-import { deliverWebhook } from "@/lib/modules/integration/application/webhook";
+import {
+  type WebhookSender,
+  WebhookTargetRejected,
+  deliverWebhook,
+} from "@/lib/modules/integration/application/webhook";
+import { signWebhook } from "@/lib/modules/integration/domain/webhook-policy";
 import { describe, expect, it, vi } from "vitest";
 
 const payload = { taskId: "t1", status: "success", structured: { a: 1 } };
@@ -9,13 +14,13 @@ function fetchReturning(...statuses: number[]) {
   return vi.fn(async () => {
     const s = statuses[Math.min(i++, statuses.length - 1)] ?? 200;
     return new Response(null, { status: s });
-  }) as unknown as typeof fetch;
+  }) as unknown as WebhookSender;
 }
 
 describe("deliverWebhook", () => {
   it("2xx 一次成功", async () => {
     const r = await deliverWebhook("https://x/hook", payload, {
-      fetchImpl: fetchReturning(200),
+      send: fetchReturning(200),
       sleep: noSleep,
     });
     expect(r).toMatchObject({ delivered: true, attempts: 1, lastStatus: 200 });
@@ -24,7 +29,7 @@ describe("deliverWebhook", () => {
   it("POST 出 JSON body 与正确头", async () => {
     const spy = vi.fn(async () => new Response(null, { status: 200 }));
     await deliverWebhook("https://x/hook", payload, {
-      fetchImpl: spy as unknown as typeof fetch,
+      send: spy as unknown as WebhookSender,
       sleep: noSleep,
     });
     const [, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
@@ -34,7 +39,7 @@ describe("deliverWebhook", () => {
 
   it("5xx 重试到成功", async () => {
     const r = await deliverWebhook("https://x/hook", payload, {
-      fetchImpl: fetchReturning(500, 200),
+      send: fetchReturning(500, 200),
       sleep: noSleep,
     });
     expect(r).toMatchObject({ delivered: true, attempts: 2 });
@@ -42,7 +47,7 @@ describe("deliverWebhook", () => {
 
   it("429 也重试", async () => {
     const r = await deliverWebhook("https://x/hook", payload, {
-      fetchImpl: fetchReturning(429, 200),
+      send: fetchReturning(429, 200),
       sleep: noSleep,
     });
     expect(r.delivered).toBe(true);
@@ -50,7 +55,7 @@ describe("deliverWebhook", () => {
 
   it("4xx 是对方拒收,不重试", async () => {
     const impl = fetchReturning(400);
-    const r = await deliverWebhook("https://x/hook", payload, { fetchImpl: impl, sleep: noSleep });
+    const r = await deliverWebhook("https://x/hook", payload, { send: impl, sleep: noSleep });
     expect(r).toMatchObject({ delivered: false, attempts: 1, lastStatus: 400 });
     expect(impl).toHaveBeenCalledTimes(1);
   });
@@ -58,7 +63,7 @@ describe("deliverWebhook", () => {
   it("一直 5xx 则用尽次数后放弃(不无限重试拖住 worker)", async () => {
     const impl = fetchReturning(503);
     const r = await deliverWebhook("https://x/hook", payload, {
-      fetchImpl: impl,
+      send: impl,
       sleep: noSleep,
       maxAttempts: 3,
     });
@@ -71,8 +76,8 @@ describe("deliverWebhook", () => {
     const impl = vi.fn(async () => {
       if (n++ === 0) throw new Error("ECONNREFUSED");
       return new Response(null, { status: 200 });
-    }) as unknown as typeof fetch;
-    const r = await deliverWebhook("https://x/hook", payload, { fetchImpl: impl, sleep: noSleep });
+    }) as unknown as WebhookSender;
+    const r = await deliverWebhook("https://x/hook", payload, { send: impl, sleep: noSleep });
     expect(r.delivered).toBe(true);
     expect(r.attempts).toBe(2);
   });
@@ -80,9 +85,9 @@ describe("deliverWebhook", () => {
   it("全程网络错误时返回失败与错误信息,不抛异常", async () => {
     const impl = vi.fn(async () => {
       throw new Error("DNS fail");
-    }) as unknown as typeof fetch;
+    }) as unknown as WebhookSender;
     const r = await deliverWebhook("https://x/hook", payload, {
-      fetchImpl: impl,
+      send: impl,
       sleep: noSleep,
       maxAttempts: 2,
     });
@@ -93,12 +98,78 @@ describe("deliverWebhook", () => {
   it("重试间隔递增(指数退避)", async () => {
     const waits: number[] = [];
     await deliverWebhook("https://x/hook", payload, {
-      fetchImpl: fetchReturning(500, 500, 200),
+      send: fetchReturning(500, 500, 200),
       sleep: async (ms) => {
         waits.push(ms);
       },
       maxAttempts: 3,
     });
     expect(waits).toEqual([500, 1000]);
+  });
+});
+
+describe("deliverWebhook 签名与目标检查", () => {
+  it("配了密钥就带时间戳与签名头,签名覆盖原样发出的请求体", async () => {
+    const spy = vi.fn(async () => new Response(null, { status: 200 }));
+    await deliverWebhook(
+      "https://x/hook",
+      { ...payload, deliveryId: "t1" },
+      { send: spy as unknown as WebhookSender, sleep: noSleep, secret: "k", now: () => 5_000 },
+    );
+    const [, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    const h = init.headers as Record<string, string>;
+    expect(h["X-OWA-Timestamp"]).toBe("5");
+    expect(h["X-OWA-Delivery"]).toBe("t1");
+    expect(h["X-OWA-Signature"]).toBe(signWebhook("k", 5, String(init.body)));
+  });
+
+  it("换密钥重叠期:主签名头用新密钥(老接收方按原样比对不受影响),旧密钥另签一份", async () => {
+    const spy = vi.fn(async () => new Response(null, { status: 200 }));
+    await deliverWebhook("https://x/hook", payload, {
+      send: spy as unknown as WebhookSender,
+      sleep: noSleep,
+      secret: "new",
+      previousSecret: "old",
+      now: () => 5_000,
+    });
+    const [, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    const h = init.headers as Record<string, string>;
+    expect(h["X-OWA-Signature"]).toBe(signWebhook("new", 5, String(init.body)));
+    expect(h["X-OWA-Signature-Previous"]).toBe(signWebhook("old", 5, String(init.body)));
+  });
+
+  it("不在重叠期:不带旧签名头", async () => {
+    const spy = vi.fn(async () => new Response(null, { status: 200 }));
+    await deliverWebhook("https://x/hook", payload, {
+      send: spy as unknown as WebhookSender,
+      sleep: noSleep,
+      secret: "new",
+    });
+    const [, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect((init.headers as Record<string, string>)["X-OWA-Signature-Previous"]).toBeUndefined();
+  });
+
+  it("没配密钥就不带签名头", async () => {
+    const spy = vi.fn(async () => new Response(null, { status: 200 }));
+    await deliverWebhook("https://x/hook", payload, {
+      send: spy as unknown as WebhookSender,
+      sleep: noSleep,
+    });
+    const [, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect((init.headers as Record<string, string>)["X-OWA-Signature"]).toBeUndefined();
+  });
+
+  it("发送器报目标被拒:立刻抛出,不做即时重试", async () => {
+    const send = vi.fn(async () => {
+      throw new WebhookTargetRejected("解析到 127.0.0.1");
+    });
+    await expect(
+      deliverWebhook("https://x/hook", payload, {
+        send: send as unknown as WebhookSender,
+        sleep: noSleep,
+        maxAttempts: 3,
+      }),
+    ).rejects.toBeInstanceOf(WebhookTargetRejected);
+    expect(send).toHaveBeenCalledTimes(1);
   });
 });

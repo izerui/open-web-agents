@@ -1,0 +1,1 @@
+ALTER TABLE `eval_runs` ADD `config_hash` varchar(64);

@@ -43,6 +43,8 @@ describe("aliasEnv", () => {
     expect(env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe("m-opus");
     expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe("m-sonnet");
     expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("m-haiku");
+    // 曾经漏了 fable:智能体选 fable 时 SDK 用的是它内置的默认模型,OWA_MODEL_FABLE 不生效
+    expect(env.ANTHROPIC_DEFAULT_FABLE_MODEL).toBe("m-fable");
   });
 
   it("小快模型槽复用 haiku", () => {
@@ -156,32 +158,64 @@ describe("buildSdkOptions", () => {
     });
   });
 
-  it("escapeHatch 不能在平台关闭时偷塞 stdio MCP", () => {
-    expect(() =>
-      buildSdkOptions(
-        specOf({
-          escapeHatch: {
-            mcpServers: { local: { type: "stdio", command: "sh", args: ["-c", "id"] } },
-          },
-        }),
-        ctx,
-        deps(),
-      ),
-    ).toThrow(/stdio MCP.*未启用|OWA_ALLOW_STDIO_MCP/);
+  it("escapeHatch 偷塞不进 stdio MCP(mcpServers 属于受保护字段)", () => {
+    const o = buildSdkOptions(
+      specOf({
+        escapeHatch: {
+          mcpServers: { local: { type: "stdio", command: "sh", args: ["-c", "id"] } },
+        },
+      }),
+      ctx,
+      deps(),
+    );
+    expect(o.mcpServers).toBeUndefined();
   });
 
   it("无 mcpServers 时不传该字段", () => {
     expect(buildSdkOptions(specOf(), ctx, deps()).mcpServers).toBeUndefined();
   });
 
-  it("逃生舱最后 spread,可覆盖任何默认", () => {
+  it("逃生舱可覆盖平台没建模的普通参数", () => {
     const o = buildSdkOptions(
-      specOf({ escapeHatch: { permissionMode: "default", includePartialMessages: true } }),
+      specOf({ escapeHatch: { maxBudgetUsd: 3, fallbackModel: "haiku" } }),
       ctx,
       deps(),
     );
-    expect(o.permissionMode).toBe("default");
-    expect(o.includePartialMessages).toBe(true);
+    expect(o.maxBudgetUsd).toBe(3);
+    expect(o.fallbackModel).toBe("haiku");
+  });
+
+  // 【越权回归】逃生舱曾经能一次性拆掉所有安全设置
+  it("逃生舱改不了安全边界字段:hooks、cwd、env、settingSources、权限模式、工具限制", () => {
+    const base = buildSdkOptions(specOf({}), ctx, deps());
+    const o = buildSdkOptions(
+      specOf({
+        escapeHatch: {
+          hooks: {},
+          cwd: "/",
+          env: { HOME: "/root" },
+          settingSources: ["user", "project"],
+          permissionMode: "bypassPermissions",
+          allowDangerouslySkipPermissions: true,
+          disallowedTools: [],
+          canUseTool: undefined,
+          additionalDirectories: ["/"],
+        },
+      }),
+      ctx,
+      deps(),
+    );
+    expect(o.hooks).toBe(base.hooks === undefined ? undefined : o.hooks);
+    expect(Object.keys((o.hooks ?? {}) as object)).toEqual(
+      Object.keys((base.hooks ?? {}) as object),
+    );
+    expect(o.cwd).toBe(base.cwd);
+    expect(o.env).toEqual(base.env);
+    expect(o.settingSources).toEqual([]);
+    expect(o.permissionMode).toBe(base.permissionMode);
+    expect(o.allowDangerouslySkipPermissions).toBeUndefined();
+    expect(o.additionalDirectories).toBeUndefined();
+    expect(typeof o.canUseTool).toBe("function");
   });
 });
 
@@ -212,9 +246,11 @@ describe("执行隔离进入 SDK options", () => {
     expect(o.disallowedTools).toEqual(expect.arrayContaining([expect.stringContaining("Write(")]));
   });
 
-  it("逃生舱可覆盖沙箱设置(留给特殊业务)", () => {
+  it("逃生舱关不掉沙箱", () => {
+    const base = buildSdkOptions(specOf({}), ctx, withSandbox());
     const o = buildSdkOptions(specOf({ escapeHatch: { sandbox: undefined } }), ctx, withSandbox());
-    expect(o.sandbox).toBeUndefined();
+    expect(o.sandbox).toEqual(base.sandbox);
+    expect(o.sandbox).toBeDefined();
   });
 });
 
@@ -226,10 +262,37 @@ describe("执行隔离进入 SDK options", () => {
  * 对照隔壁 skills 还做了 Array.isArray 检查)。所以传错形状不会报错,
  * 只是子代理静默不生效:构建器里配了、存下来了、界面也显示着。
  */
+describe("从某一轮重来:resumeSessionAt + forkSession", () => {
+  it("给了起点消息:在那条消息之后接着跑,并分到新会话(不改写原对话)", () => {
+    const o = buildSdkOptions(specOf(), { ...ctx, resumeSessionAt: "msg-9" }, deps());
+    expect(o.resume).toBe("sess_9");
+    expect(o.resumeSessionAt).toBe("msg-9");
+    expect(o.forkSession).toBe(true);
+  });
+
+  it("没给起点消息:照常续接最新状态,不分会话", () => {
+    const o = buildSdkOptions(specOf(), ctx, deps());
+    expect("resumeSessionAt" in o).toBe(false);
+    expect("forkSession" in o).toBe(false);
+  });
+
+  it("没有要续接的会话时,起点消息无意义,不传", () => {
+    const o = buildSdkOptions(
+      specOf(),
+      { ...ctx, resumeSessionId: undefined, resumeSessionAt: "msg-9" },
+      deps(),
+    );
+    expect("resumeSessionAt" in o).toBe(false);
+  });
+});
+
 describe("子代理传给 SDK 的形状", () => {
   const agentsOf = (subagents: AgentSpec["subagents"]) =>
     buildSdkOptions(specOf({ subagents }), ctx, deps()).agents as
-      | Record<string, { description?: string; prompt?: string; background?: boolean }>
+      | Record<
+          string,
+          { description?: string; prompt?: string; background?: boolean; model?: string }
+        >
       | undefined;
 
   it("是对象而非数组 —— 数组会让 agent 名变成下标", () => {
@@ -251,6 +314,16 @@ describe("子代理传给 SDK 的形状", () => {
   it("平台强制同步执行 —— background 恒为 false", () => {
     const a = agentsOf([{ name: "r", prompt: "p", background: false }]);
     expect(a?.r?.background).toBe(false);
+  });
+
+  it("子代理单独指定的模型别名原样交给 SDK;不指定就不传(跟随主 agent)", () => {
+    // SDK 按 ANTHROPIC_DEFAULT_<别名>_MODEL 换成真实模型(scripts/sdk-probe/subagent-model.mjs 实测)
+    const a = agentsOf([
+      { name: "cheap", prompt: "p", model: "haiku", background: false },
+      { name: "same", prompt: "p", background: false },
+    ]);
+    expect(a?.cheap?.model).toBe("haiku");
+    expect(a?.same && "model" in a.same).toBe(false);
   });
 
   it("没配子代理时不传该字段", () => {
@@ -439,6 +512,19 @@ describe("PreToolUse 围栏接入 SDK options", () => {
       requestApproval: async () => ({ approved: true }),
     });
     expect((await gateOf(o)("Bash", { command: "rm -rf x" })).denied).toBe(false);
+  });
+
+  it("发起审批时带上这次调用的类别(供「本会话内同类不再询问」匹配)", async () => {
+    const seen: unknown[] = [];
+    const o = buildSdkOptions(specOf({ approvalRules: { commandPatterns: ["curl"] } }), ctx, {
+      ...deps(),
+      requestApproval: async (r) => {
+        seen.push(r.scopes);
+        return { approved: true };
+      },
+    });
+    await gateOf(o)("Bash", { command: "curl https://x" });
+    expect(seen).toEqual([[{ key: "bash:curl", label: "含「curl」的命令" }]]);
   });
 
   it("需审批时拒绝则不执行,并带出说明", async () => {
@@ -631,5 +717,64 @@ describe("PreToolUse 围栏接入 SDK options", () => {
     });
     await gateOf(o)("Bash", { command: "ls" });
     expect(spy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("没有审批人时的审批策略", () => {
+  const ruled = specOf({ approvalRules: { tools: ["Bash"] } });
+  async function decide(policy: "ask" | "allow" | "deny") {
+    const asked: string[] = [];
+    const o = buildSdkOptions(
+      ruled,
+      { ...ctx, approvalPolicy: policy },
+      {
+        ...deps(),
+        requestApproval: async (r) => {
+          asked.push(r.toolName);
+          return { approved: true };
+        },
+      },
+    );
+    const hook = (o.hooks as { PreToolUse: { hooks: ((i: unknown) => Promise<unknown>)[] }[] })
+      .PreToolUse[0]?.hooks[0];
+    const out = (await hook?.({
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_input: { command: "ls" },
+    })) as { hookSpecificOutput?: { permissionDecision?: string } } | undefined;
+    return { decision: out?.hookSpecificOutput?.permissionDecision, asked };
+  }
+
+  it("ask:发起人工审批", async () => {
+    expect((await decide("ask")).asked).toEqual(["Bash"]);
+  });
+
+  it("deny:不等人,直接拒绝(嵌入组件默认)", async () => {
+    const r = await decide("deny");
+    expect(r.asked).toEqual([]);
+    expect(r.decision).toBe("deny");
+  });
+
+  it("allow:不等人,直接放行(接口调用默认)", async () => {
+    const r = await decide("allow");
+    expect(r.asked).toEqual([]);
+    expect(r.decision).not.toBe("deny");
+  });
+});
+
+describe("技能插件进入 SDK options", () => {
+  it("有技能插件目录时以本地插件加载,且不放开 settingSources", () => {
+    const o = buildSdkOptions(specOf({}), ctx, { ...deps(), skillPluginPath: "/data/.skills/abc" });
+    expect(o.plugins).toEqual([{ type: "local", path: "/data/.skills/abc" }]);
+    expect(o.settingSources).toEqual([]);
+  });
+
+  it("逃生舱塞不进别的插件", () => {
+    const o = buildSdkOptions(
+      specOf({ escapeHatch: { plugins: [{ type: "local", path: "/tmp/evil" }] } }),
+      ctx,
+      deps(),
+    );
+    expect(o.plugins).toBeUndefined();
   });
 });

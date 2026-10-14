@@ -13,6 +13,8 @@ export interface SessionSummary {
   runCount?: number;
   /** 最后一次发起运行的时间;一轮都没跑过时等于创建时间。 */
   lastActiveAt?: number;
+  /** 工作目录被自动清理的时刻(长期未活动);之前生成的文件已不在 */
+  workspacePurgedAt?: number;
 }
 
 export interface AgentSummary {
@@ -20,11 +22,29 @@ export interface AgentSummary {
   name: string;
   icon?: string;
   description?: string;
-  config: { outputSchema?: Record<string, unknown> };
+  config: {
+    inputSchema?: Record<string, unknown>;
+    outputSchema?: Record<string, unknown>;
+    starters?: string[];
+  };
+  /** 结果回调地址(仅所有者与管理员可见) */
+  webhookUrl?: string;
+  /** 当前发布的版本;null = 从未发布(所有入口跑草稿) */
+  publishedVersion?: number | null;
+  /** 草稿是否有未发布的修改(仅能修改的人可见) */
+  hasUnpublishedChanges?: boolean;
+  /** 调用方默认拿到的契约;null = 从未发布,调用跑草稿 */
+  published?: {
+    version: number;
+    inputSchema?: Record<string, unknown>;
+    outputSchema?: Record<string, unknown>;
+  } | null;
   /** 是否已公开分享 */
   isPublic?: boolean;
   /** 当前用户能否修改 */
   canWrite?: boolean;
+  /** 当前用户能否查看与设置 webhook(仅所有者与管理员) */
+  canManageWebhook?: boolean;
 }
 
 export interface FileNode {

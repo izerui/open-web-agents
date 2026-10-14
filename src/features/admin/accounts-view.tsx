@@ -1,16 +1,18 @@
 "use client";
 
+import { useConfirm } from "@/components/confirm-dialog";
+import { OneTimeSecretDialog } from "@/components/one-time-secret-dialog";
 import { SpaceShell } from "@/components/space-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { formatUsd } from "@/lib/modules/usage/domain/aggregate";
 import { peekMe } from "@/lib/use-me";
 import { cn } from "@/lib/utils";
-import { Ban, Check, ShieldCheck, User as UserIcon } from "lucide-react";
+import { Ban, Check, KeyRound, ShieldCheck, User as UserIcon, UserPlus } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -42,6 +44,12 @@ export function AccountsView() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [quotaDraft, setQuotaDraft] = useState<Record<string, string>>({});
+  const [newEmail, setNewEmail] = useState("");
+  const [newRole, setNewRole] = useState<"user" | "admin">("user");
+  const [creating, setCreating] = useState(false);
+  /** 刚生成的一次性密码(建号或重置),只展示这一次。 */
+  const [secret, setSecret] = useState<{ title: string; value: string } | null>(null);
+  const confirm = useConfirm();
 
   const selfId = peekMe()?.user?.id;
 
@@ -61,24 +69,53 @@ export function AccountsView() {
     void load();
   }, [load]);
 
-  async function patch(id: string, body: Record<string, unknown>, okMsg: string) {
+  /**
+   * 返回是否成功。曾经没有 catch(网络错误成了未处理的 rejection)、失败也不告诉调用方,
+   * 于是保存额度失败后草稿照样被清空,刚填的数字就丢了。
+   */
+  async function patch(
+    id: string,
+    body: Record<string, unknown>,
+    okMsg: string,
+  ): Promise<{ tempPassword?: string } | null> {
     setBusy(id);
     try {
-      const res = await fetch("/api/admin/accounts", {
+      const d = await fetchJson<{ tempPassword?: string }>("/api/admin/accounts", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, ...body }),
       });
-      const d = (await res.json()) as { error?: string };
-      if (!res.ok) {
-        // 服务端的拒绝理由写得很具体(如"这是最后一位管理员"),原样呈现
-        toast.error(d.error ?? `HTTP ${res.status}`);
-        return;
-      }
       toast.success(okMsg);
       await load();
+      return d;
+    } catch (e) {
+      // 服务端的拒绝理由写得很具体(如"这是最后一位管理员"),原样呈现
+      toast.error(errorText(e));
+      return null;
     } finally {
       setBusy(null);
+    }
+  }
+
+  async function createAccount() {
+    if (!newEmail.trim() || creating) return;
+    setCreating(true);
+    try {
+      const d = await fetchJson<{ tempPassword: string; account: { email: string } }>(
+        "/api/admin/accounts",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: newEmail.trim(), role: newRole }),
+        },
+      );
+      setNewEmail("");
+      setSecret({ title: `已创建 ${d.account.email}`, value: d.tempPassword });
+      await load();
+    } catch (e) {
+      toast.error(`创建失败:${errorText(e)}`);
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -90,11 +127,12 @@ export function AccountsView() {
       toast.error("额度要填一个非负数字,或留空表示不限");
       return;
     }
-    await patch(
+    const ok = await patch(
       a.id,
       { monthlyQuotaMicroUsd: value === null ? null : toMicro(value) },
       value === null ? "已取消该账号的额度限制" : `额度已设为 $${value}`,
     );
+    if (!ok) return;
     setQuotaDraft((m) => {
       const next = { ...m };
       delete next[a.id];
@@ -111,6 +149,52 @@ export function AccountsView() {
       title="账号管理"
       subtitle={`${accounts.length} 个账号 · ${activeCount} 个启用中 · 本月合计 ${formatUsd(totalCost)}`}
     >
+      {confirm.dialog}
+      <OneTimeSecretDialog
+        title={secret?.title ?? ""}
+        description="这是一次性的初始密码,关闭后无法再次查看。请转交给账号使用者,并提醒其登录后在「账号安全」里修改。"
+        secret={secret?.value ?? null}
+        onClose={() => setSecret(null)}
+      />
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">创建账号</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form
+            className="flex flex-wrap items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void createAccount();
+            }}
+          >
+            <Input
+              type="email"
+              required
+              className="h-8 min-w-48 flex-1 text-xs"
+              placeholder="name@company.com"
+              aria-label="新账号邮箱"
+              value={newEmail}
+              onChange={(e) => setNewEmail(e.target.value)}
+            />
+            <select
+              className="h-8 rounded-md border border-input bg-transparent px-2 text-xs"
+              aria-label="角色"
+              value={newRole}
+              onChange={(e) => setNewRole(e.target.value as "user" | "admin")}
+            >
+              <option value="user">普通账号</option>
+              <option value="admin">管理员</option>
+            </select>
+            <Button type="submit" size="sm" disabled={creating || !newEmail.trim()}>
+              <UserPlus className="size-3.5" />
+              创建
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
       {loading && (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Spinner className="size-3.5" />
@@ -164,7 +248,7 @@ export function AccountsView() {
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                   <span>注册于 {new Date(a.createdAt).toLocaleDateString()}</span>
                   <span>{a.agentCount} 个智能体</span>
-                  <span className={cn(over && "font-medium text-[var(--warning)]")}>
+                  <span className={cn(over && "font-medium text-warning")}>
                     本月 {formatUsd(a.monthCostMicroUsd)}
                     {a.monthlyQuotaMicroUsd !== null &&
                       ` / 上限 ${formatUsd(a.monthlyQuotaMicroUsd)}`}
@@ -233,17 +317,47 @@ export function AccountsView() {
                     </Button>
 
                     <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7"
+                      disabled={busy === a.id}
+                      onClick={() =>
+                        confirm.ask({
+                          title: `重置 ${a.email} 的密码?`,
+                          description: "旧密码立即失效,系统会生成一个一次性的新密码供你转交。",
+                          confirmLabel: "重置",
+                          onConfirm: async () => {
+                            const d = await patch(a.id, { resetPassword: true }, "密码已重置");
+                            if (d?.tempPassword) {
+                              setSecret({ title: `${a.email} 的新密码`, value: d.tempPassword });
+                            }
+                          },
+                        })
+                      }
+                    >
+                      <KeyRound className="size-3.5" />
+                      重置密码
+                    </Button>
+
+                    <Button
                       variant={a.disabled ? "outline" : "ghost"}
                       size="sm"
                       className={cn("h-7", !a.disabled && "text-destructive")}
                       disabled={isSelf || busy === a.id}
                       title={isSelf ? "不能停用自己" : undefined}
                       onClick={() =>
-                        void patch(
-                          a.id,
-                          { disabled: !a.disabled },
-                          a.disabled ? "已恢复该账号" : "已停用该账号,其登录立即失效",
-                        )
+                        a.disabled
+                          ? void patch(a.id, { disabled: false }, "已恢复该账号")
+                          : confirm.ask({
+                              title: `停用 ${a.email}?`,
+                              description:
+                                "其登录立即失效,签发的 API Key 与嵌入令牌也一并停用。之后可以随时恢复。",
+                              confirmLabel: "停用",
+                              destructive: true,
+                              onConfirm: async () => {
+                                await patch(a.id, { disabled: true }, "已停用该账号");
+                              },
+                            })
                       }
                     >
                       <Ban className="size-3.5" />

@@ -71,17 +71,62 @@ describe("RunOrchestrator.execute", () => {
     bus.subscribe(topicOf("s1"), (e) => got.push(e));
     await orch.execute({ sessionId: "s1", prompt: "hi" }, signal);
 
-    expect(got.map((e) => e.kind)).toEqual(["status", "text", "tool_use", "result"]);
+    expect(got.map((e) => e.kind)).toEqual(["status", "text", "tool_use"]);
   });
 
-  it("首尾补齐 status 与 result 事件", async () => {
+  it("开头补 running 状态;终态事件不由编排层发布(worker 落库后才发)", async () => {
     const { bus, orch } = await setup(new FakeEngine());
     const got: AgentEvent[] = [];
     bus.subscribe(topicOf("s1"), (e) => got.push(e));
     await orch.execute({ sessionId: "s1", prompt: "hi" }, signal);
 
     expect(got[0]).toMatchObject({ kind: "status", state: "running" });
-    expect(got.at(-1)).toMatchObject({ kind: "result", status: "success" });
+    expect(got.some((e) => e.kind === "result")).toBe(false);
+  });
+
+  it("相邻的文本增量合并成一条再发布,顺序不变", async () => {
+    const engine = new FakeEngine([
+      { kind: "text", text: "你" },
+      { kind: "text", text: "好" },
+      { kind: "tool_use", tool: "Bash", input: {} },
+      { kind: "text", text: "完" },
+      { kind: "text", text: "成" },
+    ]);
+    const { bus, orch } = await setup(engine);
+    const got: AgentEvent[] = [];
+    bus.subscribe(topicOf("s1"), (e) => got.push(e));
+    await orch.execute({ sessionId: "s1", prompt: "hi" }, signal);
+
+    expect(got.slice(1)).toEqual([
+      { kind: "text", text: "你好" },
+      { kind: "tool_use", tool: "Bash", input: {} },
+      { kind: "text", text: "完成" },
+    ]);
+  });
+
+  it("按入队时的配置快照执行", async () => {
+    const engine = new FakeEngine();
+    const { orch } = await setup(engine);
+    await orch.execute(
+      {
+        sessionId: "s1",
+        prompt: "hi",
+        agentConfig: { systemPrompt: "快照里的提示词", model: "haiku" },
+      },
+      signal,
+    );
+    expect(engine.lastSpec?.systemPrompt).toContain("快照里的提示词");
+    expect(engine.lastSpec?.model).toEqual({ alias: "haiku" });
+  });
+
+  it("启动前已被中止:不调用引擎", async () => {
+    const engine = new FakeEngine();
+    const { orch } = await setup(engine);
+    const ac = new AbortController();
+    ac.abort();
+    const r = await orch.execute({ sessionId: "s1", prompt: "hi" }, ac.signal);
+    expect(r.status).toBe("failed");
+    expect(engine.lastCtx).toBeUndefined();
   });
 
   it("把工作目录与 prompt 传给引擎", async () => {
@@ -140,7 +185,8 @@ describe("RunOrchestrator.execute", () => {
 
     const r = await orch.execute({ sessionId: "s1", prompt: "hi" }, signal);
     expect(r.status).toBe("failed");
-    expect(got.at(-1)).toMatchObject({ kind: "result", status: "failed", summary: "炸了" });
+    expect(r.error?.message).toBe("炸了");
+    expect(got.some((e) => e.kind === "result")).toBe(false);
   });
 
   it("会话不存在时抛错", async () => {
@@ -217,11 +263,109 @@ describe("outputSchema 契约守门", () => {
     expect(r.error?.message).toMatch(/videoId/);
   });
 
-  it("契约失败也会发 result 事件让前端看到原因", async () => {
-    const { orch, bus } = await setupWithSchema({ status: "success", structured: {} });
-    const got: AgentEvent[] = [];
-    bus.subscribe(topicOf("s1"), (e) => got.push(e));
+  it("契约失败时清掉不合格的 structured,原因写进 error 供终态事件展示", async () => {
+    const { orch } = await setupWithSchema({ status: "success", structured: {} });
+    const r = await orch.execute({ sessionId: "s1", prompt: "hi" }, signal);
+    expect(r).toMatchObject({ status: "failed", error: { kind: "schema_mismatch" } });
+    expect(r.structured).toBeUndefined();
+  });
+});
+
+describe("计费账号", () => {
+  const signal = new AbortController().signal;
+
+  async function setupBilling(
+    quota?: (u: string) => Promise<{ allowed: boolean; reason?: string }>,
+  ) {
+    const sessions = new InMemorySessionRepo();
+    const agents = new InMemoryAgentRepo([
+      { id: "a1", ownerId: "u1", name: "a", config: { systemPrompt: "p", model: "sonnet" } },
+    ]);
+    // API Key 建的会话:没有人用归属,计费归签发人 u2
+    await sessions.create({
+      id: "s1",
+      agentId: "a1",
+      workspaceDir: "/ws/s1",
+      callerApiKeyId: "key-1",
+      billingUserId: "u2",
+    });
+    const engine = new FakeEngine();
+    const seenUsers: string[] = [];
+    const orch = new RunOrchestrator({
+      sessions,
+      agents,
+      engine,
+      bus: new InMemoryBus(),
+      platformCredentials: PLATFORM,
+      userCredentials: async (userId) => {
+        seenUsers.push(userId);
+        return userId === "u2" ? { key: "sk-u2" } : {};
+      },
+      quotaCheck: quota,
+    });
+    return { orch, engine, seenUsers };
+  }
+
+  it("API Key 会话用签发人自带的凭证,而不是平台默认", async () => {
+    const { orch, engine, seenUsers } = await setupBilling();
     await orch.execute({ sessionId: "s1", prompt: "hi" }, signal);
-    expect(got.at(-1)).toMatchObject({ kind: "result", status: "failed" });
+    expect(seenUsers).toEqual(["u2"]);
+    expect(engine.lastCtx?.credentials.key).toBe("sk-u2");
+  });
+
+  it("执行前复核额度:超额则不启动引擎", async () => {
+    const checked: string[] = [];
+    const { orch, engine } = await setupBilling(async (u) => {
+      checked.push(u);
+      return { allowed: false, reason: "超出月度额度" };
+    });
+    const r = await orch.execute({ sessionId: "s1", prompt: "hi" }, signal);
+    expect(checked).toEqual(["u2"]);
+    expect(r).toMatchObject({ status: "failed", error: { kind: "quota_exceeded" } });
+    expect(engine.lastCtx).toBeUndefined();
+  });
+
+  it("额度查不动(DB 故障)时本轮失败,不当作没超", async () => {
+    const { orch } = await setupBilling(async () => {
+      throw new Error("db down");
+    });
+    await expect(orch.execute({ sessionId: "s1", prompt: "hi" }, signal)).rejects.toThrow(
+      /db down/,
+    );
+  });
+});
+
+describe("RunOrchestrator:工作目录已被清理", () => {
+  it("运行前在原路径重建工作目录,引擎拿到的 cwd 是存在的", async () => {
+    const fs = await import("node:fs/promises");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "owa-ws-"));
+    const dir = path.join(root, "s-purged"); // 不存在:模拟被 GC 整体清理
+    let existedAtRun = false;
+    const engine: EnginePort = {
+      async run(_spec, ctx) {
+        existedAtRun = (await fs.stat(ctx.workspaceDir).catch(() => null))?.isDirectory() === true;
+        return { status: "success", summary: "ok", sessionId: "sdk" };
+      },
+    };
+    const sessions = new InMemorySessionRepo();
+    await sessions.create({ id: "s1", agentId: "a1", workspaceDir: dir });
+    const orch = new RunOrchestrator({
+      sessions,
+      agents: new InMemoryAgentRepo([
+        { id: "a1", ownerId: "u1", name: "a", config: { systemPrompt: "p", model: "sonnet" } },
+      ]),
+      engine,
+      bus: new InMemoryBus(),
+      platformCredentials: PLATFORM,
+      ensureWorkspace: async (_sid, d) => {
+        await fs.mkdir(d, { recursive: true });
+      },
+    });
+    const r = await orch.execute({ sessionId: "s1", prompt: "继续" }, new AbortController().signal);
+    expect(r.status).toBe("success");
+    expect(existedAtRun).toBe(true);
+    await fs.rm(root, { recursive: true, force: true });
   });
 });

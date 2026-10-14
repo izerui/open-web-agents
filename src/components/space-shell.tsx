@@ -21,7 +21,10 @@ import {
   ArrowLeft,
   BarChart3,
   Bot,
+  History,
   KeyRound,
+  Lock,
+  ScrollText,
   ShieldCheck,
   Terminal,
   User,
@@ -38,9 +41,12 @@ import { usePathname } from "next/navigation";
  * 【为什么不含用户组】一个账号就是一家企业,内部不分人,组没有存在意义。
  */
 export const PERSONAL_NAV = [
-  { href: "/settings/keys", label: "接入与 API Key", icon: Terminal },
+  { href: "/settings/runs", label: "运行记录", icon: History },
+  { href: "/settings/keys", label: "接入中心", icon: Terminal },
+  { href: "/settings/audit", label: "审计日志", icon: ScrollText },
   { href: "/settings/usage", label: "用量与成本", icon: BarChart3 },
   { href: "/settings/credentials", label: "模型凭证", icon: KeyRound },
+  { href: "/settings/account", label: "账号安全", icon: Lock },
 ] as const;
 
 /**

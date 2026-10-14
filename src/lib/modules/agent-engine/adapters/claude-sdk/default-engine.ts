@@ -11,7 +11,11 @@ import { ClaudeSdkEngine, type EngineDeps, type QueryFn } from "./runner";
 
 const sdkQuery: QueryFn = ({ prompt, options }) =>
   // SDK 的 options 类型面很宽且随版本变化,此处是 ACL 的边界,窄化交给 buildSdkOptions 保证
-  query({ prompt, options: options as Parameters<typeof query>[0]["options"] });
+  query({
+    // 流式输入的消息由 runner 按 SDKUserMessage 的形状构造(见 runner.ts 的 userMessage)
+    prompt: prompt as Parameters<typeof query>[0]["prompt"],
+    options: options as Parameters<typeof query>[0]["options"],
+  });
 
 /**
  * 创建绑定真实 SDK 的引擎。
@@ -36,5 +40,7 @@ export function createClaudeSdkEngine(
     sandboxEnabled,
     allowStdioMcp,
     requestApproval,
+    // 技能插件写在这里:不在任何会话工作目录之下,agent 写不进去,GC 也不会扫到
+    skillsRoot: path.join(dataDir, ".skills"),
   });
 }

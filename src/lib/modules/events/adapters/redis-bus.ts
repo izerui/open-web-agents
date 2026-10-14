@@ -5,7 +5,14 @@ import type { BusPort, StreamSubscriptionOptions, Unsubscribe } from "@/lib/modu
 import type { AgentEvent } from "@/lib/shared";
 import Redis from "ioredis";
 
-const STREAM_MAX_LENGTH = 2_000;
+/**
+ * 单个运行的事件上限。
+ *
+ * 曾经是 2000,而文本按 token 增量发布,一次长回答就能超过 —— 断线重连回放时
+ * 开头早已被裁掉。现在编排层先把相邻增量合并(event-coalescer.ts)再发布,
+ * 事件数降了一到两个数量级,同时把上限放宽到 10000 留足余量。
+ */
+const STREAM_MAX_LENGTH = 10_000;
 const STREAM_TTL_SECONDS = 24 * 60 * 60;
 const COMMAND_TIMEOUT_MS = 2_000;
 const READ_BLOCK_MS = 1_000;

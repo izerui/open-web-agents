@@ -1,7 +1,7 @@
 // 登录用例:注册 / 登录 / 从 cookie 解析当前用户。
 // 只依赖端口与纯域函数,便于用内存 fake 完整单测。
 
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import { hashPassword, verifyPassword } from "@/lib/modules/identity/domain/password";
 import {
   buildClearCookie,
@@ -11,11 +11,13 @@ import {
   verifyToken,
 } from "@/lib/modules/identity/domain/session-token";
 import type { User, UserRepo } from "@/lib/modules/identity/user-ports";
+import { BrandedError } from "@/lib/shared";
 
 /** 登录态有效期。 */
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
-export class AuthError extends Error {
+export class AuthError extends BrandedError {
+  static readonly brand = Symbol.for("owa.error.AuthError");
   constructor(
     message: string,
     readonly status = 400,
@@ -29,6 +31,11 @@ export interface AuthServiceDeps {
   sessionSecret: string;
   /** 生产环境下 cookie 加 Secure。 */
   secureCookie: boolean;
+  /**
+   * 是否开放自助注册。关掉后只有第一个账号(平台管理员)能自助注册,其余账号由管理员创建。
+   * 曾经注册完全开放:任何能访问到平台的人都能注册、签 key、花平台的钱。
+   */
+  allowSignup?: boolean;
 }
 
 function assertEmail(email: string): string {
@@ -42,24 +49,75 @@ function assertPassword(pw: string): void {
   if (pw.length < 8) throw new AuthError("密码至少 8 位");
 }
 
+/** 一次性初始密码:16 位,去掉易混字符。 */
+function generateTempPassword(): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+  return Array.from({ length: 16 }, () => alphabet[randomInt(alphabet.length)]).join("");
+}
+
 export class AuthService {
   constructor(private readonly deps: AuthServiceDeps) {}
 
-  /** 首个注册的用户自动成为 admin —— 自托管部署无需额外的初始化脚本。 */
+  /**
+   * 首个注册的用户自动成为 admin —— 自托管部署无需额外的初始化脚本。
+   * 并发注册也只有一个成为 admin(判定与建号同一个事务,见 UserRepo.registerSelf)。
+   */
   async register(email: string, password: string): Promise<{ user: User; cookie: string }> {
     const e = assertEmail(email);
     assertPassword(password);
 
+    const closed = () => new AuthError("当前平台未开放注册,请联系管理员开通账号", 403);
+    // 提前给出明确答复;真正的判定在 registerSelf 的事务里(并发注册时这里的计数不可信)
+    if (this.deps.allowSignup === false && (await this.deps.users.count()) > 0) throw closed();
     if (await this.deps.users.findByEmail(e)) throw new AuthError("该邮箱已注册", 409);
 
-    const isFirst = (await this.deps.users.count()) === 0;
+    const user = await this.deps.users.registerSelf(
+      {
+        id: randomUUID().replace(/-/g, "").slice(0, 24),
+        email: e,
+        passwordHash: await hashPassword(password),
+      },
+      { allowOthers: this.deps.allowSignup !== false },
+    );
+    if (!user) throw closed();
+    return { user, cookie: this.cookieFor(user.id) };
+  }
+
+  /**
+   * 管理员创建账号。不受"开放注册"开关限制 —— 关闭自助注册之后,这是开通账号的唯一途径。
+   * 返回一次性的初始密码,由管理员转交;用户登录后应在「账号安全」里改掉。
+   */
+  async createAccount(
+    email: string,
+    role: "admin" | "user" = "user",
+  ): Promise<{ user: User; tempPassword: string }> {
+    const e = assertEmail(email);
+    if (await this.deps.users.findByEmail(e)) throw new AuthError("该邮箱已注册", 409);
+    const tempPassword = generateTempPassword();
     const user = await this.deps.users.create({
       id: randomUUID().replace(/-/g, "").slice(0, 24),
       email: e,
-      passwordHash: await hashPassword(password),
-      role: isFirst ? "admin" : "user",
+      passwordHash: await hashPassword(tempPassword),
+      role,
     });
-    return { user, cookie: this.cookieFor(user.id) };
+    return { user, tempPassword };
+  }
+
+  /** 管理员重置某账号的密码,返回一次性的新密码。 */
+  async resetPassword(userId: string): Promise<string> {
+    const tempPassword = generateTempPassword();
+    await this.deps.users.setPasswordHash(userId, await hashPassword(tempPassword));
+    return tempPassword;
+  }
+
+  /** 用户自己改密码:必须先证明知道当前密码。 */
+  async changePassword(userId: string, current: string, next: string): Promise<void> {
+    const record = await this.deps.users.getWithPassword(userId);
+    if (!record || !(await verifyPassword(current, record.passwordHash))) {
+      throw new AuthError("当前密码不正确", 400);
+    }
+    assertPassword(next);
+    await this.deps.users.setPasswordHash(userId, await hashPassword(next));
   }
 
   /**

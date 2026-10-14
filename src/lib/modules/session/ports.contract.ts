@@ -25,8 +25,58 @@ export function sessionRepoContract(name: string, harness: SessionRepoHarness): 
       repo = await harness.makeRepo();
     });
 
-    const mk = (id: string, over: Partial<{ ownerId: string; callerApiKeyId: string }> = {}) =>
-      repo.create({ id, agentId: "a1", workspaceDir: `/ws/${id}`, ...over });
+    const mk = (
+      id: string,
+      over: Partial<{ ownerId: string; callerApiKeyId: string; billingUserId: string }> = {},
+    ) => repo.create({ id, agentId: "a1", workspaceDir: `/ws/${id}`, ...over });
+
+    it("计费归属:人用会话默认归 owner,API Key 会话归显式传入的签发人", async () => {
+      expect((await mk("web", { ownerId: "u1" })).billingUserId).toBe("u1");
+      const api = await mk("api", { callerApiKeyId: "key-a", billingUserId: "u2" });
+      expect(api.billingUserId).toBe("u2");
+      // 计费归属不能顺带变成人用归属 —— 否则 key 建的会话会出现在签发人的工作台里
+      expect(api.ownerId).toBeUndefined();
+      expect((await repo.get("api"))?.billingUserId).toBe("u2");
+    });
+
+    it("来源:无人值守默认 invoke,其余默认 web,显式传入的照存", async () => {
+      expect((await repo.create({ id: "w", agentId: "a1", workspaceDir: "/w" })).source).toBe(
+        "web",
+      );
+      expect(
+        (await repo.create({ id: "i", agentId: "a1", workspaceDir: "/w", unattended: true }))
+          .source,
+      ).toBe("invoke");
+      expect(
+        (await repo.create({ id: "e", agentId: "a1", workspaceDir: "/w", source: "embed" })).source,
+      ).toBe("embed");
+    });
+
+    it("按计费账号 + 来源过滤:列出用自己 key 发起的接口会话", async () => {
+      await repo.create({ id: "mine-web", agentId: "a1", workspaceDir: "/w", ownerId: "u1" });
+      await repo.create({
+        id: "mine-invoke",
+        agentId: "a1",
+        workspaceDir: "/w",
+        billingUserId: "u1",
+        unattended: true,
+      });
+      await repo.create({
+        id: "other-invoke",
+        agentId: "a1",
+        workspaceDir: "/w",
+        billingUserId: "u2",
+        unattended: true,
+      });
+      const list = await repo.list({ billingUserId: "u1", sources: ["invoke", "api", "embed"] });
+      expect(list.map((s) => s.id)).toEqual(["mine-invoke"]);
+    });
+
+    it("delete 删掉会话", async () => {
+      await mk("gone", { ownerId: "u1" });
+      await repo.delete("gone");
+      expect(await repo.get("gone")).toBeNull();
+    });
 
     it("按 ownerId 过滤只回该用户的会话", async () => {
       await mk("s1", { ownerId: "u1" });

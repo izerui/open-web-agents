@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto";
+import { admissionErrorResponse, callerOf } from "@/app/api/_lib/admission";
+import { apiError } from "@/lib/api-error";
 import { getContainer } from "@/lib/container";
+import { authErrorResponse } from "@/lib/modules/access/application/authorize";
+import type { Principal } from "@/lib/modules/access/domain/principal";
 import { extractEmbedToken, verifyEmbedToken } from "@/lib/modules/integration/domain/embed-token";
-import { topicOf } from "@/lib/modules/run/application/orchestrator";
-import type { AgentEvent } from "@/lib/shared";
+import { streamRun } from "../../_lib/run-stream";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,98 +17,48 @@ export const dynamic = "force-dynamic";
  * 所以拿到令牌也换不到别人的会话。
  */
 export async function POST(req: Request) {
-  const { runs, bus, env } = getContainer();
+  const { runs, bus, enqueuer, embedSecret, auth, admission } = getContainer();
 
   const token = extractEmbedToken(req.headers);
-  const claims = token ? verifyEmbedToken(env.sessionSecret, token) : null;
-  if (!claims) {
-    return Response.json({ error: "invalid or expired embed token" }, { status: 401 });
+  const claims = token ? verifyEmbedToken(embedSecret, token) : null;
+  if (!claims) return apiError(401, "unauthorized", "invalid or expired embed token");
+  // 令牌签名有效还不够:签发它的 key 被吊销、签发人被停用、分享被撤销,都必须立即失效
+  let principal: Principal;
+  try {
+    principal = await auth.resolveEmbed(claims);
+  } catch (err) {
+    const res = authErrorResponse(err);
+    if (res) return res;
+    throw err;
   }
 
-  const body = (await req.json().catch(() => ({}))) as { prompt?: string };
-  const prompt = body.prompt?.trim();
-  if (!prompt) return Response.json({ error: "prompt is required" }, { status: 400 });
-
+  const body = (await req.json().catch(() => ({}))) as { prompt?: unknown };
   const sessionId = claims.sessionId;
+
+  /*
+   * 受理:与对话、分支同一套规则。访客在浏览器里花的钱记在签发 Key 的账号上,
+   * 所以这把 Key 的调用限流与签发人的额度同样约束嵌入组件 —— 这两条曾经都没有
+   * (额度是后来补的,限流此前只拦 invoke)。
+   */
+  let prompt: string;
+  try {
+    ({ prompt } = await admission.admit({
+      sessionId,
+      caller: callerOf(principal),
+      prompt: body.prompt,
+    }));
+  } catch (err) {
+    const res = admissionErrorResponse(err);
+    if (res) return res;
+    throw err;
+  }
+
   const runId = randomUUID().replace(/-/g, "").slice(0, 24);
-  const encoder = new TextEncoder();
-
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      let closed = false;
-      const send = (e: AgentEvent, eventId?: string) => {
-        if (closed) return;
-        const idLine = eventId ? `id: ${eventId}\n` : "";
-        try {
-          controller.enqueue(encoder.encode(`${idLine}data: ${JSON.stringify(e)}\n\n`));
-        } catch {
-          closed = true;
-        }
-      };
-
-      const finish = () => {
-        if (closed) return;
-        closed = true;
-        unsubscribe();
-        try {
-          controller.close();
-        } catch {
-          // 客户端已断开
-        }
-      };
-
-      const unsubscribe = bus.subscribe(
-        topicOf(sessionId, runId),
-        (e, eventId) => {
-          send(e, eventId);
-          if (e.kind === "result") finish();
-        },
-        { afterId: "0-0" },
-      );
-      req.signal.addEventListener("abort", finish, { once: true });
-
-      try {
-        // 等订阅生效再入队,避免 worker 抢先发出的首批事件丢失。
-        // 总线故障不阻止提交 —— 队列在 MySQL,任务照常执行,只是没有实时过程。
-        let busUsable = true;
-        try {
-          await bus.ready?.();
-        } catch {
-          busUsable = false;
-          send({ kind: "status", label: "事件通道不可用,本次无实时过程", state: "degraded" });
-        }
-        await runs.create({ id: runId, sessionId, prompt });
-        send({ kind: "status", label: "已入队", state: "pending" });
-
-        // 总线不可用时已知收不到事件,立即收流,别让客户端白等到超时。
-        // status 用 unknown 而非 success —— 此刻任务才刚入队,结局根本还不知道,
-        // 发 success 等于把「我不知道」渲染成绿色对勾(见 types.ts 对该字段的说明)。
-        if (!busUsable) {
-          send({
-            kind: "result",
-            status: "unknown",
-            summary: "任务已提交,但事件通道不可用 —— 请稍后轮询结果接口查看结局",
-          });
-          finish();
-        }
-      } catch (err) {
-        send({
-          kind: "result",
-          status: "failed",
-          summary: err instanceof Error ? err.message : String(err),
-        });
-        finish();
-      }
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
-      "X-Run-Id": runId,
-    },
+  return streamRun(req, {
+    bus,
+    results: runs,
+    sessionId,
+    runId,
+    enqueue: () => enqueuer.enqueue({ runId, sessionId, prompt }),
   });
 }

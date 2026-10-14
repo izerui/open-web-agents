@@ -3,7 +3,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { WorkspaceGc } from "@/lib/modules/artifacts/application/gc";
+import { TRASH_DIR, WorkspaceGc } from "@/lib/modules/artifacts/application/gc";
 import type { WorkspaceInfo } from "@/lib/modules/artifacts/domain/gc-policy";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -144,5 +144,122 @@ describe("WorkspaceGc / 健壮性", () => {
       NOW,
     ).run();
     expect(report).toMatchObject({ scanned: 3, cleaned: 1, purged: 1 });
+  });
+});
+
+describe("WorkspaceGc / 走会话行锁协议(reclaim)", () => {
+  const old = [{ sessionId: "s1", lastActiveAt: NOW - 20_000, finished: true }];
+
+  it("reclaim 拒绝(锁内发现又有人用过):目录一个文件都不动,计入 spared", async () => {
+    const dir = await makeWorkspace("s1");
+    const gc = new WorkspaceGc({
+      workspacesRoot: root,
+      listWorkspaces: async () => old,
+      policy,
+      now: () => NOW,
+      reclaim: async () => "busy" as const,
+    });
+    const r = await gc.run();
+    expect(r).toMatchObject({ purged: 0, spared: 1 });
+    expect(await fs.readFile(path.join(dir, "report.md"), "utf8")).toBe("重要产出");
+    expect(await fs.stat(path.join(dir, "node_modules"))).toBeTruthy();
+  });
+
+  it("整体清理:用保留期截止时刻作条件,改名在 reclaim 的 op 里完成,回收站不留残余", async () => {
+    const dir = await makeWorkspace("s1");
+    const calls: { id: string; existedInOp: boolean; opts: unknown }[] = [];
+    const gc = new WorkspaceGc({
+      workspacesRoot: root,
+      listWorkspaces: async () => old,
+      policy,
+      now: () => NOW,
+      reclaim: async (id, opts, op) => {
+        const before = (await fs.stat(dir).catch(() => null)) !== null;
+        await op();
+        const after = (await fs.stat(dir).catch(() => null)) !== null;
+        calls.push({ id, existedInOp: before && !after, opts });
+        return "reclaimed" as const;
+      },
+    });
+    const r = await gc.run();
+    expect(calls).toEqual([
+      {
+        id: "s1",
+        existedInOp: true, // 改名发生在 op 里(也就是锁内)
+        opts: { quietSinceMs: NOW - policy.purgeAfterMs, nowMs: NOW, kind: "purge" },
+      },
+    ]);
+    expect(r.purged).toBe(1);
+    expect(await fs.readdir(path.join(root, TRASH_DIR))).toEqual([]);
+  });
+
+  it("清中间产物同样走 reclaim(kind=clean),业务产出保留", async () => {
+    const dir = await makeWorkspace("s1");
+    const kinds: string[] = [];
+    const gc = new WorkspaceGc({
+      workspacesRoot: root,
+      listWorkspaces: async () => [{ sessionId: "s1", lastActiveAt: NOW - 2000, finished: true }],
+      policy,
+      now: () => NOW,
+      reclaim: async (_id, opts, op) => {
+        kinds.push(opts.kind);
+        return (await op()) ? ("reclaimed" as const) : ("gone" as const);
+      },
+    });
+    const r = await gc.run();
+    expect(kinds).toEqual(["clean"]);
+    expect(r.cleaned).toBe(1);
+    expect(await fs.stat(path.join(dir, "node_modules")).catch(() => null)).toBeNull();
+    expect(await fs.readFile(path.join(dir, "report.md"), "utf8")).toBe("重要产出");
+  });
+
+  it("回收站残余按批次核对:clean 批次删除;purge 批次在无法确认提交时挪回,不删", async () => {
+    await fs.mkdir(path.join(root, TRASH_DIR, "clean-s8-1", "node_modules"), { recursive: true });
+    await fs.mkdir(path.join(root, TRASH_DIR, "purge-s9-123"), { recursive: true });
+    await fs.writeFile(path.join(root, TRASH_DIR, "purge-s9-123", "x.md"), "x");
+    // 没提供 lockSession:清理时刻未知,一律视为未确认 —— 宁可多留,不丢文件
+    await gcOf([]).run();
+    expect(await fs.readdir(path.join(root, TRASH_DIR))).toEqual([]);
+    expect(await fs.readFile(path.join(root, "s9", "x.md"), "utf8")).toBe("x");
+  });
+});
+
+describe("WorkspaceGc / 多进程互斥", () => {
+  it("别的进程持有锁:本轮跳过,不扫描不删除", async () => {
+    const dir = await makeWorkspace("s1");
+    let listed = false;
+    const gc = new WorkspaceGc({
+      workspacesRoot: root,
+      listWorkspaces: async () => {
+        listed = true;
+        return [{ sessionId: "s1", lastActiveAt: NOW - 20_000, finished: true }];
+      },
+      policy,
+      now: () => NOW,
+      acquireLock: async () => null,
+    });
+    const r = await gc.run();
+    expect(r.skippedLocked).toBe(true);
+    expect(listed).toBe(false);
+    expect(await fs.stat(dir)).toBeTruthy();
+  });
+
+  it("拿到锁:跑完释放(即使中途出错)", async () => {
+    let released = 0;
+    const gc = new WorkspaceGc({
+      workspacesRoot: root,
+      listWorkspaces: async () => {
+        throw new Error("db down");
+      },
+      policy,
+      now: () => NOW,
+      acquireLock: async () => ({
+        release: async () => {
+          released++;
+        },
+      }),
+    });
+    await expect(gc.run()).rejects.toThrow("db down");
+    expect(released).toBe(1);
   });
 });

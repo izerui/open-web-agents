@@ -19,6 +19,21 @@ export interface ApprovalNeed {
   needed: boolean;
   /** 为什么需要审批,直接展示给审批人。 */
   reason?: string;
+  /**
+   * 这次调用属于哪些类 —— 审批人选"本会话内同类不再询问"时,授权的就是这些类;
+   * 之后只有【每一类】都已授权才自动放行。
+   * 按命中的规则划分:命中工具规则就是这个工具;命中命令模式就是含该模式的命令,
+   * 而且【所有】命中的模式都算 —— `curl … ; rm -rf …` 同时属于两类,只授权了 curl
+   * 不足以放行它。曾经只取第一条命中的模式,复合命令就借着先列出的那一类绕过了后面的规则。
+   */
+  scopes?: ApprovalGrantScope[];
+}
+
+export interface ApprovalGrantScope {
+  /** 稳定的类别键,如 `tool:Write`、`bash:curl` */
+  key: string;
+  /** 给人看的说明 */
+  label: string;
 }
 
 const NOT_NEEDED: ApprovalNeed = { needed: false };
@@ -57,19 +72,34 @@ export function needsApproval(
 ): ApprovalNeed {
   if (!rules) return NOT_NEEDED;
 
+  const toolScope = { key: `tool:${toolName}`, label: `工具 ${toolName}` };
   if (rules.all) {
-    return { needed: true, reason: "该智能体配置了全部工具调用均需审批" };
+    return { needed: true, reason: "该智能体配置了全部工具调用均需审批", scopes: [toolScope] };
   }
 
   if (rules.tools?.includes(toolName)) {
-    return { needed: true, reason: `工具 ${toolName} 被配置为需审批` };
+    return { needed: true, reason: `工具 ${toolName} 被配置为需审批`, scopes: [toolScope] };
   }
 
   const patterns = rules.commandPatterns;
   if (patterns?.length && toolName === "Bash") {
     const cmd = commandOf(input).toLowerCase();
-    const hit = patterns.find((p) => p && cmd.includes(p.toLowerCase()));
-    if (hit) return { needed: true, reason: `命令包含高风险模式:${hit}` };
+    // 全部命中的模式,不只第一条;按小写去重(规则里大小写不同的同一模式只算一类)
+    const hits = [
+      ...new Map(
+        patterns.filter((p) => p && cmd.includes(p.toLowerCase())).map((p) => [p.toLowerCase(), p]),
+      ).values(),
+    ];
+    if (hits.length > 0) {
+      return {
+        needed: true,
+        reason: `命令包含高风险模式:${hits.join("、")}`,
+        scopes: hits.map((hit) => ({
+          key: `bash:${hit.toLowerCase()}`,
+          label: `含「${hit}」的命令`,
+        })),
+      };
+    }
   }
 
   return NOT_NEEDED;

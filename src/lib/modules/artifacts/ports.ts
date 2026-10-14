@@ -24,5 +24,11 @@ export interface StoragePort {
   /** 读原始字节用于下载。 */
   read(workspaceDir: string, relPath: string): Promise<{ bytes: Buffer; mime: string }>;
   /** 写入用户上传的工作区文件。 */
-  write(workspaceDir: string, relPath: string, bytes: Buffer): Promise<void>;
+  /** 默认只新建,已存在则 EEXIST;overwrite 时覆盖(拒绝符号链接)。 */
+  write(
+    workspaceDir: string,
+    relPath: string,
+    bytes: Buffer,
+    opts?: { overwrite?: boolean },
+  ): Promise<void>;
 }

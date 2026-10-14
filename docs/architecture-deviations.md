@@ -75,7 +75,7 @@
 
 - 文稿 §3 把 `ResultDelivery(poll/sse/webhook)` 列为 Strategy 模式的用武之地
 - 实际:三种投递各自实现 —— poll 在 `/api/agents/{id}/result`,sse 在 run/events 路由,
-  webhook 是编排层的 `onComplete` 回调
+  webhook 是数据库发件箱 + 投递器(`integration/application/webhook-dispatcher.ts`)
 - **理由**:三者的**触发时机与生命周期完全不同**(poll 是调用方拉、sse 是长连接推、
   webhook 是终态一次性推),硬套同一个接口会造出一个每个实现都用不满的抽象。
 - **什么时候该改**:出现第四种投递方式(如消息队列)、且它与现有三种共享真实逻辑时。
@@ -173,6 +173,34 @@ jsonl 里虽然也有用户提示词,但从中反推轮次边界既脆弱又多�
   这是规则未知时能做的最有价值的事。
 - **什么时候该改**:探针报出新字符,就补进 `projectDirNameFor` 并加测试;
   若改用 SDK 的 `SessionStore`(见 E 节),整套路径推导连同探针一起作废。
+
+---
+
+## F. 运行语义与终态通知(设计缺陷修复)
+
+### F1. 运行从"至少一次"改为"至多一次"
+
+- 原实现:租约过期的 running 可被重新认领,由别的 worker 从头重跑;`attempts` 只累加不设限
+- 现在:`claimNext` 只认领 pending;`reclaimOrphans` 把失租运行判 `failed`(`worker_lost`)
+- **理由**:运行有外部副作用,栅栏令牌只防重复写结果、不防重复执行;无上限重跑还会让
+  "让 worker 崩溃的任务"被无限认领。要不要重试交给调用方(配合 `Idempotency-Key`)。
+- **什么时候该改**:引擎能声明某次运行无副作用(如纯问答、无工具)时,可对这类运行放开有限重试。
+
+### F2. 终态事件与回调以数据库为准
+
+- 原实现:编排层在 `execute` 末尾发布 `result` 事件并触发 webhook —— 早于 worker 落库,
+  且分不清本轮是否已被取消或失租
+- 现在:编排层只返回结果;worker 写入终态成功后经 `onFinalized` 发布 `result`;
+  回调在终态的同一条 UPDATE 里登记到发件箱(`runs.webhook_state`),由投递器补发
+- **理由**:终态只有一个事实来源。SSE 末帧与库里不一致、作废运行照发回调、
+  进程崩溃回调丢失,根因都是"通知方不是写入方"。
+
+### F3. 计费账号与会话归属分离
+
+- 新增 `sessions.billing_user_id`,与 `owner_id` 并存
+- **理由**:`owner_id` 决定谁能在工作台里操作这个会话;API Key / embed 会话没有人用归属,
+  但花费必须有主。曾经额度与"用户自带凭证"都只看 `owner_id`,于是这两类入口既不受额度约束,
+  也用不上签发人自己的 key。
 
 ---
 

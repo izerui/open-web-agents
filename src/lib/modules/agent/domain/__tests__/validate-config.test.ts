@@ -174,6 +174,18 @@ describe("validateAgentConfig / skills 与子代理", () => {
     expect(f).toContain("subagents[0].prompt");
   });
 
+  it("子代理模型只收别名:完整模型 id 或乱写被拦,别名与不填都可以", () => {
+    const withModel = (model: unknown) =>
+      fields({
+        ...ok,
+        subagents: [{ name: "s", prompt: "p", model, background: false } as never],
+      });
+    expect(withModel("claude-opus-5-5")).toContain("subagents[0].model");
+    expect(withModel("gpt-4")).toContain("subagents[0].model");
+    expect(withModel("haiku")).not.toContain("subagents[0].model");
+    expect(withModel(undefined)).not.toContain("subagents[0].model");
+  });
+
   it("子代理重名被拦", () => {
     expect(
       fields({
@@ -218,5 +230,29 @@ describe("validateAgentConfig / outputSchema", () => {
 
   it("未声明 type 时不强求(交给 ajv 在运行时判)", () => {
     expect(validateAgentConfig({ ...ok, outputSchema: { properties: {} } })).toEqual([]);
+  });
+});
+
+describe("validateAgentConfig / 逃生舱", () => {
+  it("安全边界字段在保存时就被拒绝", () => {
+    const issues = validateAgentConfig({
+      systemPrompt: "p",
+      model: "sonnet",
+      escapeHatch: { hooks: {}, sandbox: null, cwd: "/", maxBudgetUsd: 1 },
+    });
+    const hatch = issues.find((i) => i.field === "escapeHatch");
+    expect(hatch?.message).toMatch(/hooks/);
+    expect(hatch?.message).toMatch(/sandbox/);
+    expect(hatch?.message).toMatch(/cwd/);
+    expect(hatch?.message).not.toMatch(/maxBudgetUsd/);
+  });
+
+  it("普通参数可以放进逃生舱", () => {
+    const issues = validateAgentConfig({
+      systemPrompt: "p",
+      model: "sonnet",
+      escapeHatch: { maxBudgetUsd: 1, fallbackModel: "haiku" },
+    });
+    expect(issues.find((i) => i.field === "escapeHatch")).toBeUndefined();
   });
 });

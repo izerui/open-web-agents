@@ -22,7 +22,7 @@ async function requireGroupAdmin(req: Request, groupId: string) {
   if (!isAdmin && group.ownerId !== userId) {
     return { error: Response.json({ error: "not found" }, { status: 404 }) };
   }
-  return { group };
+  return { group, principal };
 }
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -55,6 +55,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (!user) return Response.json({ error: `用户不存在:${email}` }, { status: 404 });
 
     await groups.addMember(id, user.id);
+    // 加进组 = 获得组内所有分享;记在组主名下
+    await getContainer().audit.record({
+      actor: r.principal,
+      action: "group.member_add",
+      resource: { type: "group", id },
+      ownerId: r.group.ownerId,
+      details: { group: r.group.name, memberId: user.id, email: user.email },
+      req,
+    });
     return Response.json({ members: await groups.members(id) }, { status: 201 });
   } catch (err) {
     const res = authErrorResponse(err);
@@ -74,6 +83,14 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
     if (!userId) return Response.json({ error: "userId is required" }, { status: 400 });
 
     await groups.removeMember(id, userId);
+    await getContainer().audit.record({
+      actor: r.principal,
+      action: "group.member_remove",
+      resource: { type: "group", id },
+      ownerId: r.group.ownerId,
+      details: { group: r.group.name, memberId: userId },
+      req,
+    });
     return Response.json({ members: await groups.members(id) });
   } catch (err) {
     const res = authErrorResponse(err);

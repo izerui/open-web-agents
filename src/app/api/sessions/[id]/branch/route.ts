@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { admissionErrorResponse, callerOf } from "@/app/api/_lib/admission";
+import { apiError } from "@/lib/api-error";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
+import type { Principal } from "@/lib/modules/access/domain/principal";
+import { PromptTooLarge } from "@/lib/modules/run/application/enqueue";
 import { type BranchMode, anchorForBranch } from "@/lib/modules/run/domain/branching";
 
 export const runtime = "nodejs";
@@ -40,41 +44,64 @@ interface Body {
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { runs, auth } = getContainer();
+  const { runs, auth, sessions, enqueuer, admission } = getContainer();
 
+  let principal: Principal;
   try {
-    const principal = await auth.resolveWeb(req);
+    principal = await auth.resolveWeb(req);
     await auth.assertSessionAccess(principal, id);
+    const session = await sessions.get(id);
+    if (!session) return apiError(404, "not_found", "session not found");
+    // 分享被撤销后不能借原会话继续跑
+    await auth.assertCanInvoke(principal, session.agentId);
   } catch (err) {
     const res = authErrorResponse(err);
     if (res) return res;
     throw err;
   }
 
-  const body = (await req.json().catch(() => ({}))) as Body;
-  const prompt = body.prompt?.trim();
-  if (!body.fromRunId) return Response.json({ error: "fromRunId is required" }, { status: 400 });
-  if (!prompt) return Response.json({ error: "prompt is required" }, { status: 400 });
-  const mode: BranchMode = body.mode === "continue" ? "continue" : "fresh";
+  const body = (await req.json().catch(() => ({}))) as Body & { input?: unknown };
+  if (!body.fromRunId) return apiError(400, "invalid_request", "fromRunId is required");
+  const mode: BranchMode =
+    body.mode === "continue" ? "continue" : body.mode === "rewind" ? "rewind" : "fresh";
+
+  // 重跑同样花钱、同样要守契约 —— 与对话、嵌入走同一个受理关卡
+  let prompt: string;
+  try {
+    ({ prompt } = await admission.admit({
+      sessionId: id,
+      caller: callerOf(principal),
+      prompt: body.prompt,
+      input: body.input,
+    }));
+  } catch (err) {
+    const res = admissionErrorResponse(err);
+    if (res) return res;
+    throw err;
+  }
 
   // 只能从本会话内的运行分叉,防止拿别会话的 runId 越权续接其上下文
   const list = await runs.listBySession(id);
   const target = list.find((r) => r.id === body.fromRunId);
-  if (!target) {
-    return Response.json({ error: "该运行不属于本会话或不存在" }, { status: 404 });
-  }
+  if (!target) return apiError(404, "not_found", "该运行不属于本会话或不存在");
 
-  const anchor = anchorForBranch(target, mode);
-  if (!anchor.ok) return Response.json({ error: anchor.reason }, { status: 409 });
+  const anchor = anchorForBranch(target, mode, list);
+  if (!anchor.ok) return apiError(409, anchor.code ?? "invalid_request", anchor.reason);
 
   const runId = randomUUID().replace(/-/g, "").slice(0, 24);
-  await runs.create({
-    id: runId,
-    sessionId: id,
-    prompt,
-    parentRunId: anchor.parentRunId,
-    resumeAnchor: anchor.resumeAnchor,
-  });
+  try {
+    await enqueuer.enqueue({
+      runId,
+      sessionId: id,
+      prompt,
+      parentRunId: anchor.parentRunId,
+      resumeAnchor: anchor.resumeAnchor,
+      resumeAt: anchor.resumeAt,
+    });
+  } catch (err) {
+    if (err instanceof PromptTooLarge) return apiError(413, "prompt_too_large", err.message);
+    throw err;
+  }
 
   return Response.json(
     { runId, parentRunId: anchor.parentRunId, mode, resumeAnchor: anchor.resumeAnchor ?? null },

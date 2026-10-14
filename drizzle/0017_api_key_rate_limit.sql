@@ -1,0 +1,1 @@
+ALTER TABLE `api_keys` ADD `rate_limit_per_minute` int;

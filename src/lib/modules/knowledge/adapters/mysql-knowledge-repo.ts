@@ -1,7 +1,13 @@
 import type { Db } from "@/lib/db/client";
 import { knowledgeDocs } from "@/lib/db/schema";
+import {
+  KNOWLEDGE_LIMITS,
+  KnowledgeLimitExceeded,
+  type KnowledgeLimits,
+  limitViolation,
+} from "@/lib/modules/knowledge/domain/limits";
 import { type Chunk, chunkText } from "@/lib/modules/knowledge/domain/retrieval";
-import { desc, eq } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 
 export interface KnowledgeDoc {
   id: string;
@@ -18,11 +24,53 @@ export interface NewKnowledgeDoc {
   content: string;
 }
 
-export class MysqlKnowledgeRepo {
-  constructor(private readonly db: Db) {}
+export interface KnowledgeListItem extends Omit<KnowledgeDoc, "content"> {
+  chars: number;
+  /** 是否参与检索:按 (创建时间, id) 升序的前 maxDocs 篇 */
+  searchable: boolean;
+}
 
+export interface KnowledgeListing {
+  /** 新的在前(展示顺序) */
+  docs: KnowledgeListItem[];
+  usage: { docs: number; chars: number };
+  limits: KnowledgeLimits;
+}
+
+export class MysqlKnowledgeRepo {
+  constructor(
+    private readonly db: Db,
+    private readonly limits: KnowledgeLimits = KNOWLEDGE_LIMITS,
+  ) {}
+
+  /**
+   * 新增一篇。超限抛 KnowledgeLimitExceeded。
+   * 计数与插入在同一事务里、先锁住智能体那一行:并发上传不能各自看到"还差一篇"而一起越过上限。
+   */
   async create(d: NewKnowledgeDoc): Promise<KnowledgeDoc> {
-    await this.db.insert(knowledgeDocs).values(d);
+    await this.db.transaction(async (tx) => {
+      const locked = await tx.execute(
+        sql`SELECT id FROM agents WHERE id = ${d.agentId} LIMIT 1 FOR UPDATE`,
+      );
+      const lockedRows = (locked as unknown as [unknown[]])[0];
+      if (!Array.isArray(lockedRows) || lockedRows.length === 0) {
+        throw new Error(`agent not found: ${d.agentId}`);
+      }
+      const [u] = await tx
+        .select({
+          docs: sql<number>`COUNT(*)`,
+          chars: sql<number>`COALESCE(SUM(CHAR_LENGTH(${knowledgeDocs.content})), 0)`,
+        })
+        .from(knowledgeDocs)
+        .where(eq(knowledgeDocs.agentId, d.agentId));
+      const reason = limitViolation(
+        { docs: Number(u?.docs ?? 0), chars: Number(u?.chars ?? 0) },
+        [...d.content].length,
+        this.limits,
+      );
+      if (reason) throw new KnowledgeLimitExceeded(reason);
+      await tx.insert(knowledgeDocs).values(d);
+    });
     const got = await this.get(d.id);
     if (!got) throw new Error(`knowledge doc insert failed: ${d.id}`);
     return got;
@@ -46,29 +94,59 @@ export class MysqlKnowledgeRepo {
       : null;
   }
 
-  /** 列出智能体的知识文档。不带正文 —— 列表页不需要,省带宽。 */
-  async list(agentId: string): Promise<Omit<KnowledgeDoc, "content">[]> {
+  /**
+   * 列出智能体的全部知识文档(不带正文),并标出哪些参与检索。
+   * 不截断:写入时已有上限;上限之前的超额旧数据也要列出来并标为"不参与检索",
+   * 否则用户不知道为什么有的文档不起作用。
+   */
+  async list(agentId: string): Promise<KnowledgeListing> {
     const rows = await this.db
       .select({
         id: knowledgeDocs.id,
         agentId: knowledgeDocs.agentId,
         title: knowledgeDocs.title,
         createdAt: knowledgeDocs.createdAt,
+        chars: sql<number>`CHAR_LENGTH(${knowledgeDocs.content})`,
       })
       .from(knowledgeDocs)
       .where(eq(knowledgeDocs.agentId, agentId))
-      .orderBy(desc(knowledgeDocs.createdAt))
-      .limit(500);
-    return rows.map((r) => ({
+      // 与 chunksOf 同一个顺序 —— 两边对"哪些可检索"的判定必须一致
+      .orderBy(asc(knowledgeDocs.createdAt), asc(knowledgeDocs.id));
+    const items = rows.map((r, i) => ({
       id: r.id,
       agentId: r.agentId,
       title: r.title,
       createdAt: r.createdAt.getTime(),
+      chars: Number(r.chars),
+      searchable: i < this.limits.maxDocs,
     }));
+    return {
+      docs: items.reverse(),
+      usage: { docs: items.length, chars: items.reduce((n, d) => n + d.chars, 0) },
+      limits: this.limits,
+    };
   }
 
   async delete(id: string): Promise<void> {
     await this.db.delete(knowledgeDocs).where(eq(knowledgeDocs.id, id));
+  }
+
+  /**
+   * 该智能体文档集合的指纹:数量 + 最新创建时间 + 全部 id 的 CRC 异或。
+   * 只碰 id 与时间列,不读正文 —— 每次运行都要查一次,必须足够便宜。
+   * 文档只有增删、没有原地修改,这三项足以判断"集合变没变"。
+   */
+  async signatureOf(agentId: string): Promise<string> {
+    const rows = await this.db
+      .select({
+        n: sql<number>`COUNT(*)`,
+        latest: sql<string>`COALESCE(MAX(${knowledgeDocs.createdAt}), '')`,
+        ids: sql<number>`COALESCE(BIT_XOR(CRC32(${knowledgeDocs.id})), 0)`,
+      })
+      .from(knowledgeDocs)
+      .where(eq(knowledgeDocs.agentId, agentId));
+    const r = rows[0];
+    return `${Number(r?.n ?? 0)}:${String(r?.latest ?? "")}:${Number(r?.ids ?? 0)}`;
   }
 
   /**
@@ -86,10 +164,10 @@ export class MysqlKnowledgeRepo {
       })
       .from(knowledgeDocs)
       .where(eq(knowledgeDocs.agentId, agentId))
-      // 必须定序:无序截断会让"文档超过 500 篇后哪些对检索可见"变得不可预测,
-      // 同一个问题在不同请求下得到不同答案,无报错无日志
-      .orderBy(knowledgeDocs.createdAt)
-      .limit(500);
+      // 必须定序,且与 list() 完全一致:(创建时间, id) 升序取前 maxDocs 篇。
+      // created_at 只到秒,同一秒的文档只按时间排序是不确定的,两边会在边界上各取各的
+      .orderBy(asc(knowledgeDocs.createdAt), asc(knowledgeDocs.id))
+      .limit(this.limits.maxDocs);
 
     const out: Chunk[] = [];
     for (const r of rows) {

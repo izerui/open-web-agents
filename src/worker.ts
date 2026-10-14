@@ -28,17 +28,20 @@ import nextEnv from "@next/env";
 nextEnv.loadEnvConfig(process.cwd(), false);
 
 async function main(): Promise<void> {
-  const { worker, env } = getContainer();
+  const { worker, webhooks, env } = getContainer();
 
   console.log(
     `[owa-worker] 启动 pid=${process.pid} db=${env.databaseUrl.replace(/:\/\/[^@]*@/, "://***@")}`,
   );
+  // 两者都是幂等的:内嵌模式下 container 已经起过,这里不会重复启动
   worker.start();
+  webhooks.start();
 
   /**
    * 关停宽限期。到点仍未排空就强退,避免卡住部署。
    * 默认 60 秒:比一个租约周期(60s)略长,常见的短任务能跑完;
-   * 真正的长任务本来就不该指望在关停窗口里做完,交给栅栏与孤儿回收兜底。
+   * 到点仍在跑的运行会被主动中止并判失败(至多一次语义,不会被别人重跑),
+   * 调用方需要的话自行重试。
    */
   const graceMs = Number(process.env.OWA_SHUTDOWN_GRACE_MS ?? 60_000);
 
@@ -57,14 +60,24 @@ async function main(): Promise<void> {
     shuttingDown = true;
     console.log(`[owa-worker] 收到 ${signal},停止认领新任务,最多等 ${graceMs}ms…`);
     worker.stop();
-    void worker.drain(graceMs).then((clean) => {
+    webhooks.stop();
+    void (async () => {
+      if (await worker.drain(graceMs)) {
+        console.log("[owa-worker] 在途任务已收尾,退出");
+        process.exit(0);
+      }
+      // 至多一次语义下没有"交给别人接着跑"这回事:直接退出的话,这些运行要等租约过期
+      // 才被判失败,期间界面一直显示运行中。主动中止,让它们立刻落 failed 终态。
+      const n = worker.abortInFlight();
+      console.log(`[owa-worker] 宽限期到,中止 ${n} 个在途运行并等待其落终态…`);
+      const clean = await worker.drain(15_000);
       console.log(
         clean
-          ? "[owa-worker] 在途任务已收尾,退出"
-          : "[owa-worker] 宽限期到仍有任务在跑,强制退出 —— 它们会在租约过期后被其它 worker 接手",
+          ? "[owa-worker] 在途运行已落终态,退出"
+          : "[owa-worker] 仍有运行未收尾,强制退出 —— 租约过期后会被判为失败(worker_lost)",
       );
       process.exit(0);
-    });
+    })();
   };
 
   process.on("SIGTERM", () => shutdown("SIGTERM"));

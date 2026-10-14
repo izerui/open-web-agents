@@ -102,9 +102,12 @@ const ROOT = "";
 export function FilePanel({
   sessionId,
   refreshKey,
+  live = false,
 }: {
   sessionId: string | null;
   refreshKey: number;
+  /** 当前会话正在运行:此时才需要轮询,产物在持续变化。 */
+  live?: boolean;
 }) {
   /** 目录路径 → 该目录下的一层子节点。没有条目 = 还没拉过。 */
   const [dirs, setDirs] = useState<Map<string, FileNode[]>>(new Map());
@@ -153,10 +156,17 @@ export function FilePanel({
           `/api/sessions/${requestSession}/files?dir=${encodeURIComponent(target)}`,
           { cache: "no-store" },
         );
-        const data = (await res.json()) as { nodes?: FileNode[]; error?: string };
-        if (data.error) throw new Error(data.error);
+        // 曾经不看 res.ok:后端 500 时用户看到的是一句 JSON 解析报错
+        const data = (await res.json().catch(() => ({}))) as { nodes?: FileNode[]; error?: string };
+        if (!res.ok || data.error) throw new Error(data.error ?? `HTTP ${res.status}`);
         if (sessionRef.current !== requestSession) return;
-        setDirs((m) => new Map(m).set(target, data.nodes ?? []));
+        const nodes = data.nodes ?? [];
+        // 内容没变就不换 Map:每次都 new Map 会让整棵树跟着重渲染
+        setDirs((m) =>
+          JSON.stringify(m.get(target)) === JSON.stringify(nodes)
+            ? m
+            : new Map(m).set(target, nodes),
+        );
         setError(null);
       } catch (e) {
         if (sessionRef.current === requestSession) {
@@ -202,11 +212,14 @@ export function FilePanel({
   }, [refreshKey, sessionId, loadDir]);
 
   /**
-   * 工作空间可被长任务或其它 Worker 持续修改。页面可见时低频刷新当前已经展示的层级,
+   * 运行中工作空间在持续变化:页面可见时低频刷新当前已经展示的层级,
    * 既能及时出现新文件,也不会递归扫描 node_modules 等大型目录。
+   *
+   * 只在运行中轮询 —— 曾经不论有没有在跑都每 2.5 秒重拉全部展开目录。
+   * 不在跑的时候,运行结束那一刻的 refreshKey 刷新已经足够。
    */
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId || !live) return;
     const refreshVisible = () => {
       if (document.visibilityState !== "visible") return;
       for (const dir of new Set([ROOT, ...dirsRef.current.keys()])) void loadDir(dir);
@@ -217,7 +230,7 @@ export function FilePanel({
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", refreshVisible);
     };
-  }, [sessionId, loadDir]);
+  }, [sessionId, loadDir, live]);
 
   const handleExpandedChange = useCallback(
     (next: Set<string>) => {

@@ -7,6 +7,7 @@ import { materializeSandbox } from "@/lib/modules/agent-engine/domain/sandbox";
 import { guardToolUse } from "@/lib/modules/agent-engine/domain/tool-guard";
 import type { ModelSlots } from "@/lib/modules/model-gateway/ports";
 import type { AgentSpec, ResolvedCredentials, RunContext } from "@/lib/shared";
+import { ESCAPE_HATCH_PROTECTED } from "@/lib/shared/escape-hatch";
 
 /**
  * agent 子进程的 ANTHROPIC_* 环境。
@@ -20,6 +21,9 @@ export function aliasEnv(creds: ResolvedCredentials, slots: ModelSlots): Record<
     ANTHROPIC_BASE_URL: creds.baseUrl,
     ANTHROPIC_API_KEY: creds.key,
     ANTHROPIC_AUTH_TOKEN: "",
+    // 四个别名槽都要给。漏了哪个,选它的智能体就会用 SDK 内置的默认模型
+    // (scripts/sdk-probe/model-alias.mjs 实测:fable 未固定时发给网关的是 claude-opus-5-5)
+    ANTHROPIC_DEFAULT_FABLE_MODEL: slots.fable,
     ANTHROPIC_DEFAULT_OPUS_MODEL: slots.opus,
     ANTHROPIC_DEFAULT_SONNET_MODEL: slots.sonnet,
     ANTHROPIC_DEFAULT_HAIKU_MODEL: slots.haiku,
@@ -81,6 +85,8 @@ function toAgents(spec: AgentSpec): Record<string, unknown> | undefined {
     out[s.name] = {
       description: s.description?.trim() || `处理与「${s.name}」相关的子任务`,
       prompt: s.prompt,
+      // 别名由 SDK 经 ANTHROPIC_DEFAULT_<别名>_MODEL 换成真实模型,与主 agent 走同一套映射
+      ...(s.model ? { model: s.model } : {}),
       // 平台强制同步执行:后台跑的子代理没法纳入过程监控
       background: false,
     };
@@ -188,6 +194,8 @@ export interface SdkOptionsDeps {
   sandboxEnabled: boolean;
   /** 是否允许在宿主机启动 stdio MCP 进程。 */
   allowStdioMcp: boolean;
+  /** 已写好的技能插件目录(由 runner 生成)。 */
+  skillPluginPath?: string;
   /**
    * 人工审批钩子(HITL)。给了才启用审批;不给则审批规则被忽略。
    * 返回 true 放行、false 拒绝 —— 实现方负责超时兜底。
@@ -203,6 +211,8 @@ export interface SdkOptionsDeps {
       toolName: string;
       summary: string;
       reason: string;
+      /** 这次调用所属的全部类别 —— 本会话若每一类都已授权,就不必再问人 */
+      scopes?: { key: string; label: string }[];
     },
     signal?: AbortSignal,
   ) => Promise<{ approved: boolean; message?: string }>;
@@ -243,7 +253,6 @@ export function buildSdkOptions(
     // ② spec 一等公民字段
     model: spec.model.alias,
     systemPrompt: spec.systemPrompt,
-    skills: spec.skills,
     mcpServers: toMcpServers(spec, deps.allowStdioMcp),
     agents: toAgents(spec),
     maxTurns: spec.limits.maxTurns,
@@ -264,6 +273,11 @@ export function buildSdkOptions(
 
     // ③ 续跑 + 环境
     resume: ctx.resumeSessionId,
+    // 从某条消息之后接着跑时必须分到新会话:不分的话新的一轮会写进原文件,原对话就被改写了
+    // (scripts/sdk-probe/branch-resume-at.mjs 实测:模型只看到那条消息之前的对话)
+    ...(ctx.resumeSessionId && ctx.resumeSessionAt
+      ? { resumeSessionAt: ctx.resumeSessionAt, forkSession: true }
+      : {}),
     env: {
       ...ctx.env,
       ...aliasEnv(ctx.credentials, deps.slots),
@@ -352,6 +366,11 @@ export function buildSdkOptions(
    */
   if (disallowedTools.length) options.disallowedTools = disallowedTools;
 
+  // 智能体自带的技能:平台写好的只读插件目录(见 skill-plugin.ts)
+  if (deps.skillPluginPath) {
+    options.plugins = [{ type: "local", path: deps.skillPluginPath }];
+  }
+
   // 执行隔离第二道:宿主侧文件工具按路径拦截。
   // 它【不依赖内核沙箱】,故本地开发关掉沙箱时依然生效 —— 正是之前两次
   // "agent 用绝对路径写到宿主 HOME" 的直接补救。
@@ -383,38 +402,46 @@ export function buildSdkOptions(
     const d = guardToolUse(toolName, input, guardPolicy);
     if (!d.allow) return { allow: false, reason: d.reason ?? "越界操作" };
 
-    // 【无人值守不走审批】接口 invoke 是一次调用拿结果,没有人能点批准。
-    // 照常发审批的后果是白等满 10 分钟、超时自动拒绝,任务本来能成功却挂成失败。
+    // 【没有审批人时不等人】接口调用、嵌入组件里没有人能点批准(嵌入的访客不是审批人)。
+    // 照常发审批的后果是白等满 10 分钟、超时自动拒绝。按智能体配置直接放行或拒绝;
     // 路径围栏与工具白名单仍然生效 —— 那两道是结构性安全边界,不依赖人。
-    if (deps.requestApproval && !ctx.unattended) {
-      const need = needsApproval(toolName, input, spec.approvalRules);
-      if (need.needed) {
-        // 【必须 fail-closed】等待审批期间 Redis 不可达时这个 await 会 reject。
-        // 曾经没有 try:promise 被 reject,代码根本走不到下面的 deny 分支,
-        // 安全的失败闭合路径被整个跳过 —— 会抛异常的围栏不是围栏。
-        // 一个需要人确认的危险操作,不能因为审批通道挂了就变成"没人拦"。
-        let verdict: Awaited<ReturnType<NonNullable<typeof deps.requestApproval>>>;
-        try {
-          verdict = await deps.requestApproval(
-            {
-              sessionId: ctx.sessionId,
-              runId: ctx.runId,
-              toolName,
-              summary: describeToolCall(toolName, input),
-              reason: need.reason ?? "需人工确认",
-            },
-            // 本轮被取消/超时中止时,挂着的审批要跟着立刻收场
-            deps.abort.signal,
-          );
-        } catch (err) {
-          return {
-            allow: false,
-            reason: `审批通道不可用,按拒绝处理:${err instanceof Error ? err.message : String(err)}`,
-          };
-        }
-        if (!verdict.approved) {
-          return { allow: false, reason: verdict.message ?? "人工审批未通过" };
-        }
+    const policy = ctx.approvalPolicy ?? (ctx.unattended ? "allow" : "ask");
+    const need = deps.requestApproval
+      ? needsApproval(toolName, input, spec.approvalRules)
+      : { needed: false };
+    if (need.needed && policy === "deny") {
+      return {
+        allow: false,
+        reason: `该操作需要人工审批,而当前入口没有审批人,按智能体配置拒绝(${need.reason ?? toolName})`,
+      };
+    }
+    if (deps.requestApproval && need.needed && policy === "ask") {
+      // 【必须 fail-closed】等待审批期间 Redis 不可达时这个 await 会 reject。
+      // 曾经没有 try:promise 被 reject,代码根本走不到下面的 deny 分支,
+      // 安全的失败闭合路径被整个跳过 —— 会抛异常的围栏不是围栏。
+      // 一个需要人确认的危险操作,不能因为审批通道挂了就变成"没人拦"。
+      let verdict: Awaited<ReturnType<NonNullable<typeof deps.requestApproval>>>;
+      try {
+        verdict = await deps.requestApproval(
+          {
+            sessionId: ctx.sessionId,
+            runId: ctx.runId,
+            toolName,
+            summary: describeToolCall(toolName, input),
+            reason: need.reason ?? "需人工确认",
+            ...(need.scopes ? { scopes: need.scopes } : {}),
+          },
+          // 本轮被取消/超时中止时,挂着的审批要跟着立刻收场
+          deps.abort.signal,
+        );
+      } catch (err) {
+        return {
+          allow: false,
+          reason: `审批通道不可用,按拒绝处理:${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+      if (!verdict.approved) {
+        return { allow: false, reason: verdict.message ?? "人工审批未通过" };
       }
     }
 
@@ -476,9 +503,16 @@ export function buildSdkOptions(
     updatedInput: input,
   });
 
-  // ④ 逃生舱:最后 spread,覆盖以上普通默认。
-  // stdio MCP 是宿主 RCE 边界,必须在 spread 后再验一次,不能被逃生舱绕过。
-  const merged = { ...options, ...spec.escapeHatch };
+  // ④ 逃生舱:最后 spread,覆盖以上普通默认 —— 但【安全边界字段一律以平台为准】。
+  //
+  // 曾经是无条件覆盖,任何能建智能体的用户都能用一份 escapeHatch 关掉沙箱、清空 hooks
+  // (路径围栏、工具白名单、审批都挂在 PreToolUse 上)、把 cwd 改成 /、换掉 settingSources。
+  // 逃生舱留给"平台没建模的普通参数",不是安全开关。
+  const merged: Record<string, unknown> = { ...options, ...spec.escapeHatch };
+  for (const k of ESCAPE_HATCH_PROTECTED) {
+    if (k in options) merged[k] = options[k];
+    else delete merged[k];
+  }
   assertStdioMcpAllowed(merged.mcpServers, deps.allowStdioMcp);
   return merged;
 }

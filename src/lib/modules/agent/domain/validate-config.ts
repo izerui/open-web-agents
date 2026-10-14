@@ -3,7 +3,13 @@
 // 为什么要单独校验:MCP/skills 配错了不会在保存时报错,而是在【运行时】让 agent
 // 起不来或静默少能力 —— 那时候排查成本高得多。宁可在构建器里当场拦住。
 
-import { PERMISSION_MODES } from "@/lib/shared";
+import {
+  MODEL_ALIASES,
+  PERMISSION_MODES,
+  isModelAlias,
+  protectedEscapeHatchKeys,
+  validateSkillPackages,
+} from "@/lib/shared";
 import type { AgentConfig } from "./config";
 
 export interface ConfigIssue {
@@ -16,7 +22,6 @@ export interface ConfigValidationPolicy {
   allowStdioMcp?: boolean;
 }
 
-const MODEL_ALIASES = new Set(["fable", "opus", "sonnet", "haiku"]);
 const EFFORTS = new Set(["low", "medium", "high"]);
 
 /** MCP 名称会作为 SDK mcpServers 的 key,必须是安全标识符。 */
@@ -46,8 +51,8 @@ export function validateAgentConfig(
     issues.push({ field: "systemPrompt", message: "系统提示词不能为空" });
   }
 
-  if (cfg.model !== undefined && !MODEL_ALIASES.has(cfg.model)) {
-    issues.push({ field: "model", message: `模型别名须是 ${[...MODEL_ALIASES].join("/")}` });
+  if (cfg.model !== undefined && !isModelAlias(cfg.model)) {
+    issues.push({ field: "model", message: `模型别名须是 ${MODEL_ALIASES.join("/")}` });
   }
 
   if (cfg.effort !== undefined && !EFFORTS.has(cfg.effort)) {
@@ -121,6 +126,8 @@ export function validateAgentConfig(
     }
   }
 
+  issues.push(...validateSkillPackages(cfg.skillPackages));
+
   const seenSub = new Set<string>();
   for (const [i, sa] of (cfg.subagents ?? []).entries()) {
     const at = `subagents[${i}]`;
@@ -130,6 +137,12 @@ export function validateAgentConfig(
     } else seenSub.add(sa.name);
 
     if (!sa.prompt?.trim()) issues.push({ field: `${at}.prompt`, message: "子代理提示词不能为空" });
+    if (sa.model !== undefined && !isModelAlias(sa.model)) {
+      issues.push({
+        field: `${at}.model`,
+        message: "子代理模型只能是别名(fable / opus / sonnet / haiku),不填则与主 agent 相同",
+      });
+    }
   }
 
   const ar = cfg.approvalRules;
@@ -172,6 +185,33 @@ export function validateAgentConfig(
     if (s.type !== undefined && s.type !== "object") {
       issues.push({ field: "inputSchema.type", message: "顶层类型须是 object" });
     }
+  }
+
+  if (
+    cfg.unattendedApproval !== undefined &&
+    cfg.unattendedApproval !== "allow" &&
+    cfg.unattendedApproval !== "deny"
+  ) {
+    issues.push({ field: "unattendedApproval", message: "须为 allow 或 deny" });
+  }
+
+  if (cfg.starters !== undefined) {
+    if (
+      !Array.isArray(cfg.starters) ||
+      cfg.starters.length > 4 ||
+      cfg.starters.some((x) => typeof x !== "string" || !x.trim() || x.length > 200)
+    ) {
+      issues.push({ field: "starters", message: "最多 4 条,每条 1~200 字" });
+    }
+  }
+
+  // 逃生舱碰不了安全边界 —— 运行时会忽略这些字段,这里直接说清楚,免得作者以为生效了
+  const blocked = protectedEscapeHatchKeys(cfg.escapeHatch);
+  if (blocked.length > 0) {
+    issues.push({
+      field: "escapeHatch",
+      message: `以下字段属于安全边界,不能通过逃生舱覆盖:${blocked.join(", ")}`,
+    });
   }
 
   return issues;

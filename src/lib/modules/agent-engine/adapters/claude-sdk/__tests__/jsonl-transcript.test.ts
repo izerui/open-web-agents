@@ -4,11 +4,13 @@
 // 这正是本 adapter 成立的前提:normalizeSdkMessage 读的就是这个形状,不需要适配层。
 // 形状一旦被 SDK 改掉,这里会先红。
 
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { JsonlTranscript } from "@/lib/modules/agent-engine/adapters/claude-sdk/jsonl-transcript";
 import { projectDirNameFor } from "@/lib/modules/agent-engine/domain/transcript-path";
+import type { AgentEvent } from "@/lib/shared";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 let dataDir: string;
@@ -19,7 +21,14 @@ const transcript = new JsonlTranscript();
 /** transcript 该落的目录。刻意复用生产的编码函数 —— 夹具自己再写一遍规则的话,
  * 两边一起错就测不出编码 bug(而编码错的表现恰恰是"读到空",测试反而会绿)。 */
 function projectDir(): string {
-  return path.join(dataDir, ".agent-home", ".claude", "projects", projectDirNameFor(workspaceDir));
+  // SDK 按工作目录的真实路径编目录名(符号链接已解析 —— macOS 的临时目录就在 /var → /private/var 下)
+  return path.join(
+    dataDir,
+    ".agent-home",
+    ".claude",
+    "projects",
+    projectDirNameFor(fsSync.realpathSync(workspaceDir)),
+  );
 }
 
 /** 按 SDK 规则写一份 transcript 到该落的位置。 */
@@ -90,6 +99,17 @@ describe("JsonlTranscript.read", () => {
     const result = events.find((e) => e.kind === "tool_result");
     expect(use).toMatchObject({ tool: "Bash", toolUseId: "t1" });
     expect(result).toMatchObject({ toolUseId: "t1", text: "a.txt" });
+  });
+
+  it("经符号链接给出的工作目录:按真实路径找到文件(与 SDK 一致)", async () => {
+    const link = path.join(dataDir, "ws-link");
+    await fs.symlink(workspaceDir, link);
+    try {
+      const events = await transcript.read({ dataDir, workspaceDir: link, sdkSessionId: SID });
+      expect(events.length).toBeGreaterThan(0);
+    } finally {
+      await fs.rm(link, { force: true });
+    }
   });
 
   it("跳过非对话行而不是抛错", async () => {
@@ -203,5 +223,121 @@ describe("JsonlTranscript.read / 编码规则漂移探针", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  describe("同一 SDK 会话续接的多轮共用一份文件:按 uuid 截出本轮", () => {
+    const SHARED = "6a1c20d8-ce64-42cf-a12b-d5a866be1f86";
+    // 形状照抄 scripts/sdk-probe 实测的 jsonl:两轮都在同一个文件里,提示词行不在实时流里
+    const line = (type: string, uuid: string, content: unknown) => ({
+      type,
+      uuid,
+      cwd: workspaceDir,
+      sessionId: SHARED,
+      message: { id: `m-${uuid}`, content },
+    });
+    beforeAll(async () => {
+      await writeTranscript(SHARED, [
+        { type: "queue-operation", operation: "enqueue", sessionId: SHARED },
+        line("user", "p1", "第一轮提示词"),
+        line("assistant", "a1", [{ type: "text", text: "第一轮回答" }]),
+        { type: "queue-operation", operation: "enqueue", sessionId: SHARED },
+        line("user", "p2", "第二轮提示词"),
+        line("assistant", "a2", [{ type: "tool_use", id: "t2", name: "Bash", input: {} }]),
+        line("user", "r2", [{ type: "tool_result", tool_use_id: "t2", content: "ok" }]),
+        line("assistant", "a3", [{ type: "text", text: "第二轮回答" }]),
+      ]);
+    });
+    const read = (range?: { first: string; last: string }) =>
+      transcript.read({ dataDir, workspaceDir, sdkSessionId: SHARED, range });
+    const texts = (es: AgentEvent[]) => es.flatMap((e) => (e.kind === "text" ? [e.text] : []));
+
+    it("各轮只读到自己的过程", async () => {
+      expect(texts(await read({ first: "a1", last: "a1" }))).toEqual(["第一轮回答"]);
+      const second = await read({ first: "a2", last: "a3" });
+      expect(texts(second)).toEqual(["第二轮回答"]);
+      expect(second.map((e) => e.kind)).toEqual(["tool_use", "tool_result", "text"]);
+    });
+
+    it("不给范围(旧数据)读整份", async () => {
+      expect(texts(await read())).toEqual(["第一轮回答", "第二轮回答"]);
+    });
+
+    it("找不到起点:返回空,而不是把别的轮次当成本轮", async () => {
+      expect(await read({ first: "nope", last: "a3" })).toEqual([]);
+    });
+
+    it("找不到终点(本轮写盘途中被杀):读到文件末尾", async () => {
+      expect(texts(await read({ first: "a2", last: "nope" }))).toEqual(["第二轮回答"]);
+    });
+  });
+
+  describe("运行中途追加的消息(两种落盘形态,按 scripts/sdk-probe/steer-*.mjs 实测)", () => {
+    const SID2 = "7b1c20d8-ce64-42cf-a12b-d5a866be1f87";
+    const base = { cwd: "/x", sessionId: SID2 };
+    beforeAll(async () => {
+      await writeTranscript(SID2, [
+        { ...base, type: "user", uuid: "p1", message: { content: "本轮提示词" } },
+        {
+          ...base,
+          type: "assistant",
+          uuid: "a1",
+          message: { id: "m1", content: [{ type: "text", text: "先答" }] },
+        },
+        // 插进当前这一轮
+        {
+          ...base,
+          type: "attachment",
+          uuid: "q1",
+          attachment: {
+            type: "queued_command",
+            prompt: "插进来的 sk-ant-api03-SECRETSECRETSECRET",
+            commandMode: "prompt",
+          },
+        },
+        { ...base, type: "user", uuid: "meta", isMeta: true, message: { content: "系统提示" } },
+        {
+          ...base,
+          type: "assistant",
+          uuid: "a2",
+          message: { id: "m2", content: [{ type: "text", text: "接着答" }] },
+        },
+        // 本轮回答之后再答一轮
+        { ...base, type: "user", uuid: "p2", message: { content: "晚到的补充" } },
+        {
+          ...base,
+          type: "assistant",
+          uuid: "a3",
+          message: { id: "m3", content: [{ type: "text", text: "补答" }] },
+        },
+      ]);
+    });
+    const kinds = (es: AgentEvent[]) =>
+      es.map((e) =>
+        e.kind === "steer" ? `steer:${e.text}` : e.kind === "text" ? `text:${e.text}` : e.kind,
+      );
+
+    it("按本轮范围读:两种形态都还原成 steer 事件,位置与发生顺序一致;提示词与系统提示不算", async () => {
+      const es = await transcript.read({
+        dataDir,
+        workspaceDir,
+        sdkSessionId: SID2,
+        range: { first: "a1", last: "a3" },
+      });
+      expect(kinds(es).filter((k) => k.startsWith("steer") || k.startsWith("text"))).toEqual([
+        "text:先答",
+        expect.stringMatching(/^steer:插进来的 /),
+        "text:接着答",
+        "steer:晚到的补充",
+        "text:补答",
+      ]);
+      // 与其余事件一样脱敏
+      expect(JSON.stringify(es)).not.toContain("SECRETSECRET");
+    });
+
+    it("不给范围(旧数据)读整份:普通用户文本不认作追加 —— 那里面有各轮的提示词", async () => {
+      const es = await transcript.read({ dataDir, workspaceDir, sdkSessionId: SID2 });
+      const steers = es.filter((e) => e.kind === "steer");
+      expect(steers).toHaveLength(1); // 只有 queued_command 那一条
+    });
   });
 });

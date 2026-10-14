@@ -1,0 +1,1 @@
+ALTER TABLE `runs` ADD `idempotency_hash` varchar(64);

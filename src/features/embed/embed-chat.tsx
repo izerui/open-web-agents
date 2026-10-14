@@ -1,11 +1,12 @@
 "use client";
 
+import { MessageResponse } from "@/components/ai-elements/message";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { readEventStream } from "@/features/chat/event-stream";
 import type { AgentEvent } from "@/lib/shared";
-import { SendHorizontal } from "lucide-react";
-import { useRef, useState } from "react";
+import { SendHorizontal, Square } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 interface Turn {
   prompt: string;
@@ -94,12 +95,39 @@ function QuestionBlock({
   );
 }
 
+/**
+ * 把相邻的文字增量合成一段。
+ *
+ * 文字是按增量推送的(逐 token,编排层只做了短窗口合并),曾经每个事件渲染成一个独立段落,
+ * 一句回答被拆成几十个碎块。工作台用 foldEvents 合并,这里做同样的事。
+ */
+function mergeText(events: AgentEvent[]): AgentEvent[] {
+  const out: AgentEvent[] = [];
+  for (const e of events) {
+    const last = out[out.length - 1];
+    if (e.kind === "text" && last?.kind === "text" && last.subagent === e.subagent) {
+      out[out.length - 1] = { ...last, text: last.text + e.text };
+    } else {
+      out.push(e);
+    }
+  }
+  return out;
+}
+
 /** widget 里只显示对用户有意义的内容 —— 工具细节与 token 用量属于运维视角,不该露给终端用户。 */
-function Line({ e }: { e: AgentEvent }) {
+function Line({ e, streaming }: { e: AgentEvent; streaming: boolean }) {
   switch (e.kind) {
     case "text":
-      return <p className="whitespace-pre-wrap text-sm leading-relaxed">{e.text}</p>;
+      // 子代理的中间文字是过程,不是给终端用户的回答
+      if (e.subagent) return null;
+      return (
+        <div className="text-sm leading-relaxed">
+          <MessageResponse isAnimating={streaming}>{e.text}</MessageResponse>
+        </div>
+      );
     case "status":
+      // "已入队""运行中"这类是运维视角的内部状态,访客看到只会困惑;正在回复由光标表示
+      if (e.state === "pending" || e.state === "running" || e.state === "knowledge") return null;
       return <p className="text-xs text-muted-foreground">{e.label}</p>;
     case "tool_use":
       return <p className="text-xs text-muted-foreground">正在使用 {e.tool}…</p>;
@@ -112,9 +140,7 @@ function Line({ e }: { e: AgentEvent }) {
       }
       // unknown 不能什么都不显示 —— 用户会以为消息发丢了。如实说明结局未知。
       if (e.status === "unknown") {
-        return (
-          <p className="text-sm text-[var(--warning)]">{e.summary ?? "已提交,结果稍后可查"}</p>
-        );
+        return <p className="text-sm text-warning">{e.summary ?? "已提交,结果稍后可查"}</p>;
       }
       return null;
     default:
@@ -130,8 +156,25 @@ export function EmbedChat({ token }: { token: string }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [running, setRunning] = useState(false);
-  const [expired, setExpired] = useState(false);
+  const [expired, setExpired] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  // 新内容到达时跟到底部 —— 曾经回答一长就只能手动往下滚
+  const lastLen = turns.at(-1)?.events.length ?? 0;
+  useEffect(() => {
+    if (turns.length > 0 || lastLen > 0) bottomRef.current?.scrollIntoView({ block: "end" });
+  }, [turns.length, lastLen]);
+
+  /** 停止:先让服务端真的停下(否则只是断开事件流,运行照常跑完扣费),再断开本地流。 */
+  async function stop() {
+    await fetch("/api/embed/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Embed-Token": token },
+      body: "{}",
+    }).catch(() => {});
+    abortRef.current?.abort();
+  }
 
   async function send(text?: string) {
     const prompt = (text ?? input).trim();
@@ -155,16 +198,35 @@ export function EmbedChat({ token }: { token: string }) {
         body: JSON.stringify({ prompt }),
         signal: abort.signal,
       });
-      // 令牌过期要给出明确提示,而不是让用户对着无反应的输入框发呆
-      if (res.status === 401) {
-        setExpired(true);
+      // 令牌过期/失效要给出明确提示,而不是让用户对着无反应的输入框发呆
+      if (res.status === 401 || res.status === 403) {
+        setExpired(
+          res.status === 401 ? "会话已过期,请刷新页面重新开始" : "该助手已不可用,请联系网站管理员",
+        );
+        return;
+      }
+      // 其它错误(额度用尽、输入过长、服务端故障)的响应体是 JSON,不是事件流 ——
+      // 曾经被当成事件流读完,一个字都不显示,这一轮静默结束
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        push({
+          kind: "result",
+          status: "failed",
+          summary: data.error ?? `请求失败(HTTP ${res.status})`,
+        });
         return;
       }
       if (!res.body) throw new Error("无响应流");
       await readEventStream(res.body, push);
     } catch (err) {
-      if (!abort.signal.aborted) {
-        push({ kind: "result", status: "failed", summary: String(err) });
+      if (abort.signal.aborted) {
+        push({ kind: "result", status: "cancelled", summary: "已停止" });
+      } else {
+        push({
+          kind: "result",
+          status: "failed",
+          summary: err instanceof Error ? err.message : String(err),
+        });
       }
     } finally {
       patch((t) => ({ ...t, running: false }));
@@ -185,7 +247,7 @@ export function EmbedChat({ token }: { token: string }) {
               {turn.prompt}
             </p>
             <div className="space-y-1">
-              {turn.events.map((e, j) =>
+              {mergeText(turn.events).map((e, j) =>
                 e.kind === "question" ? (
                   <QuestionBlock
                     key={e.toolUseId ?? `q-${j}`}
@@ -194,18 +256,25 @@ export function EmbedChat({ token }: { token: string }) {
                     onAnswer={(t) => void send(t)}
                   />
                 ) : (
-                  <Line key={`${j}-${e.kind}`} e={e} />
+                  <Line key={`${j}-${e.kind}`} e={e} streaming={turn.running} />
                 ),
               )}
-              {turn.running && <p className="animate-pulse text-xs text-brand">▍</p>}
+              {turn.running && (
+                <p className="animate-pulse text-xs text-brand" aria-label="正在回复">
+                  ▍
+                </p>
+              )}
             </div>
           </div>
         ))}
+        <div ref={bottomRef} aria-live="polite" className="sr-only">
+          {running ? "正在回复" : ""}
+        </div>
       </div>
 
       {expired ? (
         <p className="border-t border-border p-4 text-center text-xs text-muted-foreground">
-          会话已过期,请刷新页面重新开始
+          {expired}
         </p>
       ) : (
         <div className="flex gap-2 border-t border-border p-3">
@@ -213,19 +282,34 @@ export function EmbedChat({ token }: { token: string }) {
             className="min-w-0 flex-1"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && send()}
+            // 中文输入法选字时的回车不能当成发送
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) void send();
+            }}
             placeholder={running ? "正在回复…" : "输入消息"}
             disabled={running}
           />
-          <Button
-            type="button"
-            className="shrink-0"
-            onClick={() => void send()}
-            disabled={!input.trim() || running}
-          >
-            <SendHorizontal className="size-4" />
-            <span className="hidden sm:inline">发送</span>
-          </Button>
+          {running ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="shrink-0"
+              onClick={() => void stop()}
+            >
+              <Square className="size-4" />
+              <span className="hidden sm:inline">停止</span>
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              className="shrink-0"
+              onClick={() => void send()}
+              disabled={!input.trim()}
+            >
+              <SendHorizontal className="size-4" />
+              <span className="hidden sm:inline">发送</span>
+            </Button>
+          )}
         </div>
       )}
     </div>

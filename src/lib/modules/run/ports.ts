@@ -1,4 +1,5 @@
 import type { RunState } from "@/lib/shared";
+import { BrandedError } from "@/lib/shared";
 
 export interface Run {
   id: string;
@@ -11,17 +12,68 @@ export interface Run {
    * 只有 claimNext 会返回它 —— 拿不到令牌就没资格写这一行。
    */
   fence?: string;
+  /** 仅 findByIdempotencyKey 返回:首次受理时的请求体摘要。 */
+  idempotencyHash?: string;
+  /**
+   * 仅 findByIdempotencyKey 返回:首次受理时锁定的智能体版本(undefined = 草稿),
+   * 以及那次的配置快照是否声明了 outputSchema(快照缺失的旧任务为 undefined)。
+   * 重放必须如实回报【原任务】的版本与结果形态,而不是当前发布的版本。
+   */
+  agentVersion?: number;
+  hasOutputSchema?: boolean;
 }
+
+/**
+ * 回调目标快照。地址与来源一起存:来源决定签名账号 ——
+ * agent = 智能体默认地址(所有者签名),caller = 调用方指定(调用方签名),none = 受理时没有回调。
+ */
+export type CallbackSnapshot = { source: "agent" | "caller"; url: string } | { source: "none" };
 
 export interface NewRun {
   id: string;
   sessionId: string;
+  prompt?: string;
+  parentRunId?: string;
+  resumeAnchor?: string;
+  /** 在 resumeAnchor 那份会话里从哪条消息之后接着跑(配 forkSession);只有"从某一轮重来"才有 */
+  resumeAt?: string;
+  /** 入队时的智能体配置快照,worker 按它执行。 */
+  agentConfig?: unknown;
+  /** 执行的智能体版本;不传 = 草稿。 */
+  agentVersion?: number;
+  /** 请求级凭证覆盖,已加密。 */
+  overrideEnc?: string;
+  /** 受理时定下的回调目标快照(见 CallbackSnapshot);不传 = 旧行为,按投递时的配置投。 */
+  callback?: CallbackSnapshot;
+  /** 幂等键(已带调用方作用域)。重复则 create 抛 DuplicateIdempotencyKey。 */
+  idempotencyKey?: string;
+  idempotencyHash?: string;
 }
+
+/** create 撞上已存在的幂等键。调用方据此回滚自己刚建的会话,并返回已有的任务。 */
+export class DuplicateIdempotencyKey extends BrandedError {
+  static readonly brand = Symbol.for("owa.error.DuplicateIdempotencyKey");
+  constructor(readonly idempotencyKey: string) {
+    super(`duplicate idempotency key: ${idempotencyKey}`);
+    this.name = "DuplicateIdempotencyKey";
+  }
+}
+
+/** 孤儿回收时写进 error 的类型标记 —— 结果接口与 webhook 都能据此识别。 */
+export const WORKER_LOST = "worker_lost";
 
 /** 队列 + 仓储。MySQL 乐观锁认领 + 租约续期 + 孤儿回收,零中间件的可靠异步任务。 */
 export interface RunRepo {
   create(r: NewRun): Promise<Run>;
-  /** 认领一个可执行的 run(pending,或 running 但租约已过期)。 */
+  /**
+   * 认领一个可执行的 run。【只认领 pending】。
+   *
+   * 租约过期的 running 曾经也可认领(崩溃后由别的 worker 从头重跑)。但运行会产生
+   * 外部副作用(MCP 调用、Bash 里的网络请求),栅栏令牌只挡得住重复写结果,
+   * 挡不住重复执行 —— 重跑等于把副作用再做一遍,且 attempts 从未设上限,
+   * 一个让 worker 崩溃的任务会被无限重跑。现在的语义是【至多一次】:
+   * 失租的运行由 reclaimOrphans 判失败,要不要重试交给调用方决定。
+   */
   claimNext(leaseMs: number, now: number): Promise<Run | null>;
   /**
    * 续租,证明 worker 还活着。
@@ -48,9 +100,15 @@ export interface RunRepo {
    * 用户以为停了,其实没停;cancelled 是个不可达状态。
    */
   cancel(id: string): Promise<boolean>;
-  /** 把租约过期的 running 打回可认领,返回回收数量。 */
-  reclaimOrphans(now: number): Promise<number>;
+  /**
+   * 把租约过期的 running 判为 failed(error.kind = worker_lost),返回本次判定的运行。
+   * 多个 worker 同时回收时,每条运行只会出现在其中一个的返回值里 ——
+   * 调用方据此发布终态事件,不会重复。
+   */
+  reclaimOrphans(now: number): Promise<Run[]>;
   get(id: string): Promise<Run | null>;
+  /** 按幂等键找已受理的运行。 */
+  findByIdempotencyKey(key: string): Promise<Run | null>;
   /**
    * 按会话聚合运行情况,供会话列表展示。
    *
@@ -67,4 +125,54 @@ export interface RunStats {
   runs: number;
   /** 最后一次发起运行的时间戳(ms)。比会话创建时间更能反映"最近在用哪个"。 */
   lastRunAt: number;
+}
+
+/**
+ * 取消通知:取消接口在数据库里标记 cancelled 之后发一条,正在执行该运行的 worker 立即中止。
+ *
+ * 【为什么需要】取消原本只靠 worker 的续租心跳发现(默认 15 秒一次):点了停止,
+ * 工具还会继续执行最多 15 秒、继续花钱、继续产生副作用。
+ * 通知是"尽力而为"(pub/sub 最多一次),丢了仍由心跳兜底 —— 正确性不依赖它,只是更快。
+ */
+export interface CancelSignal {
+  publish(runId: string): Promise<void>;
+  /** 订阅取消通知;返回取消订阅函数。 */
+  subscribe(onCancel: (runId: string) => void): () => void;
+}
+
+/**
+ * 受理一条追加消息的结果。每个消息 id 第一次执行就定局,之后同一 id 再受理答的都是这个定局:
+ * accepted = 已入队(结局待定);rejected = 没有受理(运行还没开始或已关闭输入);
+ * delivered / dropped = 早先已受理,且已有结局。
+ */
+export type SteerOfferResult = "accepted" | "rejected" | "delivered" | "dropped";
+
+/**
+ * 运行中途追加消息的通道(web 进程受理 ↔ worker 交给模型)。
+ *
+ * 【受理与关闭检查同一个状态】offer 只在状态为 open 时入队;close 把状态置为 closed ——
+ * 两者对同一份状态互斥。
+ * 【先交接、再删除】take / close 只读出还没有结局的消息,不删;消息只在 settle 记下结局时删除。
+ * 读取的响应丢了,下一次读取仍拿得到 —— 每条被受理的消息最终都有结局(只要通道可用)。
+ * 【按 id 去重】调用方给每条消息稳定的 id,重试复用;同一 id 的结论只定一次。
+ */
+export interface SteerChannel {
+  /** web:受理一条。 */
+  offer(runId: string, m: { id: string; text: string }): Promise<SteerOfferResult>;
+  /** web:等这条的结局,最多 timeoutMs;等不到返回 "pending"。 */
+  awaitOutcome(
+    runId: string,
+    id: string,
+    timeoutMs: number,
+  ): Promise<"delivered" | "dropped" | "pending">;
+  /** worker:开始受理。 */
+  open(runId: string): Promise<void>;
+  /** worker:读出还没有结局的消息(按受理顺序;不删除)。 */
+  take(runId: string): Promise<{ id: string; text: string }[]>;
+  /** worker:停止受理,并读出还没有结局的消息(不删除)。与 offer 互斥。 */
+  close(runId: string): Promise<{ id: string; text: string }[]>;
+  /** worker:记下一条的结局,并从队列删除。 */
+  settle(runId: string, id: string, outcome: "delivered" | "dropped"): Promise<void>;
+  /** worker:有新消息受理时通知(尽力而为,可能漏,取用方还要定期 take)。 */
+  onOffer(runId: string, cb: () => void): () => void;
 }

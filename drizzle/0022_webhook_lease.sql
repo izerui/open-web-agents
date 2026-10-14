@@ -1,0 +1,1 @@
+ALTER TABLE `runs` ADD `webhook_lease` varchar(36);

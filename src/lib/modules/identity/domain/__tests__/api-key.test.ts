@@ -3,7 +3,11 @@ import {
   extractApiKey,
   generateApiKey,
   hashApiKey,
+  isKeyExpired,
   looksLikeApiKey,
+  parseExpiresInDays,
+  parseGraceHours,
+  rotationPlan,
   safeEqualHash,
 } from "@/lib/modules/identity/domain/api-key";
 import { describe, expect, it } from "vitest";
@@ -99,5 +103,40 @@ describe("extractApiKey", () => {
     expect(extractApiKey(headersOf({}))).toBeNull();
     expect(extractApiKey(headersOf({ "x-api-key": "   " }))).toBeNull();
     expect(extractApiKey(headersOf({ authorization: "Basic xyz" }))).toBeNull();
+  });
+});
+
+describe("Key 到期与轮换", () => {
+  it("到点即过期(含正好到点);没有到期时刻不过期", () => {
+    expect(isKeyExpired({ expiresAt: 1000 }, 999)).toBe(false);
+    expect(isKeyExpired({ expiresAt: 1000 }, 1000)).toBe(true);
+    expect(isKeyExpired({}, 10 ** 15)).toBe(false);
+  });
+
+  it("有效天数与重叠期的取值范围", () => {
+    expect(parseExpiresInDays(undefined)).toEqual({ ok: true });
+    expect(parseExpiresInDays(30)).toEqual({ ok: true, days: 30 });
+    for (const bad of [0, -1, 1.5, 3651, "30"]) expect(parseExpiresInDays(bad).ok).toBe(false);
+    expect(parseGraceHours(undefined)).toEqual({ ok: true, hours: 24 });
+    expect(parseGraceHours(0)).toEqual({ ok: true, hours: 0 });
+    for (const bad of [-1, 169, 2.5, "24"]) expect(parseGraceHours(bad).ok).toBe(false);
+  });
+
+  it("轮换:新 Key 沿用旧 Key 的有效时长;旧 Key 提前到重叠期结束,但不会被延长", () => {
+    const H = 3_600_000;
+    // 旧 Key 不过期:新 Key 也不过期,旧 Key 重叠期后失效
+    expect(rotationPlan({ createdAt: 0 }, 100 * H, 24)).toEqual({
+      newExpiresAt: undefined,
+      oldExpiresAt: 124 * H,
+    });
+    // 旧 Key 有效 30 天、还剩很久:新 Key 也是 30 天
+    expect(rotationPlan({ createdAt: 0, expiresAt: 720 * H }, 100 * H, 24)).toEqual({
+      newExpiresAt: 820 * H,
+      oldExpiresAt: 124 * H,
+    });
+    // 旧 Key 本来 2 小时后就到期:不因轮换而延长到 24 小时后
+    expect(rotationPlan({ createdAt: 0, expiresAt: 102 * H }, 100 * H, 24).oldExpiresAt).toBe(
+      102 * H,
+    );
   });
 });

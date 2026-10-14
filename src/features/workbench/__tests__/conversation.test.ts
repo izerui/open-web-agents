@@ -236,8 +236,41 @@ describe("contextTokens", () => {
     expect(contextTokens(turns)).toBe(120);
   });
 
+  it("一轮里多次模型调用:取最后一次,不累加(每次调用都带着完整上下文)", () => {
+    const turn: Turn = {
+      prompt: "p",
+      running: false,
+      events: [
+        { kind: "usage", messageId: "m1", input: 1000, output: 50, cacheRead: 9000 },
+        { kind: "usage", messageId: "m2", input: 1200, output: 80, cacheRead: 9000 },
+        { kind: "usage", messageId: "m3", input: 1500, output: 100, cacheRead: 9000 },
+      ],
+    };
+    // 曾经算成 3 次累加 ≈ 31,930
+    expect(contextTokens([turn])).toBe(1500 + 9000 + 100);
+  });
+
   it("一轮用量都没有时返回 0", () => {
     expect(contextTokens([turnWith(0)])).toBe(0);
     expect(contextTokens([])).toBe(0);
+  });
+});
+
+describe("运行中途追加的消息", () => {
+  it("按交给模型的时刻插在过程里,前后的文本各自成块", () => {
+    const blocks = processBlocks(
+      foldEvents([
+        { kind: "text", text: "先答" },
+        { kind: "steer", id: "m1", text: "顺便看看 B", outcome: "delivered" },
+        { kind: "text", text: "好的,也看 B" },
+        { kind: "steer", id: "m2", text: "晚了", outcome: "dropped" },
+      ]),
+    );
+    expect(blocks).toEqual([
+      { kind: "text", text: "先答" },
+      { kind: "steer", text: "顺便看看 B", outcome: "delivered" },
+      { kind: "text", text: "好的,也看 B" },
+      { kind: "steer", text: "晚了", outcome: "dropped" },
+    ]);
   });
 });
