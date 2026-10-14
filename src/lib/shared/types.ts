@@ -60,6 +60,12 @@ export interface SubagentDef {
    */
   description?: string;
   prompt: string;
+  /**
+   * 这个子代理用的模型别名;不填 = 跟主 agent 一样。
+   * 只收别名,不收完整模型 id —— 别名经平台的模型映射(OWA_MODEL_*)落到真实模型,
+   * 子代理不该绕开它。典型用法:主 agent 用 opus,检索 / 汇总类子代理用 haiku 省钱。
+   */
+  model?: ModelAlias;
   background: false;
 }
 

@@ -85,6 +85,8 @@ function toAgents(spec: AgentSpec): Record<string, unknown> | undefined {
     out[s.name] = {
       description: s.description?.trim() || `处理与「${s.name}」相关的子任务`,
       prompt: s.prompt,
+      // 别名由 SDK 经 ANTHROPIC_DEFAULT_<别名>_MODEL 换成真实模型,与主 agent 走同一套映射
+      ...(s.model ? { model: s.model } : {}),
       // 平台强制同步执行:后台跑的子代理没法纳入过程监控
       background: false,
     };

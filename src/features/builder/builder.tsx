@@ -20,6 +20,7 @@ import { SharePanel } from "@/features/builder/share-panel";
 import { InvokeSnippetTabs } from "@/features/integration/invoke-snippet";
 import type { AgentSummary } from "@/features/workbench/types";
 import { errorText, fetchJson } from "@/lib/fetch-json";
+import type { ModelAlias } from "@/lib/shared";
 import { PERMISSION_MODES, type PermissionMode } from "@/lib/shared";
 import { cn } from "@/lib/utils";
 import { Bot, FileCode, Play, Plus, Save, Sparkles, Trash2 } from "lucide-react";
@@ -80,10 +81,12 @@ interface SubagentDraft {
   /** 【何时】用它 —— 主 agent 靠这句话决定要不要把子任务交出去 */
   description: string;
   prompt: string;
+  /** 模型别名;空 = 与主 agent 相同 */
+  model: string;
 }
 
 function newSubagentRow(): SubagentDraft {
-  return { uid: crypto.randomUUID(), name: "", description: "", prompt: "" };
+  return { uid: crypto.randomUUID(), name: "", description: "", prompt: "", model: "" };
 }
 
 /**
@@ -452,6 +455,7 @@ export function Builder() {
                 name: s.name.trim(),
                 description: s.description.trim() || undefined,
                 prompt: s.prompt.trim(),
+                ...(s.model ? { model: s.model as ModelAlias } : {}),
                 background: false,
               })),
           }),
@@ -585,14 +589,20 @@ export function Builder() {
               }))
             : [],
           subagents: Array.isArray(cfg.subagents)
-            ? (cfg.subagents as { name?: string; description?: string; prompt?: string }[]).map(
-                (s) => ({
-                  uid: crypto.randomUUID(),
-                  name: s.name ?? "",
-                  description: s.description ?? "",
-                  prompt: s.prompt ?? "",
-                }),
-              )
+            ? (
+                cfg.subagents as {
+                  name?: string;
+                  description?: string;
+                  prompt?: string;
+                  model?: string;
+                }[]
+              ).map((s) => ({
+                uid: crypto.randomUUID(),
+                name: s.name ?? "",
+                description: s.description ?? "",
+                prompt: s.prompt ?? "",
+                model: s.model ?? "",
+              }))
             : [],
         };
         setCleanDraft(nextDraft);
@@ -1080,6 +1090,23 @@ export function Builder() {
                     }}
                     placeholder="【何时】用它,如:需要审阅代码质量时"
                   />
+                  <Select
+                    className="max-w-[9rem]"
+                    aria-label={`子代理 ${s.name || i + 1} 的模型`}
+                    value={s.model}
+                    onChange={(e) => {
+                      const next = [...draft.subagents];
+                      next[i] = { ...s, model: e.target.value };
+                      setDraft({ ...draft, subagents: next });
+                    }}
+                  >
+                    <option value="">同主 agent</option>
+                    {["fable", "opus", "sonnet", "haiku"].map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </Select>
                 </div>
                 <Textarea
                   className="min-h-[3rem]"

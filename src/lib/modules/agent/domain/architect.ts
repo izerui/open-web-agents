@@ -25,7 +25,8 @@ export const BUNDLE_README = `# 智能体包
   - \`starters\`:开场建议,最多 4 条
   - \`tools\`:工具白名单,如 [{"name":"Bash"},{"name":"Write"}];不写 = 不限制
   - \`mcpServers\`:外部工具服务,如 [{"name":"assets","type":"http","url":"https://..."}]
-  - \`subagents\`:子代理,如 [{"name":"reviewer","description":"何时用它","prompt":"它的提示词"}]
+  - \`subagents\`:子代理,如 [{"name":"reviewer","description":"何时用它","prompt":"它的提示词","model":"haiku"}]
+    (model 可选,只能是 fable / opus / sonnet / haiku,不填则与主 agent 相同;检索、汇总这类子任务用 haiku 更省钱)
   - \`approvalRules\`:需要人工确认的操作,如 {"tools":["Bash"],"commandPatterns":["rm -rf"]}
   - \`inputSchema\` / \`outputSchema\`:接口调用的入参与结果契约(JSON Schema,顶层 type 为 object)
 - \`${BUNDLE_DIR}/system-prompt.md\` —— 系统提示词

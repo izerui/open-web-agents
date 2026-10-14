@@ -174,6 +174,18 @@ describe("validateAgentConfig / skills 与子代理", () => {
     expect(f).toContain("subagents[0].prompt");
   });
 
+  it("子代理模型只收别名:完整模型 id 或乱写被拦,别名与不填都可以", () => {
+    const withModel = (model: unknown) =>
+      fields({
+        ...ok,
+        subagents: [{ name: "s", prompt: "p", model, background: false } as never],
+      });
+    expect(withModel("claude-opus-5-5")).toContain("subagents[0].model");
+    expect(withModel("gpt-4")).toContain("subagents[0].model");
+    expect(withModel("haiku")).not.toContain("subagents[0].model");
+    expect(withModel(undefined)).not.toContain("subagents[0].model");
+  });
+
   it("子代理重名被拦", () => {
     expect(
       fields({

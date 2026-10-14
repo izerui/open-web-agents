@@ -137,6 +137,12 @@ export function validateAgentConfig(
     } else seenSub.add(sa.name);
 
     if (!sa.prompt?.trim()) issues.push({ field: `${at}.prompt`, message: "子代理提示词不能为空" });
+    if (sa.model !== undefined && !isModelAlias(sa.model)) {
+      issues.push({
+        field: `${at}.model`,
+        message: "子代理模型只能是别名(fable / opus / sonnet / haiku),不填则与主 agent 相同",
+      });
+    }
   }
 
   const ar = cfg.approvalRules;

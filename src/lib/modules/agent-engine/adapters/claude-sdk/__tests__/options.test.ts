@@ -265,7 +265,10 @@ describe("执行隔离进入 SDK options", () => {
 describe("子代理传给 SDK 的形状", () => {
   const agentsOf = (subagents: AgentSpec["subagents"]) =>
     buildSdkOptions(specOf({ subagents }), ctx, deps()).agents as
-      | Record<string, { description?: string; prompt?: string; background?: boolean }>
+      | Record<
+          string,
+          { description?: string; prompt?: string; background?: boolean; model?: string }
+        >
       | undefined;
 
   it("是对象而非数组 —— 数组会让 agent 名变成下标", () => {
@@ -287,6 +290,16 @@ describe("子代理传给 SDK 的形状", () => {
   it("平台强制同步执行 —— background 恒为 false", () => {
     const a = agentsOf([{ name: "r", prompt: "p", background: false }]);
     expect(a?.r?.background).toBe(false);
+  });
+
+  it("子代理单独指定的模型别名原样交给 SDK;不指定就不传(跟随主 agent)", () => {
+    // SDK 按 ANTHROPIC_DEFAULT_<别名>_MODEL 换成真实模型(scripts/sdk-probe/subagent-model.mjs 实测)
+    const a = agentsOf([
+      { name: "cheap", prompt: "p", model: "haiku", background: false },
+      { name: "same", prompt: "p", background: false },
+    ]);
+    expect(a?.cheap?.model).toBe("haiku");
+    expect(a?.same && "model" in a.same).toBe(false);
   });
 
   it("没配子代理时不传该字段", () => {
