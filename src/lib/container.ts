@@ -5,7 +5,7 @@
 import { createHmac, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { type Db, createDb } from "@/lib/db/client";
+import { type Db, createDb, dbOver } from "@/lib/db/client";
 import { type Env, loadEnv } from "@/lib/env";
 import { MysqlGrantRepo } from "@/lib/modules/access/adapters/mysql-grant-repo";
 import { MysqlGroupRepo } from "@/lib/modules/access/adapters/mysql-group-repo";
@@ -94,6 +94,8 @@ export interface Container {
    */
   embedSecret: string;
   db: Db;
+  /** 健康检查用:命令期限 2 秒 */
+  probeDb: Db;
   sessions: SessionRepo;
   agents: AgentRepo;
   /** 版本与发布:发布、回滚、载入草稿,以及每个入口该跑哪一版。 */
@@ -189,7 +191,10 @@ function inheritedEnv(): Record<string, string> {
 
 function build(): Container {
   const env = loadEnv();
-  const { db } = createDb(env.databaseUrl);
+  const { db, pool } = createDb(env.databaseUrl);
+  // 健康检查的探测:同一个连接池,命令期限 2 秒 —— 数据库卡住时底层探测查询也在 2 秒内被断开,
+  // 频繁的探测不会一条条占住连接、把主池耗尽
+  const probeDb = dbOver(pool.withCommandTimeout(2_000));
 
   const gateway = new EnvModelGateway({
     base: env.models.base,
@@ -499,6 +504,7 @@ function build(): Container {
     env,
     embedSecret: createHmac("sha256", env.sessionSecret).update("owa-embed-token-v1").digest("hex"),
     db,
+    probeDb,
     sessions,
     agents,
     releases,

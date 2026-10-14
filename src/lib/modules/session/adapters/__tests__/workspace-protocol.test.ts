@@ -170,6 +170,67 @@ if (!TEST_DB_URL) {
       },
     );
 
+    it(
+      "连接池的命令期限不按借出时长计:GC 在锁内停在改名前远超命令期限,新运行仍等它改完,目录与文件都还在",
+      { timeout: 30_000 },
+      async () => {
+        // GC 用命令期限只有 300ms 的连接池(主池的保护,见 guarded-pool.ts)。若按"借出时长"计时,
+        // GC 停在改名前的这段事务空档会被判超时、连接断开、行锁释放 —— 新运行随即拿到锁写进旧目录,
+        // 之后迟到的改名把它整个搬走。
+        // 新运行用默认期限的连接池:它在等行锁,等锁本身就是一条执行中的命令(由 MySQL 的等锁上限兜底)
+        const short = createDb(TEST_DB_URL as string, { commandMs: 300 });
+        try {
+          const shortSessions = new MysqlSessionRepo(short.db);
+          const shortRuns = new MysqlRunRepo(short.db);
+          const { id, dir } = await oldSession();
+
+          let reached!: () => void;
+          let release!: () => void;
+          const atGate = new Promise<void>((r) => {
+            reached = r;
+          });
+          const gate = new Promise<void>((r) => {
+            release = r;
+          });
+          const gc = new WorkspaceGc({
+            workspacesRoot: root,
+            listWorkspaces: () => shortRuns.listSessionActivity(),
+            reclaim: (sid, o, op) => shortSessions.reclaimWorkspace(sid, o, op),
+            beforeMove: async () => {
+              reached();
+              await gate;
+            },
+          });
+
+          const gcDone = gc.run();
+          await atGate; // GC 已在锁内判定通过,停在改名之前
+
+          let runFinished = false;
+          const run = (async () => {
+            await sessions.prepareWorkspace(id, { nowMs: Date.now() }, async () => {
+              await fs.mkdir(dir, { recursive: true });
+            });
+            await fs.writeFile(path.join(dir, "本轮产出.md"), "刚写的");
+            runFinished = true;
+          })();
+          await new Promise((r) => setTimeout(r, 1_500)); // 命令期限的 5 倍
+          expect(runFinished).toBe(false); // 行锁仍在 GC 手里,运行在等
+
+          release();
+          const report = await gcDone;
+          await run;
+
+          expect(report.purged).toBe(1);
+          expect(report.errors).toEqual([]);
+          expect(await fs.readFile(path.join(dir, "本轮产出.md"), "utf8")).toBe("刚写的");
+          expect(await fs.stat(path.join(dir, "旧产出.md")).catch(() => null)).toBeNull();
+          expect((await sessions.get(id))?.workspacePurgedAt).toBeGreaterThan(0);
+        } finally {
+          await short.pool.end();
+        }
+      },
+    );
+
     it("反过来:运行先按协议记下使用,GC 在锁内看到后放弃,旧文件也不动", async () => {
       const { id, dir } = await oldSession();
       await startRun(id, dir);

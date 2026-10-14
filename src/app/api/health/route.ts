@@ -86,10 +86,10 @@ export async function GET(req: Request) {
     return Response.json({ status: "alive", uptimeSec: Math.round(process.uptime()) });
   }
 
-  const { db, bus, env, worker } = getContainer();
+  const { probeDb, bus, env, worker } = getContainer();
 
   const [database, redis] = await Promise.all([
-    probe(() => db.execute(sql`SELECT 1`)),
+    probe(() => probeDb.execute(sql`SELECT 1`)),
     probe(async () => {
       if (bus.ready) await bus.ready();
     }),
