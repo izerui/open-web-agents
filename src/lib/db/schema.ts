@@ -40,6 +40,12 @@ export const users = mysqlTable("users", {
    * 必须可逆:签名时要取回明文。
    */
   webhookSecretEnc: varchar("webhook_secret_enc", { length: 1024 }),
+  /**
+   * 换密钥后的重叠期:旧密钥在 until 之前仍额外签一份(X-OWA-Signature-Previous),
+   * 接收方来得及换上新密钥,验签不会中断。
+   */
+  webhookSecretPrevEnc: varchar("webhook_secret_prev_enc", { length: 1024 }),
+  webhookSecretPrevUntil: timestamp("webhook_secret_prev_until", { fsp: 3 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

@@ -22,7 +22,12 @@ export interface WebhookConsoleDeps {
   /** 该智能体当前的投递目标(地址 + 所有者签名密钥);没配回调返回 null */
   targetOfAgent(agentId: string): Promise<WebhookTarget | null>;
   /** 单次投递(测试投递不做即时重试) */
-  deliver(url: string, payload: WebhookPayload, secret?: string): Promise<WebhookResult>;
+  deliver(
+    url: string,
+    payload: WebhookPayload,
+    secret?: string,
+    previousSecret?: string,
+  ): Promise<WebhookResult>;
   log: WebhookDeliveryLog;
   outbox: Pick<WebhookOutbox, "requeueWebhook">;
   now?: () => number;
@@ -63,7 +68,7 @@ export class WebhookConsole {
     const started = this.now();
     let r: WebhookResult;
     try {
-      r = await this.deps.deliver(target.url, payload, target.secret);
+      r = await this.deps.deliver(target.url, payload, target.secret, target.previousSecret);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       r = {

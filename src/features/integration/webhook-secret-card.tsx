@@ -21,12 +21,22 @@ export function WebhookSecretCard() {
     if (saving) return;
     setSaving(true);
     try {
-      const data = await fetchJson<{ secret: string }>("/api/me/webhook-secret", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(generate ? {} : { secret: customSecret.trim() }),
-      });
+      const data = await fetchJson<{ secret: string; previousValidUntil?: string | null }>(
+        "/api/me/webhook-secret",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(generate ? {} : { secret: customSecret.trim() }),
+        },
+      );
       setRevealedSecret(data.secret);
+      // 换了新密钥:旧密钥在重叠期内仍额外签一份,提醒接收方在这之前换上新密钥
+      if (data.previousValidUntil) {
+        toast.message(
+          `旧密钥在 ${new Date(data.previousValidUntil).toLocaleString()} 前仍会额外签名(X-OWA-Signature-Previous),请在此之前把接收方换成新密钥`,
+          { duration: 15_000 },
+        );
+      }
       setCustomSecret("");
       toast.success(generate ? "已生成新的签名密钥" : "已保存签名密钥");
       await refreshMe();

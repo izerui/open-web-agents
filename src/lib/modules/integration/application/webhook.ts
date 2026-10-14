@@ -82,6 +82,11 @@ export interface WebhookOptions {
   sleep?: (ms: number) => Promise<void>;
   /** 签名密钥。给了就带 X-OWA-Timestamp / X-OWA-Signature 头。 */
   secret?: string;
+  /**
+   * 换密钥重叠期内的旧密钥:额外带 X-OWA-Signature-Previous。主签名头始终用当前密钥 ——
+   * 已接入的接收方按原样比对主签名头的不受影响;还没换上新密钥的接收方改验这一个。
+   */
+  previousSecret?: string;
   now?: () => number;
 }
 
@@ -118,6 +123,9 @@ export async function deliverWebhook(
     const ts = Math.floor((opts.now ?? Date.now)() / 1000);
     headers["X-OWA-Timestamp"] = String(ts);
     headers["X-OWA-Signature"] = signWebhook(opts.secret, ts, body);
+    if (opts.previousSecret) {
+      headers["X-OWA-Signature-Previous"] = signWebhook(opts.previousSecret, ts, body);
+    }
   }
 
   let lastStatus: number | undefined;

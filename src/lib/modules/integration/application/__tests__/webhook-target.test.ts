@@ -13,8 +13,8 @@ function deps(over: Partial<RunTargetDeps> = {}, source = "invoke"): RunTargetDe
     session: async () => ({ agentId: "a1", source, billingUserId: "caller" }),
     // 智能体【现在】的配置:地址已从 A 改成 B
     agentTarget: async (agentId) => ({ agentId, url: B, secret: "owner-s" }),
-    ownerSecret: async () => "owner-s",
-    userSecret: async (userId) => (userId === "caller" ? "caller-s" : undefined),
+    ownerSecret: async () => ({ secret: "owner-s" }),
+    userSecret: async (userId) => (userId === "caller" ? { secret: "caller-s" } : undefined),
     ...over,
   };
 }
@@ -98,5 +98,13 @@ describe("resolveRunTarget", () => {
     expect(
       await resolveRunTarget(deps({ session: async () => null }), { sessionId: "s1" }),
     ).toBeNull();
+  });
+
+  it("换密钥重叠期内:旧密钥随目标一起带出(另签一份),来源规则不变", async () => {
+    const t = await resolveRunTarget(
+      deps({ ownerSecret: async () => ({ secret: "new-s", previousSecret: "old-s" }) }),
+      { sessionId: "s1", callback: { source: "agent", url: A } },
+    );
+    expect(t).toEqual({ agentId: "a1", url: A, secret: "new-s", previousSecret: "old-s" });
   });
 });

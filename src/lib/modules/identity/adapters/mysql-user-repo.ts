@@ -10,6 +10,8 @@ interface Row {
   defaultBaseUrl: string | null;
   anthropicKeyEnc: string | null;
   webhookSecretEnc: string | null;
+  webhookSecretPrevEnc: string | null;
+  webhookSecretPrevUntil: Date | null;
   disabled: number;
   monthlyQuotaMicroUsd: number | null;
   createdAt: Date;
@@ -22,6 +24,8 @@ const COLUMNS = {
   defaultBaseUrl: users.defaultBaseUrl,
   anthropicKeyEnc: users.anthropicKeyEnc,
   webhookSecretEnc: users.webhookSecretEnc,
+  webhookSecretPrevEnc: users.webhookSecretPrevEnc,
+  webhookSecretPrevUntil: users.webhookSecretPrevUntil,
   disabled: users.disabled,
   monthlyQuotaMicroUsd: users.monthlyQuotaMicroUsd,
   createdAt: users.createdAt,
@@ -35,6 +39,8 @@ function toUser(r: Row): User {
     defaultBaseUrl: r.defaultBaseUrl ?? undefined,
     anthropicKeyEnc: r.anthropicKeyEnc ?? undefined,
     webhookSecretEnc: r.webhookSecretEnc ?? undefined,
+    webhookSecretPrevEnc: r.webhookSecretPrevEnc ?? undefined,
+    webhookSecretPrevUntil: r.webhookSecretPrevUntil?.getTime(),
     // 存量行是 NULL(加列前就有的数据),按"未禁用"处理
     disabled: Number(r.disabled ?? 0) !== 0,
     monthlyQuotaMicroUsd: r.monthlyQuotaMicroUsd ?? undefined,
@@ -155,12 +161,19 @@ export class MysqlUserRepo implements UserRepo {
       defaultBaseUrl?: string | null;
       anthropicKeyEnc?: string | null;
       webhookSecretEnc?: string | null;
+      webhookSecretPrevEnc?: string | null;
+      webhookSecretPrevUntil?: number | null;
     },
   ): Promise<void> {
-    const patch: Record<string, string | null> = {};
+    const patch: Record<string, string | Date | null> = {};
     if (v.defaultBaseUrl !== undefined) patch.defaultBaseUrl = v.defaultBaseUrl;
     if (v.anthropicKeyEnc !== undefined) patch.anthropicKeyEnc = v.anthropicKeyEnc;
     if (v.webhookSecretEnc !== undefined) patch.webhookSecretEnc = v.webhookSecretEnc;
+    if (v.webhookSecretPrevEnc !== undefined) patch.webhookSecretPrevEnc = v.webhookSecretPrevEnc;
+    if (v.webhookSecretPrevUntil !== undefined) {
+      patch.webhookSecretPrevUntil =
+        v.webhookSecretPrevUntil === null ? null : new Date(v.webhookSecretPrevUntil);
+    }
     if (Object.keys(patch).length === 0) return;
     await this.db.update(users).set(patch).where(eq(users.id, id));
   }

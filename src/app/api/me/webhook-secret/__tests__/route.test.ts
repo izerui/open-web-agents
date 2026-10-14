@@ -14,7 +14,7 @@ const state: { audit?: AuditLog; setCredentials: ReturnType<typeof vi.fn> } = {
 vi.mock("@/lib/container", () => ({
   getContainer: () => ({
     authService: { currentUser: async () => ({ id: "u1", email: "u1@x.test" }) },
-    users: { setCredentials: state.setCredentials },
+    users: { setCredentials: state.setCredentials, get: async () => ({ id: "u1" }) },
     secrets: { encrypt: (v: string) => `enc:${v}` },
     audit: state.audit,
   }),

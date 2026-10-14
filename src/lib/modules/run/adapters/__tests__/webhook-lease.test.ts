@@ -229,9 +229,14 @@ if (!TEST_DB_URL) {
                   agentTarget: async () => {
                     throw new Error("有快照的任务不该读当前配置");
                   },
-                  ownerSecret: async (agentId) =>
-                    secrets[(await agents.get(agentId))?.ownerId ?? ""],
-                  userSecret: async (userId) => secrets[userId],
+                  ownerSecret: async (agentId) => {
+                    const s = secrets[(await agents.get(agentId))?.ownerId ?? ""];
+                    return s ? { secret: s } : undefined;
+                  },
+                  userSecret: async (userId) => {
+                    const s = secrets[userId];
+                    return s ? { secret: s } : undefined;
+                  },
                 },
                 job,
               ),

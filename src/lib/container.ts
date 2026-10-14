@@ -55,6 +55,7 @@ import { deliverWebhook, runFinishedPayload } from "@/lib/modules/integration/ap
 import { WebhookConsole } from "@/lib/modules/integration/application/webhook-console";
 import { WebhookDispatcher } from "@/lib/modules/integration/application/webhook-dispatcher";
 import { resolveRunTarget } from "@/lib/modules/integration/application/webhook-target";
+import { signingSecretsOf } from "@/lib/modules/integration/domain/signing-secrets";
 import { isAddressAllowed } from "@/lib/modules/integration/domain/webhook-policy";
 import { MysqlKnowledgeRepo } from "@/lib/modules/knowledge/adapters/mysql-knowledge-repo";
 import { ChunkCache } from "@/lib/modules/knowledge/application/chunk-cache";
@@ -375,19 +376,19 @@ function build(): Container {
     allowAddress: (ip) => isAddressAllowed(ip, env.webhookAllowPrivate),
   });
   /** 账号的回调签名密钥。配置了却解不开就抛错 —— 不能退化成不签名照发。 */
+  /** 账号的回调签名密钥(含换密钥重叠期内的旧密钥,见 signing-secrets.ts)。 */
   const webhookSecretOf = async (userId: string) => {
     const u = await users.get(userId);
-    if (!u?.webhookSecretEnc) return undefined;
-    const secret = secrets.decrypt(u.webhookSecretEnc);
-    if (secret === null) throw new Error(`webhook 签名密钥无法解密(user=${userId})`);
-    return secret;
+    return u
+      ? signingSecretsOf(u, (enc) => secrets.decrypt(enc), Date.now(), `user=${userId}`)
+      : undefined;
   };
   /** 智能体当前的回调目标:地址 + 所有者的签名密钥。 */
   const webhookTargetOf = async (agentId: string) => {
     const agent = await agents.get(agentId);
     if (!agent?.webhookUrl) return null;
-    const secret = await webhookSecretOf(agent.ownerId);
-    return { agentId, url: agent.webhookUrl, ...(secret ? { secret } : {}) };
+    const keys = await webhookSecretOf(agent.ownerId);
+    return { agentId, url: agent.webhookUrl, ...(keys ?? {}) };
   };
   const webhookLog = new MysqlWebhookDeliveryLog(db);
   const webhooks = new WebhookDispatcher({
@@ -420,15 +421,15 @@ function build(): Container {
         )),
       };
     },
-    deliver: (url, payload, secret) =>
-      deliverWebhook(url, payload, { secret, maxAttempts: 2, send: webhookSender }),
+    deliver: (url, payload, secret, previousSecret) =>
+      deliverWebhook(url, payload, { secret, previousSecret, maxAttempts: 2, send: webhookSender }),
     recordDelivery: (d) => webhookLog.record(d),
   });
   const webhookConsole = new WebhookConsole({
     targetOfAgent: webhookTargetOf,
     // 测试投递不做即时重试:一次的结果就是集成方要看的
-    deliver: (url, payload, secret) =>
-      deliverWebhook(url, payload, { secret, maxAttempts: 1, send: webhookSender }),
+    deliver: (url, payload, secret, previousSecret) =>
+      deliverWebhook(url, payload, { secret, previousSecret, maxAttempts: 1, send: webhookSender }),
     log: webhookLog,
     outbox: runs,
   });

@@ -18,6 +18,8 @@ export interface WebhookTarget {
   url: string;
   /** 智能体所有者的签名密钥;没配置则不签名。 */
   secret?: string;
+  /** 换密钥重叠期内的旧密钥:额外签一份(X-OWA-Signature-Previous) */
+  previousSecret?: string;
 }
 
 export interface DispatcherDeps {
@@ -29,7 +31,12 @@ export interface DispatcherDeps {
   loadTarget(job: Pick<WebhookJob, "sessionId" | "callback">): Promise<WebhookTarget | null>;
   /** 从数据库读终态结果拼载荷 —— 回调内容与 /result 接口同源。 */
   loadPayload(runId: string, sessionId: string): Promise<WebhookPayload | null>;
-  deliver(url: string, payload: WebhookPayload, secret?: string): Promise<WebhookResult>;
+  deliver(
+    url: string,
+    payload: WebhookPayload,
+    secret?: string,
+    previousSecret?: string,
+  ): Promise<WebhookResult>;
   /**
    * 记下这次投递(供集成方排查)。尽力而为:写失败或超时只记日志,不影响投递状态;
    * 每次写入有等待上限,数据库不返回时不能把投递器拖住。
@@ -129,7 +136,7 @@ export class WebhookDispatcher {
         at: started,
       });
     try {
-      result = await this.deps.deliver(target.url, payload, target.secret);
+      result = await this.deps.deliver(target.url, payload, target.secret, target.previousSecret);
     } catch (err) {
       if (err instanceof WebhookTargetRejected) {
         console.warn(`[owa][webhook] 目标被拒(run=${job.runId}):${err.message}`);

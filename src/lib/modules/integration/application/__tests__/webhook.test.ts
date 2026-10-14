@@ -123,6 +123,32 @@ describe("deliverWebhook 签名与目标检查", () => {
     expect(h["X-OWA-Signature"]).toBe(signWebhook("k", 5, String(init.body)));
   });
 
+  it("换密钥重叠期:主签名头用新密钥(老接收方按原样比对不受影响),旧密钥另签一份", async () => {
+    const spy = vi.fn(async () => new Response(null, { status: 200 }));
+    await deliverWebhook("https://x/hook", payload, {
+      send: spy as unknown as WebhookSender,
+      sleep: noSleep,
+      secret: "new",
+      previousSecret: "old",
+      now: () => 5_000,
+    });
+    const [, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    const h = init.headers as Record<string, string>;
+    expect(h["X-OWA-Signature"]).toBe(signWebhook("new", 5, String(init.body)));
+    expect(h["X-OWA-Signature-Previous"]).toBe(signWebhook("old", 5, String(init.body)));
+  });
+
+  it("不在重叠期:不带旧签名头", async () => {
+    const spy = vi.fn(async () => new Response(null, { status: 200 }));
+    await deliverWebhook("https://x/hook", payload, {
+      send: spy as unknown as WebhookSender,
+      sleep: noSleep,
+      secret: "new",
+    });
+    const [, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect((init.headers as Record<string, string>)["X-OWA-Signature-Previous"]).toBeUndefined();
+  });
+
   it("没配密钥就不带签名头", async () => {
     const spy = vi.fn(async () => new Response(null, { status: 200 }));
     await deliverWebhook("https://x/hook", payload, {

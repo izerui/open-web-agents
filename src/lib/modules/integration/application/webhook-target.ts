@@ -13,14 +13,20 @@
 import type { WebhookJob } from "@/lib/modules/integration/ports";
 import type { WebhookTarget } from "./webhook-dispatcher";
 
+/** 当前签名密钥,以及换密钥重叠期内的旧密钥 */
+export interface SigningSecrets {
+  secret: string;
+  previousSecret?: string;
+}
+
 export interface RunTargetDeps {
   session(id: string): Promise<{ agentId: string; source: string; billingUserId?: string } | null>;
   /** 智能体当前配置的回调目标(地址 + 所有者密钥);没配返回 null。只用于没有快照的旧任务。 */
   agentTarget(agentId: string): Promise<WebhookTarget | null>;
   /** 智能体所有者的签名密钥;没配置返回 undefined,配置了却解不开必须抛错。 */
-  ownerSecret(agentId: string): Promise<string | undefined>;
+  ownerSecret(agentId: string): Promise<SigningSecrets | undefined>;
   /** 该账号的签名密钥;没配置返回 undefined,配置了却解不开必须抛错。 */
-  userSecret(userId: string): Promise<string | undefined>;
+  userSecret(userId: string): Promise<SigningSecrets | undefined>;
 }
 
 export async function resolveRunTarget(
@@ -32,11 +38,11 @@ export async function resolveRunTarget(
   const snap = job.callback;
   if (!snap) return deps.agentTarget(session.agentId);
   if (snap.source === "none") return null;
-  const secret =
+  const keys =
     snap.source === "agent"
       ? await deps.ownerSecret(session.agentId)
       : session.billingUserId
         ? await deps.userSecret(session.billingUserId)
         : undefined;
-  return { agentId: session.agentId, url: snap.url, ...(secret ? { secret } : {}) };
+  return { agentId: session.agentId, url: snap.url, ...(keys ?? {}) };
 }

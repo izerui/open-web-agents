@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { getContainer } from "@/lib/container";
+import { parseGraceHours } from "@/lib/modules/identity/domain/api-key";
 import { maskSecret } from "@/lib/modules/identity/domain/secret-box";
 
 export const runtime = "nodejs";
@@ -24,7 +25,10 @@ export async function POST(req: Request) {
   const user = await authService.currentUser(req);
   if (!user) return Response.json({ error: "login required" }, { status: 401 });
 
-  const body = (await req.json().catch(() => ({}))) as { secret?: string };
+  const body = (await req.json().catch(() => ({}))) as { secret?: string; graceHours?: unknown };
+  // 换密钥的重叠期:旧密钥在这段时间里仍额外签一份,接收方来得及换上新密钥
+  const grace = parseGraceHours(body.graceHours);
+  if (!grace.ok) return Response.json({ error: grace.reason }, { status: 400 });
   let secret: string;
   if (typeof body.secret === "string" && body.secret.trim()) {
     secret = body.secret.trim();
@@ -38,16 +42,35 @@ export async function POST(req: Request) {
     secret = `whsec_${randomBytes(32).toString("base64url")}`;
   }
 
-  await users.setCredentials(user.id, { webhookSecretEnc: secrets.encrypt(secret) });
+  const current = await users.get(user.id);
+  const overlapUntil =
+    current?.webhookSecretEnc && grace.hours > 0 ? Date.now() + grace.hours * 3_600_000 : null;
+  await users.setCredentials(user.id, {
+    webhookSecretEnc: secrets.encrypt(secret),
+    // 原来就有密钥才有重叠期;重叠期为 0 即刻作废旧密钥
+    webhookSecretPrevEnc: overlapUntil ? (current?.webhookSecretEnc ?? null) : null,
+    webhookSecretPrevUntil: overlapUntil,
+  });
   await getContainer().audit.record({
     actor: { type: "web", userId: user.id },
     action: "me.webhook_secret_set",
     resource: { type: "account", id: user.id },
     ownerId: user.id,
-    details: { generated: !(typeof body.secret === "string" && body.secret.trim()) },
+    details: {
+      generated: !(typeof body.secret === "string" && body.secret.trim()),
+      ...(overlapUntil ? { previousValidUntil: new Date(overlapUntil).toISOString() } : {}),
+    },
     req,
   });
-  return Response.json({ secret, mask: maskSecret(secret) }, { status: 201 });
+  return Response.json(
+    {
+      secret,
+      mask: maskSecret(secret),
+      /** 旧密钥在这之前仍额外签一份(X-OWA-Signature-Previous);没有旧密钥或重叠期为 0 则为 null */
+      previousValidUntil: overlapUntil ? new Date(overlapUntil).toISOString() : null,
+    },
+    { status: 201 },
+  );
 }
 
 /** 清除签名密钥。之后回调不再带签名头。 */
@@ -55,7 +78,12 @@ export async function DELETE(req: Request) {
   const { authService, users } = getContainer();
   const user = await authService.currentUser(req);
   if (!user) return Response.json({ error: "login required" }, { status: 401 });
-  await users.setCredentials(user.id, { webhookSecretEnc: null });
+  // 清除就是不再签名:旧密钥一并作废
+  await users.setCredentials(user.id, {
+    webhookSecretEnc: null,
+    webhookSecretPrevEnc: null,
+    webhookSecretPrevUntil: null,
+  });
   await getContainer().audit.record({
     actor: { type: "web", userId: user.id },
     action: "me.webhook_secret_clear",

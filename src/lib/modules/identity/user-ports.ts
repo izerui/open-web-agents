@@ -10,6 +10,9 @@ export interface User {
   anthropicKeyEnc?: string;
   /** Webhook 签名密钥,已加密。该用户名下智能体的回调都用它签名。 */
   webhookSecretEnc?: string;
+  /** 换密钥后的旧密钥(重叠期内仍签名)与重叠期结束时刻(ms) */
+  webhookSecretPrevEnc?: string;
+  webhookSecretPrevUntil?: number;
   defaultModel?: ModelAlias;
   /** 禁用的账号不能登录,已登录的会话也立即失效。 */
   disabled: boolean;
@@ -43,6 +46,8 @@ export interface UserRepo {
       defaultBaseUrl?: string | null;
       anthropicKeyEnc?: string | null;
       webhookSecretEnc?: string | null;
+      webhookSecretPrevEnc?: string | null;
+      webhookSecretPrevUntil?: number | null;
     },
   ): Promise<void>;
 
