@@ -28,13 +28,16 @@ const DECISION_TTL_MS = 15 * 60_000;
  * 原子裁决:待审还在才落地裁决并删除待审,返回 1;待审已不存在(过期或已被别人裁决)返回 0。
  * 只用一条 EVAL(而非 EVALSHA + 回退),中间不存在"只做了一半"的状态。
  */
+// ARGV: 裁决, 裁决保留时长, 授权保留时长, 之后是成对的(类别键, 授权 JSON)—— 没有就不写授权
 const RESOLVE_SCRIPT = `
 if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
 redis.call('SET', KEYS[2], ARGV[1], 'PX', tonumber(ARGV[2]))
 redis.call('DEL', KEYS[1])
-if ARGV[3] ~= '' then
-  redis.call('HSET', KEYS[3], ARGV[3], ARGV[4])
-  redis.call('PEXPIRE', KEYS[3], tonumber(ARGV[5]))
+if #ARGV >= 5 then
+  for i = 4, #ARGV, 2 do
+    redis.call('HSET', KEYS[3], ARGV[i], ARGV[i + 1])
+  end
+  redis.call('PEXPIRE', KEYS[3], tonumber(ARGV[3]))
 end
 return 1
 `;
@@ -234,7 +237,7 @@ export class RedisApproval implements ApprovalPort {
   async resolve(
     id: string,
     outcome: ApprovalOutcome,
-    remember?: { sessionId: string; grant: SessionGrant },
+    remember?: { sessionId: string; grants: SessionGrant[] },
   ): Promise<boolean> {
     // 授权只跟批准一起落地,且在同一段脚本里:待审已失效(没批成)就不会留下授权
     const g = outcome.decision === "approved" ? remember : undefined;
@@ -247,9 +250,8 @@ export class RedisApproval implements ApprovalPort {
         GRANTS_KEY(g?.sessionId ?? "-"),
         JSON.stringify(outcome),
         String(DECISION_TTL_MS),
-        g?.grant.key ?? "",
-        g ? JSON.stringify(g.grant) : "",
         String(GRANTS_TTL_MS),
+        ...(g?.grants ?? []).flatMap((x) => [x.key, JSON.stringify(x)]),
       ),
       `审批 ${id} 的裁决提交结果未知(连接恢复后可能仍会生效)`,
     );

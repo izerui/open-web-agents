@@ -92,7 +92,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (!target) {
       return Response.json({ error: "该待审请求不存在或已失效" }, { status: 404 });
     }
-    if (body.remember && !target.grant) {
+    const scopes = target.scopes ?? [];
+    if (body.remember && scopes.length === 0) {
       return Response.json({ error: "这类调用不支持授权同类,只能逐次审批" }, { status: 400 });
     }
     // 批准并授权同类:与裁决在同一步原子落地 —— 待审已失效(没批成)就不会留下授权
@@ -101,10 +102,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       body.decision === "approved"
         ? { decision: "approved", by }
         : { decision: "denied", by, ...(message ? { message } : {}) },
-      body.remember && target.grant
+      // 授权的是这次调用命中的【全部】类别 —— 界面上也是把它们都列出来让人确认的
+      body.remember
         ? {
             sessionId: id,
-            grant: { key: target.grant.key, label: target.grant.label, by, at: Date.now() },
+            grants: scopes.map((s) => ({ key: s.key, label: s.label, by, at: Date.now() })),
           }
         : undefined,
     );
@@ -139,8 +141,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         runId: target?.runId,
         tool: target?.toolName,
         decision: body.decision,
-        ...(body.remember && target?.grant
-          ? { remember: true, grantCategory: target.grant.key, grantLabel: target.grant.label }
+        ...(body.remember && target?.scopes?.length
+          ? {
+              remember: true,
+              grantCategories: target.scopes.map((s) => s.key),
+              grantLabel: target.scopes.map((s) => s.label).join("、"),
+            }
           : {}),
       },
       req,

@@ -69,7 +69,7 @@ export interface EngineDeps {
       toolName: string;
       summary: string;
       reason: string;
-      grant?: { key: string; label: string };
+      scopes?: { key: string; label: string }[];
     },
     signal?: AbortSignal,
   ) => Promise<{ approved: boolean; message?: string }>;

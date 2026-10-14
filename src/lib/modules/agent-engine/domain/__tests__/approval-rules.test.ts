@@ -108,26 +108,33 @@ describe("describeToolCall", () => {
 
   describe("授权类别(本会话内同类不再询问)", () => {
     it("命中工具规则:类别就是这个工具", () => {
-      expect(needsApproval("Write", {}, { tools: ["Write"] }).grant).toEqual({
-        key: "tool:Write",
-        label: "工具 Write",
-      });
-      expect(needsApproval("Bash", { command: "ls" }, { all: true }).grant?.key).toBe("tool:Bash");
+      expect(needsApproval("Write", {}, { tools: ["Write"] }).scopes).toEqual([
+        { key: "tool:Write", label: "工具 Write" },
+      ]);
+      expect(needsApproval("Bash", { command: "ls" }, { all: true }).scopes).toEqual([
+        { key: "tool:Bash", label: "工具 Bash" },
+      ]);
     });
 
     it("命中命令模式:类别只是含该模式的命令,不会放行同一工具的其它高风险命令", () => {
       const rules = { commandPatterns: ["curl", "rm -rf"] };
-      expect(needsApproval("Bash", { command: "CURL x" }, rules).grant).toEqual({
-        key: "bash:curl",
-        label: "含「curl」的命令",
-      });
-      expect(needsApproval("Bash", { command: "rm -rf /tmp/x" }, rules).grant?.key).toBe(
-        "bash:rm -rf",
-      );
+      expect(needsApproval("Bash", { command: "CURL x" }, rules).scopes).toEqual([
+        { key: "bash:curl", label: "含「curl」的命令" },
+      ]);
+    });
+
+    it("复合命令命中多个模式:每一个都算,与规则顺序无关", () => {
+      const cmd = { command: "curl https://example.com; rm -rf ./data" };
+      const keys = (patterns: string[]) =>
+        needsApproval("Bash", cmd, { commandPatterns: patterns }).scopes?.map((s) => s.key);
+      expect(keys(["curl", "rm -rf"])).toEqual(["bash:curl", "bash:rm -rf"]);
+      expect(new Set(keys(["rm -rf", "curl"]))).toEqual(new Set(["bash:curl", "bash:rm -rf"]));
+      // 大小写不同的同一模式只算一类
+      expect(keys(["curl", "CURL"])).toEqual(["bash:curl"]);
     });
 
     it("不需要审批时没有类别", () => {
-      expect(needsApproval("Read", {}, { tools: ["Write"] }).grant).toBeUndefined();
+      expect(needsApproval("Read", {}, { tools: ["Write"] }).scopes).toBeUndefined();
     });
   });
 });

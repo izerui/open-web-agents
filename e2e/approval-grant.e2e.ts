@@ -25,7 +25,7 @@ describe("审批分级(真实服务 + Redis)", () => {
       expect(sessionId).toBeTruthy();
 
       const approval = new RedisApproval(redisUrl as string);
-      const grant = { key: "bash:curl", label: "含「curl」的命令" };
+      const scopes = [{ key: "bash:curl", label: "含「curl」的命令" }];
       const ask = (id: string) =>
         approval.request({
           id,
@@ -34,7 +34,7 @@ describe("审批分级(真实服务 + Redis)", () => {
           toolName: "Bash",
           summary: "curl https://example.com",
           reason: "命令包含高风险模式:curl",
-          grant,
+          scopes,
           createdAt: Date.now(),
           expiresAt: Date.now() + 60_000,
         });
@@ -112,7 +112,7 @@ describe("审批分级(真实服务 + Redis)", () => {
         const decided = (audit.body.items ?? []).find(
           (e) => e.action === "approval.decide" && e.details?.approvalId === a1,
         );
-        expect(decided?.details).toMatchObject({ remember: true, grantCategory: "bash:curl" });
+        expect(decided?.details).toMatchObject({ remember: true, grantCategories: ["bash:curl"] });
       } finally {
         await approval.close();
       }

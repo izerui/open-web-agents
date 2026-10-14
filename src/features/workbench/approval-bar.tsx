@@ -16,8 +16,8 @@ interface Pending {
   toolName: string;
   summary: string;
   reason: string;
-  /** 所属类别;有才能"本会话内同类不再询问" */
-  grant?: { key: string; label: string };
+  /** 所属的全部类别;有才能"本会话内同类不再询问"(授权的是全部这些类) */
+  scopes?: { key: string; label: string }[];
   createdAt?: number;
   expiresAt: number;
 }
@@ -277,7 +277,7 @@ export function ApprovalBar({
                     <CheckCircle2 className="size-3.5" />
                     批准
                   </Button>
-                  {p.grant && (
+                  {p.scopes && p.scopes.length > 0 && (
                     <Button
                       size="sm"
                       variant="outline"
@@ -285,7 +285,7 @@ export function ApprovalBar({
                       disabled={busy === p.id}
                       title="之后本会话里同一类调用直接放行;可在上方随时撤销"
                     >
-                      批准,本会话内{p.grant.label}不再询问
+                      批准,本会话内{p.scopes.map((s) => s.label).join("、")}不再询问
                     </Button>
                   )}
                   <Button

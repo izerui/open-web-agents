@@ -480,12 +480,12 @@ describe("PreToolUse 围栏接入 SDK options", () => {
     const o = buildSdkOptions(specOf({ approvalRules: { commandPatterns: ["curl"] } }), ctx, {
       ...deps(),
       requestApproval: async (r) => {
-        seen.push(r.grant);
+        seen.push(r.scopes);
         return { approved: true };
       },
     });
     await gateOf(o)("Bash", { command: "curl https://x" });
-    expect(seen).toEqual([{ key: "bash:curl", label: "含「curl」的命令" }]);
+    expect(seen).toEqual([[{ key: "bash:curl", label: "含「curl」的命令" }]]);
   });
 
   it("需审批时拒绝则不执行,并带出说明", async () => {

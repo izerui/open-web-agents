@@ -8,8 +8,11 @@ export interface ApprovalRequest {
   /** 给审批人看的摘要(已截断)。 */
   summary: string;
   reason: string;
-  /** 这次调用所属的类别;审批人可以把这一类授权给本会话(见 SessionGrant)。规则没给就没有。 */
-  grant?: { key: string; label: string };
+  /**
+   * 这次调用所属的全部类别;审批人可以把这些类授权给本会话(见 SessionGrant)。
+   * 之后只有每一类都已授权才自动放行。规则没给就没有。
+   */
+  scopes?: { key: string; label: string }[];
   createdAt: number;
   /** 到点自动拒绝的时刻。 */
   expiresAt: number;
@@ -78,7 +81,7 @@ export interface ApprovalPort {
     id: string,
     outcome: ApprovalOutcome,
     /** 批准并记下本会话的同类授权:与裁决原子落地 —— 裁决没生效,授权也不会写入 */
-    remember?: { sessionId: string; grant: SessionGrant },
+    remember?: { sessionId: string; grants: SessionGrant[] },
   ): Promise<boolean>;
   /** 本会话的同类授权。不可用时以 ApprovalUnavailable 有界失败。 */
   grants(sessionId: string): Promise<SessionGrant[]>;

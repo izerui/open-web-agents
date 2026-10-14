@@ -44,7 +44,7 @@ const pendingOf = (over: Partial<ApprovalRequest> = {}): ApprovalRequest => ({
   toolName: "Bash",
   summary: "curl https://x",
   reason: "命令包含高风险模式:curl",
-  grant: { key: "bash:curl", label: "含「curl」的命令" },
+  scopes: [{ key: "bash:curl", label: "含「curl」的命令" }],
   createdAt: 0,
   expiresAt: Date.now() + 60_000,
   ...over,
@@ -81,13 +81,32 @@ describe("审批分级", () => {
     expect(r).toMatchObject({ status: 200, body: { remembered: true } });
     expect(state.resolved[0]?.remember).toEqual({
       sessionId: "s1",
-      grant: { key: "bash:curl", label: "含「curl」的命令", by: "u1", at: expect.any(Number) },
+      grants: [{ key: "bash:curl", label: "含「curl」的命令", by: "u1", at: expect.any(Number) }],
     });
     const ev = auditRepo.events.find((e) => e.action === "approval.decide");
     expect(ev?.details).toMatchObject({
       decision: "approved",
       remember: true,
-      grantCategory: "bash:curl",
+      grantCategories: ["bash:curl"],
+    });
+  });
+
+  it("复合命令命中多类:授权写入全部这些类(界面上列出的就是这些),审计里也是全部", async () => {
+    state.pending = [
+      pendingOf({
+        scopes: [
+          { key: "bash:curl", label: "含「curl」的命令" },
+          { key: "bash:rm -rf", label: "含「rm -rf」的命令" },
+        ],
+      }),
+    ];
+    await call("POST", { approvalId: "a1", decision: "approved", remember: "session" });
+    const remember = state.resolved[0]?.remember as { grants: { key: string }[] };
+    expect(remember.grants.map((g) => g.key)).toEqual(["bash:curl", "bash:rm -rf"]);
+    const ev = auditRepo.events.find((e) => e.action === "approval.decide");
+    expect(ev?.details).toMatchObject({
+      grantCategories: ["bash:curl", "bash:rm -rf"],
+      grantLabel: "含「curl」的命令、含「rm -rf」的命令",
     });
   });
 
@@ -95,7 +114,7 @@ describe("审批分级", () => {
     expect(
       (await call("POST", { approvalId: "a1", decision: "denied", remember: "session" })).status,
     ).toBe(400);
-    state.pending = [pendingOf({ grant: undefined })];
+    state.pending = [pendingOf({ scopes: undefined })];
     expect(
       (await call("POST", { approvalId: "a1", decision: "approved", remember: "session" })).status,
     ).toBe(400);

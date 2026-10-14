@@ -14,8 +14,8 @@ export interface ApprovalCall {
   toolName: string;
   summary: string;
   reason: string;
-  /** 这次调用所属的类别(审批规则给出);有才可能命中同类授权 */
-  grant?: { key: string; label: string };
+  /** 这次调用所属的全部类别(审批规则给出);每一类都已授权才自动放行 */
+  scopes?: { key: string; label: string }[];
 }
 
 export interface RequestApprovalDeps {
@@ -35,16 +35,19 @@ export async function requestApproval(
   const say = (label: string, state: string) =>
     deps.publish(r.sessionId, r.runId, { kind: "status", label, state }).catch(() => {});
 
-  if (r.grant) {
+  const scopes = r.scopes ?? [];
+  if (scopes.length > 0) {
     let granted = false;
     try {
-      granted = (await deps.approval.grants(r.sessionId)).some((g) => g.key === r.grant?.key);
+      const have = new Set((await deps.approval.grants(r.sessionId)).map((g) => g.key));
+      // 每一类都已授权才放行:复合命令里任何一类没授权,都要问人
+      granted = scopes.every((s) => have.has(s.key));
     } catch {
       granted = false; // 读不到就去问人
     }
     if (granted) {
       await say(
-        `已按本会话授权自动批准:${r.toolName} — ${r.summary}(${r.grant.label})`,
+        `已按本会话授权自动批准:${r.toolName} — ${r.summary}(${scopes.map((s) => s.label).join("、")})`,
         "approved_by_grant",
       );
       return { approved: true };
@@ -64,7 +67,7 @@ export async function requestApproval(
         toolName: r.toolName,
         summary: r.summary,
         reason: r.reason,
-        ...(r.grant ? { grant: r.grant } : {}),
+        ...(scopes.length > 0 ? { scopes } : {}),
         createdAt,
         expiresAt: createdAt + deps.timeoutMs,
       },

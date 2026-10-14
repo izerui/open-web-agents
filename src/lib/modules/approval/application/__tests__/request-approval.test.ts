@@ -48,7 +48,7 @@ const call = {
   toolName: "Bash",
   summary: "curl https://x",
   reason: "命令包含高风险模式:curl",
-  grant: { key: "bash:curl", label: "含「curl」的命令" },
+  scopes: [{ key: "bash:curl", label: "含「curl」的命令" }],
 };
 
 describe("requestApproval", () => {
@@ -69,7 +69,7 @@ describe("requestApproval", () => {
     const { d } = deps(p);
     await requestApproval(d, call);
     expect(requested).toHaveLength(1);
-    expect(requested[0]?.grant).toEqual(call.grant);
+    expect(requested[0]?.scopes).toEqual(call.scopes);
     expect(requested[0]?.expiresAt).toBe(1_000 + 600_000);
   });
 
@@ -83,7 +83,7 @@ describe("requestApproval", () => {
       return [];
     };
     const { d } = deps(p);
-    await requestApproval(d, { ...call, grant: undefined });
+    await requestApproval(d, { ...call, scopes: undefined });
     expect(looked).toBe(false);
     expect(requested).toHaveLength(1);
   });
