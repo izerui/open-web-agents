@@ -57,3 +57,19 @@ describe("buildAgentOpenApi", () => {
     expect(at(invokeBody(doc, "a2"), "properties", "input", "type")).toBe("string");
   });
 });
+
+describe("任务的产物与过程", () => {
+  it("文档列出同一把 Key 可用的工作目录与事件流接口", () => {
+    const doc = buildAgentOpenApi({ id: "a1", name: "x" }, "https://owa.example.com") as {
+      paths: Record<string, { get?: { parameters?: { name: string }[] } }>;
+    };
+    const files = doc.paths["/api/sessions/{sessionId}/files"]?.get;
+    const events = doc.paths["/api/sessions/{sessionId}/events"]?.get;
+    expect(files?.parameters?.map((p) => p.name)).toEqual(
+      expect.arrayContaining(["sessionId", "dir", "download"]),
+    );
+    expect(events?.parameters?.map((p) => p.name)).toEqual(
+      expect.arrayContaining(["sessionId", "runId", "cursor"]),
+    );
+  });
+});

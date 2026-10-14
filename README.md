@@ -333,6 +333,16 @@ SSE 传输是裸 `data: <AgentEvent JSON>\n\n`。前端用 `fetch + getReader` �
 
 输入(`prompt` / `invoke` 的 `input`)上限 200,000 字符,超出返回 413。
 
+### 接口调用的产物与过程
+
+`invoke` 返回 `taskId` 与 `sessionId`。用**同一把** API Key 还能:
+
+- `GET /api/sessions/{sessionId}/files` 列出这次任务的工作目录,`?download=<路径>` 下载智能体产出的文件
+- `GET /api/sessions/{sessionId}/events?runId={taskId}` 以 SSE 跟随过程事件,收到 `result` 后服务端关流;
+  断线带 `Last-Event-ID` 头续读
+
+别的 Key(包括同一账号的另一把)访问这些接口一律 403/404。OpenAPI 文档与接入中心的示例都写了这两条。
+
 ### 运行中途追加消息
 
 工作台与 API 会话的运行在进行中也能继续补充:`POST /api/sessions/{id}/steer`,`{ runId, text, id }`。

@@ -108,6 +108,16 @@ describe("buildSnippets 文本内容", () => {
     expect(s.curl).not.toContain("需要按实际填写");
   });
 
+  it("三种示例都指明:同一把 Key 读取任务工作目录与订阅过程", () => {
+    expect(s.curl).toContain("https://owa.example.com/api/sessions/<sessionId>/files");
+    expect(s.curl).toContain("files?download=");
+    expect(s.curl).toContain("/api/sessions/<sessionId>/events?runId=<taskId>");
+    expect(s.python).toContain('session_id = r.json().get("sessionId")');
+    expect(s.python).toContain("/events?runId={task_id}");
+    expect(s.node).toContain("const { taskId, sessionId } = await r.json();");
+    expect(s.node).toContain("/events?runId=");
+  });
+
   it("Python:如实说明超时只停止等待、不取消底层请求", () => {
     expect(s.python).toContain("没有被取消");
     expect(s.python).toContain("无限期");
@@ -153,7 +163,8 @@ beforeAll(async () => {
     hits[`${mode}:${m[2]}`] = (hits[`${mode}:${m[2]}`] ?? 0) + 1;
     if (m[2] === "invoke") {
       if (mode === "reject") return send(400, { error: "bad input", code: "input_invalid" });
-      return send(202, { taskId: mode });
+      // 与真实接口同形:受理返回 taskId 与 sessionId
+      return send(202, { taskId: mode, sessionId: `s-${mode}` });
     }
     switch (mode) {
       case "unauth":

@@ -245,6 +245,63 @@ export function buildAgentOpenApi(agent: OpenApiAgent, origin: string): Record<s
           },
         },
       },
+      "/api/sessions/{sessionId}/files": {
+        get: {
+          operationId: "taskFiles",
+          summary: "任务工作目录:列目录 / 预览 / 下载产物",
+          description:
+            "sessionId 取自 invoke 的返回。只有发起这次调用的同一把 Key 能访问(别的 Key 403/404)。" +
+            "不带参数列根目录;?dir= 列子目录;?file= 预览(文本截断);?download= 下载原始字节。",
+          parameters: [
+            { name: "sessionId", in: "path", required: true, schema: { type: "string" } },
+            { name: "dir", in: "query", description: "列这个子目录", schema: { type: "string" } },
+            { name: "file", in: "query", description: "预览这个文件", schema: { type: "string" } },
+            {
+              name: "download",
+              in: "query",
+              description: "下载这个文件(Content-Disposition: attachment)",
+              schema: { type: "string" },
+            },
+          ],
+          responses: {
+            "200": {
+              description:
+                "列目录时为 { nodes: [{ name, path, type, size? }] };下载时为文件原始字节",
+            },
+            "400": errorResponse("路径越出工作目录"),
+            "404": errorResponse("会话或文件不存在,或无权访问"),
+          },
+        },
+      },
+      "/api/sessions/{sessionId}/events": {
+        get: {
+          operationId: "taskEvents",
+          summary: "订阅任务的过程事件(SSE)",
+          description:
+            "sessionId、taskId 取自 invoke 的返回;只有同一把 Key 能订阅。帧格式为 `id: <游标>` + " +
+            "`data: <AgentEvent JSON>`;收到 kind 为 result 的事件后服务端关流。断线后带 " +
+            "Last-Event-ID 头(或 cursor 参数)从断点继续。用 fetch 读流 —— 浏览器的 EventSource 带不了 X-Api-Key。",
+          parameters: [
+            { name: "sessionId", in: "path", required: true, schema: { type: "string" } },
+            {
+              name: "runId",
+              in: "query",
+              description: "即 taskId;不传则订阅该会话里所有未结束的运行",
+              schema: { type: "string" },
+            },
+            {
+              name: "cursor",
+              in: "query",
+              description: "从这个游标之后继续(等同 Last-Event-ID 头)",
+              schema: { type: "string" },
+            },
+          ],
+          responses: {
+            "200": { description: "text/event-stream", content: { "text/event-stream": {} } },
+            "404": errorResponse("会话或任务不存在,或无权访问"),
+          },
+        },
+      },
       "/api/runs": {
         get: {
           operationId: "listRuns",

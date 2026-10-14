@@ -166,10 +166,17 @@ export function buildSnippets({
   -H "Idempotency-Key: $(uuidgen)" \\
   -H "Content-Type: application/json" \\
   -d ${shellQuote(body)}
-# → 202 { "taskId": "…" }
+# → 202 { "taskId": "…", "sessionId": "…" }
 
 curl ${origin}/api/agents/<taskId>/result -H "X-Api-Key: $OWA_API_KEY"
-# → { "status": "success", "done": true, "${resultField}": … }`;
+# → { "status": "success", "done": true, "${resultField}": … }
+
+# 可选:用同一把 Key 读取这次任务的工作目录(智能体产出的文件)
+curl "${origin}/api/sessions/<sessionId>/files" -H "X-Api-Key: $OWA_API_KEY"
+curl -OJ "${origin}/api/sessions/<sessionId>/files?download=<文件路径>" -H "X-Api-Key: $OWA_API_KEY"
+
+# 可选:实时跟随过程(SSE,收到 kind 为 result 的事件后服务端关流)
+curl -N "${origin}/api/sessions/<sessionId>/events?runId=<taskId>" -H "X-Api-Key: $OWA_API_KEY"`;
 
   const python = `import json, os, queue, threading, time, uuid, requests
 
@@ -186,6 +193,11 @@ r = requests.post(
 if r.status_code not in (200, 202):
     raise RuntimeError(f"提交失败 HTTP {r.status_code}: {r.text}")
 task_id = r.json()["taskId"]
+# 同一把 Key 还能读取这次任务的工作目录与过程(见 OpenAPI 文档):
+#   GET {BASE}/api/sessions/{session_id}/files                    列目录
+#   GET {BASE}/api/sessions/{session_id}/files?download=<路径>     下载产物
+#   GET {BASE}/api/sessions/{session_id}/events?runId={task_id}   SSE 过程事件
+session_id = r.json().get("sessionId")
 
 # 轮询整体期限 ${N} 秒:连接、DNS 解析、等响应头、读响应体、间隔等待都算在内。
 # requests 的 timeout 只管单次连接/两次读之间的间隔,不是总时长(也不管 DNS):
@@ -251,7 +263,11 @@ const r = await fetch(\`\${BASE}/api/agents/${agentId}/invoke\`, {
   signal: AbortSignal.timeout(30_000),
 });
 if (!r.ok) throw new Error(\`提交失败 HTTP \${r.status}: \${await r.text()}\`);
-const { taskId } = await r.json();
+const { taskId, sessionId } = await r.json();
+// 同一把 Key 还能读取这次任务的工作目录与过程(见 OpenAPI 文档):
+//   GET \${BASE}/api/sessions/\${sessionId}/files                    列目录
+//   GET \${BASE}/api/sessions/\${sessionId}/files?download=<路径>     下载产物
+//   GET \${BASE}/api/sessions/\${sessionId}/events?runId=\${taskId}  SSE 过程事件(用 fetch 读流)
 
 // 轮询整体期限 ${N} 秒:同一个取消信号覆盖每次请求的等待、响应体读取与间隔等待,
 // 服务端不回响应、只发响应头不结束 body、或一直慢速发送,都会在期限到时被取消。
