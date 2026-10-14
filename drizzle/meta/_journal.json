@@ -183,6 +183,13 @@
       "when": 1791949515162,
       "tag": "0025_structured_salvaged",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "5",
+      "when": 1791951590909,
+      "tag": "0026_callback_snapshot",
+      "breakpoints": true
     }
   ]
 }

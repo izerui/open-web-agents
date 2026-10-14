@@ -120,4 +120,140 @@ describe("回调投递记录与操作", () => {
     expect(actions).toContain("webhook.test");
     expect(actions).toContain("webhook.redeliver");
   });
+
+  it("invoke 的 callbackUrl:不合规的地址 400,并指明是 callbackUrl", async () => {
+    for (const bad of [
+      "http://127.0.0.1/cb",
+      "http://169.254.169.254/latest",
+      "http://localhost:9/cb",
+      "ftp://cb.owa-e2e.invalid/x",
+      "not a url",
+      `https://cb.owa-e2e.invalid/${"x".repeat(1100)}`,
+    ]) {
+      const r = await anon.post<{ error?: string }>(
+        `/api/agents/${plainAgentId}/invoke`,
+        { input: "x", callbackUrl: bad },
+        { "X-Api-Key": key },
+      );
+      expect(r.status, bad).toBe(400);
+      expect(r.body.error, bad).toMatch(/callbackUrl/);
+    }
+  });
+
+  it(
+    "invoke 的 callbackUrl:智能体没配回调也投到它;投递记录里地址已脱敏",
+    { timeout: 60_000 },
+    async () => {
+      const r = await anon.post<{ taskId?: string }>(
+        `/api/agents/${plainAgentId}/invoke`,
+        { input: "带回调地址", callbackUrl: "https://cb.owa-e2e.invalid/cb?token=CALLER-SECRET-9" },
+        { "X-Api-Key": key },
+      );
+      expect(r.status).toBe(202);
+      const taskId = r.body.taskId ?? "";
+      let mine: Delivery | undefined;
+      for (let i = 0; i < 60 && !mine; i++) {
+        const list = await owner.get<{ items?: Delivery[] }>(
+          `/api/agents/${plainAgentId}/webhook/deliveries`,
+        );
+        mine = list.body.items?.find((d) => d.runId === taskId);
+        if (!mine) await new Promise((ok) => setTimeout(ok, 500));
+      }
+      // 没指定 callbackUrl 的运行在这个智能体上会被标 skipped、不留投递记录;这里有记录,说明投到了它
+      expect(mine).toMatchObject({
+        trigger: "auto",
+        ok: false,
+        url: "https://cb.owa-e2e.invalid/cb",
+      });
+      expect(JSON.stringify(mine)).not.toContain("CALLER-SECRET");
+    },
+  );
+
+  it(
+    "回调快照(共享智能体):默认地址 A 受理后改成 B,首投与自动重试仍投 A、所有者签名;显式地址用调用方的(未配)密钥",
+    { timeout: 120_000 },
+    async () => {
+      const snapOwner = await newUser("snap-owner");
+      const caller = await newUser("snap-caller");
+      // 所有者配了签名密钥,调用方没配:签不签名就能看出用的是谁的密钥
+      expect((await snapOwner.post("/api/me/webhook-secret", {})).status).toBeLessThan(300);
+      const A = "https://snap-a.owa-e2e.invalid/in";
+      const B = "https://snap-b.owa-e2e.invalid/in";
+      const name = `snap-${Date.now()}`;
+      const config = { systemPrompt: "p", model: "sonnet" };
+      const id =
+        (await snapOwner.post<AgentRes>("/api/agents", { name, webhookUrl: A, config })).body.agent
+          ?.id ?? "";
+      const callerEmail = (await caller.get<{ user?: { email: string } }>("/api/auth")).body.user
+        ?.email;
+      await snapOwner.post(`/api/agents/${id}/share`, { target: callerEmail, permission: "read" });
+      const callerKey =
+        (await caller.post<{ plaintext?: string }>("/api/keys", { name: "snap", agentId: id })).body
+          .plaintext ?? "";
+      expect(callerKey).toBeTruthy();
+
+      const invoke = async (body: Record<string, unknown>) => {
+        const r = await anon.post<{ taskId?: string }>(`/api/agents/${id}/invoke`, body, {
+          "X-Api-Key": callerKey,
+        });
+        expect(r.status).toBe(202);
+        return r.body.taskId ?? "";
+      };
+      const viaDefault = await invoke({ input: "默认地址" });
+      const viaExplicit = await invoke({
+        input: "显式地址",
+        callbackUrl: "https://snap-caller.owa-e2e.invalid/cb",
+      });
+
+      // 受理之后改成 B
+      const saved = await snapOwner.post("/api/agents", { id, name, webhookUrl: B, config });
+      expect(saved.status).toBeLessThan(300);
+
+      // 对方域名解析不了:首投失败,30 秒后自动重试。等到两条运行都至少投了两次
+      type D = Delivery & { attempt?: number; signed?: boolean };
+      let items: D[] = [];
+      const of = (run: string) => items.filter((d) => d.runId === run);
+      for (let i = 0; i < 100; i++) {
+        items =
+          (await snapOwner.get<{ items?: D[] }>(`/api/agents/${id}/webhook/deliveries`)).body
+            .items ?? [];
+        if (of(viaDefault).length >= 2 && of(viaExplicit).length >= 2) break;
+        await new Promise((ok) => setTimeout(ok, 1000));
+      }
+      const dflt = of(viaDefault);
+      expect(
+        dflt.some((d) => (d.attempt ?? 0) >= 2),
+        "默认地址的自动重试",
+      ).toBe(true);
+      for (const d of dflt) expect(d).toMatchObject({ url: A, signed: true });
+      const explicit = of(viaExplicit);
+      expect(explicit.length).toBeGreaterThanOrEqual(2);
+      for (const d of explicit) {
+        expect(d).toMatchObject({ url: "https://snap-caller.owa-e2e.invalid/cb", signed: false });
+      }
+    },
+  );
+
+  it("invoke 的 callbackUrl 也算请求内容:同一个幂等键换地址 422", async () => {
+    const idem = `cb-${Date.now()}`;
+    const first = await anon.post<{ taskId?: string }>(
+      `/api/agents/${plainAgentId}/invoke`,
+      { input: "幂等", callbackUrl: "https://cb.owa-e2e.invalid/a" },
+      { "X-Api-Key": key, "Idempotency-Key": idem },
+    );
+    expect(first.status).toBe(202);
+    const same = await anon.post<{ taskId?: string }>(
+      `/api/agents/${plainAgentId}/invoke`,
+      { input: "幂等", callbackUrl: "https://cb.owa-e2e.invalid/a" },
+      { "X-Api-Key": key, "Idempotency-Key": idem },
+    );
+    expect(same.status).toBe(200);
+    expect(same.body.taskId).toBe(first.body.taskId);
+    const changed = await anon.post(
+      `/api/agents/${plainAgentId}/invoke`,
+      { input: "幂等", callbackUrl: "https://cb.owa-e2e.invalid/b" },
+      { "X-Api-Key": key, "Idempotency-Key": idem },
+    );
+    expect(changed.status).toBe(422);
+  });
 });

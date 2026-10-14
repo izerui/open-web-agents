@@ -8,8 +8,14 @@
 
 import { randomUUID } from "node:crypto";
 import { createDb } from "@/lib/db/client";
+import { InMemoryAgentRepo } from "@/lib/modules/agent/adapters/in-memory-agent-repo";
+import { InMemoryAgentVersionRepo } from "@/lib/modules/agent/adapters/in-memory-agent-version-repo";
+import { AgentReleases } from "@/lib/modules/agent/application/releases";
 import { WebhookDispatcher } from "@/lib/modules/integration/application/webhook-dispatcher";
+import { resolveRunTarget } from "@/lib/modules/integration/application/webhook-target";
 import { MysqlRunRepo } from "@/lib/modules/run/adapters/mysql-run-repo";
+import { RunEnqueuer } from "@/lib/modules/run/application/enqueue";
+import { InMemorySessionRepo } from "@/lib/modules/session/adapters/in-memory-session-repo";
 import { sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 
@@ -103,6 +109,7 @@ if (!TEST_DB_URL) {
           const next = await repo.claimWebhook(-8_000, 60_000);
           expect(next?.runId).toBe(id);
           expect(next?.attempts).toBe(1);
+          expect(next?.callback).toBeUndefined(); // 直接建的行没有快照:按旧任务处理
           expect(await repo.markWebhook(id, next?.lease ?? "", "delivered")).toBe(true);
         } finally {
           // 收尾:落到终态,免得负数时刻的待投行被别的测试(用真实时钟认领)拿到
@@ -160,6 +167,124 @@ if (!TEST_DB_URL) {
         // 已落 failed:同一令牌再写也不行
         expect(await repo.markWebhook(id, job?.lease ?? "", "delivered")).toBe(false);
         expect((await state(id)).s).toBe("failed");
+      } finally {
+        await db.execute(
+          sql`UPDATE runs SET webhook_state = 'delivered', webhook_next_at = NULL, webhook_lease = NULL WHERE id = ${id}`,
+        );
+      }
+    });
+
+    it(
+      "回调快照:默认地址 A 受理后改成 B,原任务首投与自动重试都投 A、用所有者密钥;显式地址用调用方密钥",
+      { timeout: 30_000 },
+      async () => {
+        // 所有者 owner 把智能体分享出去,调用方 caller 用自己的 Key 调用 —— 两个账号、两把密钥
+        const agents = new InMemoryAgentRepo([
+          {
+            id: "a-snap",
+            ownerId: "owner",
+            name: "snap",
+            webhookUrl: "https://owner.example.com/a",
+            config: { systemPrompt: "p", model: "sonnet" },
+          },
+        ]);
+        const sessions = new InMemorySessionRepo();
+        await sessions.create({
+          id: "s-snap",
+          agentId: "a-snap",
+          workspaceDir: "/ws",
+          source: "invoke",
+          billingUserId: "caller",
+        });
+        const enqueuer = new RunEnqueuer({
+          runs: repo,
+          sessions,
+          agents,
+          releases: new AgentReleases(agents, new InMemoryAgentVersionRepo(agents)),
+        });
+        const dflt = randomUUID().replace(/-/g, "").slice(0, 24);
+        const explicit = randomUUID().replace(/-/g, "").slice(0, 24);
+        await enqueuer.enqueue({ runId: dflt, sessionId: "s-snap", prompt: "t" });
+        await enqueuer.enqueue({
+          runId: explicit,
+          sessionId: "s-snap",
+          prompt: "t",
+          callbackUrl: "https://caller.example.com/cb",
+        });
+
+        // 受理之后,所有者把回调地址改成 B
+        const a = await agents.get("a-snap");
+        if (a) await agents.upsert({ ...a, webhookUrl: "https://owner.example.com/b" });
+
+        const secrets: Record<string, string> = { owner: "owner-s", caller: "caller-s" };
+        const sent: { run: string; url: string; secret?: string }[] = [];
+        let now = -69_000;
+        const d = new WebhookDispatcher(
+          {
+            outbox: repo,
+            loadTarget: (job) =>
+              resolveRunTarget(
+                {
+                  session: (id) => sessions.get(id),
+                  agentTarget: async () => {
+                    throw new Error("有快照的任务不该读当前配置");
+                  },
+                  ownerSecret: async (agentId) =>
+                    secrets[(await agents.get(agentId))?.ownerId ?? ""],
+                  userSecret: async (userId) => secrets[userId],
+                },
+                job,
+              ),
+            loadPayload: async (runId) => ({ taskId: runId, status: "success" }),
+            // 对方 503:首投失败、按退避表 30 秒后重试
+            deliver: async (url, p, secret) => {
+              sent.push({ run: p.taskId, url, secret });
+              return { delivered: false, attempts: 1, lastStatus: 503 };
+            },
+            now: () => now,
+          },
+          { leaseMs: 60_000, batch: 5 },
+        );
+
+        try {
+          await db.execute(
+            sql`UPDATE runs SET status = 'success', webhook_state = 'pending', webhook_next_at = -70000 WHERE id IN (${dflt}, ${explicit})`,
+          );
+          expect(await d.runOnce()).toBe(2); // 首投
+          now = -38_000; // 退避到期(-69000 + 30000 = -39000)
+          expect(await d.runOnce()).toBe(2); // 自动重试
+
+          const expected = [
+            { url: "https://owner.example.com/a", secret: "owner-s" },
+            { url: "https://caller.example.com/cb", secret: "caller-s" },
+          ];
+          for (const [run, want] of [
+            [dflt, expected[0]],
+            [explicit, expected[1]],
+          ] as const) {
+            const mine = sent
+              .filter((x) => x.run === run)
+              .map(({ url, secret }) => ({ url, secret }));
+            expect(mine, run === dflt ? "默认地址" : "显式地址").toEqual([want, want]);
+          }
+        } finally {
+          await db.execute(
+            sql`UPDATE runs SET webhook_state = 'delivered', webhook_next_at = NULL, webhook_lease = NULL WHERE id IN (${dflt}, ${explicit})`,
+          );
+        }
+      },
+    );
+
+    it("受理时没有回调:快照记为 none,认领时带出,与没有快照的旧行区分开", async () => {
+      const id = randomUUID().replace(/-/g, "").slice(0, 24);
+      await repo.create({ id, sessionId: "s-lease", prompt: "t", callback: { source: "none" } });
+      await db.execute(
+        sql`UPDATE runs SET status = 'success', webhook_state = 'pending', webhook_next_at = -80000 WHERE id = ${id}`,
+      );
+      try {
+        const job = await repo.claimWebhook(-79_000, 60_000);
+        expect(job?.runId).toBe(id);
+        expect(job?.callback).toEqual({ source: "none" });
       } finally {
         await db.execute(
           sql`UPDATE runs SET webhook_state = 'delivered', webhook_next_at = NULL, webhook_lease = NULL WHERE id = ${id}`,

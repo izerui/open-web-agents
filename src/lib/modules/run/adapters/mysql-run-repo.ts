@@ -8,6 +8,7 @@ import type { Db } from "@/lib/db/client";
 import { runs } from "@/lib/db/schema";
 import type { RunRecord } from "@/lib/modules/run/domain/run-result";
 import {
+  type CallbackSnapshot,
   DuplicateIdempotencyKey,
   type NewRun,
   type Run,
@@ -87,6 +88,8 @@ export class MysqlRunRepo implements RunRepo {
         agentConfig: r.agentConfig ?? null,
         agentVersion: r.agentVersion ?? null,
         overrideEnc: r.overrideEnc,
+        callbackSource: r.callback?.source,
+        callbackUrl: r.callback && r.callback.source !== "none" ? r.callback.url : undefined,
         idempotencyKey: r.idempotencyKey,
         idempotencyHash: r.idempotencyHash,
         leaseUntil: null,
@@ -347,7 +350,13 @@ export class MysqlRunRepo implements RunRepo {
   async claimWebhook(
     now: number,
     leaseMs: number,
-  ): Promise<{ runId: string; sessionId: string; attempts: number; lease: string } | null> {
+  ): Promise<{
+    runId: string;
+    sessionId: string;
+    attempts: number;
+    lease: string;
+    callback?: CallbackSnapshot;
+  } | null> {
     const due = or(
       and(eq(runs.webhookState, "pending"), lte(runs.webhookNextAt, now)),
       and(eq(runs.webhookState, "delivering"), lt(runs.webhookNextAt, now)),
@@ -360,6 +369,8 @@ export class MysqlRunRepo implements RunRepo {
           attempts: runs.webhookAttempts,
           state: runs.webhookState,
           nextAt: runs.webhookNextAt,
+          callbackUrl: runs.callbackUrl,
+          callbackSource: runs.callbackSource,
         })
         .from(runs)
         .where(due)
@@ -386,7 +397,13 @@ export class MysqlRunRepo implements RunRepo {
           ),
         );
       if (affectedRows(res) > 0) {
-        return { runId: row.id, sessionId: row.sessionId, attempts: row.attempts + 1, lease };
+        return {
+          runId: row.id,
+          sessionId: row.sessionId,
+          attempts: row.attempts + 1,
+          lease,
+          callback: toCallbackSnapshot(row.callbackSource, row.callbackUrl),
+        };
       }
     }
     return null;
@@ -625,4 +642,14 @@ export class MysqlRunRepo implements RunRepo {
     }
     await this.db.delete(runs).where(sql`1=1`);
   }
+}
+
+/** 行上的快照两列 → 快照;NULL 来源是快照功能之前的旧行。来源与地址对不上的行按没有快照处理。 */
+function toCallbackSnapshot(
+  source: string | null,
+  url: string | null,
+): CallbackSnapshot | undefined {
+  if (source === "none") return { source: "none" };
+  if ((source === "agent" || source === "caller") && url) return { source, url };
+  return undefined;
 }

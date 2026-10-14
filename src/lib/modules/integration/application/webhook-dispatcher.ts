@@ -9,7 +9,7 @@ import type { WebhookPayload, WebhookResult } from "@/lib/modules/integration/ap
 import { WebhookTargetRejected } from "@/lib/modules/integration/application/webhook";
 import { nextWebhookDelay } from "@/lib/modules/integration/domain/webhook-policy";
 import { redactWebhookUrl } from "@/lib/modules/integration/domain/webhook-policy";
-import type { WebhookDelivery, WebhookOutbox } from "@/lib/modules/integration/ports";
+import type { WebhookDelivery, WebhookJob, WebhookOutbox } from "@/lib/modules/integration/ports";
 
 /** 投递目标。null = 该智能体没配回调,标 skipped。 */
 export interface WebhookTarget {
@@ -22,8 +22,11 @@ export interface WebhookTarget {
 
 export interface DispatcherDeps {
   outbox: WebhookOutbox;
-  /** 解析该运行的投递目标。签名密钥配置了却解不开时必须抛错 —— 不能悄悄发不签名的请求。 */
-  loadTarget(sessionId: string): Promise<WebhookTarget | null>;
+  /**
+   * 解析该运行的投递目标(按受理时的快照;旧任务没有快照则按当前配置)。
+   * 签名密钥配置了却解不开时必须抛错 —— 不能悄悄发不签名的请求。
+   */
+  loadTarget(job: Pick<WebhookJob, "sessionId" | "callback">): Promise<WebhookTarget | null>;
   /** 从数据库读终态结果拼载荷 —— 回调内容与 /result 接口同源。 */
   loadPayload(runId: string, sessionId: string): Promise<WebhookPayload | null>;
   deliver(url: string, payload: WebhookPayload, secret?: string): Promise<WebhookResult>;
@@ -73,7 +76,7 @@ export class WebhookDispatcher {
     return n;
   }
 
-  private async handle(job: { runId: string; sessionId: string; attempts: number; lease: string }) {
+  private async handle(job: WebhookJob) {
     const { outbox } = this.deps;
     /*
      * 写回本次投递的结局,带上认领令牌:租约过期被别人接手、或期间被手动重发,
@@ -91,7 +94,7 @@ export class WebhookDispatcher {
     };
     let target: WebhookTarget | null;
     try {
-      target = await this.deps.loadTarget(job.sessionId);
+      target = await this.deps.loadTarget(job);
     } catch (err) {
       console.warn(`[owa][webhook] 无法准备投递(run=${job.runId}):${errText(err)}`);
       await mark("failed");

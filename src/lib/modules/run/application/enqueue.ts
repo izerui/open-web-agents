@@ -38,6 +38,11 @@ export interface EnqueueRequest {
   resumeAnchor?: string;
   /** 请求级凭证覆盖。含明文 key,入库前加密。 */
   override?: RunCommand["override"];
+  /**
+   * 调用方为这次指定的回调地址,入口已按回调地址策略校验过。
+   * 不传则快照智能体此刻配置的默认地址(没配就记"无回调")。
+   */
+  callbackUrl?: string;
   /** 已带调用方作用域的幂等键。 */
   idempotencyKey?: string;
   idempotencyHash?: string;
@@ -94,6 +99,12 @@ export class RunEnqueuer {
       agentConfig: release.config,
       agentVersion: release.version ?? undefined,
       overrideEnc,
+      // 回调目标在受理时定下:之后改智能体的地址,不会把这次转投到新地址
+      callback: req.callbackUrl
+        ? { source: "caller", url: req.callbackUrl }
+        : agent.webhookUrl
+          ? { source: "agent", url: agent.webhookUrl }
+          : { source: "none" },
       idempotencyKey: req.idempotencyKey,
       idempotencyHash: req.idempotencyHash,
     });

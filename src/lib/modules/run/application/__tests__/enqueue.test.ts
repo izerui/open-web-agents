@@ -8,6 +8,7 @@ import {
   RunEnqueuer,
 } from "@/lib/modules/run/application/enqueue";
 import { MAX_PROMPT_CHARS } from "@/lib/modules/run/domain/limits";
+import type { NewRun } from "@/lib/modules/run/ports";
 import { InMemorySessionRepo } from "@/lib/modules/session/adapters/in-memory-session-repo";
 import { describe, expect, it } from "vitest";
 
@@ -78,6 +79,52 @@ describe("RunEnqueuer", () => {
     });
     const p = await runs.getPayload("r1");
     expect(p?.overrideEnc).toBe(`enc:${JSON.stringify({ key: "sk-secret" })}`);
+  });
+
+  describe("回调目标快照", () => {
+    async function capture(webhookUrl?: string) {
+      const ctx = await setup();
+      if (webhookUrl) {
+        const a = await ctx.agents.get("a1");
+        if (a) await ctx.agents.upsert({ ...a, webhookUrl });
+      }
+      const created: NewRun[] = [];
+      const create = ctx.runs.create.bind(ctx.runs);
+      ctx.runs.create = async (r) => {
+        created.push(r);
+        return create(r);
+      };
+      return { ...ctx, created };
+    }
+
+    it("没指定 callbackUrl:快照智能体此刻的默认地址,来源记为 agent", async () => {
+      const { enqueuer, agents, created } = await capture("https://owner.example.com/a");
+      await enqueuer.enqueue({ runId: "r1", sessionId: "s1", prompt: "hi" });
+      // 受理之后再改,不影响已定下的快照
+      const a = await agents.get("a1");
+      if (a) await agents.upsert({ ...a, webhookUrl: "https://owner.example.com/b" });
+      expect(created[0]?.callback).toEqual({ source: "agent", url: "https://owner.example.com/a" });
+    });
+
+    it("指定了 callbackUrl:来源记为 caller", async () => {
+      const { enqueuer, created } = await capture("https://owner.example.com/a");
+      await enqueuer.enqueue({
+        runId: "r1",
+        sessionId: "s1",
+        prompt: "hi",
+        callbackUrl: "https://caller.example.com/cb",
+      });
+      expect(created[0]?.callback).toEqual({
+        source: "caller",
+        url: "https://caller.example.com/cb",
+      });
+    });
+
+    it("受理时智能体没配回调:记为 none(与没有快照的旧任务区分开)", async () => {
+      const { enqueuer, created } = await capture();
+      await enqueuer.enqueue({ runId: "r1", sessionId: "s1", prompt: "hi" });
+      expect(created[0]?.callback).toEqual({ source: "none" });
+    });
   });
 
   it("没有加密能力时拒绝带覆盖的请求,绝不明文落库", async () => {

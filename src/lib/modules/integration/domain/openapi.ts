@@ -97,6 +97,14 @@ export function buildAgentOpenApi(agent: OpenApiAgent, origin: string): Record<s
                         ? `锁定智能体版本;不传 = 当前发布的版本(本文档对应 v${agent.version})`
                         : "锁定智能体版本;该智能体尚未发布,不传则使用草稿",
                     },
+                    callbackUrl: {
+                      type: "string",
+                      format: "uri",
+                      maxLength: 1024,
+                      description:
+                        "本次结果回调到这个地址(代替智能体配置的回调地址),用调用方自己的签名密钥签名;" +
+                        "地址规则与智能体回调地址相同(不能指向回环、云元数据等地址)",
+                    },
                     override: {
                       type: "object",
                       description: "请求级模型凭证;自定义 baseUrl 必须同时给 key",

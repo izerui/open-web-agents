@@ -23,6 +23,12 @@ export interface Run {
   hasOutputSchema?: boolean;
 }
 
+/**
+ * 回调目标快照。地址与来源一起存:来源决定签名账号 ——
+ * agent = 智能体默认地址(所有者签名),caller = 调用方指定(调用方签名),none = 受理时没有回调。
+ */
+export type CallbackSnapshot = { source: "agent" | "caller"; url: string } | { source: "none" };
+
 export interface NewRun {
   id: string;
   sessionId: string;
@@ -35,6 +41,8 @@ export interface NewRun {
   agentVersion?: number;
   /** 请求级凭证覆盖,已加密。 */
   overrideEnc?: string;
+  /** 受理时定下的回调目标快照(见 CallbackSnapshot);不传 = 旧行为,按投递时的配置投。 */
+  callback?: CallbackSnapshot;
   /** 幂等键(已带调用方作用域)。重复则 create 抛 DuplicateIdempotencyKey。 */
   idempotencyKey?: string;
   idempotencyHash?: string;

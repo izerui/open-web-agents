@@ -242,6 +242,17 @@ export const runs = mysqlTable(
      * 曾经是进程内 fire-and-forget,进程一挂回调就永久丢失。
      */
     webhookState: varchar("webhook_state", { length: 16 }),
+    /**
+     * 受理时定下的回调目标快照。之后改智能体的回调地址,不会把已受理的任务(含自动重试、手动重发)转投到新地址。
+     * callback_source 同时说明地址来源,决定用谁的密钥签名:
+     *   agent  = 智能体当时配置的默认地址,所有者签名
+     *   caller = 调用方在 invoke 时指定的 callbackUrl,调用方(签发 Key 的账号)签名
+     *   none   = 受理时没有回调,不投
+     *   NULL   = 快照功能之前受理的旧任务,按投递时的配置投
+     * 地址只能和来源一起看:同一个地址字段若不带来源,共享智能体的默认回调会被签错密钥。
+     */
+    callbackUrl: varchar("callback_url", { length: 1024 }),
+    callbackSource: varchar("callback_source", { length: 8 }),
     webhookAttempts: int("webhook_attempts").notNull().default(0),
     /**
      * 本次投递认领的令牌(每次认领新生成)。投递结果的写回必须带上它、且状态仍是 delivering:

@@ -12,8 +12,21 @@ class OneJobOutbox implements WebhookOutbox {
   marks: { state: string; nextAt?: number }[] = [];
   /** 写回是否被接受(模拟令牌失效时为 false) */
   accept = true;
-  private job: { runId: string; sessionId: string; attempts: number; lease: string } | null;
-  constructor(job: { runId: string; sessionId: string; attempts: number } | null) {
+  private job: {
+    runId: string;
+    sessionId: string;
+    attempts: number;
+    lease: string;
+    callback?: { source: "agent" | "caller"; url: string } | { source: "none" };
+  } | null;
+  constructor(
+    job: {
+      runId: string;
+      sessionId: string;
+      attempts: number;
+      callback?: { source: "agent" | "caller"; url: string };
+    } | null,
+  ) {
     this.job = job ? { ...job, lease: "L1" } : null;
   }
   async claimWebhook() {
@@ -64,6 +77,30 @@ describe("WebhookDispatcher", () => {
     expect(await d.runOnce()).toBe(1);
     expect(sent).toEqual([{ url: "https://x/hook?token=t0p", secret: "s" }]);
     expect(box.marks).toEqual([{ state: "delivered", nextAt: undefined }]);
+  });
+
+  it("认领到的回调快照原样交给目标解析,投到解析出的地址", async () => {
+    const box = new OneJobOutbox({
+      runId: "r1",
+      sessionId: "s1",
+      attempts: 1,
+      callback: { source: "caller", url: "https://caller.example.com/cb" },
+    });
+    const seen: unknown[] = [];
+    const { d, sent } = make(box, {
+      loadTarget: async (job) => {
+        seen.push({ sessionId: job.sessionId, callback: job.callback });
+        return {
+          agentId: "a1",
+          url: job.callback?.source === "caller" ? job.callback.url : "https://owner/hook",
+        };
+      },
+    });
+    await d.runOnce();
+    expect(seen).toEqual([
+      { sessionId: "s1", callback: { source: "caller", url: "https://caller.example.com/cb" } },
+    ]);
+    expect(sent).toEqual([{ url: "https://caller.example.com/cb", secret: undefined }]);
   });
 
   it("没配回调标 skipped,不发请求", async () => {

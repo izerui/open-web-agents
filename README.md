@@ -307,9 +307,12 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 | GET/POST        | `/api/sessions/{id}/approvals`             | cookie / key           | 待审列表 / 批准拒绝         |
 | GET/POST        | `/api/sessions/{id}/branch`                | cookie / key           | 运行列表 / 重跑           |
 | POST            | `/api/sessions/{id}/cancel`                | cookie / key           | 取消未完成的运行(见下方延迟说明)   |
-| POST            | `/api/agents/{id}/invoke`                  | **key**                | 对外触发,返回 taskId;支持 `Idempotency-Key` |
+| POST            | `/api/agents/{id}/invoke`                  | **key**                | 对外触发,返回 taskId;支持 `Idempotency-Key`、单次 `callbackUrl` |
 | GET             | `/api/agents/{id}/result`                  | **key**                | 轮询结构化结果             |
 | GET             | `/api/agents/{id}/openapi.json`            | cookie / key           | 该智能体的 OpenAPI 3.1 文档(含入参与结果契约) |
+| GET             | `/api/agents/{id}/webhook/deliveries`      | cookie(所有者)          | 回调投递记录              |
+| POST            | `/api/agents/{id}/webhook/test`            | cookie(所有者)          | 测试投递                |
+| POST            | `/api/runs/{id}/webhook/redeliver`         | cookie(所有者)          | 手动重发回调              |
 | GET             | `/api/audit`                               | cookie                 | 审计日志(与自己相关的;管理员 `scope=all` 看全部) |
 | GET/POST        | `/api/agents/{id}/versions`                | 读:cookie / key;发布:cookie(write) | 版本列表 / 把草稿发布为新版本 |
 | GET             | `/api/agents/{id}/versions/{v}`            | cookie / key           | 某个版本的完整内容            |
@@ -383,13 +386,12 @@ X-OWA-Signature: v1=<hex(HMAC-SHA256(密钥, "<timestamp>.<原始请求体>"))>
   `OWA_WEBHOOK_ALLOW_PRIVATE=1`。保存时检查字面量;投递时的检查接在**建连自己的那次 DNS 解析**上,
   被检查的地址就是被连接的地址 —— 域名两次解析返回不同地址(DNS rebinding)绕不过去。
   请求仍以原始域名发出,Host 头与 TLS 证书校验照常针对域名;不复用连接,不跟随重定向。
-
----
-
-## 已知限制
-
-这些是实测撞出来的,不是猜测。
-
+- **单次调用指定回调地址**:`invoke` 请求体带 `callbackUrl`,这次的结果就投到它(代替智能体配置的地址,
+  智能体没配回调也可以),用**调用方**(签发这把 Key 的账号)的签名密钥签名 —— 接收方是调用方自己;
+  调用方没配密钥则不签名,不会借用所有者的密钥。地址规则同上,不合规直接 400。
+  它也算请求内容:同一个 `Idempotency-Key` 换了地址按冲突处理(422)。
+- 没指定 `callbackUrl` 的运行投到智能体**投递时**配置的地址,不在受理时快照 ——
+  所有者修好配错的地址后点"重发",投的是修好的新地址。
 
 **投递记录、测试与重发**(接入中心,仅智能体所有者与管理员):每次投递记一行(第几次、对方状态码、
 错误、耗时、是否签名),回调地址只存协议 + 主机 + 路径(查询串常带令牌,不落库)。
@@ -398,9 +400,11 @@ X-OWA-Signature: v1=<hex(HMAC-SHA256(密钥, "<timestamp>.<原始请求体>"))>
 还在投递中的不重复入队。记录写入尽力而为、有 2 秒等待上限:写不进去不影响投递结果与接口返回
 (超时只是不再等,底层写入未取消)。
 
-| GET  | `/api/agents/{id}/webhook/deliveries` | cookie(所有者) | 投递记录 |
-| POST | `/api/agents/{id}/webhook/test`       | cookie(所有者) | 测试投递 |
-| POST | `/api/runs/{id}/webhook/redeliver`    | cookie(所有者) | 手动重发 |
+---
+
+## 已知限制
+
+这些是实测撞出来的,不是猜测。
 
 ### macOS 本地开发必须关沙箱
 

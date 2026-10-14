@@ -10,6 +10,7 @@ import {
   checkInvokeRate,
   rateLimitHeaders,
 } from "@/lib/modules/identity/application/invoke-rate-limit";
+import { validateWebhookUrl } from "@/lib/modules/integration/domain/webhook-policy";
 import { PromptTooLarge, assertPromptSize } from "@/lib/modules/run/application/enqueue";
 import { isValidIdempotencyKey } from "@/lib/modules/run/domain/limits";
 import { DuplicateIdempotencyKey } from "@/lib/modules/run/ports";
@@ -27,6 +28,8 @@ interface InvokeBody {
   override?: { baseUrl?: string; key?: string; model?: ModelAlias };
   /** 锁定智能体版本;不传 = 当前发布的版本(从未发布则为草稿)。 */
   version?: number;
+  /** 本次结果回调到这个地址(代替智能体配置的地址),用调用方自己的签名密钥签名。 */
+  callbackUrl?: string;
 }
 
 /**
@@ -90,9 +93,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const requested = parseVersion(body.version);
   if (!requested.ok) return apiError(400, "invalid_request", "version 须为正整数");
 
-  // 同键重放时用来判断"是不是同一个请求";请求体里的 version 也算请求内容
+  // 回调地址与智能体配置的 webhookUrl 同一套地址策略;建连时还会按实际解析到的地址再查一次
+  const callback = parseCallbackUrl(body.callbackUrl, env.webhookAllowPrivate);
+  if (!callback.ok) return apiError(400, "invalid_request", callback.reason);
+
+  // 同键重放时用来判断"是不是同一个请求";请求体里的 version、callbackUrl 也算请求内容。
+  // callbackUrl 只在给了时才放进去:不带它的请求摘要与引入它之前完全一致
   const requestHash = sha256(
-    JSON.stringify({ prompt, override: override.value ?? null, version: requested.value ?? null }),
+    JSON.stringify({
+      prompt,
+      override: override.value ?? null,
+      version: requested.value ?? null,
+      ...(callback.value ? { callbackUrl: callback.value } : {}),
+    }),
   );
 
   // ── 第二步:幂等重放 —— 必须在解析当前版本、校验契约【之前】 ───────────────────
@@ -238,6 +251,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       sessionId,
       prompt,
       override: override.value,
+      callbackUrl: callback.value,
       idempotencyKey,
       idempotencyHash: idempotencyKey ? requestHash : undefined,
     });
@@ -342,6 +356,19 @@ function parseOverride(
     return { ok: false, reason: "override.baseUrl 必须与 override.key 一起提供" };
   }
   return { ok: true, value: Object.keys(out).length ? out : undefined };
+}
+
+function parseCallbackUrl(
+  raw: unknown,
+  allowPrivate: boolean,
+): { ok: true; value?: string } | { ok: false; reason: string } {
+  if (raw === undefined || raw === null || raw === "") return { ok: true };
+  if (typeof raw !== "string" || raw.length > 1024) {
+    return { ok: false, reason: "callbackUrl 须为不超过 1024 字符的字符串" };
+  }
+  const v = validateWebhookUrl(raw, { allowPrivate });
+  if (!v.ok) return { ok: false, reason: v.reason.replace(/^webhookUrl/, "callbackUrl") };
+  return { ok: true, value: raw };
 }
 
 function sha256(text: string): string {

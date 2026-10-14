@@ -5,15 +5,28 @@
  * 这次回调就永久丢了,而等着它的企业系统不会知道。登记和终态写在同一条语句里,
  * "跑完了却没登记回调"就不可能发生。
  */
+/** 一条认领到的待投递回调。 */
+export interface WebhookJob {
+  runId: string;
+  sessionId: string;
+  /** 含本次 */
+  attempts: number;
+  /** 本次认领的令牌,写回结果时必须带上 */
+  lease: string;
+  /**
+   * 受理时定下的回调目标:agent = 智能体当时的默认地址(所有者签名),
+   * caller = 调用方指定的地址(调用方签名),none = 受理时没有回调。
+   * 缺省 = 快照功能之前受理的旧任务,按投递时的配置投。
+   */
+  callback?: { source: "agent" | "caller"; url: string } | { source: "none" };
+}
+
 export interface WebhookOutbox {
   /**
    * 认领一条到期的待投递回调,认领期间别的投递器拿不到它。attempts 含本次。
    * lease 是本次认领的令牌,写回结果时必须带上。
    */
-  claimWebhook(
-    now: number,
-    leaseMs: number,
-  ): Promise<{ runId: string; sessionId: string; attempts: number; lease: string } | null>;
+  claimWebhook(now: number, leaseMs: number): Promise<WebhookJob | null>;
   /**
    * 写回本次投递的结局;pending 表示稍后重试,nextAt 是下一次可投递的时刻。
    * 只有状态仍是 delivering 且令牌一致时才写入,返回是否写入 ——

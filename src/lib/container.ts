@@ -50,6 +50,7 @@ import { MysqlWebhookDeliveryLog } from "@/lib/modules/integration/adapters/mysq
 import { deliverWebhook, runFinishedPayload } from "@/lib/modules/integration/application/webhook";
 import { WebhookConsole } from "@/lib/modules/integration/application/webhook-console";
 import { WebhookDispatcher } from "@/lib/modules/integration/application/webhook-dispatcher";
+import { resolveRunTarget } from "@/lib/modules/integration/application/webhook-target";
 import { isAddressAllowed } from "@/lib/modules/integration/domain/webhook-policy";
 import { MysqlKnowledgeRepo } from "@/lib/modules/knowledge/adapters/mysql-knowledge-repo";
 import { ChunkCache } from "@/lib/modules/knowledge/application/chunk-cache";
@@ -414,27 +415,39 @@ function build(): Container {
   const webhookSender = createGuardedSender({
     allowAddress: (ip) => isAddressAllowed(ip, env.webhookAllowPrivate),
   });
-  /** 智能体当前的回调目标:地址 + 所有者的签名密钥。配置了密钥却解不开就抛错 —— 不能退化成不签名照发。 */
+  /** 账号的回调签名密钥。配置了却解不开就抛错 —— 不能退化成不签名照发。 */
+  const webhookSecretOf = async (userId: string) => {
+    const u = await users.get(userId);
+    if (!u?.webhookSecretEnc) return undefined;
+    const secret = secrets.decrypt(u.webhookSecretEnc);
+    if (secret === null) throw new Error(`webhook 签名密钥无法解密(user=${userId})`);
+    return secret;
+  };
+  /** 智能体当前的回调目标:地址 + 所有者的签名密钥。 */
   const webhookTargetOf = async (agentId: string) => {
     const agent = await agents.get(agentId);
     if (!agent?.webhookUrl) return null;
-    const owner = await users.get(agent.ownerId);
-    if (!owner?.webhookSecretEnc) return { agentId, url: agent.webhookUrl };
-    const secret = secrets.decrypt(owner.webhookSecretEnc);
-    if (secret === null) throw new Error(`webhook 签名密钥无法解密(user=${agent.ownerId})`);
-    return { agentId, url: agent.webhookUrl, secret };
+    const secret = await webhookSecretOf(agent.ownerId);
+    return { agentId, url: agent.webhookUrl, ...(secret ? { secret } : {}) };
   };
   const webhookLog = new MysqlWebhookDeliveryLog(db);
   const webhooks = new WebhookDispatcher({
     outbox: runs,
-    loadTarget: async (sessionId) => {
-      const session = await sessions.get(sessionId);
-      // 回调是给集成方的:只推系统发起的运行(接口调用、API 会话)。
-      // 曾经对每个运行都推 —— 被分享者在工作台里的对话、访客在嵌入组件里的对话,
-      // 最终回答都会被推到智能体所有者的地址上
-      if (!session || (session.source !== "invoke" && session.source !== "api")) return null;
-      return webhookTargetOf(session.agentId);
-    },
+    loadTarget: (job) =>
+      resolveRunTarget(
+        {
+          session: (id) => sessions.get(id),
+          agentTarget: webhookTargetOf,
+          ownerSecret: async (agentId) => {
+            // 已删除的智能体读不到:没有所有者可签名,抛错让这次投递判失败,而不是不签名照发
+            const agent = await agents.get(agentId);
+            if (!agent) throw new Error(`智能体不存在或已删除(agent=${agentId}),无法确定签名账号`);
+            return webhookSecretOf(agent.ownerId);
+          },
+          userSecret: webhookSecretOf,
+        },
+        job,
+      ),
     loadPayload: async (runId, sessionId) => {
       const r = await runs.getResult(runId);
       if (!r) return null;
