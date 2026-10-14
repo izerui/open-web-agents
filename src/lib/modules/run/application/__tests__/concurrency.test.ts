@@ -44,8 +44,30 @@ if (!TEST_DB_URL) {
 
   /** 记录每个 run 被执行了几次 —— 并发正确性的核心断言。 */
   const executions = new Map<string, number>();
-  /** 记录每个任务是被哪个 worker 执行的 —— 用来证明并发【真的发生了】。 */
+  /** 记录每个任务是被哪个 worker 执行的。 */
   const executedBy = new Map<string, string>();
+  /** 正在执行的运行:任务 → worker。用来度量真实的并行度与同会话重叠。 */
+  const inFlight = new Map<string, { workerId: string; sessionId: string }>();
+  /** 执行期间同时在跑的不同 worker 数的峰值 —— 证明并发【真的发生了】。 */
+  let peakWorkers = 0;
+  /** 同一会话的两个运行在执行期间重叠 —— 会话内必须串行(同一工作目录、同一份 SDK 会话)。 */
+  const sessionOverlaps: string[] = [];
+  /**
+   * 汇合点:运行先等到至少两个不同的 worker 同时在执行,再往下走(最多等 5 秒)。
+   * 原先只断言"多个 worker 都执行过",而且全部任务都在同一个会话里 —— 会话内串行,
+   * 实际从没有两个运行同时在执行,"恰好执行一次"也就没在真正的并行下检验过。
+   * 现在任务分散在多个会话,并要求不同 worker 确实同时在执行:只要多 worker 并行可行就必然达成,
+   * 达不成说明认领本身有问题,而不是靠执行窗口碰运气。
+   */
+  const newRendezvous = () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  };
+  let rendezvous = newRendezvous();
+  const distinctWorkersInFlight = () => new Set([...inFlight.values()].map((r) => r.workerId)).size;
 
   class RecordingEngine implements EnginePort {
     constructor(
@@ -62,9 +84,20 @@ if (!TEST_DB_URL) {
       const key = ctx.prompt;
       executions.set(key, (executions.get(key) ?? 0) + 1);
       executedBy.set(key, this.workerId);
-      // 留出真实的执行窗口,让并发有机会撞车
-      await new Promise((r) => setTimeout(r, this.delayMs));
-      return { status: "success", summary: "ok" };
+      if ([...inFlight.values()].some((r) => r.sessionId === ctx.sessionId)) {
+        sessionOverlaps.push(`${ctx.sessionId}:${key}`);
+      }
+      inFlight.set(key, { workerId: this.workerId, sessionId: ctx.sessionId });
+      peakWorkers = Math.max(peakWorkers, distinctWorkersInFlight());
+      if (peakWorkers >= 2) rendezvous.resolve();
+      try {
+        await Promise.race([rendezvous.promise, new Promise((r) => setTimeout(r, 5_000))]);
+        // 留出真实的执行窗口,让并发有机会撞车
+        await new Promise((r) => setTimeout(r, this.delayMs));
+        return { status: "success", summary: "ok" };
+      } finally {
+        inFlight.delete(key);
+      }
     }
   }
 
@@ -97,6 +130,10 @@ if (!TEST_DB_URL) {
     await repo._truncate(dbName);
     executions.clear();
     executedBy.clear();
+    inFlight.clear();
+    peakWorkers = 0;
+    sessionOverlaps.length = 0;
+    rendezvous = newRendezvous();
   });
 
   afterAll(async () => {
@@ -106,19 +143,31 @@ if (!TEST_DB_URL) {
 
   describe("多 worker 并发", { timeout: 60_000 }, () => {
     it("N 个 worker 抢同一队列:每个任务恰好执行一次,不重不漏", async () => {
-      const SESSION = "s-conc";
-      await sessions.create({ id: SESSION, agentId: "a1", workspaceDir: "/ws" });
+      // 任务分散在多个会话里:同一会话内是串行的,只有跨会话才会真的并行执行。
+      // 会话数(6)多于单个 worker 的槽位数(默认 4),一个 worker 吃不下全部 —— 别的 worker 必然参与。
+      // 按块分配(连续 4 个任务同一会话):最早的几个任务同属一个会话,认领必须跳过忙碌的会话
+      // 去拿别的会话的任务 —— 会话互斥一旦失效,同会话的任务会被同时认领,重叠必然出现
+      const SESSIONS = ["s-conc-0", "s-conc-1", "s-conc-2", "s-conc-3", "s-conc-4", "s-conc-5"];
+      for (const sid of SESSIONS) {
+        await sessions.create({ id: sid, agentId: "a1", workspaceDir: `/ws/${sid}` });
+      }
 
       const TASKS = 24;
       const ids: string[] = [];
       for (let i = 0; i < TASKS; i++) {
         const id = randomUUID().replace(/-/g, "").slice(0, 24);
         ids.push(id);
-        await repo.create({ id, sessionId: SESSION, prompt: `task-${i}` });
+        await repo.create({
+          id,
+          sessionId: SESSIONS[Math.floor(i / 4)] as string,
+          prompt: `task-${i}`,
+        });
       }
 
       // 4 个 worker 同时抢
-      const workers = ["w1", "w2", "w3", "w4"].map((id) => makeWorker(id));
+      // 执行时长要明显长于一次认领(一次数据库事务),运行之间才会真的重叠;
+      // 只停 5ms 时绝大多数时刻只有一个运行在执行,会话互斥失效也撞不出来
+      const workers = ["w1", "w2", "w3", "w4"].map((id) => makeWorker(id, 100));
       for (const w of workers) w.start();
 
       // 等队列排空
@@ -140,9 +189,10 @@ if (!TEST_DB_URL) {
       // 也没有漏掉的
       expect(executions.size).toBe(TASKS);
 
-      // 【并发真的发生了】否则这个测试只是"单 worker 顺序跑完",证明不了任何并发正确性
-      const participatingWorkers = new Set(executedBy.values());
-      expect(participatingWorkers.size).toBeGreaterThan(1);
+      // 【并发真的发生了】不同 worker 同时在执行 —— 否则这个测试只是"顺序跑完",证明不了并发正确性
+      expect(peakWorkers).toBeGreaterThan(1);
+      // 并行只发生在会话之间:同一会话的运行从不重叠
+      expect(sessionOverlaps).toEqual([]);
     });
 
     it("并发认领同一个任务:只有一个 worker 拿到", async () => {
@@ -300,10 +350,13 @@ if (!TEST_DB_URL) {
     });
 
     it("持续入队时多 worker 也不重复执行(边跑边加)", async () => {
-      const SESSION = "s-stream";
-      await sessions.create({ id: SESSION, agentId: "a1", workspaceDir: "/ws" });
+      // 同上:分散到多个会话才有真正的并行执行;按块分配,连续 4 个任务同一会话
+      const SESSIONS = ["s-stream-0", "s-stream-1", "s-stream-2", "s-stream-3", "s-stream-4"];
+      for (const sid of SESSIONS) {
+        await sessions.create({ id: sid, agentId: "a1", workspaceDir: `/ws/${sid}` });
+      }
 
-      const workers = ["s1", "s2", "s3"].map((id) => makeWorker(id, 2));
+      const workers = ["s1", "s2", "s3"].map((id) => makeWorker(id, 60));
       for (const w of workers) w.start();
 
       const ids: string[] = [];
@@ -312,7 +365,11 @@ if (!TEST_DB_URL) {
         for (let i = 0; i < 5; i++) {
           const id = randomUUID().replace(/-/g, "").slice(0, 24);
           ids.push(id);
-          await repo.create({ id, sessionId: SESSION, prompt: `stream-${batch}-${i}` });
+          await repo.create({
+            id,
+            sessionId: SESSIONS[Math.floor((batch * 5 + i) / 4)] as string,
+            prompt: `stream-${batch}-${i}`,
+          });
         }
         await new Promise((r) => setTimeout(r, 30));
       }
@@ -327,8 +384,9 @@ if (!TEST_DB_URL) {
 
       expect([...executions.values()].filter((n) => n > 1)).toEqual([]);
       expect(executions.size).toBe(ids.length);
-      // 同样要确认多个 worker 都参与了
-      expect(new Set(executedBy.values()).size).toBeGreaterThan(1);
+      // 同样要确认不同 worker 同时在执行,且同一会话从不重叠
+      expect(peakWorkers).toBeGreaterThan(1);
+      expect(sessionOverlaps).toEqual([]);
     });
   });
 }
