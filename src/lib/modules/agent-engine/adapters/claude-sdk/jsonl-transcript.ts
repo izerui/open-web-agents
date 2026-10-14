@@ -12,7 +12,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { normalizeSdkMessage } from "@/lib/modules/agent-engine/domain/normalize";
 import { transcriptPathFor } from "@/lib/modules/agent-engine/domain/transcript-path";
-import type { TranscriptPort } from "@/lib/modules/agent-engine/ports";
+import type { TranscriptPort, TranscriptRange } from "@/lib/modules/agent-engine/ports";
 import type { AgentEvent } from "@/lib/shared";
 
 /**
@@ -52,14 +52,36 @@ async function warnIfEncodingDrifted(
   }
 }
 
+/**
+ * 截出一轮自己的那一段:从 uuid = first 的行到 uuid = last 的行(含两端)。
+ *
+ * 【为什么要截】续接同一个 SDK 会话的各轮写进同一份 jsonl(resume 不换 session id,
+ * 2026-10 用 scripts/sdk-probe 实测)。不截的话,每一轮的历史都是整份文件 —— 第 1 轮
+ * 也会显示之后所有轮的过程。
+ *
+ * 找不到起点返回空:宁可这一轮空着,也不能把别的轮次的过程当成它的。
+ * 找不到终点(本轮在写盘途中被杀)读到文件末尾。
+ */
+function sliceByUuid(lines: unknown[], range: TranscriptRange): unknown[] {
+  const uuidOf = (l: unknown) => (l as { uuid?: unknown } | null)?.uuid;
+  const start = lines.findIndex((l) => uuidOf(l) === range.first);
+  if (start < 0) return [];
+  const end = lines.findIndex((l, i) => i >= start && uuidOf(l) === range.last);
+  return lines.slice(start, end < 0 ? undefined : end + 1);
+}
+
 export class JsonlTranscript implements TranscriptPort {
   async read(args: {
     dataDir: string;
     workspaceDir: string;
     sdkSessionId: string;
+    range?: TranscriptRange;
   }): Promise<AgentEvent[]> {
+    // SDK 按工作目录的【真实路径】(符号链接已解析)编目录名,这里也先解析;
+    // 目录已被清理等读不到真实路径时按原路径算(随后读不到文件,照常返回空)
+    const workspaceDir = await fs.realpath(args.workspaceDir).catch(() => args.workspaceDir);
     // 路径推导里的白名单校验要在读盘【之前】把穿越挡掉,所以不放进下面的 try。
-    const file = transcriptPathFor(args);
+    const file = transcriptPathFor({ ...args, workspaceDir });
 
     let raw: string;
     try {
@@ -71,19 +93,21 @@ export class JsonlTranscript implements TranscriptPort {
       return [];
     }
 
-    const out: AgentEvent[] = [];
+    const lines: unknown[] = [];
     for (const line of raw.split("\n")) {
       if (!line.trim()) continue;
-      let msg: unknown;
       try {
-        msg = JSON.parse(line);
+        lines.push(JSON.parse(line));
       } catch {
         // 半行写入(进程被杀在写盘途中)只该丢这一行。
         // 整份 abort 的话,一次崩溃就让此前所有轮次的历史一起看不见了。
-        continue;
       }
-      // skipStreamed 恒为 false:历史回放没有"增量已推送过"这回事,
-      // 完整消息就是唯一来源,跳过就什么都不剩了。
+    }
+
+    const out: AgentEvent[] = [];
+    // skipStreamed 恒为 false:历史回放没有"增量已推送过"这回事,
+    // 完整消息就是唯一来源,跳过就什么都不剩了。
+    for (const msg of args.range ? sliceByUuid(lines, args.range) : lines) {
       out.push(...normalizeSdkMessage(msg));
     }
     return out;

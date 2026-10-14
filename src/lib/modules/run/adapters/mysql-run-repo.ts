@@ -464,9 +464,19 @@ export class MysqlRunRepo implements RunRepo {
     await this.db.update(runs).set({ resumeAnchor: anchor }).where(eq(runs.id, id));
   }
 
-  /** 记录这一轮跑完产生的 SDK 会话,供后续轮次与分支续接。 */
-  async setSdkSessionId(id: string, sdkSessionId: string): Promise<void> {
-    await this.db.update(runs).set({ sdkSessionId }).where(eq(runs.id, id));
+  /** 记录这一轮跑完产生的 SDK 会话(供后续轮次与分支续接)及本轮在 transcript 里的范围。 */
+  async setSdkSessionId(
+    id: string,
+    sdkSessionId: string,
+    range?: { first: string; last: string },
+  ): Promise<void> {
+    await this.db
+      .update(runs)
+      .set({
+        sdkSessionId,
+        ...(range ? { transcriptFirstUuid: range.first, transcriptLastUuid: range.last } : {}),
+      })
+      .where(eq(runs.id, id));
   }
 
   /** 列出会话内的运行,含分支信息,供界面画分支树。 */
@@ -478,6 +488,7 @@ export class MysqlRunRepo implements RunRepo {
       parentRunId?: string;
       resumeAnchor?: string;
       sdkSessionId?: string;
+      transcriptRange?: { first: string; last: string };
       createdAt: number;
     }[]
   > {
@@ -489,6 +500,8 @@ export class MysqlRunRepo implements RunRepo {
         parentRunId: runs.parentRunId,
         resumeAnchor: runs.resumeAnchor,
         sdkSessionId: runs.sdkSessionId,
+        transcriptFirstUuid: runs.transcriptFirstUuid,
+        transcriptLastUuid: runs.transcriptLastUuid,
         createdAt: runs.createdAt,
       })
       .from(runs)
@@ -502,6 +515,10 @@ export class MysqlRunRepo implements RunRepo {
       parentRunId: r.parentRunId ?? undefined,
       resumeAnchor: r.resumeAnchor ?? undefined,
       sdkSessionId: r.sdkSessionId ?? undefined,
+      transcriptRange:
+        r.transcriptFirstUuid && r.transcriptLastUuid
+          ? { first: r.transcriptFirstUuid, last: r.transcriptLastUuid }
+          : undefined,
       createdAt: r.createdAt.getTime(),
     }));
   }

@@ -22,7 +22,7 @@ export function isSafeSdkSessionId(id: string): boolean {
 }
 
 /**
- * 把工作目录的绝对路径编码成 SDK 的 projects 子目录名:分隔符与点都换成短横线。
+ * 把工作目录的绝对路径编码成 SDK 的 projects 子目录名:字母数字以外的字符都换成短横线。
  *
  * 例:/srv/owa/data/workspaces/s1 → -srv-owa-data-workspaces-s1
  * (前导 `/` 也参与替换,所以结果以短横线开头 —— 这与盘上实际形态一致。)
@@ -34,16 +34,20 @@ export function isSafeSdkSessionId(id: string): boolean {
  * 这不需要改代码就能踩到:`OWA_DATA_DIR=/srv/app.v2/data` 这样的部署配置即可,
  * 而失败表现是空白页面不是报错。
  *
- * 【已知边界】只对 `/` 与 `.` 两个字符有实证。SDK 对空格、中文等是否另有替换规则
- * 尚无反例可查 —— 故 JsonlTranscript 读不到文件时会扫一眼 projects 目录并告警,
- * 免得下一个未知字符再以"静默空白"的形式出现。
+ * 【完整规则(scripts/sdk-probe/project-dir-encoding.mjs 实测)】不只是 `/` 与 `.`:
+ * 字母数字以外的【每个】字符都换成一个短横线 —— 下划线、空格、`+@~`、每个中文字符都是。
+ * 曾经只换 `/` 与 `.`,数据目录含下划线(如 /srv/owa_data)的部署历史回放整片空白;
+ * 是读不到时的告警探针在 macOS 临时目录(路径里有下划线)上撞出来的。
+ *
+ * 另外 SDK 用的是工作目录的【真实路径】(符号链接已解析)—— 那一步需要读盘,
+ * 由调用方先做(见 JsonlTranscript),这里只管字符替换。
  */
 export function projectDirNameFor(workspaceDir: string): string {
   if (!path.isAbsolute(workspaceDir)) {
     // 相对路径推出来的目录名必然与 SDK 写的对不上,且错得很安静。早失败。
     throw new Error(`workspaceDir must be absolute: ${JSON.stringify(workspaceDir)}`);
   }
-  return workspaceDir.split(path.sep).join("-").replaceAll(".", "-");
+  return workspaceDir.replace(/[^A-Za-z0-9]/g, "-");
 }
 
 /** 算出某次 SDK 会话的 transcript 文件绝对路径。 */

@@ -338,7 +338,8 @@ function build(): Container {
     // 凭证与 HOME 会在 buildSdkOptions 里覆盖掉这里的同名项。
     baseEnv: inheritedEnv(),
     runAnchor: (runId) => runs.getResumeAnchor(runId),
-    recordRunSession: (runId, sdkSessionId) => runs.setSdkSessionId(runId, sdkSessionId),
+    recordRunSession: (runId, sdkSessionId, range) =>
+      runs.setSdkSessionId(runId, sdkSessionId, range),
     recordRunAnchor: (runId, anchor) => runs.setResumeAnchor(runId, anchor),
     // 与 GC 共用会话行锁:记下"刚用过"并确保目录存在(见 SessionRepo.prepareWorkspace)
     ensureWorkspace: (sessionId, dir) =>

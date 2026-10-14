@@ -9,7 +9,7 @@ import {
   normalizeSdkMessage,
   normalizeStreamEvent,
 } from "@/lib/modules/agent-engine/domain/normalize";
-import type { EnginePort, RunResult } from "@/lib/modules/agent-engine/ports";
+import type { EnginePort, RunResult, TranscriptRange } from "@/lib/modules/agent-engine/ports";
 import type { ModelGatewayPort } from "@/lib/modules/model-gateway/ports";
 import type { AgentEvent, AgentSpec, RunContext } from "@/lib/shared";
 import { buildSdkOptions } from "./options";
@@ -73,6 +73,18 @@ export class ClaudeSdkEngine implements EnginePort {
 
     let sessionId: string | undefined;
     let result: RunResult | undefined;
+    // 本轮自己产生的主线消息的首尾 uuid(见 RunResult.transcriptRange)。
+    // 子代理的消息不在主 transcript 里,不计入
+    let firstUuid: string | undefined;
+    let lastUuid: string | undefined;
+    const trackUuid = (m: { type?: string; uuid?: unknown; parent_tool_use_id?: unknown }) => {
+      if (m.type !== "assistant" && m.type !== "user") return;
+      if (m.parent_tool_use_id || typeof m.uuid !== "string") return;
+      firstUuid ??= m.uuid;
+      lastUuid = m.uuid;
+    };
+    const range = (): TranscriptRange | undefined =>
+      firstUuid && lastUuid ? { first: firstUuid, last: lastUuid } : undefined;
 
     // 按消息累计 token,给"没等到结算消息就中止"的运行一个部分花费。
     // 同一条 assistant 消息可能分多次到达,按 messageId 取最后一次
@@ -121,7 +133,14 @@ export class ClaudeSdkEngine implements EnginePort {
       let hasStreamed = false;
 
       for await (const msg of stream) {
-        const m = msg as { type?: string; subtype?: string; session_id?: string } | null;
+        const m = msg as {
+          type?: string;
+          subtype?: string;
+          session_id?: string;
+          uuid?: unknown;
+          parent_tool_use_id?: unknown;
+        } | null;
+        if (m) trackUuid(m);
 
         if (m?.type === "system" && m.subtype === "init") {
           sessionId = m.session_id ?? sessionId;
@@ -149,12 +168,13 @@ export class ClaudeSdkEngine implements EnginePort {
       // 这一轮真实花掉的钱就永远统计不到,失败原因也从 error_max_turns 这类
       // 具体子类型退化成笼统的 engine_error —— 排查时看到的是"引擎炸了",
       // 而实际上是"轮次用完了",两者的处置完全不同。
-      if (result) return { ...result, sessionId };
+      if (result) return { ...result, sessionId, transcriptRange: range() };
 
       const message = err instanceof Error ? err.message : String(err);
       return {
         status: "failed",
         sessionId,
+        transcriptRange: range(),
         cost: partialCost(),
         error: { kind: abort.signal.aborted ? "aborted" : "engine_error", message },
       };
@@ -167,6 +187,7 @@ export class ClaudeSdkEngine implements EnginePort {
       return {
         status: "failed",
         sessionId,
+        transcriptRange: range(),
         cost: partialCost(),
         error: abort.signal.aborted
           ? { kind: "aborted", message: "运行被中断" }
@@ -174,6 +195,6 @@ export class ClaudeSdkEngine implements EnginePort {
       };
     }
 
-    return { ...result, sessionId };
+    return { ...result, sessionId, transcriptRange: range() };
   }
 }

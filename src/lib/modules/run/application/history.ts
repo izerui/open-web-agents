@@ -8,7 +8,7 @@
 // 【活跃轮不读 transcript】这是「历史回放」与「实时流」互不重复的结构性保证,
 // 不是性能优化 —— 见下方 isActive 处的注释。
 
-import type { TranscriptPort } from "@/lib/modules/agent-engine/ports";
+import type { TranscriptPort, TranscriptRange } from "@/lib/modules/agent-engine/ports";
 import type { AgentEvent } from "@/lib/shared";
 
 /** 一轮对话。字段与前端 workbench 的 Turn 对齐,路由可直接透传。 */
@@ -41,6 +41,8 @@ export interface HistoryDeps {
         prompt: string;
         parentRunId?: string;
         sdkSessionId?: string;
+        /** 本轮在 transcript 里的范围;旧数据没有 */
+        transcriptRange?: TranscriptRange;
         createdAt: number;
       }[]
     >;
@@ -86,6 +88,9 @@ export async function loadSessionHistory(
           dataDir: deps.dataDir,
           workspaceDir: session.workspaceDir,
           sdkSessionId: row.sdkSessionId,
+          // 续接同一 SDK 会话的各轮共用一份 jsonl:只读本轮那一段,否则每轮都会显示之后各轮的过程。
+          // 旧数据没记范围,只能读整份
+          range: row.transcriptRange,
         });
       } catch {
         // 单个文件损坏/无权读,只让这一轮空着。

@@ -126,6 +126,22 @@ describe("故障注入 / 审计与回调", () => {
     ).resolves.toMatchObject({ status: "success" });
   });
 
+  it("本轮在 transcript 里的范围随 SDK 会话一起记到运行上(历史回放按它截取)", async () => {
+    const engine = new OkEngine();
+    engine.run = async () => ({
+      status: "success",
+      sessionId: "sdk-1",
+      transcriptRange: { first: "a1", last: "a9" },
+    });
+    const recorded: unknown[] = [];
+    const { orch } = await setup(
+      { recordRunSession: async (...args) => void recorded.push(args) },
+      engine,
+    );
+    await orch.execute({ sessionId: "s1", prompt: "hi", runId: "r1" }, signal());
+    expect(recorded).toEqual([["r1", "sdk-1", { first: "a1", last: "a9" }]]);
+  });
+
   it("记 SDK 会话失败不影响运行", async () => {
     const { orch } = await setup({ recordRunSession: boom });
     await expect(

@@ -5,7 +5,7 @@ import {
   resolveCredentials,
   resolveModelAlias,
 } from "@/lib/modules/agent-engine/domain/resolve-credentials";
-import type { EnginePort, RunResult } from "@/lib/modules/agent-engine/ports";
+import type { EnginePort, RunResult, TranscriptRange } from "@/lib/modules/agent-engine/ports";
 import { buildSpec } from "@/lib/modules/agent/domain/build-spec";
 import type { AgentConfig } from "@/lib/modules/agent/domain/config";
 import { validateStructured } from "@/lib/modules/agent/domain/validate-output";
@@ -50,8 +50,15 @@ export interface OrchestratorDeps {
    * 否则回退到会话最新锚点,分支就会串回主线。
    */
   runAnchor?: (runId: string) => Promise<{ anchored: boolean; anchor?: string }>;
-  /** 记录本轮产生的 SDK 会话到该运行上,供后续分支续接。 */
-  recordRunSession?: (runId: string, sdkSessionId: string) => Promise<void>;
+  /**
+   * 记录本轮产生的 SDK 会话到该运行上,供后续分支续接;
+   * range 是本轮在 transcript 里的那一段,供历史回放只读本轮(见 RunResult.transcriptRange)。
+   */
+  recordRunSession?: (
+    runId: string,
+    sdkSessionId: string,
+    range?: TranscriptRange,
+  ) => Promise<void>;
   /** 记录本轮实际使用的起跑锚点,供审计。 */
   recordRunAnchor?: (runId: string, anchor: string | null) => Promise<void>;
   /**
@@ -215,7 +222,9 @@ export class RunOrchestrator {
       }
       // 同时记到本次运行上 —— 将来要从这一轮分叉时需要它
       if (cmd.runId) {
-        await this.deps.recordRunSession?.(cmd.runId, result.sessionId).catch(() => {});
+        await this.deps
+          .recordRunSession?.(cmd.runId, result.sessionId, result.transcriptRange)
+          .catch(() => {});
       }
     }
 

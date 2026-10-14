@@ -83,6 +83,42 @@ describe("ClaudeSdkEngine 回放", () => {
     expect(r.cost).toEqual({ usd: 0.01, input: 20, output: 8 });
   });
 
+  it("记下本轮主线消息的首尾 uuid:子代理的、没有 uuid 的不算", async () => {
+    const r = await engine(
+      replay([
+        { type: "system", subtype: "init", session_id: "s", uuid: "sys-1" },
+        { type: "assistant", uuid: "a-1", message: { content: [{ type: "text", text: "x" }] } },
+        {
+          type: "assistant",
+          uuid: "sub-1",
+          parent_tool_use_id: "tu_9",
+          message: { content: [{ type: "text", text: "子代理" }] },
+        },
+        { type: "user", uuid: "u-2", message: { content: [] } },
+        { type: "assistant", message: { content: [{ type: "text", text: "没 uuid" }] } },
+        {
+          type: "assistant",
+          uuid: "sub-2",
+          parent_tool_use_id: "tu_9",
+          message: { content: [] },
+        },
+        { type: "result", subtype: "success", result: "ok", uuid: "res-1" },
+      ]),
+    ).run(spec(), ctx, () => {}, new AbortController().signal);
+    expect(r.transcriptRange).toEqual({ first: "a-1", last: "u-2" });
+  });
+
+  it("中途失败也带上已产生的范围(历史回放仍要截得出这一段)", async () => {
+    const r = await engine(
+      replay([
+        { type: "system", subtype: "init", session_id: "s" },
+        { type: "assistant", uuid: "a-1", message: { content: [] } },
+      ]),
+    ).run(spec(), ctx, () => {}, new AbortController().signal);
+    expect(r.status).toBe("failed");
+    expect(r.transcriptRange).toEqual({ first: "a-1", last: "a-1" });
+  });
+
   it("system/result 消息不进事件流", async () => {
     const events: AgentEvent[] = [];
     await engine(replay(RECORDED)).run(

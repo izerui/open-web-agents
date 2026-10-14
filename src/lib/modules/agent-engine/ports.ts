@@ -1,5 +1,11 @@
 import type { AgentEvent, AgentSpec, RunContext } from "@/lib/shared";
 
+/** 一轮在 transcript 里的范围:首尾两条消息的 uuid(含两端)。 */
+export interface TranscriptRange {
+  first: string;
+  last: string;
+}
+
 export interface RunResult {
   status: "success" | "failed";
   /** 仅当智能体定义了 outputSchema 且 SDK 产出结构化输出时存在。 */
@@ -7,6 +13,11 @@ export interface RunResult {
   summary?: string;
   /** SDK session id,供下一轮 resume。 */
   sessionId?: string;
+  /**
+   * 本轮自己产生的第一条与最后一条主线消息(非子代理)的 uuid。
+   * 同一 SDK 会话的各轮写进同一份 transcript,回放时按它截出本轮那一段。
+   */
+  transcriptRange?: TranscriptRange;
   /**
    * partial:运行被中止或异常终止、没等到 SDK 的结算消息,token 数是按已收到的消息累计的,
    * 美元金额未知(usd 为空)。曾经这种情况 cost 直接缺失,取消/超时的运行花费一律不入账。
@@ -45,6 +56,11 @@ export interface TranscriptPort {
     dataDir: string;
     workspaceDir: string;
     sdkSessionId: string;
+    /**
+     * 只读这一段(按行的 uuid,含两端)。同一 SDK 会话续接的各轮共用一份文件,
+     * 不给范围就是整份 —— 只用于没记下范围的旧数据。
+     */
+    range?: TranscriptRange;
   }): Promise<AgentEvent[]>;
 }
 

@@ -75,6 +75,21 @@ bypassPermissions + 白名单  | ✗ 命令执行了     | ✓ 拦住
 这同时证明了两件事:改之前那三种配置下围栏形同虚设;改之后连
 `bypassPermissions` 都绕不过去 —— 后者是权限模式敢开放给用户配置的全部前提。
 
+### 会话续接与 transcript(2026-10-14)
+
+```bash
+node scripts/sdk-probe/branch-resume-at.mjs          # resume 是否换 id;resumeSessionAt + forkSession 的分支语义
+node scripts/sdk-probe/project-dir-encoding.mjs      # cwd → projects 子目录名的真实编码规则
+npx tsx --tsconfig tsconfig.json scripts/sdk-probe/history-slice.ts   # 生产引擎 + 真 SDK:历史按本轮范围截取
+```
+
+- **resume 不换 session id**:同一会话续接的各轮写进【同一份】jsonl。历史回放曾经每轮读整份,
+  第 1 轮也显示之后各轮的过程;现在按每轮记下的首尾消息 uuid 截取(实时流里的 uuid 与盘上的行一一对应)。
+- **resumeSessionAt(某轮最后一条消息)+ forkSession** 能回到中间某轮的状态并分到新文件,
+  模型只看到那之前的对话 —— 将来做"从中间分叉"可以用它(当前分支只提供从零重开与接最新状态)。
+- **目录名编码**:字母数字以外的每个字符都换成短横线(下划线、空格、中文……),
+  且用工作目录的真实路径(符号链接已解析)。曾经只换 `/` 与 `.`。
+
 ## 没有进 CI
 
 单次要拉起真实 SDK 子进程,比整个单测套件还慢。目前定位是**改动权限/围栏

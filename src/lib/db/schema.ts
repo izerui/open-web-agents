@@ -212,6 +212,13 @@ export const runs = mysqlTable(
     resumeAnchor: varchar("resume_anchor", { length: 128 }),
     /** 这一轮跑完产生的 SDK 会话,供后续轮次/分支续接。 */
     sdkSessionId: varchar("sdk_session_id", { length: 128 }),
+    /**
+     * 这一轮自己产生的第一条 / 最后一条消息的 uuid(SDK transcript 里的行)。
+     * 续接同一个 SDK 会话的各轮写进【同一份】jsonl,历史回放按它截出本轮那一段;
+     * 曾经每轮都读整份文件,于是第 1 轮也显示出之后各轮的过程。为空 = 旧数据,读整份。
+     */
+    transcriptFirstUuid: varchar("transcript_first_uuid", { length: 64 }),
+    transcriptLastUuid: varchar("transcript_last_uuid", { length: 64 }),
     /** 租约到期时间戳(ms)。NULL = 未认领或已完成 */
     leaseUntil: bigint("lease_until", { mode: "number" }),
     /**
