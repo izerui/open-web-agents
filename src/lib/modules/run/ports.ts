@@ -139,15 +139,24 @@ export interface CancelSignal {
 }
 
 /**
+ * 受理一条追加消息的结果。每个消息 id 第一次执行就定局,之后同一 id 再受理答的都是这个定局:
+ * accepted = 已入队(结局待定);rejected = 没有受理(运行还没开始或已关闭输入);
+ * delivered / dropped = 早先已受理,且已有结局。
+ */
+export type SteerOfferResult = "accepted" | "rejected" | "delivered" | "dropped";
+
+/**
  * 运行中途追加消息的通道(web 进程受理 ↔ worker 交给模型)。
  *
- * 【受理与关闭检查同一个状态】offer 只在状态为 open 时入队;close 把状态置为 closed 并取走
- * 队列里剩下的 —— 两者对同一份状态互斥。所以每条被受理的消息,要么被 worker 取走交给模型,
- * 要么在关闭时被取走(此时模型仍在读输入就交给它,已不读就记为未送达),不会悬在队列里。
+ * 【受理与关闭检查同一个状态】offer 只在状态为 open 时入队;close 把状态置为 closed ——
+ * 两者对同一份状态互斥。
+ * 【先交接、再删除】take / close 只读出还没有结局的消息,不删;消息只在 settle 记下结局时删除。
+ * 读取的响应丢了,下一次读取仍拿得到 —— 每条被受理的消息最终都有结局(只要通道可用)。
+ * 【按 id 去重】调用方给每条消息稳定的 id,重试复用;同一 id 的结论只定一次。
  */
 export interface SteerChannel {
-  /** web:受理一条。不是 open(还没开始 / 已关闭)返回 "closed"。 */
-  offer(runId: string, m: { id: string; text: string }): Promise<"accepted" | "closed">;
+  /** web:受理一条。 */
+  offer(runId: string, m: { id: string; text: string }): Promise<SteerOfferResult>;
   /** web:等这条的结局,最多 timeoutMs;等不到返回 "pending"。 */
   awaitOutcome(
     runId: string,
@@ -156,11 +165,11 @@ export interface SteerChannel {
   ): Promise<"delivered" | "dropped" | "pending">;
   /** worker:开始受理。 */
   open(runId: string): Promise<void>;
-  /** worker:取走已受理的(不阻塞,没有返回空)。 */
+  /** worker:读出还没有结局的消息(按受理顺序;不删除)。 */
   take(runId: string): Promise<{ id: string; text: string }[]>;
-  /** worker:停止受理,并取走队列里剩下的。与 offer 互斥。 */
+  /** worker:停止受理,并读出还没有结局的消息(不删除)。与 offer 互斥。 */
   close(runId: string): Promise<{ id: string; text: string }[]>;
-  /** worker:记下一条的结局。 */
+  /** worker:记下一条的结局,并从队列删除。 */
   settle(runId: string, id: string, outcome: "delivered" | "dropped"): Promise<void>;
   /** worker:有新消息受理时通知(尽力而为,可能漏,取用方还要定期 take)。 */
   onOffer(runId: string, cb: () => void): () => void;

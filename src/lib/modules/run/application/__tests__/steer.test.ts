@@ -13,27 +13,35 @@ describe("steerRun", () => {
             throw new Error("redis down");
           },
         },
-        newId: () => "m1",
       },
-      { runId: "r1", text: "x" },
+      { runId: "r1", id: "m1", text: "x" },
     );
     expect(r).toEqual({ id: "m1", outcome: "pending" });
   });
 
-  it("入队本身失败:抛给调用方(接口答 503),不吞成某个结局", async () => {
-    await expect(
-      steerRun(
-        {
-          channel: {
-            offer: async () => {
-              throw new Error("redis down");
-            },
-            awaitOutcome: async () => "delivered",
+  it("受理请求本身没得到答复:答 unknown —— 它可能已经入队,既不能说没受理(会被重发两次),也不能说成功", async () => {
+    const r = await steerRun(
+      {
+        channel: {
+          offer: async () => {
+            throw new Error("Redis offer 超过 2000ms 未返回");
           },
-          newId: () => "m1",
+          awaitOutcome: async () => "delivered",
         },
-        { runId: "r1", text: "x" },
-      ),
-    ).rejects.toThrow(/redis down/);
+      },
+      { runId: "r1", id: "m1", text: "x" },
+    );
+    expect(r).toEqual({ id: "m1", outcome: "unknown" });
+  });
+
+  it("明确没受理才答 not_accepting;同一 id 已有结局直接答结局", async () => {
+    const ask = (offer: "rejected" | "delivered" | "dropped") =>
+      steerRun(
+        { channel: { offer: async () => offer, awaitOutcome: async () => "pending" } },
+        { runId: "r1", id: "m1", text: "x" },
+      );
+    expect((await ask("rejected")).outcome).toBe("not_accepting");
+    expect((await ask("delivered")).outcome).toBe("delivered");
+    expect((await ask("dropped")).outcome).toBe("dropped");
   });
 });

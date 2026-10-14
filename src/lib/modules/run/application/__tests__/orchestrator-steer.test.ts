@@ -64,7 +64,7 @@ describe("编排 × 追加消息", () => {
       { sessionId: "s1", prompt: "hi", runId: "r1" },
       new AbortController().signal,
     );
-    expect(await channel.offer("r1", { id: "late", text: "x" })).toBe("closed");
+    expect(await channel.offer("r1", { id: "late", text: "x" })).toBe("rejected");
   });
 
   it("引擎中途抛出:已受理未交出的追加消息记为未送达,并发 dropped 事件", async () => {

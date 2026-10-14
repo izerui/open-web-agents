@@ -30,6 +30,7 @@ import { createEventBatcher } from "./event-batcher";
 import { FilePanel } from "./file-panel";
 import { SessionActions } from "./session-actions";
 import { activityOf, groupSessions, relativeTime } from "./session-groups";
+import { sendSteer } from "./steer-client";
 import type { AgentSummary, SessionSummary, Turn } from "./types";
 import {
   agentIdFromSearch,
@@ -866,32 +867,33 @@ export function Workbench() {
   );
 
   /**
-   * 运行中追加一条消息。答复如实处理:
-   *   200 已交给智能体(过程里会出现这条);202 已提交、还没确认(之后在事件流里见分晓);
-   *   其余(这一轮在收尾、已结束、接口不可用)一律改为本轮结束后作为新消息发送 —— 不丢。
+   * 运行中追加一条消息(发送策略见 steer-client.ts)。
+   * 只有明确"没受理 / 没送达"才改为本轮结束后作为新消息发送;不确定时绝不自动重发 ——
+   * 那条可能已经交给了智能体,再发一遍就执行两次。
    */
   async function steerOrQueue(sid: string, runId: string, text: string) {
-    try {
-      const res = await fetch(`/api/sessions/${sid}/steer`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ runId, text }),
-      });
-      const data = (await res.json().catch(() => null)) as { id?: string } | null;
-      if (res.status === 200) {
+    const r = await sendSteer({ sessionId: sid, runId, id: crypto.randomUUID(), text });
+    switch (r.kind) {
+      case "delivered":
         toast.success("已交给智能体");
         return;
-      }
-      if (res.status === 202 && data?.id) {
-        pendingSteerRef.current.add(data.id);
+      case "pending":
+        pendingSteerRef.current.add(r.id);
         toast.message("已提交,等待智能体接收");
         return;
-      }
-    } catch {
-      // 网络错误:同下,改为排队
+      case "unconfirmed":
+        // 结局若之后从事件流里来(未送达),照样会自动改为排队
+        pendingSteerRef.current.add(r.id);
+        toast.warning("暂时无法确认这条是否已交给智能体,请留意它的回答;确认没收到再重新发送");
+        return;
+      case "invalid":
+        toast.error(r.message);
+        return;
+      case "resend":
+        setQueued((q) => [...q, { id: crypto.randomUUID(), text, files: [] }]);
+        toast.message("这一轮正在收尾,本轮结束后作为新消息发送");
+        return;
     }
-    setQueued((q) => [...q, { id: crypto.randomUUID(), text, files: [] }]);
-    toast.message("这一轮正在收尾,本轮结束后作为新消息发送");
   }
 
   // 待定的追加消息最终没送达:改为排队,本轮结束后作为新消息发送

@@ -58,8 +58,8 @@ async function scenario(
   let api: Promise<{ outcome: string }> | undefined;
   const fire = () => {
     api ??= steerRun(
-      { channel, newId: () => "m1", outcomeTimeoutMs: 15_000 },
-      { runId: "r1", text: "STEER-追加" },
+      { channel, outcomeTimeoutMs: 15_000 },
+      { runId: "r1", id: "m1", text: "STEER-追加" },
     );
   };
   if (trigger.atMs !== undefined) setTimeout(fire, trigger.atMs);
@@ -74,8 +74,8 @@ async function scenario(
   );
   const outcome = api ? (await api).outcome : "(没发)";
   const late = await steerRun(
-    { channel, newId: () => "m2", outcomeTimeoutMs: 200 },
-    { runId: "r1", text: "晚了" },
+    { channel, outcomeTimeoutMs: 200 },
+    { runId: "r1", id: "m2", text: "晚了" },
   );
   gw.close();
   console.log(`\n── ${name}`);

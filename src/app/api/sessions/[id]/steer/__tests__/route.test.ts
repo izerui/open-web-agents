@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const state = {
   source: "web" as string,
   runSession: "s1" as string | null,
-  offer: async (): Promise<"accepted" | "closed"> => "accepted",
+  offer: async (): Promise<"accepted" | "rejected" | "delivered" | "dropped"> => "accepted",
   outcome: async (): Promise<"delivered" | "dropped" | "pending"> => "delivered",
   offered: [] as unknown[],
 };
@@ -54,10 +54,29 @@ describe("POST /api/sessions/{id}/steer", () => {
     state.offered = [];
   });
 
-  it("已交给模型:200 delivered", async () => {
-    const r = await post({ runId: "r1", text: "  补充一句  " });
-    expect(r).toMatchObject({ status: 200, body: { outcome: "delivered" } });
-    expect(state.offered).toEqual([["r1", { id: expect.any(String), text: "补充一句" }]]);
+  it("已交给模型:200 delivered;用的是调用方给的 id", async () => {
+    const r = await post({ runId: "r1", id: "client-id-0001", text: "  补充一句  " });
+    expect(r).toMatchObject({ status: 200, body: { id: "client-id-0001", outcome: "delivered" } });
+    expect(state.offered).toEqual([["r1", { id: "client-id-0001", text: "补充一句" }]]);
+  });
+
+  it("id 格式不对:400,不入队", async () => {
+    expect((await post({ runId: "r1", id: "短", text: "x" })).status).toBe(400);
+    expect((await post({ runId: "r1", id: "a/b/c/d/e/f", text: "x" })).status).toBe(400);
+    expect(state.offered).toEqual([]);
+  });
+
+  it("同一 id 早先已有结局:直接答那个结局,不再等", async () => {
+    state.offer = async () => "delivered";
+    expect(await post({ runId: "r1", id: "client-id-0001", text: "x" })).toMatchObject({
+      status: 200,
+      body: { outcome: "delivered" },
+    });
+    state.offer = async () => "dropped";
+    expect(await post({ runId: "r1", id: "client-id-0001", text: "x" })).toMatchObject({
+      status: 409,
+      body: { code: "dropped" },
+    });
   });
 
   it("等待上限内没等到结局:202 pending —— 不说成功也不说失败", async () => {
@@ -69,7 +88,7 @@ describe("POST /api/sessions/{id}/steer", () => {
   });
 
   it("没有受理:409 not_accepting;受理了但没送达:409 dropped", async () => {
-    state.offer = async () => "closed";
+    state.offer = async () => "rejected";
     expect(await post({ runId: "r1", text: "x" })).toMatchObject({
       status: 409,
       body: { code: "not_accepting" },
@@ -82,11 +101,14 @@ describe("POST /api/sessions/{id}/steer", () => {
     });
   });
 
-  it("通道不可用:503", async () => {
+  it("受理请求没得到答复(可能已入队):202 unknown —— 不是 503,也不让调用方改作新消息", async () => {
     state.offer = async () => {
-      throw new Error("redis down");
+      throw new Error("Redis offer 超过 2000ms 未返回");
     };
-    expect((await post({ runId: "r1", text: "x" })).status).toBe(503);
+    expect(await post({ runId: "r1", id: "client-id-0001", text: "x" })).toMatchObject({
+      status: 202,
+      body: { id: "client-id-0001", outcome: "unknown" },
+    });
   });
 
   it("别的会话的运行:404,且根本不入队", async () => {

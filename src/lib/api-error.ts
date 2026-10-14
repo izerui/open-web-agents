@@ -20,8 +20,7 @@ export type ApiErrorCode =
   /** 运行没有在接受追加消息(还没开始或已收尾),这条没有受理 */
   | "not_accepting"
   /** 追加消息受理了,但运行在交给模型前结束了 */
-  | "dropped"
-  | "steer_unavailable";
+  | "dropped";
 
 export function apiError(
   status: number,
