@@ -90,6 +90,20 @@ npx tsx --tsconfig tsconfig.json scripts/sdk-probe/history-slice.ts   # 生产�
 - **目录名编码**:字母数字以外的每个字符都换成短横线(下划线、空格、中文……),
   且用工作目录的真实路径(符号链接已解析)。曾经只换 `/` 与 `.`。
 
+### 运行中途追加消息(2026-10-14)
+
+```bash
+node scripts/sdk-probe/steer-midturn.mjs     # 工具执行期间追加:插进当前这一轮
+MODE=end-on-first-result node scripts/sdk-probe/steer-late.mjs   # 模型写最终回答时追加:再答一轮
+npx tsx --tsconfig tsconfig.json scripts/sdk-probe/steer-e2e.ts  # 生产引擎 + 真 SDK 的完整验证
+```
+
+- 模型之后还要调工具时,追加的消息在下一次模型请求里以 `The user sent a new message while you were
+  working:` 的形式出现,只有一条 result;transcript 里记为 `attachment.queued_command`。
+- 模型已经在写最终回答时,追加的消息排成新的一轮,出现第二条 result;transcript 里是一条普通用户消息。
+  收到第一条 result 就结束输入,已交出的消息也不会丢。
+- 多条 result 时 `total_cost_usd` 是累计值、`usage` 是单条的。
+
 ## 没有进 CI
 
 单次要拉起真实 SDK 子进程,比整个单测套件还慢。目前定位是**改动权限/围栏

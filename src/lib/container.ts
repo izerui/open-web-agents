@@ -60,6 +60,7 @@ import type { ModelGatewayPort } from "@/lib/modules/model-gateway/ports";
 import { MysqlRunQuery } from "@/lib/modules/run/adapters/mysql-run-query";
 import { MysqlRunRepo } from "@/lib/modules/run/adapters/mysql-run-repo";
 import { RedisCancelSignal } from "@/lib/modules/run/adapters/redis-cancel-signal";
+import { RedisSteerChannel } from "@/lib/modules/run/adapters/redis-steer-channel";
 import { AdmissionRejected, RunAdmission } from "@/lib/modules/run/application/admission";
 import { RunEnqueuer } from "@/lib/modules/run/application/enqueue";
 import {
@@ -68,7 +69,7 @@ import {
   topicOf,
 } from "@/lib/modules/run/application/orchestrator";
 import { RunWorker } from "@/lib/modules/run/application/worker";
-import type { CancelSignal } from "@/lib/modules/run/ports";
+import type { CancelSignal, SteerChannel } from "@/lib/modules/run/ports";
 import { MysqlSessionRepo } from "@/lib/modules/session/adapters/mysql-session-repo";
 import type { SessionRepo } from "@/lib/modules/session/ports";
 import { MysqlUsageRepo } from "@/lib/modules/usage/adapters/mysql-usage-repo";
@@ -118,6 +119,7 @@ export interface Container {
   webhookConsole: WebhookConsole;
   /** 取消通知:取消接口落库后发出,执行中的 worker 立即中止。 */
   cancelSignal: CancelSignal;
+  steerChannel: SteerChannel;
   /** 登录、注册等入口的限流。 */
   rateLimiter: RateLimiter;
   /** 审计日志:谁在什么时候对什么做了什么。操作成功后由路由记录。 */
@@ -328,7 +330,10 @@ function build(): Container {
     requestApproval,
   );
 
+  // 运行中途追加消息:web 进程受理、worker 交给模型,经 Redis 交接(见 run/ports.ts 的 SteerChannel)
+  const steerChannel = new RedisSteerChannel(env.redisUrl);
   const orchestrator = new RunOrchestrator({
+    steerChannel,
     sessions,
     agents,
     engine,
@@ -530,6 +535,7 @@ function build(): Container {
     webhooks,
     webhookConsole,
     cancelSignal,
+    steerChannel,
     rateLimiter,
     bundles: { read: readBundle, write: writeBundle },
     admission: new RunAdmission({

@@ -325,6 +325,8 @@ export function Workbench() {
    * 用户写的东西静默丢失,也不知道为什么没发出去。
    */
   const [queued, setQueued] = useState<{ id: string; text: string; files: FileUIPart[] }[]>([]);
+  /** 追加消息接口答"待定"(202)的那些:之后若在事件流里收到未送达,自动改为排队重发 */
+  const pendingSteerRef = useRef(new Set<string>());
   const [filesKey, setFilesKey] = useState(0);
   const [pickerOpen, setPickerOpen] = useState(false);
   /**
@@ -838,6 +840,12 @@ export function Workbench() {
       const text = message.text.trim() || (message.files.length > 0 ? "请查看附件。" : "");
       if (!text) return;
       if (running) {
+        const runId = activeRunRef.current?.runId;
+        // 纯文本:直接追加进正在跑的这一轮;带附件的(追加只能带文本)或还拿不到 runId 时照旧排队
+        if (message.files.length === 0 && runId && sessionId) {
+          void steerOrQueue(sessionId, runId, text);
+          return;
+        }
         setQueued((q) => [...q, { id: crypto.randomUUID(), text, files: message.files }]);
         toast.message("已排队,本轮结束后发送");
         return;
@@ -856,6 +864,46 @@ export function Workbench() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [running, input],
   );
+
+  /**
+   * 运行中追加一条消息。答复如实处理:
+   *   200 已交给智能体(过程里会出现这条);202 已提交、还没确认(之后在事件流里见分晓);
+   *   其余(这一轮在收尾、已结束、接口不可用)一律改为本轮结束后作为新消息发送 —— 不丢。
+   */
+  async function steerOrQueue(sid: string, runId: string, text: string) {
+    try {
+      const res = await fetch(`/api/sessions/${sid}/steer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runId, text }),
+      });
+      const data = (await res.json().catch(() => null)) as { id?: string } | null;
+      if (res.status === 200) {
+        toast.success("已交给智能体");
+        return;
+      }
+      if (res.status === 202 && data?.id) {
+        pendingSteerRef.current.add(data.id);
+        toast.message("已提交,等待智能体接收");
+        return;
+      }
+    } catch {
+      // 网络错误:同下,改为排队
+    }
+    setQueued((q) => [...q, { id: crypto.randomUUID(), text, files: [] }]);
+    toast.message("这一轮正在收尾,本轮结束后作为新消息发送");
+  }
+
+  // 待定的追加消息最终没送达:改为排队,本轮结束后作为新消息发送
+  useEffect(() => {
+    for (const turn of turns) {
+      for (const e of turn.events) {
+        if (e.kind !== "steer" || e.outcome !== "dropped" || !e.id) continue;
+        if (!pendingSteerRef.current.delete(e.id)) continue;
+        setQueued((q) => [...q, { id: crypto.randomUUID(), text: e.text, files: [] }]);
+      }
+    }
+  }, [turns]);
 
   // 本轮结束、且当前会话可以发送时,发出排在最前的一条
   // biome-ignore lint/correctness/useExhaustiveDependencies: send 每次渲染都是新闭包,只在状态变化时触发
@@ -1429,7 +1477,11 @@ export function Workbench() {
                                 }
                               }}
                               disabled={historyLoading || historyError !== null || !hasAgents}
-                              placeholder={running ? "运行中…" : "说点什么,或输入 /"}
+                              placeholder={
+                                running
+                                  ? "运行中也可以继续补充,会交给正在干活的智能体"
+                                  : "说点什么,或输入 /"
+                              }
                             />
                           </PromptInputBody>
                           <PromptInputFooter>

@@ -852,6 +852,31 @@ const TurnView = memo(function TurnView({
             </div>
           );
         }
+        if (block.kind === "steer") {
+          return (
+            <div
+              // biome-ignore lint/suspicious/noArrayIndexKey: process blocks append in event order
+              key={`steer-${blockIndex}`}
+              className="flex flex-col items-end gap-1 pb-3"
+            >
+              <span className="px-1 text-[0.6875rem] text-muted-foreground">
+                {block.outcome === "delivered"
+                  ? "运行中追加"
+                  : "运行中追加 · 没来得及交给智能体,已改为本轮结束后发送"}
+              </span>
+              <div
+                className={cn(
+                  "max-w-[80%] whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2 text-sm",
+                  block.outcome === "delivered"
+                    ? "bg-message text-foreground"
+                    : "border border-dashed border-border text-muted-foreground",
+                )}
+              >
+                {block.text}
+              </div>
+            </div>
+          );
+        }
         if (block.kind === "tool-result") {
           return (
             <pre

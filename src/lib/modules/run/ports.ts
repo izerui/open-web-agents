@@ -137,3 +137,31 @@ export interface CancelSignal {
   /** 订阅取消通知;返回取消订阅函数。 */
   subscribe(onCancel: (runId: string) => void): () => void;
 }
+
+/**
+ * 运行中途追加消息的通道(web 进程受理 ↔ worker 交给模型)。
+ *
+ * 【受理与关闭检查同一个状态】offer 只在状态为 open 时入队;close 把状态置为 closed 并取走
+ * 队列里剩下的 —— 两者对同一份状态互斥。所以每条被受理的消息,要么被 worker 取走交给模型,
+ * 要么在关闭时被取走(此时模型仍在读输入就交给它,已不读就记为未送达),不会悬在队列里。
+ */
+export interface SteerChannel {
+  /** web:受理一条。不是 open(还没开始 / 已关闭)返回 "closed"。 */
+  offer(runId: string, m: { id: string; text: string }): Promise<"accepted" | "closed">;
+  /** web:等这条的结局,最多 timeoutMs;等不到返回 "pending"。 */
+  awaitOutcome(
+    runId: string,
+    id: string,
+    timeoutMs: number,
+  ): Promise<"delivered" | "dropped" | "pending">;
+  /** worker:开始受理。 */
+  open(runId: string): Promise<void>;
+  /** worker:取走已受理的(不阻塞,没有返回空)。 */
+  take(runId: string): Promise<{ id: string; text: string }[]>;
+  /** worker:停止受理,并取走队列里剩下的。与 offer 互斥。 */
+  close(runId: string): Promise<{ id: string; text: string }[]>;
+  /** worker:记下一条的结局。 */
+  settle(runId: string, id: string, outcome: "delivered" | "dropped"): Promise<void>;
+  /** worker:有新消息受理时通知(尽力而为,可能漏,取用方还要定期 take)。 */
+  onOffer(runId: string, cb: () => void): () => void;
+}

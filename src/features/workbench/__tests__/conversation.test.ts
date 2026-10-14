@@ -255,3 +255,22 @@ describe("contextTokens", () => {
     expect(contextTokens([])).toBe(0);
   });
 });
+
+describe("运行中途追加的消息", () => {
+  it("按交给模型的时刻插在过程里,前后的文本各自成块", () => {
+    const blocks = processBlocks(
+      foldEvents([
+        { kind: "text", text: "先答" },
+        { kind: "steer", id: "m1", text: "顺便看看 B", outcome: "delivered" },
+        { kind: "text", text: "好的,也看 B" },
+        { kind: "steer", id: "m2", text: "晚了", outcome: "dropped" },
+      ]),
+    );
+    expect(blocks).toEqual([
+      { kind: "text", text: "先答" },
+      { kind: "steer", text: "顺便看看 B", outcome: "delivered" },
+      { kind: "text", text: "好的,也看 B" },
+      { kind: "steer", text: "晚了", outcome: "dropped" },
+    ]);
+  });
+});

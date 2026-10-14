@@ -270,4 +270,74 @@ describe("JsonlTranscript.read / 编码规则漂移探针", () => {
       expect(texts(await read({ first: "a2", last: "nope" }))).toEqual(["第二轮回答"]);
     });
   });
+
+  describe("运行中途追加的消息(两种落盘形态,按 scripts/sdk-probe/steer-*.mjs 实测)", () => {
+    const SID2 = "7b1c20d8-ce64-42cf-a12b-d5a866be1f87";
+    const base = { cwd: "/x", sessionId: SID2 };
+    beforeAll(async () => {
+      await writeTranscript(SID2, [
+        { ...base, type: "user", uuid: "p1", message: { content: "本轮提示词" } },
+        {
+          ...base,
+          type: "assistant",
+          uuid: "a1",
+          message: { id: "m1", content: [{ type: "text", text: "先答" }] },
+        },
+        // 插进当前这一轮
+        {
+          ...base,
+          type: "attachment",
+          uuid: "q1",
+          attachment: {
+            type: "queued_command",
+            prompt: "插进来的 sk-ant-api03-SECRETSECRETSECRET",
+            commandMode: "prompt",
+          },
+        },
+        { ...base, type: "user", uuid: "meta", isMeta: true, message: { content: "系统提示" } },
+        {
+          ...base,
+          type: "assistant",
+          uuid: "a2",
+          message: { id: "m2", content: [{ type: "text", text: "接着答" }] },
+        },
+        // 本轮回答之后再答一轮
+        { ...base, type: "user", uuid: "p2", message: { content: "晚到的补充" } },
+        {
+          ...base,
+          type: "assistant",
+          uuid: "a3",
+          message: { id: "m3", content: [{ type: "text", text: "补答" }] },
+        },
+      ]);
+    });
+    const kinds = (es: AgentEvent[]) =>
+      es.map((e) =>
+        e.kind === "steer" ? `steer:${e.text}` : e.kind === "text" ? `text:${e.text}` : e.kind,
+      );
+
+    it("按本轮范围读:两种形态都还原成 steer 事件,位置与发生顺序一致;提示词与系统提示不算", async () => {
+      const es = await transcript.read({
+        dataDir,
+        workspaceDir,
+        sdkSessionId: SID2,
+        range: { first: "a1", last: "a3" },
+      });
+      expect(kinds(es).filter((k) => k.startsWith("steer") || k.startsWith("text"))).toEqual([
+        "text:先答",
+        expect.stringMatching(/^steer:插进来的 /),
+        "text:接着答",
+        "steer:晚到的补充",
+        "text:补答",
+      ]);
+      // 与其余事件一样脱敏
+      expect(JSON.stringify(es)).not.toContain("SECRETSECRET");
+    });
+
+    it("不给范围(旧数据)读整份:普通用户文本不认作追加 —— 那里面有各轮的提示词", async () => {
+      const es = await transcript.read({ dataDir, workspaceDir, sdkSessionId: SID2 });
+      const steers = es.filter((e) => e.kind === "steer");
+      expect(steers).toHaveLength(1); // 只有 queued_command 那一条
+    });
+  });
 });

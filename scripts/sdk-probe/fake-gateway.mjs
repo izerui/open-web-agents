@@ -90,6 +90,7 @@ function streamText(res, text) {
  *
  * @param script 剧本:第 n 次 /v1/messages 请求该回什么。
  *   `{ tool: {id,name,input} }` = 回一次工具调用;`{ text }` = 回文本收尾。
+ *   可选 `delayMs`:延迟这么久才回(模拟模型生成耗时)。
  *   剧本用完后一律回文本收尾,免得 SDK 空转。
  */
 export async function startFakeGateway(script) {
@@ -123,8 +124,11 @@ export async function startFakeGateway(script) {
         "cache-control": "no-cache",
         connection: "keep-alive",
       });
-      if (step?.tool) streamToolUse(res, step.tool);
-      else streamText(res, step?.text ?? "结束。");
+      // delayMs:模拟模型思考的耗时,用来制造"模型还在生成时用户又发了一条"的窗口
+      const reply = () =>
+        step?.tool ? streamToolUse(res, step.tool) : streamText(res, step?.text ?? "结束。");
+      if (step?.delayMs) setTimeout(reply, step.delayMs);
+      else reply();
     });
   });
 

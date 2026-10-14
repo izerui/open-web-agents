@@ -20,7 +20,9 @@ export type ProcessBlock =
     }
   | { kind: "text"; text: string }
   | { kind: "status"; label: string; state?: string }
-  | { kind: "tool-result"; text: string; isError: boolean };
+  | { kind: "tool-result"; text: string; isError: boolean }
+  /** 运行中途追加的消息,按交给模型的时刻出现在过程里 */
+  | { kind: "steer"; text: string; outcome: "delivered" | "dropped" };
 
 export type ScrollMode = "following" | "anchoring" | "free";
 
@@ -126,6 +128,9 @@ export function processBlocks(items: Rendered[]): ProcessBlock[] {
     ) {
       flushActivity();
       blocks.push({ kind: "status", label: item.event.label, state: item.event.state });
+    } else if (item.event.kind === "steer") {
+      flushActivity();
+      blocks.push({ kind: "steer", text: item.event.text, outcome: item.event.outcome });
     } else if (item.event.kind === "tool_result") {
       flushActivity();
       blocks.push({

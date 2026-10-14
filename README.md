@@ -307,6 +307,7 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 | GET/POST        | `/api/sessions/{id}/approvals`             | cookie / key           | 待审列表 / 批准拒绝         |
 | GET/POST        | `/api/sessions/{id}/branch`                | cookie / key           | 运行列表 / 重跑           |
 | POST            | `/api/sessions/{id}/cancel`                | cookie / key           | 取消未完成的运行(见下方延迟说明)   |
+| POST            | `/api/sessions/{id}/steer`                 | cookie / key           | 运行中途追加一条消息(见下方)     |
 | POST            | `/api/agents/{id}/invoke`                  | **key**                | 对外触发,返回 taskId;支持 `Idempotency-Key`、单次 `callbackUrl` |
 | GET             | `/api/agents/{id}/result`                  | **key**                | 轮询结构化结果             |
 | GET             | `/api/agents/{id}/openapi.json`            | cookie / key           | 该智能体的 OpenAPI 3.1 文档(含入参与结果契约) |
@@ -331,6 +332,27 @@ SSE 传输是裸 `data: <AgentEvent JSON>\n\n`。前端用 `fetch + getReader` �
 那条事件若丢失,SSE 与 `stream:false` 阻塞请求会从数据库读到终态收尾,不会一直挂着。
 
 输入(`prompt` / `invoke` 的 `input`)上限 200,000 字符,超出返回 413。
+
+### 运行中途追加消息
+
+工作台与 API 会话的运行在进行中也能继续补充:`POST /api/sessions/{id}/steer`,`{ runId, text }`。
+模型还在干活(之后还会调工具)时,这条会插进当前这一轮;已经在写最终回答时,会在这一轮回答之后
+再答一轮 —— 这一次运行的结局、正文与结构化结果以最后一轮为准,美元取最终累计值,token 按轮累加。
+接口调用(invoke)与嵌入组件是一次性输入,不接受追加。
+
+答复如实反映结局,不会在没确认送达时说成功:
+
+| 状态 | outcome / code | 含义 |
+|---|---|---|
+| 200 | `delivered` | 已交给模型 |
+| 202 | `pending` | 已受理,等待上限(5 秒)内没等到结局;最终结局看事件流里的 `steer` 事件(`delivered` / `dropped`) |
+| 409 | `not_accepting` | 这一轮还没开始或已经收尾,这条**没有受理** —— 请作为新消息发送 |
+| 409 | `dropped` | 受理了,但运行在交给模型前结束了 —— 请作为新消息发送 |
+| 503 | `steer_unavailable` | 追加通道不可用 |
+
+受理与关闭输入检查同一个状态(Redis 里的一段 Lua 各自原子执行):第一条结果到达时关闭输入,
+此前受理的仍会交给模型,此后到达的一律不受理。工作台在运行中发纯文本即走这条路;
+不被受理或最终未送达的,自动改为本轮结束后作为新消息发送。
 
 ### 统一的运行结果
 

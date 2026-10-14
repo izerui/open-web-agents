@@ -11,9 +11,11 @@ import type { AgentConfig } from "@/lib/modules/agent/domain/config";
 import { validateStructured } from "@/lib/modules/agent/domain/validate-output";
 import type { AgentRepo } from "@/lib/modules/agent/ports";
 import type { BusPort } from "@/lib/modules/events/ports";
+import type { SteerChannel } from "@/lib/modules/run/ports";
 import type { SessionRepo } from "@/lib/modules/session/ports";
 import type { AgentEvent, CredentialChain, ModelAlias } from "@/lib/shared";
 import { EventCoalescer } from "./event-coalescer";
+import { ChannelSteerInbox } from "./steer-inbox";
 
 /** 一次运行请求。人用对话与系统 invoke 都收敛成这一个 Command。 */
 export interface RunCommand {
@@ -59,6 +61,8 @@ export interface OrchestratorDeps {
     sdkSessionId: string,
     range?: TranscriptRange,
   ) => Promise<void>;
+  /** 运行中途追加消息的通道;不给则所有运行都是一次性输入。 */
+  steerChannel?: SteerChannel;
   /** 记录本轮实际使用的起跑锚点,供审计。 */
   recordRunAnchor?: (runId: string, anchor: string | null) => Promise<void>;
   /**
@@ -197,10 +201,23 @@ export class RunOrchestrator {
       return { status: "failed", error: { kind: "aborted", message: "运行在启动前已被中止" } };
     }
 
+    // 运行中途追加消息:只给有人在对话的入口(工作台、API 会话)。接口调用与嵌入组件是一次性输入。
+    // 开不了(通道不可用)就不接受追加,运行照常
+    const steer =
+      cmd.runId && this.deps.steerChannel && (session.source === "web" || session.source === "api")
+        ? await ChannelSteerInbox.open(this.deps.steerChannel, cmd.runId)
+        : null;
+
     let result: RunResult;
     try {
-      result = await this.deps.engine.run(spec, ctx, publish, signal);
+      result = await this.deps.engine.run(spec, steer ? { ...ctx, steer } : ctx, publish, signal);
     } finally {
+      // 引擎正常会自己收尾;它中途抛出时这里兜底:还没交出去的追加消息记为未送达
+      if (steer) {
+        for (const m of await steer.abandon()) {
+          publish({ kind: "steer", id: m.id, text: m.text, outcome: "dropped" });
+        }
+      }
       // 最后一段攒着的文本必须冲出去,否则回答会少个尾巴
       coalescer.flush();
     }

@@ -144,6 +144,31 @@ export interface RunContext {
   approvalPolicy?: "ask" | "allow" | "deny";
   credentials: ResolvedCredentials;
   env: Record<string, string>;
+  /** 运行中途追加消息的收件箱;不给 = 这一轮不接受追加(一次性输入)。 */
+  steer?: SteerInbox;
+}
+
+/** 一条追加消息。 */
+export interface SteerMessage {
+  id: string;
+  text: string;
+}
+
+/**
+ * 运行中途追加消息的收件箱(引擎侧看到的样子)。
+ *
+ * 【送达的定义】引擎从 next() 取到一条、交给模型输入流之前调 delivered() —— 之后它要么插进
+ * 当前这一轮,要么在本轮回答后再答一轮。close() 之后不再受理新消息,但已受理的仍会从 next()
+ * 取到;abandon() 是运行结束、模型不再读输入:还没取走的一律记为未送达。
+ */
+export interface SteerInbox {
+  /** 下一条;已关闭且取完返回 null。 */
+  next(): Promise<SteerMessage | null>;
+  delivered(m: SteerMessage): Promise<void>;
+  /** 停止受理(第一条 result 到达时调用)。幂等。 */
+  close(): Promise<void>;
+  /** 运行结束:剩下的记为未送达,并让挂着的 next() 返回 null。幂等。 */
+  abandon(): Promise<SteerMessage[]>;
 }
 
 // ─────────────────────────── 归一事件 ───────────────────────────
@@ -182,6 +207,11 @@ export type AgentEvent =
       }[];
     }
   | { kind: "status"; label: string; state?: string }
+  /**
+   * 运行中途用户追加的消息。delivered = 已交给模型(会插进当前这一轮,或在本轮回答后再答一轮);
+   * dropped = 运行已经结束、没能交给模型 —— 界面据此提示用户重新发送。
+   */
+  | { kind: "steer"; id?: string; text: string; outcome: "delivered" | "dropped" }
   | {
       kind: "usage";
       messageId?: string;
