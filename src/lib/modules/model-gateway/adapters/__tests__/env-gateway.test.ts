@@ -1,4 +1,7 @@
-import { EnvModelGateway } from "@/lib/modules/model-gateway/adapters/env-gateway";
+import {
+  EnvModelGateway,
+  OFFICIAL_MODEL_IDS,
+} from "@/lib/modules/model-gateway/adapters/env-gateway";
 import { describe, expect, it } from "vitest";
 
 describe("EnvModelGateway", () => {
@@ -24,5 +27,16 @@ describe("EnvModelGateway", () => {
 
   it("空串视为未配置,回退 base", () => {
     expect(new EnvModelGateway({ base: "b", opus: "" }).slots().opus).toBe("b");
+  });
+
+  it("什么都没配:各别名用官方模型 id,而不是把别名字面量当 model id 发给网关", () => {
+    expect(new EnvModelGateway({ base: "" }).slots()).toEqual(OFFICIAL_MODEL_IDS);
+    expect(new EnvModelGateway({}).slots().fable).toBe("claude-fable-5-1");
+  });
+
+  it("只配了某个槽:其余槽仍用官方模型 id", () => {
+    const slots = new EnvModelGateway({ opus: "my-opus" }).slots();
+    expect(slots.opus).toBe("my-opus");
+    expect(slots.sonnet).toBe("claude-sonnet-5-5");
   });
 });

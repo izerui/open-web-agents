@@ -27,6 +27,12 @@ export interface NewUser {
 
 export interface UserRepo {
   create(u: NewUser): Promise<User>;
+  /**
+   * 自助注册:"是不是第一个用户"的判定与建号在同一个事务里,并发注册也只有一个成为管理员。
+   * 第一个注册的成为 admin;不是第一个且 allowOthers=false(未开放注册)时不建号,返回 null。
+   * 建号失败(如邮箱已存在)时整体回滚,不会出现"第一个的名额被占了却没有管理员"。
+   */
+  registerSelf(u: Omit<NewUser, "role">, opts: { allowOthers: boolean }): Promise<User | null>;
   findByEmail(email: string): Promise<(User & { passwordHash: string }) | null>;
   get(id: string): Promise<User | null>;
   count(): Promise<number>;

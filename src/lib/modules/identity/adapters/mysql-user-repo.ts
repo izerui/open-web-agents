@@ -62,6 +62,28 @@ export class MysqlUserRepo implements UserRepo {
     return created;
   }
 
+  async registerSelf(
+    u: Omit<NewUser, "role">,
+    opts: { allowOthers: boolean },
+  ): Promise<User | null> {
+    const created = await this.db.transaction(async (tx) => {
+      // 主键唯一:并发的注册里只有一个事务插得进,其余等它提交后得到"已存在"
+      const res = await tx.execute(
+        sql`INSERT IGNORE INTO platform_state (k, v) VALUES ('first_admin', ${u.id})`,
+      );
+      const first = affectedRows(res) === 1;
+      if (!first && !opts.allowOthers) return false;
+      await tx.insert(users).values({
+        id: u.id,
+        email: normalizeEmail(u.email),
+        passwordHash: u.passwordHash,
+        role: first ? "admin" : "user",
+      });
+      return true;
+    });
+    return created ? this.get(u.id) : null;
+  }
+
   async findByEmail(email: string): Promise<(User & { passwordHash: string }) | null> {
     const rows = await this.db
       .select({ ...COLUMNS, passwordHash: users.passwordHash })
@@ -142,4 +164,12 @@ export class MysqlUserRepo implements UserRepo {
     if (Object.keys(patch).length === 0) return;
     await this.db.update(users).set(patch).where(eq(users.id, id));
   }
+}
+
+/** drizzle 的 mysql2 driver 返回 `[ResultSetHeader, FieldPacket[]]`,affectedRows 在 res[0] 上 */
+function affectedRows(res: unknown): number {
+  if (Array.isArray(res)) {
+    return (res[0] as { affectedRows?: number } | undefined)?.affectedRows ?? 0;
+  }
+  return (res as { affectedRows?: number } | null)?.affectedRows ?? 0;
 }

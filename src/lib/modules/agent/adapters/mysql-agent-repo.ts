@@ -18,6 +18,7 @@ interface Row {
   webhookUrl: string | null;
   publishedVersion: number | null;
   publishedHash: string | null;
+  seedHash: string | null;
 }
 
 const COLUMNS = {
@@ -32,6 +33,7 @@ const COLUMNS = {
   webhookUrl: agents.webhookUrl,
   publishedVersion: agents.publishedVersion,
   publishedHash: agents.publishedHash,
+  seedHash: agents.seedHash,
 };
 
 function toAgent(r: Row): Agent {
@@ -45,6 +47,7 @@ function toAgent(r: Row): Agent {
     webhookUrl: r.webhookUrl ?? undefined,
     publishedVersion: r.publishedVersion ?? undefined,
     publishedHash: r.publishedHash ?? undefined,
+    seedHash: r.seedHash ?? undefined,
     // 两个 schema 都单列存储(要按它们做接口契约查询/展示),回填进 config 供上层使用。
     // input_schema 这一列建表时就有,但此前【从没被读写过】—— 一个死列配一句谎话注释。
     config: {
@@ -135,6 +138,10 @@ export class MysqlAgentRepo implements AgentRepo {
     const saved = await this.get(a.id);
     if (!saved) throw new Error(`agent upsert failed: ${a.id}`);
     return saved;
+  }
+
+  async setSeedHash(id: string, hash: string): Promise<void> {
+    await this.db.update(agents).set({ seedHash: hash }).where(eq(agents.id, id));
   }
 
   async softDelete(id: string, at: number): Promise<boolean> {

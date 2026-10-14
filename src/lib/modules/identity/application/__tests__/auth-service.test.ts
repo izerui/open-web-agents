@@ -12,6 +12,15 @@ class InMemoryUserRepo implements UserRepo {
     return this.byId.get(id) ?? null;
   }
   private byId = new Map<string, User & { passwordHash: string }>();
+  /** 第一个管理员的名额(对应 MySQL 的 platform_state.first_admin) */
+  private firstClaimed = false;
+
+  async registerSelf(u: Omit<NewUser, "role">, opts: { allowOthers: boolean }) {
+    const first = !this.firstClaimed;
+    if (!first && !opts.allowOthers) return null;
+    this.firstClaimed = true;
+    return this.create({ ...u, role: first ? "admin" : "user" });
+  }
 
   async create(u: NewUser): Promise<User> {
     const rec = {

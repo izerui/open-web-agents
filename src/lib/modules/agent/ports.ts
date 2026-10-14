@@ -17,6 +17,8 @@ export interface Agent {
   publishedVersion?: number;
   /** 已发布版本的内容摘要,用于判断草稿是否有未发布修改。只读,同上。 */
   publishedHash?: string;
+  /** 内置智能体上次由平台写入定义后的内容摘要(见 builtin-seed.ts)。只读:upsert 不改它。 */
+  seedHash?: string;
 }
 
 /** 发布时冻结下来的内容:名称、说明与完整配置。webhookUrl 属于运维设置,不进版本。 */
@@ -76,6 +78,8 @@ export interface AgentRepo {
   /** 每个所有者名下的智能体数量(管理页统计用,不受列表条数上限影响)。 */
   countByOwner(): Promise<Map<string, number>>;
   upsert(a: Agent): Promise<Agent>;
+  /** 记下内置智能体的种子摘要。 */
+  setSeedHash(id: string, hash: string): Promise<void>;
   /**
    * 软删除:之后 get / list / countByOwner 都当它不存在。返回是否删除了(已删除或不存在为 false)。
    * 行保留,历史会话与运行记录照常显示名称;id 不能被复用(见 idTaken)。

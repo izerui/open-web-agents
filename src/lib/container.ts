@@ -21,8 +21,10 @@ import { readBundle, writeBundle } from "@/lib/modules/agent/adapters/fs-bundle-
 import { MysqlAgentRepo } from "@/lib/modules/agent/adapters/mysql-agent-repo";
 import { MysqlAgentVersionRepo } from "@/lib/modules/agent/adapters/mysql-agent-version-repo";
 import { AgentReleases } from "@/lib/modules/agent/application/releases";
+import { seedBuiltin } from "@/lib/modules/agent/application/seed-builtin";
 import { ARCHITECT_AGENT_ID, ARCHITECT_CONFIG } from "@/lib/modules/agent/domain/architect";
 import { validateInput } from "@/lib/modules/agent/domain/validate-output";
+import type { Agent } from "@/lib/modules/agent/ports";
 import type { AgentRepo } from "@/lib/modules/agent/ports";
 import { RedisApproval } from "@/lib/modules/approval/adapters/redis-approval";
 import { requestApproval as requestApprovalWithGrants } from "@/lib/modules/approval/application/request-approval";
@@ -187,41 +189,43 @@ function build(): Container {
   const sessions = new MysqlSessionRepo(db);
   const agents = new MysqlAgentRepo(db);
   const releases = new AgentReleases(agents, new MysqlAgentVersionRepo(db));
-  // 首次启动播种内置智能体,保证开箱可用;已存在则覆盖为最新定义。
-  // 它归 system 所有,故必须同时授予公开 read —— 否则新注册用户在列表里看不到它。
-  void agents
-    .upsert(DEFAULT_AGENT)
-    .then(() =>
-      grants.grant({
-        id: "grant-default-public",
-        resourceType: "agent",
-        resourceId: DEFAULT_AGENT.id,
-        principalType: "*",
-        principalId: PUBLIC_PRINCIPAL,
-        permission: "read",
-      }),
-    )
-    .catch(() => {});
+  // 内置智能体:首次写入定义;之后没人改过就升级到代码里的新定义,有人改过就保留(见 seed-builtin.ts)。
+  // 它们归 system 所有,首次写入时授予公开只读 —— 否则新注册用户在列表里看不到
+  const seedPublic = (definition: Agent, grantId: string) =>
+    seedBuiltin(
+      {
+        agents,
+        grantPublicRead: () =>
+          grants
+            .grant({
+              id: grantId,
+              resourceType: "agent",
+              resourceId: definition.id,
+              principalType: "*",
+              principalId: PUBLIC_PRINCIPAL,
+              permission: "read",
+            })
+            .then(() => {}),
+      },
+      definition,
+    ).catch((err) =>
+      console.warn(
+        `[owa] 写入内置智能体 ${definition.id} 失败:`,
+        err instanceof Error ? err.message : err,
+      ),
+    );
+  void seedPublic(DEFAULT_AGENT, "grant-default-public");
   // 内置"AI 智能体设计师":所有人可用,通过对话设计其它智能体(见 agent/domain/architect.ts)
-  void agents
-    .upsert({
+  void seedPublic(
+    {
       id: ARCHITECT_AGENT_ID,
       ownerId: "system",
       name: "AI 智能体设计师",
       description: "通过对话设计、完善你的智能体:提示词、技能、MCP、契约",
       config: ARCHITECT_CONFIG,
-    })
-    .then(() =>
-      grants.grant({
-        id: "grant-architect-public",
-        resourceType: "agent",
-        resourceId: ARCHITECT_AGENT_ID,
-        principalType: "*",
-        principalId: PUBLIC_PRINCIPAL,
-        permission: "read",
-      }),
-    )
-    .catch(() => {});
+    },
+    "grant-architect-public",
+  );
   const bus = new RedisBus(env.redisUrl);
   const runs = new MysqlRunRepo(db);
   const storage = new LocalFsStorage();

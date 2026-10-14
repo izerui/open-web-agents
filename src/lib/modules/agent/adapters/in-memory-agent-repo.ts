@@ -42,9 +42,15 @@ export class InMemoryAgentRepo implements AgentRepo {
       ...structuredClone(a),
       publishedVersion: prev?.publishedVersion,
       publishedHash: prev?.publishedHash,
+      seedHash: prev?.seedHash,
     };
     this.items.set(a.id, next);
     return structuredClone(next);
+  }
+
+  async setSeedHash(id: string, hash: string): Promise<void> {
+    const a = this.items.get(id);
+    if (a) a.seedHash = hash;
   }
 
   /** 仅供内存版本仓储调用。 */

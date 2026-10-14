@@ -21,6 +21,9 @@ export function aliasEnv(creds: ResolvedCredentials, slots: ModelSlots): Record<
     ANTHROPIC_BASE_URL: creds.baseUrl,
     ANTHROPIC_API_KEY: creds.key,
     ANTHROPIC_AUTH_TOKEN: "",
+    // 四个别名槽都要给。漏了哪个,选它的智能体就会用 SDK 内置的默认模型
+    // (scripts/sdk-probe/model-alias.mjs 实测:fable 未固定时发给网关的是 claude-opus-5-5)
+    ANTHROPIC_DEFAULT_FABLE_MODEL: slots.fable,
     ANTHROPIC_DEFAULT_OPUS_MODEL: slots.opus,
     ANTHROPIC_DEFAULT_SONNET_MODEL: slots.sonnet,
     ANTHROPIC_DEFAULT_HAIKU_MODEL: slots.haiku,

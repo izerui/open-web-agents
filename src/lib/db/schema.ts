@@ -66,6 +66,11 @@ export const agents = mysqlTable(
     /** 已发布版本的内容摘要,用来判断"草稿有没有未发布的修改",免得每次都去读快照 */
     publishedHash: varchar("published_hash", { length: 64 }),
     /**
+     * 内置智能体:上次由平台写入定义后的内容摘要。当前内容与它一致 = 没被人改过,
+     * 启动时可以升级到代码里的新定义;不一致 = 管理员改过,保留不动。普通智能体为空。
+     */
+    seedHash: varchar("seed_hash", { length: 64 }),
+    /**
      * 软删除时刻(ms);非空即"已删除":列表、调用、嵌入、分享、继续对话都当它不存在。
      * 行保留 —— 历史会话、运行记录(按 JOIN 显示名称)、审计、版本都还要引用它。
      * id 也因此不能被新智能体复用。
@@ -424,3 +429,15 @@ export const webhookDeliveries = mysqlTable(
     byRun: index("idx_webhook_deliveries_run").on(t.runId),
   }),
 );
+
+/**
+ * 平台级的一次性状态。目前只有 first_admin:第一个自助注册的用户成为管理员。
+ *
+ * 【为什么要一张表】曾经是"先数用户数、为 0 就建管理员",两人同时注册都会成为管理员。
+ * 现在注册事务里先插入这一行(主键唯一,只有一个事务插得进),插进去的才是第一个。
+ */
+export const platformState = mysqlTable("platform_state", {
+  k: varchar("k", { length: 64 }).primaryKey(),
+  v: varchar("v", { length: 255 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});

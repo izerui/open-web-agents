@@ -43,6 +43,8 @@ describe("aliasEnv", () => {
     expect(env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe("m-opus");
     expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe("m-sonnet");
     expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("m-haiku");
+    // 曾经漏了 fable:智能体选 fable 时 SDK 用的是它内置的默认模型,OWA_MODEL_FABLE 不生效
+    expect(env.ANTHROPIC_DEFAULT_FABLE_MODEL).toBe("m-fable");
   });
 
   it("小快模型槽复用 haiku", () => {

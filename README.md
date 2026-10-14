@@ -26,7 +26,8 @@ pnpm db:migrate                   # 建表
 pnpm dev                          # http://localhost:5678
 ```
 
-首次打开会引导注册 —— **第一个注册的用户自动成为 admin**,自托管无需额外的初始化脚本。
+首次打开会引导注册 —— **第一个注册的用户自动成为 admin**(并发注册也只有一个),自托管无需额外的初始化脚本。
+内置智能体(通用助手、AI 智能体设计师)可以由管理员修改;改过的不会被平台升级覆盖,没改过的随版本自动升级。
 
 ### 一分钟体验闭环
 
@@ -172,7 +173,7 @@ const bus = new RedisBus(env.redisUrl); // 曾是 InMemoryBus
 | `OWA_REDIS_URL`                                     | Redis 连接串                                  |
 | `OWA_DATA_DIR`                                      | 会话工作空间根目录(**会被解析成绝对路径**)                   |
 | `OWA_ANTHROPIC_BASE_URL` / `_API_KEY`               | 平台默认凭证(三级链兜底)                              |
-| `OWA_MODEL` 与 `OWA_MODEL_{OPUS,SONNET,HAIKU,FABLE}` | 别名槽 → 真实 modelId                           |
+| `OWA_MODEL` 与 `OWA_MODEL_{OPUS,SONNET,HAIKU,FABLE}` | 别名槽 → 真实 modelId。优先级:单独配置的槽 > `OWA_MODEL` > 各别名的官方模型 id;都不填即用官方模型。`/api/health` 显示每个别名实际用哪个模型 |
 | `OWA_SESSION_SECRET`                                | 登录会话签名。**生产未设置会拒绝启动**                      |
 | `OWA_SECRET_KEY`                                    | 用户凭证加密主密钥。**生产未设置会拒绝启动**                   |
 | `OWA_AUTH_REQUIRED`                                 | 是否要求登录,默认 1;仅本地开发可设 0                      |

@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { getContainer } from "@/lib/container";
+import { EnvModelGateway } from "@/lib/modules/model-gateway/adapters/env-gateway";
 import { sql } from "drizzle-orm";
 
 const execFileAsync = promisify(execFile);
@@ -135,7 +136,8 @@ export async function GET(req: Request) {
         authRequired: env.authRequired,
         sandbox: env.sandbox,
         allowStdioMcp: env.allowStdioMcp,
-        model: env.models.base,
+        // 每个别名实际用哪个模型 —— 只看 OWA_MODEL 看不出单独配置的槽与官方默认
+        models: new EnvModelGateway(env.models).slots(),
       },
     },
     // 未就绪返回 503,编排系统据此把流量摘走

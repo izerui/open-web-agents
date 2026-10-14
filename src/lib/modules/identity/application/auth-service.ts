@@ -58,23 +58,28 @@ function generateTempPassword(): string {
 export class AuthService {
   constructor(private readonly deps: AuthServiceDeps) {}
 
-  /** 首个注册的用户自动成为 admin —— 自托管部署无需额外的初始化脚本。 */
+  /**
+   * 首个注册的用户自动成为 admin —— 自托管部署无需额外的初始化脚本。
+   * 并发注册也只有一个成为 admin(判定与建号同一个事务,见 UserRepo.registerSelf)。
+   */
   async register(email: string, password: string): Promise<{ user: User; cookie: string }> {
     const e = assertEmail(email);
     assertPassword(password);
 
-    const isFirst = (await this.deps.users.count()) === 0;
-    if (!isFirst && this.deps.allowSignup === false) {
-      throw new AuthError("当前平台未开放注册,请联系管理员开通账号", 403);
-    }
+    const closed = () => new AuthError("当前平台未开放注册,请联系管理员开通账号", 403);
+    // 提前给出明确答复;真正的判定在 registerSelf 的事务里(并发注册时这里的计数不可信)
+    if (this.deps.allowSignup === false && (await this.deps.users.count()) > 0) throw closed();
     if (await this.deps.users.findByEmail(e)) throw new AuthError("该邮箱已注册", 409);
 
-    const user = await this.deps.users.create({
-      id: randomUUID().replace(/-/g, "").slice(0, 24),
-      email: e,
-      passwordHash: await hashPassword(password),
-      role: isFirst ? "admin" : "user",
-    });
+    const user = await this.deps.users.registerSelf(
+      {
+        id: randomUUID().replace(/-/g, "").slice(0, 24),
+        email: e,
+        passwordHash: await hashPassword(password),
+      },
+      { allowOthers: this.deps.allowSignup !== false },
+    );
+    if (!user) throw closed();
     return { user, cookie: this.cookieFor(user.id) };
   }
 
