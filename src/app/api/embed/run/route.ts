@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
  * 所以拿到令牌也换不到别人的会话。
  */
 export async function POST(req: Request) {
-  const { runResults, bus, enqueuer, embedSecret, auth, admission } = getContainer();
+  const { runs, bus, enqueuer, embedSecret, auth, admission } = getContainer();
 
   const token = extractEmbedToken(req.headers);
   const claims = token ? verifyEmbedToken(embedSecret, token) : null;
@@ -56,7 +56,7 @@ export async function POST(req: Request) {
   const runId = randomUUID().replace(/-/g, "").slice(0, 24);
   return streamRun(req, {
     bus,
-    results: runResults,
+    results: runs,
     sessionId,
     runId,
     enqueue: () => enqueuer.enqueue({ runId, sessionId, prompt }),

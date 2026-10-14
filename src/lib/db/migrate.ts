@@ -4,8 +4,7 @@ import { migrate } from "drizzle-orm/mysql2/migrator";
 import { createDb } from "./client";
 
 export async function runMigrations(databaseUrl: string): Promise<void> {
-  // 迁移里的 DDL 可能很久:不限单条命令时长(握手期限照常)
-  const { db, pool } = createDb(databaseUrl, { commandMs: null });
+  const { db, pool } = createDb(databaseUrl);
   try {
     await migrate(db, { migrationsFolder: "./drizzle" });
   } finally {

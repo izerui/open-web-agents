@@ -65,7 +65,6 @@ import { ChunkCache } from "@/lib/modules/knowledge/application/chunk-cache";
 import { formatContext, retrieve } from "@/lib/modules/knowledge/domain/retrieval";
 import { EnvModelGateway } from "@/lib/modules/model-gateway/adapters/env-gateway";
 import type { ModelGatewayPort } from "@/lib/modules/model-gateway/ports";
-import { BoundedResultReader } from "@/lib/modules/run/adapters/bounded-result-reader";
 import { MysqlRunQuery } from "@/lib/modules/run/adapters/mysql-run-query";
 import { MysqlRunRepo } from "@/lib/modules/run/adapters/mysql-run-repo";
 import { RedisCancelSignal } from "@/lib/modules/run/adapters/redis-cancel-signal";
@@ -94,7 +93,7 @@ export interface Container {
    */
   embedSecret: string;
   db: Db;
-  /** 健康检查的数据库探测(命令期限 2 秒、单一在途,见 databaseProbe) */
+  /** 健康检查的数据库探测(单一在途,等待上限由路由处理) */
   probeDatabase: () => Promise<void>;
   sessions: SessionRepo;
   agents: AgentRepo;
@@ -116,8 +115,6 @@ export interface Container {
   authService: AuthService;
   auth: Authorizer;
   runs: MysqlRunRepo;
-  /** 有时限的运行结果读取:终态兜底与阻塞模式补读用(超时即断开那条连接,见 bounded-result-reader.ts) */
-  runResults: BoundedResultReader;
   /** 运行记录查询(读模型)。 */
   runQuery: MysqlRunQuery;
   usage: MysqlUsageRepo;
@@ -191,9 +188,8 @@ function inheritedEnv(): Record<string, string> {
 
 function build(): Container {
   const env = loadEnv();
-  const { db, pool } = createDb(env.databaseUrl);
-  // 健康检查的数据库探测:命令期限 2 秒、同一时刻只有一个在途 —— 主池占满时频繁的探测也不会在池里积压
-  const probeDatabase = databaseProbe(pool);
+  const { db } = createDb(env.databaseUrl);
+  const probeDatabase = databaseProbe(db);
 
   const gateway = new EnvModelGateway({
     base: env.models.base,
@@ -241,13 +237,6 @@ function build(): Container {
   );
   const bus = new RedisBus(env.redisUrl);
   const runs = new MysqlRunRepo(db);
-  // 独立于主连接池、自己管连接:主池被别处卡住的查询占满时,终态兜底仍能读到库里的结果;
-  // 排队、建连握手、查询共用一个期限,到期即断开所用的连接(见 bounded-result-reader.ts)
-  const runResults = new BoundedResultReader({
-    databaseUrl: env.databaseUrl,
-    maxConnections: 4,
-    timeoutMs: 2_000,
-  });
   const storage = new LocalFsStorage();
   const transcript = new JsonlTranscript();
   const approval = new RedisApproval(env.redisUrl);
@@ -522,7 +511,6 @@ function build(): Container {
     authService,
     auth,
     runs,
-    runResults,
     runQuery: new MysqlRunQuery(db),
     usage,
     knowledge,

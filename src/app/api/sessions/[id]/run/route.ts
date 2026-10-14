@@ -32,7 +32,7 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { runResults, bus, sessions, auth, enqueuer, admission, storage } = getContainer();
+  const { runs, bus, sessions, auth, enqueuer, admission, storage } = getContainer();
 
   let principal: Principal;
   try {
@@ -83,7 +83,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     runId,
     prompt,
     enqueue: (r) => enqueuer.enqueue(r),
-    results: runResults,
+    results: runs,
     bus,
     // 查会话也在清单的等待上限之内:数据库不返回时阻塞响应不能被它挂住
     files: () =>
@@ -240,8 +240,7 @@ const RESULT_READ_TIMEOUT_MS = 2_000;
 
 /**
  * 有等待上限的补读:失败或超时返回 null,由调用方用事件兜底。
- * 这里的上限只管响应等多久;底层查询由结果读取源自己限时 —— 超时即断开那条连接,
- * 不会一直占着连接(见 bounded-result-reader.ts)。
+ * 【超时只是不再等】底层查询没有取消,之后仍可能返回(结果被丢弃)或一直占着连接直到驱动报错。
  */
 async function readRecordBounded(
   results: RunRouteContext["results"],
@@ -254,7 +253,7 @@ async function readRecordBounded(
       new Promise<null>((resolve) => {
         timer = setTimeout(() => {
           console.warn(
-            `[owa][run] 补读运行结果超过 ${RESULT_READ_TIMEOUT_MS}ms 未返回,改用事件拼装响应(run=${runId})`,
+            `[owa][run] 补读运行结果超过 ${RESULT_READ_TIMEOUT_MS}ms 未返回,改用事件拼装响应(run=${runId};底层查询未取消)`,
           );
           resolve(null);
         }, RESULT_READ_TIMEOUT_MS);

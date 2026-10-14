@@ -1,70 +1,29 @@
 import { sql } from "drizzle-orm";
 import { type MySql2Database, drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
-import { GuardedPool, handshakeGuard } from "./guarded-pool";
 import * as schema from "./schema";
 import { singleFlight } from "./single-flight";
 
 export type Db = MySql2Database<typeof schema>;
 
-/** 连接选项:连接池与单独建立的连接(见 bounded-result-reader)共用 */
-export function connectionOptions(databaseUrl: string) {
-  return {
+/** 建连接池。调用方(container / 测试)负责生命周期。 */
+export function createDb(databaseUrl: string): { db: Db; pool: mysql.Pool } {
+  const pool = mysql.createPool({
     uri: databaseUrl,
+    connectionLimit: 10,
     // 队列认领要比较 bigint 时间戳,按字符串取回会引入隐式转换
     supportBigNumbers: true,
     bigNumberStrings: false,
-  };
-}
-
-export interface CreateDbOptions {
-  connectionLimit?: number;
-  /** 建连握手的期限(含问候之后的认证),默认 10 秒 */
-  handshakeMs?: number;
-  /**
-   * 单条命令执行中的期限,默认 60 秒;null = 不限(迁移的 DDL 可能很久)。
-   * 【要长于 MySQL 的等锁上限】等行锁(FOR UPDATE)期间命令同样"在执行",客户端分不清它与网络卡死;
-   * 服务器自己会在 innodb_lock_wait_timeout(默认 50 秒)到点报错。期限比它长,正常的等锁仍由
-   * MySQL 按原样报错,只有连错误都送不过来的真卡死才由这里断开。
-   */
-  commandMs?: number | null;
+  });
+  return { db: drizzle(pool, { schema, mode: "default" }), pool };
 }
 
 /**
- * 建连接池。调用方(container / 测试)负责生命周期。
- * 数据库卡死时,卡住的握手与执行中的命令到期会被断开、连接池自己恢复(见 guarded-pool.ts)。
+ * 健康检查共用一次在途查询。路由的等待超时不会取消底层查询,
+ * 只有查询真正结束后才发起下一次,避免反复探测积压请求。
  */
-export function createDb(
-  databaseUrl: string,
-  opts: CreateDbOptions = {},
-): { db: Db; pool: GuardedPool } {
-  const handshake = handshakeGuard(opts.handshakeMs ?? 10_000);
-  const raw = mysql.createPool({
-    ...connectionOptions(databaseUrl),
-    connectionLimit: opts.connectionLimit ?? 10,
-    stream: handshake.stream,
-  } as mysql.PoolOptions);
-  handshake.attach(raw);
-  const pool = new GuardedPool(raw, opts.commandMs === undefined ? 60_000 : opts.commandMs);
-  return { db: dbOver(pool), pool };
-}
-
-/** 同一个受保护连接池上的 drizzle 实例(如健康检查用更短命令期限的视图) */
-export function dbOver(pool: GuardedPool): Db {
-  // drizzle 只用到连接池的 query / execute / getConnection(见 guarded-pool.ts)
-  return drizzle(pool as unknown as mysql.Pool, { schema, mode: "default" });
-}
-
-/**
- * 健康检查的数据库探测:同一个连接池上命令期限 2 秒的 SELECT 1,且同一时刻只有一个在途。
- *
- * 命令期限要拿到连接才开始计时;主池被占满时(比如连接都停在事务里的文件操作空档 —— 这些不能强杀),
- * 获取连接会一直排队,探测方的超时又撤不掉这个排队。若每次探测都各自发起,频繁的健康检查会在池里
- * 排出一长串等待。所以在途的那一次真正结束(拿到连接并查完,或失败)之前,后来的探测都等它。
- */
-export function databaseProbe(pool: GuardedPool, commandMs = 2_000): () => Promise<void> {
-  const view = dbOver(pool.withCommandTimeout(commandMs));
-  return singleFlight(() => view.execute(sql`SELECT 1`).then(() => undefined));
+export function databaseProbe(db: Db): () => Promise<void> {
+  return singleFlight(() => db.execute(sql`SELECT 1`).then(() => undefined));
 }
 
 export { schema };
