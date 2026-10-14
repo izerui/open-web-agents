@@ -128,3 +128,16 @@ const RETRY_DELAYS_MS = [30_000, 2 * 60_000, 10 * 60_000, 30 * 60_000, 2 * 60 * 
 export function nextWebhookDelay(attemptsSoFar: number): number | null {
   return RETRY_DELAYS_MS[attemptsSoFar - 1] ?? null;
 }
+
+/**
+ * 投递记录里存的地址:只留协议 + 主机 + 端口 + 路径。
+ * 查询串与用户信息常带着接收方的令牌(?token=…),投递记录的可见范围比回调配置本身宽,不落库。
+ */
+export function redactWebhookUrl(raw: string): string {
+  try {
+    const u = new URL(raw);
+    return `${u.protocol}//${u.host}${u.pathname}`.slice(0, 512);
+  } catch {
+    return "(无效地址)";
+  }
+}

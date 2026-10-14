@@ -368,6 +368,18 @@ X-OWA-Signature: v1=<hex(HMAC-SHA256(密钥, "<timestamp>.<原始请求体>"))>
 
 这些是实测撞出来的,不是猜测。
 
+
+**投递记录、测试与重发**(接入中心,仅智能体所有者与管理员):每次投递记一行(第几次、对方状态码、
+错误、耗时、是否签名),回调地址只存协议 + 主机 + 路径(查询串常带令牌,不落库)。
+"发送测试"向当前地址发 `event: "webhook.test"`,签名与正式回调相同,同步返回结果。
+"重发"把某次运行的回调放回发件箱按正常流程发出,只对接口调用与 API 会话的运行开放,
+还在投递中的不重复入队。记录写入尽力而为、有 2 秒等待上限:写不进去不影响投递结果与接口返回
+(超时只是不再等,底层写入未取消)。
+
+| GET  | `/api/agents/{id}/webhook/deliveries` | cookie(所有者) | 投递记录 |
+| POST | `/api/agents/{id}/webhook/test`       | cookie(所有者) | 测试投递 |
+| POST | `/api/runs/{id}/webhook/redeliver`    | cookie(所有者) | 手动重发 |
+
 ### macOS 本地开发必须关沙箱
 
 macOS 的 seatbelt 沙箱会**吞掉沙箱内 Bash 的 stdout** —— agent 跑什么命令都拿不到输出。

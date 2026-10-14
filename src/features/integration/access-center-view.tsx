@@ -15,6 +15,7 @@ import { NativeSelect as Select } from "@/components/ui/native-select";
 import { Separator } from "@/components/ui/separator";
 import { InvokeSnippetTabs } from "@/features/integration/invoke-snippet";
 import { KeyRateLimit, type PlatformRateLimits } from "@/features/integration/key-rate-limit";
+import { WebhookDeliveries } from "@/features/integration/webhook-deliveries";
 import { WebhookSecretCard } from "@/features/integration/webhook-secret-card";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 
@@ -333,6 +334,9 @@ export function AccessCenterView() {
                   inputSchema={contract?.inputSchema}
                   hasOutputSchema={Boolean(contract?.outputSchema)}
                 />
+                {docAgent.canManageWebhook && (
+                  <WebhookDeliveries agentId={docAgent.id} webhookUrl={docAgent.webhookUrl} />
+                )}
                 <p className="text-xs text-muted-foreground">
                   结果回调:
                   {docAgent.canManageWebhook ? (

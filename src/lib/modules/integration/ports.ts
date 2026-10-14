@@ -17,4 +17,35 @@ export interface WebhookOutbox {
     state: "delivered" | "failed" | "skipped" | "pending",
     nextAt?: number,
   ): Promise<void>;
+  /**
+   * 手动重发:把一条已经结束的投递(delivered / failed / skipped)放回发件箱,立即可投,
+   * 尝试次数清零(退避表重新开始)。还在待投 / 投递中的返回 false,不重复入队。
+   */
+  requeueWebhook(runId: string, now: number): Promise<boolean>;
+}
+
+/** 一次回调投递的记录(见 schema.webhookDeliveries)。 */
+export interface WebhookDelivery {
+  id: string;
+  agentId: string;
+  runId?: string;
+  trigger: "auto" | "test";
+  attempt?: number;
+  /** 已脱敏:只有协议、主机、路径 */
+  url: string;
+  httpStatus?: number;
+  ok: boolean;
+  error?: string;
+  durationMs: number;
+  signed: boolean;
+  at: number;
+}
+
+export interface WebhookDeliveryLog {
+  record(d: WebhookDelivery): Promise<void>;
+  /** 按时间倒序,键集分页 */
+  listByAgent(
+    agentId: string,
+    q: { cursor?: string; limit?: number },
+  ): Promise<{ items: WebhookDelivery[]; nextCursor?: string }>;
 }

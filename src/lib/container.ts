@@ -46,7 +46,9 @@ import { SecretBox } from "@/lib/modules/identity/domain/secret-box";
 import type { ApiKeyRepo } from "@/lib/modules/identity/ports";
 import type { UserRepo } from "@/lib/modules/identity/user-ports";
 import { createGuardedSender } from "@/lib/modules/integration/adapters/guarded-http-sender";
+import { MysqlWebhookDeliveryLog } from "@/lib/modules/integration/adapters/mysql-webhook-delivery-log";
 import { deliverWebhook } from "@/lib/modules/integration/application/webhook";
+import { WebhookConsole } from "@/lib/modules/integration/application/webhook-console";
 import { WebhookDispatcher } from "@/lib/modules/integration/application/webhook-dispatcher";
 import { isAddressAllowed } from "@/lib/modules/integration/domain/webhook-policy";
 import { MysqlKnowledgeRepo } from "@/lib/modules/knowledge/adapters/mysql-knowledge-repo";
@@ -111,6 +113,8 @@ export interface Container {
   worker: RunWorker;
   /** 回调发件箱投递器。与 worker 同进程启动。 */
   webhooks: WebhookDispatcher;
+  /** 投递记录、测试投递、手动重发。 */
+  webhookConsole: WebhookConsole;
   /** 取消通知:取消接口落库后发出,执行中的 worker 立即中止。 */
   cancelSignal: CancelSignal;
   /** 登录、注册等入口的限流。 */
@@ -410,6 +414,17 @@ function build(): Container {
   const webhookSender = createGuardedSender({
     allowAddress: (ip) => isAddressAllowed(ip, env.webhookAllowPrivate),
   });
+  /** 智能体当前的回调目标:地址 + 所有者的签名密钥。配置了密钥却解不开就抛错 —— 不能退化成不签名照发。 */
+  const webhookTargetOf = async (agentId: string) => {
+    const agent = await agents.get(agentId);
+    if (!agent?.webhookUrl) return null;
+    const owner = await users.get(agent.ownerId);
+    if (!owner?.webhookSecretEnc) return { agentId, url: agent.webhookUrl };
+    const secret = secrets.decrypt(owner.webhookSecretEnc);
+    if (secret === null) throw new Error(`webhook 签名密钥无法解密(user=${agent.ownerId})`);
+    return { agentId, url: agent.webhookUrl, secret };
+  };
+  const webhookLog = new MysqlWebhookDeliveryLog(db);
   const webhooks = new WebhookDispatcher({
     outbox: runs,
     loadTarget: async (sessionId) => {
@@ -418,14 +433,7 @@ function build(): Container {
       // 曾经对每个运行都推 —— 被分享者在工作台里的对话、访客在嵌入组件里的对话,
       // 最终回答都会被推到智能体所有者的地址上
       if (!session || (session.source !== "invoke" && session.source !== "api")) return null;
-      const agent = await agents.get(session.agentId);
-      if (!agent?.webhookUrl) return null;
-      // 用智能体所有者的签名密钥。配置了却解不开就抛错 —— 不能退化成不签名照发
-      const owner = await users.get(agent.ownerId);
-      if (!owner?.webhookSecretEnc) return { url: agent.webhookUrl };
-      const secret = secrets.decrypt(owner.webhookSecretEnc);
-      if (secret === null) throw new Error(`webhook 签名密钥无法解密(user=${agent.ownerId})`);
-      return { url: agent.webhookUrl, secret };
+      return webhookTargetOf(session.agentId);
     },
     loadPayload: async (runId, sessionId) => {
       const r = await runs.getResult(runId);
@@ -447,6 +455,15 @@ function build(): Container {
     },
     deliver: (url, payload, secret) =>
       deliverWebhook(url, payload, { secret, maxAttempts: 2, send: webhookSender }),
+    recordDelivery: (d) => webhookLog.record(d),
+  });
+  const webhookConsole = new WebhookConsole({
+    targetOfAgent: webhookTargetOf,
+    // 测试投递不做即时重试:一次的结果就是集成方要看的
+    deliver: (url, payload, secret) =>
+      deliverWebhook(url, payload, { secret, maxAttempts: 1, send: webhookSender }),
+    log: webhookLog,
+    outbox: runs,
   });
 
   if (process.env.OWA_EMBEDDED_WORKER !== "0") {
@@ -508,6 +525,7 @@ function build(): Container {
     enqueuer,
     worker,
     webhooks,
+    webhookConsole,
     cancelSignal,
     rateLimiter,
     bundles: { read: readBundle, write: writeBundle },

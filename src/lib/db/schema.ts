@@ -379,3 +379,34 @@ export const auditLogs = mysqlTable(
     byTime: index("idx_audit_time").on(t.atMs),
   }),
 );
+
+/**
+ * Webhook 投递记录:每次真正发出(或被拦下)的回调一行,供集成方排查对接问题。
+ * url 只存协议 + 主机 + 路径 —— 查询串与用户信息常带着接收方的令牌,不落库。
+ * agent_id 决定谁能看:智能体所有者与管理员(与"谁能设回调地址"一致)。
+ */
+export const webhookDeliveries = mysqlTable(
+  "webhook_deliveries",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    agentId: varchar("agent_id", { length: 36 }).notNull(),
+    /** 测试投递为空 */
+    runId: varchar("run_id", { length: 36 }),
+    /** auto = 发件箱自动投递(含手动重发后的那次);test = 测试投递 */
+    trigger: varchar("trigger", { length: 16 }).notNull(),
+    /** 发件箱第几次认领(测试投递为空) */
+    attempt: int("attempt"),
+    url: varchar("url", { length: 512 }).notNull(),
+    /** 对方返回的 HTTP 状态;没收到响应(网络错误、被拦)为空 */
+    httpStatus: int("http_status"),
+    ok: int("ok").notNull(),
+    error: varchar("error", { length: 512 }),
+    durationMs: int("duration_ms").notNull(),
+    signed: int("signed").notNull(),
+    atMs: bigint("at_ms", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    byAgent: index("idx_webhook_deliveries_agent").on(t.agentId, t.atMs),
+    byRun: index("idx_webhook_deliveries_run").on(t.runId),
+  }),
+);

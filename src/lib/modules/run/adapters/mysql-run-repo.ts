@@ -401,6 +401,16 @@ export class MysqlRunRepo implements RunRepo {
       .where(eq(runs.id, runId));
   }
 
+  async requeueWebhook(runId: string, now: number): Promise<boolean> {
+    const res = await this.db
+      .update(runs)
+      .set({ webhookState: "pending", webhookNextAt: now, webhookAttempts: 0 })
+      .where(
+        and(eq(runs.id, runId), inArray(runs.webhookState, ["delivered", "failed", "skipped"])),
+      );
+    return affectedRows(res) > 0;
+  }
+
   /**
    * 取这一轮该用的 resume 锚点。
    * 返回 { anchored: true } 表示该运行有自己的锚点意图(含"首轮从零开始"),

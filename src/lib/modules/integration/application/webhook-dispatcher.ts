@@ -3,13 +3,18 @@
 // 投递是【至少一次】:投递成功但标记 delivered 之前进程崩了,租约过期后会再发一次。
 // 接收方按 X-OWA-Delivery(= taskId)去重。
 
+import { randomUUID } from "node:crypto";
+import { recordBestEffort } from "@/lib/modules/integration/application/best-effort";
 import type { WebhookPayload, WebhookResult } from "@/lib/modules/integration/application/webhook";
 import { WebhookTargetRejected } from "@/lib/modules/integration/application/webhook";
 import { nextWebhookDelay } from "@/lib/modules/integration/domain/webhook-policy";
-import type { WebhookOutbox } from "@/lib/modules/integration/ports";
+import { redactWebhookUrl } from "@/lib/modules/integration/domain/webhook-policy";
+import type { WebhookDelivery, WebhookOutbox } from "@/lib/modules/integration/ports";
 
 /** 投递目标。null = 该智能体没配回调,标 skipped。 */
 export interface WebhookTarget {
+  /** 投递记录按它归属(所有者与管理员可见) */
+  agentId: string;
   url: string;
   /** 智能体所有者的签名密钥;没配置则不签名。 */
   secret?: string;
@@ -22,6 +27,11 @@ export interface DispatcherDeps {
   /** 从数据库读终态结果拼载荷 —— 回调内容与 /result 接口同源。 */
   loadPayload(runId: string, sessionId: string): Promise<WebhookPayload | null>;
   deliver(url: string, payload: WebhookPayload, secret?: string): Promise<WebhookResult>;
+  /**
+   * 记下这次投递(供集成方排查)。尽力而为:写失败或超时只记日志,不影响投递状态;
+   * 每次写入有等待上限,数据库不返回时不能把投递器拖住。
+   */
+  recordDelivery?(d: WebhookDelivery): Promise<void>;
   now?: () => number;
 }
 
@@ -85,16 +95,34 @@ export class WebhookDispatcher {
     }
 
     let result: WebhookResult;
+    const started = this.now();
+    const record = (r: WebhookResult) =>
+      this.record({
+        id: randomUUID(),
+        agentId: target.agentId,
+        runId: job.runId,
+        trigger: "auto",
+        attempt: job.attempts,
+        url: redactWebhookUrl(target.url),
+        httpStatus: r.lastStatus,
+        ok: r.delivered,
+        error: r.error,
+        durationMs: this.now() - started,
+        signed: Boolean(target.secret),
+        at: started,
+      });
     try {
       result = await this.deps.deliver(target.url, payload, target.secret);
     } catch (err) {
       if (err instanceof WebhookTargetRejected) {
         console.warn(`[owa][webhook] 目标被拒(run=${job.runId}):${err.message}`);
+        await record({ delivered: false, attempts: 1, error: `目标被拒:${err.message}` });
         await outbox.markWebhook(job.runId, "failed");
         return;
       }
       result = { delivered: false, attempts: 1, error: errText(err) };
     }
+    await record(result);
 
     if (result.delivered) {
       await outbox.markWebhook(job.runId, "delivered");
@@ -111,6 +139,15 @@ export class WebhookDispatcher {
     } else {
       await outbox.markWebhook(job.runId, "pending", this.now() + delay);
     }
+  }
+
+  private async record(d: WebhookDelivery): Promise<void> {
+    const write = this.deps.recordDelivery;
+    if (!write) return;
+    await recordBestEffort(() => write(d), {
+      onError: (err) =>
+        console.warn(`[owa][webhook] 投递记录写入失败(run=${d.runId}):${errText(err)}`),
+    });
   }
 
   start(): void {

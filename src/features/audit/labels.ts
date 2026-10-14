@@ -30,6 +30,8 @@ export const ACTION_LABEL: Record<AuditAction, string> = {
   "group.create": "创建用户组",
   "group.member_add": "添加组成员",
   "group.member_remove": "移除组成员",
+  "webhook.test": "测试回调",
+  "webhook.redeliver": "重发回调",
 };
 
 /** 需要特别留意的动作:界面上用醒目颜色标出。 */
@@ -116,6 +118,12 @@ export function describeAudit(e: AuditItem): string {
       return `「${s(d.name)}」`;
     case "group.member_add":
       return `「${s(d.group)}」加入 ${s(d.email)}`;
+    case "webhook.test":
+      return d.ok
+        ? `成功(HTTP ${s(d.httpStatus)})`
+        : `失败${d.httpStatus ? `(HTTP ${s(d.httpStatus)})` : ""}`;
+    case "webhook.redeliver":
+      return "已放回发件箱";
     case "group.member_remove":
       return `「${s(d.group)}」移除 ${s(d.memberId)}`;
     default:

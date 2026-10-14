@@ -23,6 +23,9 @@ class OneJobOutbox implements WebhookOutbox {
   ) {
     this.marks.push({ state, nextAt });
   }
+  async requeueWebhook() {
+    return false;
+  }
 }
 
 const payload: WebhookPayload = { taskId: "r1", status: "success" };
@@ -34,7 +37,7 @@ function make(
   const sent: { url: string; secret?: string }[] = [];
   const d = new WebhookDispatcher({
     outbox,
-    loadTarget: async () => ({ url: "https://x/hook", secret: "s" }),
+    loadTarget: async () => ({ agentId: "a1", url: "https://x/hook?token=t0p", secret: "s" }),
     loadPayload: async () => payload,
     deliver: async (url, _p, secret) => {
       sent.push({ url, secret });
@@ -51,7 +54,7 @@ describe("WebhookDispatcher", () => {
     const box = new OneJobOutbox({ runId: "r1", sessionId: "s1", attempts: 1 });
     const { d, sent } = make(box);
     expect(await d.runOnce()).toBe(1);
-    expect(sent).toEqual([{ url: "https://x/hook", secret: "s" }]);
+    expect(sent).toEqual([{ url: "https://x/hook?token=t0p", secret: "s" }]);
     expect(box.marks).toEqual([{ state: "delivered", nextAt: undefined }]);
   });
 
@@ -105,5 +108,58 @@ describe("WebhookDispatcher", () => {
     await d.runOnce();
     expect(sent).toEqual([]);
     expect(box.marks[0]?.state).toBe("failed");
+  });
+});
+
+describe("WebhookDispatcher:投递记录", () => {
+  it("每次投递记一行:归属智能体、第几次、状态码、是否签名;地址去掉查询串", async () => {
+    const box = new OneJobOutbox({ runId: "r1", sessionId: "s1", attempts: 3 });
+    const recs: unknown[] = [];
+    const { d } = make(box, {
+      result: { delivered: false, attempts: 2, lastStatus: 503, error: "upstream" },
+      recordDelivery: async (rec) => {
+        recs.push(rec);
+      },
+    });
+    await d.runOnce();
+    expect(recs).toEqual([
+      expect.objectContaining({
+        agentId: "a1",
+        runId: "r1",
+        trigger: "auto",
+        attempt: 3,
+        url: "https://x/hook",
+        httpStatus: 503,
+        ok: false,
+        error: "upstream",
+        signed: true,
+      }),
+    ]);
+  });
+
+  it("目标被策略拒绝也记一行(错误写明被拒)", async () => {
+    const box = new OneJobOutbox({ runId: "r1", sessionId: "s1", attempts: 1 });
+    const recs: { error?: string; ok: boolean }[] = [];
+    const { d } = make(box, {
+      deliver: async () => {
+        throw new WebhookTargetRejected("指向内网");
+      },
+      recordDelivery: async (rec) => {
+        recs.push(rec);
+      },
+    });
+    await d.runOnce();
+    expect(recs[0]).toMatchObject({ ok: false });
+    expect(recs[0]?.error).toMatch(/目标被拒/);
+    expect(box.marks).toEqual([{ state: "failed", nextAt: undefined }]);
+  });
+
+  it("记录写入永不返回:不拖住投递器,投递状态照常落下", { timeout: 10_000 }, async () => {
+    const box = new OneJobOutbox({ runId: "r1", sessionId: "s1", attempts: 1 });
+    const { d } = make(box, { recordDelivery: () => new Promise<never>(() => {}) });
+    const t0 = Date.now();
+    await d.runOnce();
+    expect(Date.now() - t0).toBeLessThan(4000);
+    expect(box.marks).toEqual([{ state: "delivered", nextAt: undefined }]);
   });
 });
