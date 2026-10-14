@@ -111,7 +111,11 @@ if (!TEST_DB_URL) {
     },
   ]);
 
-  function makeWorker(workerId: string, engineDelayMs = 5) {
+  function makeWorker(
+    workerId: string,
+    engineDelayMs = 5,
+    opts: { runRepo?: MysqlRunRepo; concurrency?: number } = {},
+  ) {
     const orchestrator = new RunOrchestrator({
       sessions,
       agents,
@@ -119,11 +123,39 @@ if (!TEST_DB_URL) {
       bus: new InMemoryBus(),
       platformCredentials: { baseUrl: "b", key: "k" },
     });
-    return new RunWorker(repo, orchestrator, {
+    return new RunWorker(opts.runRepo ?? repo, orchestrator, {
       leaseMs: 30_000,
       heartbeatMs: 10_000,
       idleMs: 5,
+      ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
     });
+  }
+
+  /**
+   * 启动 worker 跑完 body,无论成败都先 stop 全部 worker、再等 drain 成功才返回。
+   *
+   * stop() 不等在途的认领 / 执行 / 回收(见 worker.ts)。只 stop 就结束用例的话,
+   * 下一条用例的 beforeEach 随即清空运行表、重置计数,上一条还没退出的操作会碰到新用例的数据;
+   * body 中途抛错时甚至走不到 stop。所以收尾放进 finally,且 drain 不成功就让用例失败。
+   */
+  async function withWorkers<T>(workers: RunWorker[], body: () => Promise<T>): Promise<T> {
+    for (const w of workers) w.start();
+    let failure: unknown;
+    try {
+      return await body();
+    } catch (err) {
+      failure = err;
+      throw err;
+    } finally {
+      for (const w of workers) w.stop();
+      const drained = await Promise.all(workers.map((w) => w.drain(10_000)));
+      if (drained.some((ok) => !ok)) {
+        // 别让收尾失败吞掉 body 自己的错误
+        const msg = `worker 未能在 10 秒内排空:${JSON.stringify(drained)}`;
+        // biome-ignore lint/correctness/noUnsafeFinally: 收尾失败必须让用例失败
+        throw failure ? new AggregateError([failure], msg) : new Error(msg);
+      }
+    }
   }
 
   beforeEach(async () => {
@@ -168,16 +200,15 @@ if (!TEST_DB_URL) {
       // 执行时长要明显长于一次认领(一次数据库事务),运行之间才会真的重叠;
       // 只停 5ms 时绝大多数时刻只有一个运行在执行,会话互斥失效也撞不出来
       const workers = ["w1", "w2", "w3", "w4"].map((id) => makeWorker(id, 100));
-      for (const w of workers) w.start();
-
-      // 等队列排空
-      const deadline = Date.now() + 40_000;
-      while (Date.now() < deadline) {
-        const states = await Promise.all(ids.map((id) => repo.get(id)));
-        if (states.every((s) => s?.state === "success")) break;
-        await new Promise((r) => setTimeout(r, 50));
-      }
-      for (const w of workers) w.stop();
+      await withWorkers(workers, async () => {
+        // 等队列排空
+        const deadline = Date.now() + 40_000;
+        while (Date.now() < deadline) {
+          const states = await Promise.all(ids.map((id) => repo.get(id)));
+          if (states.every((s) => s?.state === "success")) break;
+          await new Promise((r) => setTimeout(r, 50));
+        }
+      });
 
       // 全部完成
       const finalStates = await Promise.all(ids.map((id) => repo.get(id)));
@@ -349,6 +380,50 @@ if (!TEST_DB_URL) {
       expect(others.every((o) => o === null)).toBe(true);
     });
 
+    it("stop 时正停在认领里:drain 要等这次认领(及它认领到的运行)退出,之后不再有写入", async () => {
+      const SESSION = "s-drain";
+      await sessions.create({ id: SESSION, agentId: "a1", workspaceDir: "/ws" });
+      const id = randomUUID().replace(/-/g, "").slice(0, 24);
+      await repo.create({ id, sessionId: SESSION, prompt: "drain-task" });
+      rendezvous.resolve(); // 单个 worker,不需要等别的 worker 汇合
+
+      // 认领在真正查库之前停住,直到放行
+      const gate = () => {
+        let open!: () => void;
+        const opened = new Promise<void>((r) => {
+          open = r;
+        });
+        return { open, opened };
+      };
+      const entered = gate();
+      const release = gate();
+      const paused = Object.create(repo) as MysqlRunRepo;
+      paused.claimNext = async (leaseMs, now) => {
+        entered.open();
+        await release.opened;
+        return repo.claimNext(leaseMs, now);
+      };
+      const w = makeWorker("drainer", 5, { runRepo: paused, concurrency: 1 });
+
+      w.start();
+      await entered.opened;
+      w.stop();
+      // 认领还停着:stop 之后 drain 不能宣称已排空
+      expect(await w.drain(300)).toBe(false);
+      expect((await repo.get(id))?.state).toBe("pending");
+
+      // 放行:这次认领照常拿到任务并跑完 —— drain 等到它真正落终态才算排空
+      release.open();
+      expect(await w.drain(10_000)).toBe(true);
+      const settled = await repo.get(id);
+      expect(settled?.state).toBe("success");
+      expect(executions.get("drain-task")).toBe(1);
+
+      // 排空之后不再有任何写入
+      await new Promise((r) => setTimeout(r, 200));
+      expect(await repo.get(id)).toEqual(settled);
+    });
+
     it("持续入队时多 worker 也不重复执行(边跑边加)", async () => {
       // 同上:分散到多个会话才有真正的并行执行;按块分配,连续 4 个任务同一会话
       const SESSIONS = ["s-stream-0", "s-stream-1", "s-stream-2", "s-stream-3", "s-stream-4"];
@@ -357,30 +432,29 @@ if (!TEST_DB_URL) {
       }
 
       const workers = ["s1", "s2", "s3"].map((id) => makeWorker(id, 60));
-      for (const w of workers) w.start();
-
       const ids: string[] = [];
-      // 分批入队,模拟真实的持续负载
-      for (let batch = 0; batch < 4; batch++) {
-        for (let i = 0; i < 5; i++) {
-          const id = randomUUID().replace(/-/g, "").slice(0, 24);
-          ids.push(id);
-          await repo.create({
-            id,
-            sessionId: SESSIONS[Math.floor((batch * 5 + i) / 4)] as string,
-            prompt: `stream-${batch}-${i}`,
-          });
+      await withWorkers(workers, async () => {
+        // 分批入队,模拟真实的持续负载
+        for (let batch = 0; batch < 4; batch++) {
+          for (let i = 0; i < 5; i++) {
+            const id = randomUUID().replace(/-/g, "").slice(0, 24);
+            ids.push(id);
+            await repo.create({
+              id,
+              sessionId: SESSIONS[Math.floor((batch * 5 + i) / 4)] as string,
+              prompt: `stream-${batch}-${i}`,
+            });
+          }
+          await new Promise((r) => setTimeout(r, 30));
         }
-        await new Promise((r) => setTimeout(r, 30));
-      }
 
-      const deadline = Date.now() + 30_000;
-      while (Date.now() < deadline) {
-        const states = await Promise.all(ids.map((id) => repo.get(id)));
-        if (states.every((s) => s?.state === "success")) break;
-        await new Promise((r) => setTimeout(r, 50));
-      }
-      for (const w of workers) w.stop();
+        const deadline = Date.now() + 30_000;
+        while (Date.now() < deadline) {
+          const states = await Promise.all(ids.map((id) => repo.get(id)));
+          if (states.every((s) => s?.state === "success")) break;
+          await new Promise((r) => setTimeout(r, 50));
+        }
+      });
 
       expect([...executions.values()].filter((n) => n > 1)).toEqual([]);
       expect(executions.size).toBe(ids.length);
