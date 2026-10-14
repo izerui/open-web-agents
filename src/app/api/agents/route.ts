@@ -14,6 +14,7 @@ import {
   pickAgentConfig,
   redactAgentConfigForReader,
 } from "@/lib/modules/agent/domain/config";
+import { isSystemAgent } from "@/lib/modules/agent/domain/system-agent";
 import { validateAgentConfig } from "@/lib/modules/agent/domain/validate-config";
 import type { Agent } from "@/lib/modules/agent/ports";
 import { validateWebhookUrl } from "@/lib/modules/integration/domain/webhook-policy";
@@ -141,6 +142,9 @@ export async function POST(req: Request) {
   }
 
   const body = (await req.json().catch(() => ({}))) as CreateBody;
+  if (body.id && isSystemAgent(body.id.trim())) {
+    return Response.json({ error: "agent not found" }, { status: 404 });
+  }
   if (!body.name?.trim()) {
     return Response.json({ error: "name is required" }, { status: 400 });
   }

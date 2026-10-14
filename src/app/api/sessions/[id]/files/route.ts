@@ -35,6 +35,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   const session = await sessions.get(id);
   if (!session) return Response.json({ error: "session not found" }, { status: 404 });
+  if (session.source === "design") {
+    return Response.json({ error: "请通过 AI 编辑页面更新设计草稿" }, { status: 403 });
+  }
 
   const form = await req.formData().catch(() => null);
   const files = form?.getAll("files").filter((value): value is File => value instanceof File) ?? [];

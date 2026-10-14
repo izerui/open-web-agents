@@ -16,7 +16,6 @@ export async function GET(req: Request) {
       allowSignup: env.allowSignup,
     });
   }
-  const decrypted = user.anthropicKeyEnc ? secrets.decrypt(user.anthropicKeyEnc) : null;
   const webhookSecret = user.webhookSecretEnc ? secrets.decrypt(user.webhookSecretEnc) : null;
   return Response.json({
     authenticated: true,
@@ -25,9 +24,6 @@ export async function GET(req: Request) {
       id: user.id,
       email: user.email,
       role: user.role,
-      defaultBaseUrl: user.defaultBaseUrl ?? null,
-      // 只回掩码,永不回明文
-      anthropicKeyMask: decrypted ? maskSecret(decrypted) : null,
       webhookSecretMask: webhookSecret ? maskSecret(webhookSecret) : null,
     },
   });

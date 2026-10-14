@@ -14,14 +14,13 @@ import { cn } from "@/lib/utils";
 import {
   BarChart3,
   Bot,
+  Cpu,
   History,
-  KeyRound,
   Lock,
   MessageSquare,
   Plus,
   ScrollText,
   Terminal,
-  Users,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
@@ -41,7 +40,7 @@ const PAGES = [
   { href: "/settings/keys", label: "接入中心", icon: Terminal },
   { href: "/settings/audit", label: "审计日志", icon: ScrollText },
   { href: "/settings/usage", label: "用量与成本", icon: BarChart3 },
-  { href: "/settings/credentials", label: "模型凭证", icon: KeyRound },
+  { href: "/settings/credentials", label: "平台算力", icon: Cpu },
   { href: "/settings/account", label: "账号安全", icon: Lock },
 ] as const;
 

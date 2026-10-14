@@ -1,5 +1,25 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { GET as getAuth } from "@/app/api/auth/route";
+import { PUT as putCredentials } from "@/app/api/me/credentials/route";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __resetMe, clearMe, initialsOf, isAdminView, peekMe, refreshMe } from "../use-me";
+
+const account = vi.hoisted(() => ({
+  currentUser: vi.fn(),
+  setCredentials: vi.fn(),
+  decrypt: vi.fn(),
+  encrypt: vi.fn(),
+  record: vi.fn(),
+}));
+
+vi.mock("@/lib/container", () => ({
+  getContainer: () => ({
+    authService: { currentUser: account.currentUser },
+    users: { setCredentials: account.setCredentials },
+    secrets: { decrypt: account.decrypt, encrypt: account.encrypt },
+    audit: { record: account.record },
+    env: { authRequired: true, allowSignup: false },
+  }),
+}));
 
 afterEach(() => {
   __resetMe();
@@ -74,6 +94,20 @@ describe("isAdminView", () => {
 });
 
 describe("共享登录态", () => {
+  it("账号响应不再需要模型地址或密钥掩码", async () => {
+    const user = {
+      id: "account",
+      email: "account@example.test",
+      role: "user",
+      webhookSecretMask: null,
+    };
+    vi.stubGlobal("fetch", async () => Response.json({ authenticated: true, user }));
+    await refreshMe();
+    expect(peekMe()?.user).toEqual(user);
+    expect(peekMe()?.user).not.toHaveProperty("defaultBaseUrl");
+    expect(peekMe()?.user).not.toHaveProperty("anthropicKeyMask");
+  });
+
   it("refreshMe 会真的重新请求,而不是吃缓存", async () => {
     const calls = stubAuth("a@x.io");
     await refreshMe();
@@ -107,5 +141,88 @@ describe("共享登录态", () => {
     // 不抛错是这里的契约:导航区的头像不该因为一次网络抖动就炸掉整页
     await expect(refreshMe()).resolves.toBeUndefined();
     expect(peekMe()?.user?.email).toBe("keep@x.io");
+  });
+});
+
+describe("账号模型凭证退役", () => {
+  const user = {
+    id: "account",
+    email: "account@example.test",
+    role: "user",
+    defaultBaseUrl: "https://old-gateway.example?token=old-secret",
+    anthropicKeyEnc: "invalid-retired-model-ciphertext",
+  };
+  const request = () => new Request("https://platform.example/api/auth");
+
+  beforeEach(() => {
+    for (const mock of Object.values(account)) mock.mockReset();
+    account.currentUser.mockResolvedValue(user);
+    account.decrypt.mockImplementation(() => {
+      throw new Error("retired model key must not be decrypted");
+    });
+  });
+
+  it("登录态忽略旧模型凭证,即使旧密文不可解密也能读取账号", async () => {
+    const response = await getAuth(request());
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      authenticated: true,
+      authRequired: true,
+      user: { id: user.id, email: user.email, role: user.role, webhookSecretMask: null },
+    });
+    expect(account.decrypt).not.toHaveBeenCalled();
+  });
+
+  it("继续提供 webhook 签名掩码,只解密 webhook 密钥", async () => {
+    account.currentUser.mockResolvedValue({ ...user, webhookSecretEnc: "webhook-ciphertext" });
+    account.decrypt.mockReturnValue("whsec_existing_integration_secret");
+    const response = await getAuth(request());
+    const body = await response.json();
+    expect(body.user.webhookSecretMask).toBeTruthy();
+    expect(JSON.stringify(body)).not.toContain("whsec_existing_integration_secret");
+    expect(body.user).not.toHaveProperty("anthropicKeyMask");
+    expect(body.user).not.toHaveProperty("defaultBaseUrl");
+    expect(account.decrypt).toHaveBeenCalledTimes(1);
+    expect(account.decrypt).toHaveBeenCalledWith("webhook-ciphertext");
+  });
+
+  it("未登录仍返回公开登录状态", async () => {
+    account.currentUser.mockResolvedValue(null);
+    expect(await (await getAuth(request())).json()).toEqual({
+      authenticated: false,
+      authRequired: true,
+      allowSignup: false,
+    });
+    expect(account.decrypt).not.toHaveBeenCalled();
+  });
+
+  it.each(["user", "admin"])("登录的 %s 请求旧接口返回410,不读取或保存密钥", async (role) => {
+    account.currentUser.mockResolvedValue({ ...user, role });
+    const req = new Request("https://platform.example/api/me/credentials", {
+      method: "PUT",
+      body: JSON.stringify({ baseUrl: "https://new-gateway.example", apiKey: "sk-new-secret" }),
+    });
+    const readBody = vi.spyOn(req, "json");
+    const response = await putCredentials(req);
+    expect(response.status).toBe(410);
+    const body = await response.json();
+    expect(body).toMatchObject({ code: "byok_disabled" });
+    expect(body.error).toContain("平台");
+    expect(JSON.stringify(body)).not.toContain("sk-new-secret");
+    expect(readBody).not.toHaveBeenCalled();
+    expect(account.setCredentials).not.toHaveBeenCalled();
+    expect(account.decrypt).not.toHaveBeenCalled();
+    expect(account.encrypt).not.toHaveBeenCalled();
+    expect(account.record).not.toHaveBeenCalled();
+  });
+
+  it("未登录调用旧接口仍返回401,不写审计", async () => {
+    account.currentUser.mockResolvedValue(null);
+    const response = await putCredentials(
+      new Request("https://platform.example/api/me/credentials", { method: "PUT" }),
+    );
+    expect(response.status).toBe(401);
+    expect(account.setCredentials).not.toHaveBeenCalled();
+    expect(account.record).not.toHaveBeenCalled();
   });
 });

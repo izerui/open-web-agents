@@ -25,8 +25,8 @@ export const dynamic = "force-dynamic";
 interface InvokeBody {
   /** 符合智能体 inputSchema 的输入;字符串则直接当 prompt。 */
   input?: unknown;
-  /** 请求级覆盖(三级链最高优先)。 */
-  override?: { baseUrl?: string; key?: string; model?: ModelAlias };
+  /** 仅支持平台模型别名选择。 */
+  override?: { model?: ModelAlias };
   /** 锁定智能体版本;不传 = 当前发布的版本(从未发布则为草稿)。 */
   version?: number;
   /** 本次结果回调到这个地址(代替智能体配置的地址),用调用方自己的签名密钥签名。 */
@@ -100,11 +100,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return apiError(400, "input_invalid", "input is required");
   }
 
-  /*
-   * 请求级凭证覆盖(三级链最高优先)。
-   * 曾经在这里解析完就丢了:入队只存了 prompt,worker 永远拿不到它,
-   * 调用方以为用了自己的 key,实际跑的是别的凭证,且没有任何报错。
-   */
+  // 平台统一供给模型,拒绝用户凭证和网关覆盖。
   const override = parseOverride(body.override);
   if (!override.ok) return apiError(400, "invalid_request", override.reason);
 
@@ -348,7 +344,7 @@ function replayed(
   );
 }
 
-type Override = { baseUrl?: string; key?: string; model?: ModelAlias };
+type Override = { model?: ModelAlias };
 
 function parseOverride(
   raw: unknown,
@@ -359,31 +355,17 @@ function parseOverride(
   }
   const o = raw as Record<string, unknown>;
   const out: Override = {};
-  if (o.baseUrl !== undefined) {
-    if (typeof o.baseUrl !== "string" || o.baseUrl.length > 512) {
-      return { ok: false, reason: "override.baseUrl 须为不超过 512 字符的字符串" };
-    }
-    const protocol = URL.canParse(o.baseUrl) ? new URL(o.baseUrl).protocol : "";
-    if (protocol !== "https:" && protocol !== "http:") {
-      return { ok: false, reason: "override.baseUrl 须为 http/https 地址" };
-    }
-    out.baseUrl = o.baseUrl;
-  }
-  if (o.key !== undefined) {
-    if (typeof o.key !== "string" || !o.key.trim() || o.key.length > 512) {
-      return { ok: false, reason: "override.key 须为不超过 512 字符的非空字符串" };
-    }
-    out.key = o.key.trim();
+  if (Object.keys(o).some((key) => key !== "model")) {
+    return {
+      ok: false,
+      reason: "平台统一提供模型,不接受 override.baseUrl、override.key 或其它凭证覆盖",
+    };
   }
   if (o.model !== undefined) {
     if (typeof o.model !== "string" || !isModelAlias(o.model)) {
       return { ok: false, reason: "override.model 不是已知的模型别名" };
     }
     out.model = o.model;
-  }
-  // 自定义网关必须自带 key:否则平台 key 会被发往调用方指定的地址(凭证链同层绑定)
-  if (out.baseUrl && !out.key) {
-    return { ok: false, reason: "override.baseUrl 必须与 override.key 一起提供" };
   }
   return { ok: true, value: Object.keys(out).length ? out : undefined };
 }

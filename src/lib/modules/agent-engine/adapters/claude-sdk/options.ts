@@ -1,10 +1,12 @@
 // SDK 选项组装:域内 AgentSpec + RunContext → claude-agent-sdk query 的 options。
 // 属 adapter 层,但刻意写成【不 import SDK】的纯函数,便于单测。
 
+import fs from "node:fs/promises";
 import path from "node:path";
 import { describeToolCall, needsApproval } from "@/lib/modules/agent-engine/domain/approval-rules";
 import { materializeSandbox } from "@/lib/modules/agent-engine/domain/sandbox";
 import { guardToolUse } from "@/lib/modules/agent-engine/domain/tool-guard";
+import { DRAFT_FILE } from "@/lib/modules/agent/domain/design";
 import type { ModelSlots } from "@/lib/modules/model-gateway/ports";
 import type { AgentSpec, ResolvedCredentials, RunContext } from "@/lib/shared";
 import { ESCAPE_HATCH_PROTECTED } from "@/lib/shared/escape-hatch";
@@ -391,6 +393,23 @@ export function buildSdkOptions(
     toolName: string,
     input: Record<string, unknown>,
   ): Promise<{ allow: true } | { allow: false; reason: string }> => {
+    if (ctx.designMode && toolName !== "AskUserQuestion") {
+      if (
+        !["Read", "Write", "Edit"].includes(toolName) ||
+        typeof input.file_path !== "string" ||
+        path.resolve(ctx.workspaceDir, input.file_path) !==
+          path.resolve(ctx.workspaceDir, DRAFT_FILE)
+      ) {
+        return {
+          allow: false,
+          reason: "AI 编辑仅可读取和修改设计草稿,不能创建技能脚本或访问其它文件",
+        };
+      }
+      const stat = await fs.lstat(path.join(ctx.workspaceDir, DRAFT_FILE)).catch(() => null);
+      if (!stat?.isFile() || stat.isSymbolicLink()) {
+        return { allow: false, reason: "设计草稿不是普通文件" };
+      }
+    }
     // 白名单最先判:名单外的工具连守卫和审批都不必走。
     // 【正向白名单而非反向黑名单】不认识的工具一律拒 —— SDK 将来新增工具时,
     // 黑名单会静默放行(fail-open),白名单则自动拒绝(fail-closed)。

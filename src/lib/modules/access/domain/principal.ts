@@ -6,6 +6,7 @@ import {
   type Subject,
   hasResourceAccess,
 } from "@/lib/modules/access/domain/grants";
+import { isSystemAgent } from "@/lib/modules/agent/domain/system-agent";
 
 /** 谁在调用。web = 平台内人类(当前单用户);apiKey = 第三方系统。 */
 export type Principal =
@@ -79,6 +80,7 @@ export function canInvokeAgent(
   subject: Subject,
   grants: Grant[],
 ): Decision {
+  if (isSystemAgent(agent.id)) return deny("platform executor is private");
   if (p.type === "apiKey" && p.agentId && p.agentId !== agent.id) {
     return deny("api key is bound to another agent");
   }
@@ -108,6 +110,7 @@ export function agentAccessLevel(
   subject: Subject,
   grants: Grant[],
 ): "none" | "read" | "write" {
+  if (isSystemAgent(agent.id)) return "none";
   if (p.type === "apiKey" && p.agentId && p.agentId !== agent.id) return "none";
   if (!hasResourceAccess(subject, agent, "read", grants)) return "none";
   if (p.type === "apiKey") return "read";

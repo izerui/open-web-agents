@@ -1,5 +1,6 @@
 import type { Db } from "@/lib/db/client";
 import { sessions } from "@/lib/db/schema";
+import type { DesignState } from "@/lib/modules/agent/domain/design";
 import type {
   NewSession,
   ReclaimResult,
@@ -25,6 +26,7 @@ interface Row {
   source: string;
   status: string;
   designTargetAgentId: string | null;
+  designState: unknown;
   agentVersion: number | null;
   workspacePurgedAt: number | null;
   workspaceTouchedAt: number | null;
@@ -45,6 +47,7 @@ function toSession(r: Row): Session {
     source: r.source as SessionSource,
     status: r.status as SessionStatus,
     designTargetAgentId: r.designTargetAgentId ?? undefined,
+    designState: (r.designState as DesignState | null) ?? undefined,
     agentVersion: r.agentVersion ?? undefined,
     workspacePurgedAt: r.workspacePurgedAt ?? undefined,
     workspaceTouchedAt: r.workspaceTouchedAt ?? undefined,
@@ -65,6 +68,7 @@ const COLUMNS = {
   source: sessions.source,
   status: sessions.status,
   designTargetAgentId: sessions.designTargetAgentId,
+  designState: sessions.designState,
   agentVersion: sessions.agentVersion,
   workspacePurgedAt: sessions.workspacePurgedAt,
   workspaceTouchedAt: sessions.workspaceTouchedAt,
@@ -102,6 +106,7 @@ export class MysqlSessionRepo implements SessionRepo {
       unattended: s.unattended ? 1 : 0,
       source: s.source ?? (s.unattended ? "invoke" : "web"),
       designTargetAgentId: s.designTargetAgentId,
+      designState: s.designState,
       agentVersion: s.agentVersion ?? null,
       status: "active",
     });
@@ -215,9 +220,15 @@ export class MysqlSessionRepo implements SessionRepo {
 
   async update(
     id: string,
-    patch: { title?: string; status?: SessionStatus; designTargetAgentId?: string },
+    patch: {
+      title?: string;
+      status?: SessionStatus;
+      designTargetAgentId?: string;
+      designState?: DesignState;
+    },
   ): Promise<void> {
-    const set: Record<string, string> = {};
+    const set: Record<string, unknown> = {};
+    if (patch.designState !== undefined) set.designState = patch.designState;
     if (patch.designTargetAgentId !== undefined)
       set.designTargetAgentId = patch.designTargetAgentId;
     if (patch.title !== undefined) set.title = patch.title;

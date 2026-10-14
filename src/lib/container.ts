@@ -6,6 +6,7 @@ import { createHmac, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { type Db, createDb, databaseProbe } from "@/lib/db/client";
+import { designTransaction } from "@/lib/design-transaction";
 import { type Env, loadEnv } from "@/lib/env";
 import { MysqlGrantRepo } from "@/lib/modules/access/adapters/mysql-grant-repo";
 import { MysqlGroupRepo } from "@/lib/modules/access/adapters/mysql-group-repo";
@@ -20,6 +21,7 @@ import type { EnginePort, TranscriptPort } from "@/lib/modules/agent-engine/port
 import { readBundle, writeBundle } from "@/lib/modules/agent/adapters/fs-bundle-store";
 import { MysqlAgentRepo } from "@/lib/modules/agent/adapters/mysql-agent-repo";
 import { MysqlAgentVersionRepo } from "@/lib/modules/agent/adapters/mysql-agent-version-repo";
+import { AgentDesigner } from "@/lib/modules/agent/application/designer";
 import { AgentReleases } from "@/lib/modules/agent/application/releases";
 import { seedBuiltin } from "@/lib/modules/agent/application/seed-builtin";
 import { ARCHITECT_AGENT_ID, ARCHITECT_CONFIG } from "@/lib/modules/agent/domain/architect";
@@ -144,6 +146,7 @@ export interface Container {
     read(workspaceDir: string): Promise<Record<string, string>>;
     write(workspaceDir: string, files: Record<string, string>): Promise<void>;
   };
+  designer: AgentDesigner;
 }
 
 /** 人工审批的等待上限。到点自动拒绝,避免 worker 被无人值守的审批永久占住。 */
@@ -224,16 +227,31 @@ function build(): Container {
       ),
     );
   void seedPublic(DEFAULT_AGENT, "grant-default-public");
-  // 内置"AI 智能体设计师":所有人可用,通过对话设计其它智能体(见 agent/domain/architect.ts)
-  void seedPublic(
+  // 私有执行器保留历史实体;新运行始终使用代码中的受限配置。
+  void seedBuiltin(
+    {
+      inRowLock: (fn) =>
+        db.transaction(async (tx) => {
+          const txDb = tx as unknown as Db;
+          await new MysqlGrantRepo(txDb).revokeAllForResource("agent", ARCHITECT_AGENT_ID);
+          return fn({
+            agents: new MysqlAgentRepo(txDb),
+            grantPublicRead: async () => {},
+          });
+        }),
+    },
     {
       id: ARCHITECT_AGENT_ID,
       ownerId: "system",
-      name: "AI 智能体设计师",
-      description: "通过对话设计、完善你的智能体:提示词、技能、MCP、契约",
+      name: "平台 AI 编辑执行器",
+      description: "平台内部功能",
       config: ARCHITECT_CONFIG,
     },
-    "grant-architect-public",
+  ).catch((err) =>
+    console.warn(
+      "[owa] 初始化 AI 编辑执行器失败",
+      err instanceof Error ? err.message : String(err),
+    ),
   );
   const bus = new RedisBus(env.redisUrl);
   const runs = new MysqlRunRepo(db);
@@ -326,19 +344,6 @@ function build(): Container {
         if (err instanceof QuotaExceeded) return { allowed: false, reason: err.message };
         throw err;
       }
-    },
-    // 用户自带凭证:未配置时返回空对象并回落平台默认;已配置却无法解密时必须失败,
-    // 避免在用户不知情时改用平台共享 key、造成计费归属错误。
-    userCredentials: async (userId) => {
-      const u = await users.get(userId);
-      if (!u) return {};
-      if (!u.anthropicKeyEnc) return { baseUrl: u.defaultBaseUrl };
-
-      const key = secrets.decrypt(u.anthropicKeyEnc);
-      if (key === null) {
-        throw new Error(`用户凭证无法解密(user=${userId}),请重新保存凭证`);
-      }
-      return { baseUrl: u.defaultBaseUrl, key };
     },
   });
 
@@ -525,6 +530,11 @@ function build(): Container {
     steerChannel,
     rateLimiter,
     bundles: { read: readBundle, write: writeBundle },
+    designer: new AgentDesigner({
+      inSession: designTransaction(db),
+      storage,
+      allowStdioMcp: env.allowStdioMcp,
+    }),
     admission: new RunAdmission({
       sessions,
       checkQuota: async (userId) => {

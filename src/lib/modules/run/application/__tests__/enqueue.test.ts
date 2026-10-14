@@ -75,10 +75,10 @@ describe("RunEnqueuer", () => {
       runId: "r1",
       sessionId: "s1",
       prompt: "hi",
-      override: { key: "sk-secret" },
+      override: { model: "haiku" },
     });
     const p = await runs.getPayload("r1");
-    expect(p?.overrideEnc).toBe(`enc:${JSON.stringify({ key: "sk-secret" })}`);
+    expect(p?.overrideEnc).toBe(`enc:${JSON.stringify({ model: "haiku" })}`);
   });
 
   describe("回调目标快照", () => {
@@ -130,7 +130,12 @@ describe("RunEnqueuer", () => {
   it("没有加密能力时拒绝带覆盖的请求,绝不明文落库", async () => {
     const { enqueuer } = await setup(false);
     await expect(
-      enqueuer.enqueue({ runId: "r1", sessionId: "s1", prompt: "hi", override: { key: "k" } }),
+      enqueuer.enqueue({
+        runId: "r1",
+        sessionId: "s1",
+        prompt: "hi",
+        override: { model: "haiku" },
+      }),
     ).rejects.toThrow(/明文/);
   });
 

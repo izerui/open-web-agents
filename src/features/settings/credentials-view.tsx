@@ -1,127 +1,43 @@
-"use client";
-
-import { useEffect, useState } from "react";
-import { toast } from "sonner";
-
 import { SpaceShell } from "@/components/space-shell";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { errorText, fetchJson } from "@/lib/fetch-json";
-import { refreshMe, useMe } from "@/lib/use-me";
+import { MODEL_ALIASES } from "@/lib/shared";
+import Link from "next/link";
 
-/** 我的模型凭证:base URL 与自带 API Key。 */
-export function CredentialsView() {
-  const { me } = useMe();
-  const [baseUrl, setBaseUrl] = useState("");
-  const [apiKey, setApiKey] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  /**
-   * 服务端的 baseUrl 落到输入框。
-   *
-   * 【为什么依赖的是这个值本身,而不是整个 me】me 对象每次刷新都是新引用,
-   * 拿它当依赖会在用户正打字时把输入框重置回服务端的旧值。
-   */
-  const serverBaseUrl = me?.user?.defaultBaseUrl ?? "";
-  useEffect(() => {
-    setBaseUrl(serverBaseUrl);
-  }, [serverBaseUrl]);
-
-  async function save() {
-    setSaving(true);
-    try {
-      const body: Record<string, string> = { baseUrl };
-      // 只有真填了才提交 key,避免空提交把已存的 key 清掉
-      if (apiKey.trim()) body.apiKey = apiKey.trim();
-      await fetchJson("/api/me/credentials", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      toast.success("已保存");
-      setApiKey("");
-      // 掩码变了,连侧栏用户菜单一起刷新
-      await refreshMe();
-    } catch (error) {
-      toast.error(`保存失败:${errorText(error)}`);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function clearKey() {
-    if (!window.confirm("确定清除自带 API Key？后续运行将改用平台默认凭证。")) return;
-    if (saving) return;
-    setSaving(true);
-    try {
-      await fetchJson("/api/me/credentials", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: "" }),
-      });
-      toast.success("已清除自带密钥,将回落到平台默认");
-      await refreshMe();
-    } catch (error) {
-      toast.error(`清除失败:${errorText(error)}`);
-    } finally {
-      setSaving(false);
-    }
-  }
-
+/** 仅接收公开状态,平台地址、模型 ID 与密钥不进入页面数据。 */
+export function CredentialsView({ configured }: { configured: boolean }) {
   return (
-    <SpaceShell
-      title="模型凭证"
-      subtitle={me?.user ? `${me.user.email} · ${me.user.role}` : undefined}
-      width="narrow"
-    >
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">我的模型凭证</CardTitle>
-          <CardDescription>
-            优先级:请求覆盖 &gt; 这里 &gt; 平台默认。密钥加密入库,只在运行时解密注入 agent。
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <label className="block space-y-1">
-            <span className="text-xs text-muted-foreground">Base URL(留空用平台默认)</span>
-            <Input
-              name="model-base-url"
-              autoComplete="off"
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder="https://api.anthropic.com"
-            />
-          </label>
-
-          <label className="block space-y-1">
-            <span className="text-xs text-muted-foreground">
-              API Key
-              {me?.user?.anthropicKeyMask ? `(当前:${me.user.anthropicKeyMask},留空则不修改)` : ""}
-            </span>
-            <Input
-              type="password"
-              name="model-api-key"
-              // new-password 是唯一能让 Chrome 稳定放弃自动填充的取值,off 会被忽略
-              autoComplete="new-password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="sk-…"
-            />
-          </label>
-
-          <div className="flex items-center gap-3">
-            <Button size="sm" onClick={save} disabled={saving}>
-              {saving ? "保存中…" : "保存"}
-            </Button>
-            {me?.user?.anthropicKeyMask && (
-              <Button variant="link" size="sm" onClick={() => void clearKey()} disabled={saving}>
-                清除自带密钥
-              </Button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+    <SpaceShell title="平台算力" width="narrow">
+      <dl className="divide-y divide-border text-sm">
+        <div className="grid gap-2 py-4 sm:grid-cols-[9rem_1fr]">
+          <dt className="text-muted-foreground">算力来源</dt>
+          <dd>平台统一提供</dd>
+        </div>
+        <div className="grid gap-2 py-4 sm:grid-cols-[9rem_1fr]">
+          <dt className="text-muted-foreground">平台凭证</dt>
+          <dd>{configured ? "已配置" : "待配置，请联系管理员"}</dd>
+        </div>
+        <div className="grid gap-2 py-4 sm:grid-cols-[9rem_1fr]">
+          <dt className="text-muted-foreground">AI 智能体设计</dt>
+          <dd>使用平台算力</dd>
+        </div>
+        <div className="grid gap-2 py-4 sm:grid-cols-[9rem_1fr]">
+          <dt className="text-muted-foreground">模型别名</dt>
+          <dd>
+            <ul className="flex flex-wrap gap-x-5 gap-y-2 font-mono">
+              {MODEL_ALIASES.map((alias) => (
+                <li key={alias}>{alias}</li>
+              ))}
+            </ul>
+          </dd>
+        </div>
+      </dl>
+      <nav aria-label="算力相关页面" className="flex flex-wrap gap-x-6 gap-y-3 text-sm">
+        <Link className="text-primary underline underline-offset-4" href="/settings/usage">
+          用量与成本
+        </Link>
+        <Link className="text-primary underline underline-offset-4" href="/settings/keys">
+          接入中心与 API Key
+        </Link>
+      </nav>
     </SpaceShell>
   );
 }

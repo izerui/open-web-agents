@@ -17,14 +17,11 @@ export interface ModelSelection {
 }
 
 /**
- * 三级凭证链,优先级 request > user > 平台默认。
- * (曾经还有一层"会话级凭证",但从没有任何代码写入它:base_url / model 读出来恒为空,
- * key_enc 连读都没读 —— 半截链路只会让人误以为能按会话换网关,已删除。)
+ * 模型凭证统一由平台提供。请求只能选择平台支持的模型别名。
  */
 export interface CredentialChain {
   platform?: { baseUrl?: string; key?: string };
-  user?: { baseUrl?: string; key?: string };
-  request?: { baseUrl?: string; key?: string; model?: ModelAlias };
+  request?: { model?: ModelAlias };
 }
 
 export interface ResolvedCredentials {
@@ -124,6 +121,8 @@ export interface AgentSpec {
 
 /** 一次运行的上下文。 */
 export interface RunContext {
+  /** 平台设计运行:文件工具只允许访问设计草稿。 */
+  designMode?: boolean;
   /** 所属会话。审批、事件归属都要用它定位。 */
   sessionId: string;
   /** 队列里的 run id(worker 执行时有;内联执行可空)。 */
@@ -175,9 +174,12 @@ export interface SteerMessage {
 export interface SteerInbox {
   /** 下一条;已关闭且取完返回 null。 */
   next(): Promise<SteerMessage | null>;
+
   delivered(m: SteerMessage): Promise<void>;
+
   /** 停止受理(第一条 result 到达时调用)。幂等。 */
   close(): Promise<void>;
+
   /** 运行结束:剩下的记为未送达,并让挂着的 next() 返回 null。幂等。 */
   abandon(): Promise<SteerMessage[]>;
 }

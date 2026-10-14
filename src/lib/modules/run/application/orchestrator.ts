@@ -24,7 +24,7 @@ export interface RunCommand {
   /** 队列里的 run id(worker 执行时带上;内联执行可不传)。 */
   runId?: string;
   /** 请求级覆盖(三级链最高优先)。 */
-  override?: { baseUrl?: string; key?: string; model?: ModelAlias };
+  override?: { model?: ModelAlias };
   /**
    * 入队时的智能体配置快照。有就按它跑,而不是读执行时的"当前配置" ——
    * 排队期间配置被改,不该改变已经受理的任务。迁移前的旧任务没有快照,回退到当前配置。
@@ -37,15 +37,10 @@ export interface OrchestratorDeps {
   agents: AgentRepo;
   engine: EnginePort;
   bus: BusPort;
-  /** 平台默认凭证(三级链兜底)。 */
+  /** 所有账号统一使用的平台凭证。 */
   platformCredentials: { baseUrl: string; key: string };
   /** 传给 agent 子进程的基础环境。 */
   baseEnv?: Record<string, string>;
-  /**
-   * 解析会话归属用户的自带凭证(三级链里的 user 层)。
-   * 返回已解密的明文;没配置则返回空对象。
-   */
-  userCredentials?: (userId: string) => Promise<{ baseUrl?: string; key?: string }>;
   /**
    * 取该运行自带的 resume 锚点(分支重跑用)。
    * anchored=true 时【必须】用它给出的锚点 —— 包括"从零重开"的空锚点;
@@ -124,18 +119,10 @@ export class RunOrchestrator {
       }
     }
 
-    // 用户级凭证是计费边界,读取失败不能静默改用平台共享 key。
-    // “用户未配置”由实现返回空对象表达;DB 故障、密文损坏或主密钥不匹配必须抛出,
-    // 由 worker 将本轮落为 failed。
-    let userCreds: { baseUrl?: string; key?: string } | undefined;
-    if (billingUserId && this.deps.userCredentials) {
-      userCreds = await this.deps.userCredentials(billingUserId);
-    }
-
     const chain: CredentialChain = {
       platform: this.deps.platformCredentials,
-      user: userCreds,
-      request: cmd.override,
+      // 旧任务里可能仍有用户凭证覆盖,只取模型选择,凭证始终由平台提供。
+      request: session.source === "design" ? undefined : { model: cmd.override?.model },
     };
     const credentials = resolveCredentials(chain);
     const model = resolveModelAlias(chain, config.model);
@@ -164,6 +151,7 @@ export class RunOrchestrator {
     await this.deps.ensureWorkspace?.(session.id, session.workspaceDir);
 
     const ctx = {
+      designMode: session.source === "design",
       sessionId: cmd.sessionId,
       runId: cmd.runId,
       workspaceDir: session.workspaceDir,

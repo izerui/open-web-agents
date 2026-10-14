@@ -307,7 +307,7 @@ describe("RunWorker 载荷", () => {
     expect(engine.seenSpecs[0]?.systemPrompt).toContain("入队时的提示词");
   });
 
-  it("请求级覆盖解密后进入凭证链最高优先级", async () => {
+  it("旧任务的用户凭证覆盖即使成功解密也不会替换平台 Key", async () => {
     const engine = new FakeEngine();
     const { repo, worker } = await setup(engine, () => 1000, {
       decodeOverride: (enc) => JSON.parse(enc.replace(/^enc:/, "")),
@@ -319,7 +319,7 @@ describe("RunWorker 载荷", () => {
       overrideEnc: `enc:${JSON.stringify({ key: "caller-key" })}`,
     });
     await worker.tick();
-    expect(engine.seenCtx[0]?.credentials.key).toBe("caller-key");
+    expect(engine.seenCtx[0]?.credentials.key).toBe("k");
   });
 
   it("覆盖解不开:本轮失败,绝不回落到平台凭证", async () => {

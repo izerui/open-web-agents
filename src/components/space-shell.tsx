@@ -21,8 +21,8 @@ import {
   ArrowLeft,
   BarChart3,
   Bot,
+  Cpu,
   History,
-  KeyRound,
   Lock,
   ScrollText,
   ShieldCheck,
@@ -45,7 +45,7 @@ export const PERSONAL_NAV = [
   { href: "/settings/keys", label: "接入中心", icon: Terminal },
   { href: "/settings/audit", label: "审计日志", icon: ScrollText },
   { href: "/settings/usage", label: "用量与成本", icon: BarChart3 },
-  { href: "/settings/credentials", label: "模型凭证", icon: KeyRound },
+  { href: "/settings/credentials", label: "平台算力", icon: Cpu },
   { href: "/settings/account", label: "账号安全", icon: Lock },
 ] as const;
 

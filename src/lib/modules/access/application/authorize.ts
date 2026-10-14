@@ -5,6 +5,7 @@ import type { Subject } from "@/lib/modules/access/domain/grants";
 import {
   type Decision,
   type Principal,
+  agentAccessLevel,
   canAccessSession,
   canAdministerPlatform,
   canInvokeAgent,
@@ -36,10 +37,13 @@ export interface AuthDeps {
   grants: GrantRepo;
   /** 是否要求网页侧登录。生产必须为 true。 */
   authRequired: boolean;
+
   /** 从 cookie 解析当前登录用户。 */
   currentUser(req: Request): Promise<{ id: string; role?: "admin" | "user" } | null>;
+
   /** 用户所属组 id。授权判定要用;未启用组时返回空数组即可。 */
   groupIdsOf?(userId: string): Promise<string[]>;
+
   /**
    * 账号是否仍可用(存在且未停用)。
    * API Key 与嵌入令牌都以签发人的身份运行:签发人被停用,它们必须一起失效。
@@ -51,6 +55,7 @@ export class Unauthorized extends BrandedError {
   static readonly brand = Symbol.for("owa.error.Unauthorized");
   readonly status = 401;
 }
+
 export class Forbidden extends BrandedError {
   static readonly brand = Symbol.for("owa.error.Forbidden");
   readonly status = 403;
@@ -159,6 +164,24 @@ export class Authorizer {
     const s = await this.deps.sessions.get(sessionId);
     // 已删除的会话视同不存在 —— 不能再读它的文件、事件,也不能继续在里面运行
     if (!s || s.status === "deleted") throw new Forbidden("session not found");
+    if (s.source === "design") {
+      if (p.type !== "web" || s.ownerId !== p.userId)
+        throw new Forbidden("no access to design session");
+      if (s.designTargetAgentId) {
+        const target = await this.deps.agents.get(s.designTargetAgentId);
+        if (
+          !target ||
+          agentAccessLevel(
+            p,
+            target,
+            await this.subjectOf(p),
+            await this.deps.grants.listForResource("agent", target.id),
+          ) !== "write"
+        ) {
+          throw new Forbidden("no edit permission on design target");
+        }
+      }
+    }
     this.assert(
       canAccessSession(p, {
         id: s.id,

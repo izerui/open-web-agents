@@ -1,3 +1,4 @@
+import type { DesignState } from "@/lib/modules/agent/domain/design";
 import type {
   NewSession,
   ReclaimResult,
@@ -116,11 +117,17 @@ export class InMemorySessionRepo implements SessionRepo {
 
   async update(
     id: string,
-    patch: { title?: string; status?: SessionStatus; designTargetAgentId?: string },
+    patch: {
+      title?: string;
+      status?: SessionStatus;
+      designTargetAgentId?: string;
+      designState?: DesignState;
+    },
   ): Promise<void> {
     const s = this.sessions.get(id);
     if (!s) return;
     if (patch.designTargetAgentId !== undefined) s.designTargetAgentId = patch.designTargetAgentId;
+    if (patch.designState !== undefined) s.designState = structuredClone(patch.designState);
     if (patch.title !== undefined) s.title = patch.title;
     if (patch.status !== undefined) s.status = patch.status;
   }

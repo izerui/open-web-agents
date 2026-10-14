@@ -102,17 +102,17 @@ describe("故障注入 / 知识检索", () => {
   });
 });
 
-describe("故障注入 / 用户凭证", () => {
-  it("读取或解密用户凭证失败时中止,不消耗平台凭证", async () => {
-    const { orch, engine } = await setup({ userCredentials: boom });
+describe("故障注入 / 平台凭证", () => {
+  it("平台 Key 未配置时中止,不尝试其它来源", async () => {
+    const { orch, engine } = await setup({ platformCredentials: { baseUrl: "platform", key: "" } });
     await expect(orch.execute({ sessionId: "s1", prompt: "hi" }, signal())).rejects.toThrow(
-      "依赖挂了",
+      "平台尚未配置",
     );
     expect(engine.lastCtx).toBeUndefined();
   });
 
-  it("用户没配凭证(返回空)仍回落平台默认", async () => {
-    const { orch, engine } = await setup({ userCredentials: async () => ({}) });
+  it("账号不需要配置模型凭证", async () => {
+    const { orch, engine } = await setup({});
     await orch.execute({ sessionId: "s1", prompt: "hi" }, signal());
     expect(engine.lastCtx?.credentials).toEqual({ baseUrl: "platform", key: "pk" });
   });
@@ -184,11 +184,13 @@ describe("故障注入 / 审计与回调", () => {
     });
   });
 
-  it("读用户凭证失败时中止本轮,不改用平台 key", async () => {
-    const { orch, engine, sessions } = await setup({ userCredentials: boom });
+  it("平台网关未配置时中止本轮", async () => {
+    const { orch, engine, sessions } = await setup({
+      platformCredentials: { baseUrl: "", key: "pk" },
+    });
     await sessions.create({ id: "s-own", agentId: "a1", workspaceDir: "/ws", ownerId: "u1" });
     await expect(orch.execute({ sessionId: "s-own", prompt: "hi" }, signal())).rejects.toThrow(
-      "依赖挂了",
+      "平台尚未配置",
     );
     expect(engine.lastCtx).toBeUndefined();
   });

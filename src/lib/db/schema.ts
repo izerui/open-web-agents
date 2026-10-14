@@ -153,6 +153,8 @@ export const sessions = mysqlTable(
      * 新建智能体的设计会话一开始为空,第一次"应用"后填上。
      */
     designTargetAgentId: varchar("design_target_agent_id", { length: 36 }),
+    /** 设计基线与可引用资源,不放进 agent 能写的工作目录。 */
+    designState: json("design_state"),
     /**
      * 会话锁定的智能体版本;NULL = 跟随草稿。
      * 建会话时定下来,整个会话的每一轮都用同一版本 —— 多轮对话中途换版本,

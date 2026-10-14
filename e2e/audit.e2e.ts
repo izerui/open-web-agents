@@ -107,6 +107,20 @@ describe("审计日志", () => {
     expect(all).not.toContain("wrong-password");
   });
 
+  it("停用的模型凭证请求被拒绝,不写凭证变更审计", async () => {
+    const before = (await mine(owner)).items ?? [];
+    const rejected = await owner.put<{ code: string }>("/api/me/credentials", {
+      baseUrl: "https://retired-gateway.example?token=retired-audit-secret",
+      apiKey: "sk-retired-audit-secret",
+    });
+    expect(rejected.status).toBe(410);
+    expect(rejected.body.code).toBe("byok_disabled");
+    const after = (await mine(owner)).items ?? [];
+    expect(after).toEqual(before);
+    expect(after.some((entry) => entry.action === "me.credentials_update")).toBe(false);
+    expect(JSON.stringify(after)).not.toContain("retired-audit-secret");
+  });
+
   it("协作者看得到自己做的修改;无关的人看不到任何相关记录", async () => {
     const forEditor = (await mine(editor, `&resourceId=${agentId}`)).items ?? [];
     expect(forEditor.some((e) => e.action === "agent.update" && e.actor.id === editorId)).toBe(

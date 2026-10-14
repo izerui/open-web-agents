@@ -356,7 +356,7 @@ export function Builder() {
         body: JSON.stringify(agentId ? { agentId } : {}),
       });
       allowNavigationRef.current = true;
-      router.push(`/?session=${encodeURIComponent(d.sessionId)}`);
+      router.push(`/agents/design?session=${encodeURIComponent(d.sessionId)}`);
     } catch (e) {
       toast.error(`无法开始设计:${errorText(e)}`);
       setDesigning(false);
@@ -746,7 +746,7 @@ export function Builder() {
             title="和 AI 对话来设计:提示词、技能、MCP、输入输出契约"
           >
             <Sparkles className="size-3.5" />
-            {designing ? "准备中…" : openedId ? "用 AI 修改" : "用 AI 设计"}
+            {designing ? "准备中…" : openedId ? "AI 编辑" : "AI 创建"}
           </Button>
           {selectedAgent?.canManageWebhook && !BUILT_IN_AGENT_IDS.includes(selectedAgent.id) && (
             <Button
@@ -857,8 +857,8 @@ export function Builder() {
             <div>
               <CardTitle className="text-sm">技能</CardTitle>
               <CardDescription>
-                可复用的专门做法:流程、规范、脚本。描述写"何时使用",模型据此自动调用。
-                多文件技能(带脚本、模板)建议用「用 AI 修改」编辑。
+                可复用的专门做法:流程、规范、脚本。描述写"何时使用",模型据此自动调用。 AI
+                编辑可选择已有技能;技能正文与文件在这里维护。
               </CardDescription>
             </div>
             <Button

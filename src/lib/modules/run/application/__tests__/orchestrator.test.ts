@@ -145,15 +145,44 @@ describe("RunOrchestrator.execute", () => {
     expect(engine.lastCtx?.credentials).toEqual(PLATFORM);
   });
 
-  it("请求级覆盖优先于平台默认", async () => {
+  it("请求可选择平台模型,历史用户凭证覆盖不再生效", async () => {
     const engine = new FakeEngine();
     const { orch } = await setup(engine);
     await orch.execute(
-      { sessionId: "s1", prompt: "hi", override: { key: "sk-caller", model: "haiku" } },
+      {
+        sessionId: "s1",
+        prompt: "hi",
+        override: JSON.parse('{"key":"sk-caller","baseUrl":"https://attacker","model":"haiku"}'),
+      },
       signal,
     );
-    expect(engine.lastCtx?.credentials).toEqual({ baseUrl: PLATFORM.baseUrl, key: "sk-caller" });
+    expect(engine.lastCtx?.credentials).toEqual(PLATFORM);
     expect(engine.lastSpec?.model).toEqual({ alias: "haiku" });
+  });
+
+  it("AI 编辑强制平台凭证和设计模型,计费归发起账号", async () => {
+    const engine = new FakeEngine();
+    const { orch, sessions } = await setup(engine);
+    await sessions.create({
+      id: "design",
+      agentId: "a1",
+      workspaceDir: "/ws/design",
+      source: "design",
+      ownerId: "author",
+      billingUserId: "author",
+    });
+    await orch.execute(
+      {
+        sessionId: "design",
+        prompt: "edit",
+        override: JSON.parse('{"key":"legacy-key","baseUrl":"https://elsewhere","model":"haiku"}'),
+      },
+      signal,
+    );
+    expect(engine.lastCtx?.designMode).toBe(true);
+    expect(engine.lastCtx?.credentials).toEqual(PLATFORM);
+    expect(engine.lastSpec?.model).toEqual({ alias: "sonnet" });
+    expect((await sessions.get("design"))?.billingUserId).toBe("author");
   });
 
   it("记下 sdkSessionId,下一轮带上 resume", async () => {
@@ -290,27 +319,21 @@ describe("计费账号", () => {
       billingUserId: "u2",
     });
     const engine = new FakeEngine();
-    const seenUsers: string[] = [];
     const orch = new RunOrchestrator({
       sessions,
       agents,
       engine,
       bus: new InMemoryBus(),
       platformCredentials: PLATFORM,
-      userCredentials: async (userId) => {
-        seenUsers.push(userId);
-        return userId === "u2" ? { key: "sk-u2" } : {};
-      },
       quotaCheck: quota,
     });
-    return { orch, engine, seenUsers };
+    return { orch, engine };
   }
 
-  it("API Key 会话用签发人自带的凭证,而不是平台默认", async () => {
-    const { orch, engine, seenUsers } = await setupBilling();
+  it("API Key 会话也使用平台凭证,计费仍归签发人", async () => {
+    const { orch, engine } = await setupBilling();
     await orch.execute({ sessionId: "s1", prompt: "hi" }, signal);
-    expect(seenUsers).toEqual(["u2"]);
-    expect(engine.lastCtx?.credentials.key).toBe("sk-u2");
+    expect(engine.lastCtx?.credentials).toEqual(PLATFORM);
   });
 
   it("执行前复核额度:超额则不启动引擎", async () => {

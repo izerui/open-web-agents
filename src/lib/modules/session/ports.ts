@@ -1,8 +1,9 @@
+import type { DesignState } from "@/lib/modules/agent/domain/design";
 import type { ModelAlias } from "@/lib/shared";
 
 /** 会话从哪个入口来。决定审批怎么走、结果是否推 webhook、在哪个列表里展示。 */
 /** eval = 评测里每个用例的运行:无人值守,不推回调,不进工作台的会话列表 */
-export type SessionSource = "web" | "api" | "invoke" | "embed" | "eval";
+export type SessionSource = "web" | "api" | "invoke" | "embed" | "eval" | "design";
 
 /** active 正常 / archived 归档(列表默认不显示) / deleted 已删除(视同不存在)。 */
 export type SessionStatus = "active" | "archived" | "deleted";
@@ -30,6 +31,7 @@ export interface Session {
   status: SessionStatus;
   /** 设计会话的目标智能体。 */
   designTargetAgentId?: string;
+  designState?: DesignState;
   /** 锁定的智能体版本;undefined = 跟随草稿。建会话时定下,整个会话不变。 */
   agentVersion?: number;
   /** 工作目录被 GC 整体清理的时刻(ms);之前生成的文件已不在。 */
@@ -53,6 +55,7 @@ export interface NewSession {
   /** 不传:无人值守即 invoke,否则 web。 */
   source?: SessionSource;
   designTargetAgentId?: string;
+  designState?: DesignState;
   /** 锁定的智能体版本;不传 = 跟随草稿。 */
   agentVersion?: number;
 }
@@ -72,7 +75,9 @@ export type ReclaimResult = "reclaimed" | "busy" | "gone";
 
 export interface SessionRepo {
   create(s: NewSession): Promise<Session>;
+
   get(id: string): Promise<Session | null>;
+
   /**
    * 列出会话。
    *
@@ -82,8 +87,10 @@ export interface SessionRepo {
    * 【别人】的活跃度。没有游标、没有截断提示,纯静默失效。
    */
   list(filter?: SessionListFilter): Promise<Session[]>;
+
   /** 每轮结束后记下 SDK session id,供下一轮 resume。 */
   setSdkSessionId(id: string, sdkSessionId: string): Promise<void>;
+
   /**
    * 工作目录的会话级互斥协议(防止 GC 与新运行 / 上传赛跑而丢文件)。
    *
@@ -96,6 +103,7 @@ export interface SessionRepo {
    * GC 在前,写方等改名完成后再建空目录。没有"判定之后、动手之前"的窗口。
    */
   prepareWorkspace(id: string, opts: { nowMs: number }, ensure: () => Promise<void>): Promise<void>;
+
   /**
    * 条件(全部在会话行锁内判定):
    * - 会话创建于 quietSinceMs 之前,且 workspaceTouchedAt 为空或早于它;
@@ -114,6 +122,7 @@ export interface SessionRepo {
     opts: { quietSinceMs: number; nowMs: number; kind: "purge" | "clean" },
     op: () => Promise<boolean>,
   ): Promise<ReclaimResult>;
+
   /**
    * 锁住会话行,把库里记下的清理时刻交给 fn,在锁内执行。GC 核对回收站批次用:
    * 另一个 GC 正在 reclaimWorkspace(改名之后、提交之前)时,这里会等它的事务结束,
@@ -123,11 +132,18 @@ export interface SessionRepo {
     id: string,
     fn: (state: { workspacePurgedAt?: number } | null) => Promise<T>,
   ): Promise<T>;
+
   /** 删除一条还没有任何运行的会话(入队失败或幂等冲突时回滚刚建的会话)。 */
   delete(id: string): Promise<void>;
+
   /** 改标题 / 归档 / 软删除。只改传进来的字段。 */
   update(
     id: string,
-    patch: { title?: string; status?: SessionStatus; designTargetAgentId?: string },
+    patch: {
+      title?: string;
+      status?: SessionStatus;
+      designTargetAgentId?: string;
+      designState?: DesignState;
+    },
   ): Promise<void>;
 }

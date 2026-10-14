@@ -22,7 +22,7 @@ const short = (v: unknown) => {
 };
 
 /** 一次对比的结果:每处改动一行;长文本给出行级差异(只显示改动行及其上下各一行) */
-function DiffView({ title, changes }: { title: string; changes: Change[] }) {
+export function DiffView({ title, changes }: { title: string; changes: Change[] }) {
   return (
     <div className="space-y-2 rounded border border-border bg-muted/30 p-2 text-xs">
       <p className="font-medium">{title}</p>

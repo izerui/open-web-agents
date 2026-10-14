@@ -103,13 +103,19 @@ describe("对外 invoke 的入口规则", () => {
     expect((await invoke({ input: "x", override: { model: "gpt-9" } })).status).toBe(400);
   });
 
-  it("【平台 key 外泄回归】只给 override.baseUrl 不给 key:400", async () => {
-    const r = await invoke({ input: "x", override: { baseUrl: "https://attacker.example" } });
+  it.each([
+    { baseUrl: "https://attacker.example" },
+    { key: "sk-caller" },
+    { key: "sk-caller", model: "haiku" },
+    { baseUrl: "https://attacker.example", key: "sk-caller" },
+    { baseUrl: "", key: "" },
+  ])("平台凭证不允许被请求覆盖: %j", async (override) => {
+    const r = await invoke({ input: "x", override });
     expect(r.status).toBe(400);
   });
 
-  it("合法的请求级覆盖被受理(会加密入库,随任务交给 worker)", async () => {
-    const r = await invoke({ input: "x", override: { key: "sk-caller", model: "haiku" } });
+  it("仅选择平台模型别名的请求被受理", async () => {
+    const r = await invoke({ input: "x", override: { model: "haiku" } });
     expect(r.status).toBe(202);
   });
 });
@@ -232,9 +238,27 @@ describe("安全边界", () => {
     expect(a?.config.permissionMode).toBe("acceptEdits");
   });
 
-  it("只设自定义 Base URL 而不配自己的 key:400", async () => {
-    const r = await user.put("/api/me/credentials", { baseUrl: "https://attacker.example" });
-    expect(r.status).toBe(400);
+  it.each([
+    { baseUrl: "https://attacker.example" },
+    { apiKey: "sk-retired-byok" },
+    { baseUrl: "https://attacker.example", apiKey: "sk-retired-byok" },
+    { baseUrl: "", apiKey: "" },
+  ])("旧账号模型凭证设置已停用: %j", async (body) => {
+    const r = await user.put<{ code: string }>("/api/me/credentials", body);
+    expect(r.status).toBe(410);
+    expect(r.body.code).toBe("byok_disabled");
+    const me = await user.get<{ user: Record<string, unknown> }>("/api/auth");
+    expect(me.status).toBe(200);
+    expect(me.body.user).not.toHaveProperty("defaultBaseUrl");
+    expect(me.body.user).not.toHaveProperty("anthropicKeyMask");
+    expect(JSON.stringify(me.body)).not.toContain("sk-retired-byok");
+  });
+
+  it("旧凭证接口仍要求登录", async () => {
+    const r = await new Client("anonymous").put("/api/me/credentials", {
+      apiKey: "sk-retired-byok",
+    });
+    expect(r.status).toBe(401);
   });
 });
 

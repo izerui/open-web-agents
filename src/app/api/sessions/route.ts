@@ -32,7 +32,7 @@ export async function GET(req: Request) {
           ? { billingUserId: principal.userId, sources: ["invoke", "api", "embed"] }
           : view === "all" && principal.role === "admin"
             ? undefined
-            : { ownerId: principal.userId };
+            : { ownerId: principal.userId, sources: ["web"] };
 
     // 查询已经收窄,这里的 canAccessSession 是第二道闸:授权规则只有一处权威,
     // 万一查询条件写错也由它兜住,而不是让越权数据直接流出去。

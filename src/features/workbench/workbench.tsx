@@ -1,8 +1,7 @@
 "use client";
 
 import { WorkbenchSidebar } from "@/components/workbench-sidebar";
-import { readEventStream } from "@/features/chat/event-stream";
-import type { AgentEvent } from "@/lib/shared";
+import { followRun } from "@/features/chat/follow-run";
 import { cn } from "@/lib/utils";
 import type { FileUIPart } from "ai";
 import {
@@ -25,7 +24,6 @@ import { ApprovalBar } from "./approval-bar";
 import { CommandPalette } from "./command-palette";
 import { ContextWindowMeter } from "./context-window-meter";
 import { ChatThread, contextTokens, sumUsage, totalUsageTokens } from "./conversation";
-import { DesignBar } from "./design-bar";
 import { createEventBatcher } from "./event-batcher";
 import { FilePanel } from "./file-panel";
 import { SessionActions } from "./session-actions";
@@ -110,6 +108,7 @@ interface SlashCommand {
   label: string;
   icon: React.ElementType;
   disabled?: boolean;
+
   run(): void;
 }
 
@@ -167,85 +166,6 @@ function AttachmentsDisplay() {
 /*  运行事件流                                                       */
 /* ================================================================== */
 
-/** 断线重连上限。超过就如实报「结局未知」—— 无限重试只会把已经出问题的服务端捶得更惨。 */
-const MAX_RECONNECT = 5;
-
-/**
- * 跟随一次运行的事件流,断线后按 Redis 游标续读。
- *
- * 【为什么要自己重连】fetch 不是 EventSource:它既不会自动重连,也不会自动带
- * Last-Event-ID。网络抖一下 readEventStream 就返回了,而运行还在 worker 里继续跑 ——
- * 界面却永远定格在断点,用户以为卡死,实际上后台早就跑完了。
- *
- * 【为什么不会重复渲染】服务端把 Redis Stream ID 写在 SSE 的 `id:` 字段里,
- * 续读时带上它,只会拿到这条之后的事件。
- *
- * 【收不到终态时发 unknown 而不是 failed】连不上只说明看不到过程,
- * 不代表运行失败 —— 运行不绑在这条 HTTP 上,它多半还在跑。
- */
-async function followRun(args: {
-  sessionId: string;
-  runId: string;
-  push: (e: AgentEvent) => void;
-  signal: AbortSignal;
-  /** `/run` 返回的第一段流;重连场景不传。 */
-  initial?: ReadableStream<Uint8Array> | null;
-}): Promise<void> {
-  const { sessionId, runId, push, signal } = args;
-  let cursor = "0-0";
-  let done = false;
-
-  const onEvent = (e: AgentEvent) => {
-    if (e.kind === "result") done = true;
-    push(e);
-  };
-  const onCursor = (id: string) => {
-    cursor = id;
-  };
-
-  if (args.initial) {
-    try {
-      await readEventStream(args.initial, onEvent, onCursor);
-    } catch {
-      // 第一段断了不要紧,下面按游标续
-      if (signal.aborted) return;
-    }
-  }
-
-  let lastError: unknown;
-  for (let attempt = 0; !done && !signal.aborted && attempt <= MAX_RECONNECT; attempt++) {
-    if (attempt > 0) {
-      await new Promise((r) => setTimeout(r, Math.min(500 * 2 ** (attempt - 1), 4000)));
-      if (signal.aborted) return;
-    }
-    try {
-      const res = await fetch(
-        `/api/sessions/${sessionId}/events?runId=${encodeURIComponent(runId)}&cursor=${encodeURIComponent(cursor)}`,
-        { signal, cache: "no-store" },
-      );
-      if (!res.ok) {
-        throw await responseError(res, "重新连接运行失败");
-      }
-      if (!res.body) throw new Error("无响应流");
-      await readEventStream(res.body, onEvent, onCursor);
-      lastError = undefined;
-    } catch (err) {
-      if (signal.aborted) return;
-      lastError = err;
-    }
-  }
-
-  if (!done && !signal.aborted) {
-    const why = lastError instanceof Error ? lastError.message : lastError ? String(lastError) : "";
-    push({
-      kind: "result",
-      status: "unknown",
-      summary: `连接中断${why ? `(${why})` : ""} —— 运行可能仍在后台继续,刷新页面可查看结果`,
-      runId,
-    });
-  }
-}
-
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 function dataUrlToBlob(url: string): Blob {
@@ -294,9 +214,6 @@ async function uploadPromptFiles(
   if (!res.ok || !body?.files) throw new Error(body?.error ?? `上传文件失败(HTTP ${res.status})`);
   return body.files;
 }
-
-/** 内置"AI 智能体设计师"的 id(与 agent/domain/architect.ts 一致;前端不引服务端模块)。 */
-const ARCHITECT_AGENT_ID = "agent-architect";
 
 /** 内置通用智能体的开场建议(它没有配置自己的)。 */
 const DEFAULT_AGENT_STARTERS = [
@@ -1303,15 +1220,6 @@ export function Workbench() {
                       松手添加文件
                     </div>
                   </div>
-                )}
-
-                {sessionId && agentId === ARCHITECT_AGENT_ID && (
-                  <DesignBar
-                    key={sessionId}
-                    sessionId={sessionId}
-                    disabled={running}
-                    onAskFix={stableAnswerAction}
-                  />
                 )}
 
                 {(() => {

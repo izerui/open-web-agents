@@ -122,10 +122,9 @@ export function buildAgentOpenApi(agent: OpenApiAgent, origin: string): Record<s
                     },
                     override: {
                       type: "object",
-                      description: "请求级模型凭证;自定义 baseUrl 必须同时给 key",
+                      description: "仅可选择平台模型别名,不接受用户 API Key 或自定义网关",
+                      additionalProperties: false,
                       properties: {
-                        baseUrl: { type: "string", format: "uri" },
-                        key: { type: "string" },
                         model: { type: "string", enum: ["fable", "opus", "sonnet", "haiku"] },
                       },
                     },

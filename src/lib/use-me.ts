@@ -7,8 +7,6 @@ export interface MeUser {
   id: string;
   email: string;
   role: string;
-  defaultBaseUrl: string | null;
-  anthropicKeyMask: string | null;
   /** Webhook 签名密钥的掩码;null = 未配置(回调不带签名)。 */
   webhookSecretMask?: string | null;
 }
@@ -24,8 +22,8 @@ export interface Me {
  * 全站共享的登录态。
  *
  * 【为什么不让每个组件各拉各的】侧栏的用户菜单和设置页要的是同一份数据:
- * 各拉各的,进设置页就会打两次 /api/auth;更麻烦的是在设置页改完凭证后,
- * 侧栏里的密钥掩码还停在旧值 —— 同一个事实有两份状态,迟早对不上。
+ * 各拉各的,进设置页就会打两次 /api/auth;账号状态变化时,
+ * 也可能出现不同页面展示的登录信息不一致。
  * 所以这里做成单一来源:一处刷新,所有订阅者一起更新。
  */
 let cache: Me | null = null;
@@ -46,7 +44,7 @@ async function load(): Promise<Me> {
   return cache;
 }
 
-/** 重新拉一次并通知所有订阅者。改完凭证后调它,侧栏才会跟着变。 */
+/** 重新拉一次并通知所有订阅者。账号或 webhook 签名配置变化后调用。 */
 export async function refreshMe(): Promise<void> {
   inflight = null;
   await load().catch(() => {

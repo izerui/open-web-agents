@@ -78,7 +78,7 @@ export function assertPromptSize(prompt: string): void {
 }
 
 function hasOverride(o: RunCommand["override"]): o is NonNullable<RunCommand["override"]> {
-  return !!o && (!!o.baseUrl || !!o.key || !!o.model);
+  return !!o?.model;
 }
 
 export class RunEnqueuer {
