@@ -34,6 +34,8 @@ export interface EvalRun {
   agentId: string;
   /** undefined = 草稿 */
   agentVersion?: number;
+  /** 这次评测固定下来的配置的内容摘要;所有用例跑的都是这一份 */
+  configHash?: string;
   status: "running" | "done";
   total: number;
   passed: number;

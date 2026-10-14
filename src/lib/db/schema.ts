@@ -482,6 +482,11 @@ export const evalRuns = mysqlTable(
     agentId: varchar("agent_id", { length: 36 }).notNull(),
     /** 跑的是哪一版;NULL = 草稿 */
     agentVersion: int("agent_version"),
+    /**
+     * 这次评测固定下来的配置的内容摘要(与发布版本的摘要同一算法)。所有用例跑的都是这一份;
+     * 历史里据此认出"这两次评测跑的是不是同一份配置"—— 草稿没有版本号,只能靠它
+     */
+    configHash: varchar("config_hash", { length: 64 }),
     /** running / done */
     status: varchar("status", { length: 16 }).notNull(),
     total: int("total").notNull(),

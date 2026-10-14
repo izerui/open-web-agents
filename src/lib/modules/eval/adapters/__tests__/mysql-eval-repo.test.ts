@@ -74,6 +74,7 @@ if (!TEST_DB_URL) {
           id: runId,
           agentId,
           agentVersion: 2,
+          configHash: "h".repeat(64),
           status: "running",
           total: 2,
           passed: 0,
@@ -103,6 +104,7 @@ if (!TEST_DB_URL) {
       );
       expect(await repo.getRun(runId)).toMatchObject({
         agentVersion: 2,
+        configHash: "h".repeat(64),
         status: "running",
         total: 2,
       });

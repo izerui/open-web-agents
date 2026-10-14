@@ -5,6 +5,7 @@
 // 收拢到一处之后每条规则只需要写一次。
 
 import type { AgentReleases } from "@/lib/modules/agent/application/releases";
+import type { AgentConfig } from "@/lib/modules/agent/domain/config";
 import type { AgentRepo } from "@/lib/modules/agent/ports";
 import { checkPromptSize } from "@/lib/modules/run/domain/limits";
 import type { Run, RunRepo } from "@/lib/modules/run/ports";
@@ -44,6 +45,12 @@ export interface EnqueueRequest {
    * 不投回调(评测里的运行):快照记为"无回调",之后智能体配上地址也不投。
    */
   noCallback?: boolean;
+  /**
+   * 调用方已经定好的配置快照(含版本号):直接用它,不再按会话读当前配置。
+   * 评测用它保证一次评测的所有用例跑同一份配置 —— 否则评测过程中保存草稿,
+   * 前几个用例跑 A、后几个跑 B,甚至按 A 的 inputSchema 校验却执行 B。
+   */
+  release?: { config: AgentConfig; version: number | null };
   /**
    * 调用方为这次指定的回调地址,入口已按回调地址策略校验过。
    * 不传则快照智能体此刻配置的默认地址(没配就记"无回调")。
@@ -85,10 +92,13 @@ export class RunEnqueuer {
     const agent = await this.deps.agents.get(session.agentId);
     if (!agent) throw new EnqueueTargetMissing(`agent not found: ${session.agentId}`);
 
-    // 会话锁定了版本就跑那一版;版本不存在(不应发生)按目标缺失处理,而不是悄悄改跑草稿
-    const release = await this.deps.releases.at(agent, session.agentVersion).catch((err) => {
-      throw new EnqueueTargetMissing(err instanceof Error ? err.message : String(err));
-    });
+    // 会话锁定了版本就跑那一版;版本不存在(不应发生)按目标缺失处理,而不是悄悄改跑草稿。
+    // 调用方给了配置快照就用它
+    const release =
+      req.release ??
+      (await this.deps.releases.at(agent, session.agentVersion).catch((err) => {
+        throw new EnqueueTargetMissing(err instanceof Error ? err.message : String(err));
+      }));
 
     let overrideEnc: string | undefined;
     if (hasOverride(req.override)) {

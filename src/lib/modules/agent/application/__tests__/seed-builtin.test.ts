@@ -28,11 +28,15 @@ function setup(agents = new InMemoryAgentRepo()) {
 }
 
 describe("decideSeed", () => {
-  it("不存在 → 写入;旧数据没有种子摘要 → 升级一次;没人改过 → 升级;改过 → 保留", () => {
-    expect(decideSeed(null)).toBe("insert");
-    expect(decideSeed({ contentHash: "a" })).toBe("upgrade");
-    expect(decideSeed({ contentHash: "a", seedHash: "a" })).toBe("upgrade");
-    expect(decideSeed({ contentHash: "b", seedHash: "a" })).toBe("keep-modified");
+  it("不存在 → 写入;有摘要:没改过 → 升级,改过 → 保留", () => {
+    expect(decideSeed(null, "d")).toBe("insert");
+    expect(decideSeed({ contentHash: "a", seedHash: "a" }, "d")).toBe("upgrade");
+    expect(decideSeed({ contentHash: "b", seedHash: "a" }, "d")).toBe("keep-modified");
+  });
+
+  it("旧数据没有摘要:内容就是代码里的定义 → 只开始跟踪;否则无从判断 → 保留,不当成没人改过", () => {
+    expect(decideSeed({ contentHash: "d" }, "d")).toBe("adopt");
+    expect(decideSeed({ contentHash: "x" }, "d")).toBe("keep-unknown");
   });
 });
 
@@ -66,12 +70,36 @@ describe("seedBuiltin", () => {
     expect(await seedBuiltin(t.deps, V2)).toBe("keep-modified");
   });
 
-  it("旧数据(引入种子摘要之前):按此前的行为升级一次,之后开始跟踪", async () => {
-    const agents = new InMemoryAgentRepo([V1]); // 没有种子摘要
+  it("旧数据没有摘要、管理员改过提示词:装上这次修复后的第一次启动,原样保留并告警", async () => {
+    // 修复前部署里的行:没有种子摘要,提示词被管理员改过
+    const agents = new InMemoryAgentRepo([
+      { ...V1, config: { ...V1.config, systemPrompt: "管理员改过的提示词" } },
+    ]);
     const t = setup(agents);
-    expect(await seedBuiltin(t.deps, V2)).toBe("upgrade");
+    expect(await seedBuiltin(t.deps, V2)).toBe("keep-unknown");
+    expect((await agents.get("default"))?.config.systemPrompt).toBe("管理员改过的提示词");
+    expect((await agents.get("default"))?.seedHash).toBeUndefined();
+    expect(t.warnings[0]).toMatch(/无从判断/);
+    // 之后每次启动都一样,不会哪一次突然覆盖
+    expect(await seedBuiltin(t.deps, V2)).toBe("keep-unknown");
+    expect((await agents.get("default"))?.config.systemPrompt).toBe("管理员改过的提示词");
+    expect(t.grants()).toBe(0);
+  });
+
+  it("旧数据没有摘要、内容就是当前内置定义:不写内容,只开始跟踪;之后代码更新就能升级", async () => {
+    const agents = new InMemoryAgentRepo([V1]);
+    const t = setup(agents);
+    expect(await seedBuiltin(t.deps, V1)).toBe("adopt");
     expect((await agents.get("default"))?.seedHash).toBeTruthy();
-    expect(t.grants()).toBe(0); // 已存在的行,不再授权
+    expect(await seedBuiltin(t.deps, V2)).toBe("upgrade");
+    expect((await agents.get("default"))?.config.systemPrompt).toBe("v2 提示词(代码里改进了)");
+  });
+
+  it("旧数据没有摘要、内容是更早的内置定义(没人改过但也无从证明):同样保留,不冒险覆盖", async () => {
+    const agents = new InMemoryAgentRepo([V1]);
+    const t = setup(agents);
+    expect(await seedBuiltin(t.deps, V2)).toBe("keep-unknown");
+    expect((await agents.get("default"))?.config.systemPrompt).toBe("v1 提示词");
   });
 
   it("升级时沿用管理员配的回调地址(运维设置不属于定义)", async () => {

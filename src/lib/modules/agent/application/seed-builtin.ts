@@ -19,15 +19,26 @@ export async function seedBuiltin(
   // 被删除过(id 仍占用):尊重删除,不复活
   if (!existing && (await deps.agents.idTaken(definition.id))) return "deleted";
 
+  const currentHash = existing ? contentHash(snapshotOf(existing)) : "";
   const decision = decideSeed(
-    existing
-      ? { contentHash: contentHash(snapshotOf(existing)), seedHash: existing.seedHash }
-      : null,
+    existing ? { contentHash: currentHash, seedHash: existing.seedHash } : null,
+    contentHash(snapshotOf(definition)),
   );
   if (decision === "keep-modified") {
     (deps.warn ?? console.warn)(
       `[owa] 内置智能体「${definition.name}」(${definition.id})已被修改,保留现有内容,不升级到新版本的内置定义`,
     );
+    return decision;
+  }
+  if (decision === "keep-unknown") {
+    (deps.warn ?? console.warn)(
+      `[owa] 内置智能体「${definition.name}」(${definition.id})与当前内置定义不同,且无从判断是否被修改过(早于修改跟踪的数据),保留现有内容不覆盖`,
+    );
+    return decision;
+  }
+  if (decision === "adopt") {
+    // 内容就是代码里的定义:不写内容,只记下摘要,之后按"没人改过就升级"跟踪
+    await deps.agents.setSeedHash(definition.id, currentHash);
     return decision;
   }
 

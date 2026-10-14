@@ -8,6 +8,7 @@
 
 import type { AgentReleases } from "@/lib/modules/agent/application/releases";
 import { VersionNotFound } from "@/lib/modules/agent/application/releases";
+import { contentHash } from "@/lib/modules/agent/domain/release";
 import { validateInput } from "@/lib/modules/agent/domain/validate-output";
 import type { AgentRepo } from "@/lib/modules/agent/ports";
 import type { EnqueueRequest } from "@/lib/modules/run/application/enqueue";
@@ -51,7 +52,16 @@ export async function startEvalRun(
     if (err instanceof VersionNotFound) return { ok: false, status: 404, reason: err.message };
     throw err;
   }
-  const schema = release.config.inputSchema;
+  // 开跑时就把这一版的完整配置固定下来:入参校验与每个用例的运行都用这一份。
+  // 曾经入队时每个用例各自再读一次当前草稿 —— 评测过程中保存草稿,前后用例跑的就不是同一份
+  const fixed = { config: release.config, version: release.version };
+  const configHash = contentHash({
+    name: release.name,
+    icon: release.icon,
+    description: release.description,
+    config: release.config,
+  });
+  const schema = fixed.config.inputSchema;
 
   const evalRunId = deps.newId();
   const planned: { result: EvalResult; enqueue?: EnqueueRequest }[] = [];
@@ -92,7 +102,7 @@ export async function startEvalRun(
     });
     planned.push({
       result: { ...base, taskId, sessionId },
-      enqueue: { runId: taskId, sessionId, prompt, noCallback: true },
+      enqueue: { runId: taskId, sessionId, prompt, noCallback: true, release: fixed },
     });
   }
 
@@ -100,6 +110,7 @@ export async function startEvalRun(
     id: evalRunId,
     agentId: agent.id,
     ...(release.version !== null ? { agentVersion: release.version } : {}),
+    configHash,
     status: "running",
     total: cases.length,
     passed: 0,

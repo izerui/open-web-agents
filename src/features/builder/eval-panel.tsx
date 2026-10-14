@@ -30,6 +30,8 @@ interface EvalCase {
 interface EvalRun {
   id: string;
   agentVersion?: number;
+  /** 这次评测固定下来的配置的摘要:草稿没有版本号,靠它认出两次跑的是不是同一份配置 */
+  configHash?: string;
   status: "running" | "done";
   total: number;
   passed: number;
@@ -336,8 +338,11 @@ export function EvalPanel({
                 className="flex w-full items-center gap-2 p-2 text-left text-xs hover:bg-accent"
                 onClick={() => void openRun(r.id)}
               >
-                <span className="w-16 shrink-0 font-mono">
+                <span className="w-28 shrink-0 font-mono" title={r.configHash}>
                   {r.agentVersion !== undefined ? `v${r.agentVersion}` : "草稿"}
+                  {r.configHash && (
+                    <span className="ml-1 text-muted-foreground">#{r.configHash.slice(0, 7)}</span>
+                  )}
                 </span>
                 <span className="flex-1">
                   {r.status === "running"

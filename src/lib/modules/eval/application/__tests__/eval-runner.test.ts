@@ -1,9 +1,11 @@
 import { InMemoryAgentRepo } from "@/lib/modules/agent/adapters/in-memory-agent-repo";
 import { InMemoryAgentVersionRepo } from "@/lib/modules/agent/adapters/in-memory-agent-version-repo";
 import { AgentReleases } from "@/lib/modules/agent/application/releases";
+import { contentHash, snapshotOf } from "@/lib/modules/agent/domain/release";
 import { InMemoryEvalRepo } from "@/lib/modules/eval/adapters/in-memory-eval-repo";
 import { readEvalRun, startEvalRun } from "@/lib/modules/eval/application/eval-runner";
-import type { EnqueueRequest } from "@/lib/modules/run/application/enqueue";
+import { InMemoryRunRepo } from "@/lib/modules/run/adapters/in-memory-run-repo";
+import { type EnqueueRequest, RunEnqueuer } from "@/lib/modules/run/application/enqueue";
 import type { RunRecord } from "@/lib/modules/run/domain/run-result";
 import { InMemorySessionRepo } from "@/lib/modules/session/adapters/in-memory-session-repo";
 import { describe, expect, it } from "vitest";
@@ -199,5 +201,85 @@ describe("readEvalRun", () => {
     r = await readEvalRun(t.deps, id);
     expect(r?.results.find((x) => x.caseId === "c2")?.status).toBe("failed");
     expect(r?.run).toMatchObject({ passed: 1, failed: 1 });
+  });
+});
+
+describe("一次评测的所有用例跑同一份配置", () => {
+  it("第一个用例入队后修改草稿,其余用例照样跑开跑时固定的那一份;摘要记在评测上", async () => {
+    const agents = new InMemoryAgentRepo([
+      {
+        id: "a1",
+        ownerId: "u1",
+        name: "审查",
+        config: {
+          systemPrompt: "A 版提示词",
+          model: "sonnet",
+          inputSchema: { type: "object", required: ["x"], properties: { x: { type: "string" } } },
+        },
+      },
+    ]);
+    const original = await agents.get("a1");
+    const releases = new AgentReleases(agents, new InMemoryAgentVersionRepo(agents));
+    const sessions = new InMemorySessionRepo();
+    const runs = new InMemoryRunRepo();
+    const enqueuer = new RunEnqueuer({ runs, sessions, agents, releases });
+    const evals = new InMemoryEvalRepo();
+    for (const i of [1, 2, 3]) {
+      await evals.createCase({
+        id: `c${i}`,
+        agentId: "a1",
+        name: `用例${i}`,
+        input: { x: "v" },
+        assertions: {},
+      });
+    }
+    const taskIds: string[] = [];
+    let n = 0;
+    const deps = {
+      evals,
+      agents,
+      releases,
+      sessions,
+      workspaceFor: async (id: string) => `/ws/${id}`,
+      enqueue: async (r: EnqueueRequest) => {
+        await enqueuer.enqueue(r); // 真实的入队
+        taskIds.push(r.runId);
+        if (taskIds.length === 1) {
+          // 暂停点:第一个用例入队之后,有人保存了草稿 —— 换提示词、换 inputSchema
+          const cur = await agents.get("a1");
+          if (cur) {
+            await agents.upsert({
+              ...cur,
+              config: {
+                ...cur.config,
+                systemPrompt: "B 版提示词",
+                inputSchema: {
+                  type: "object",
+                  required: ["y"],
+                  properties: { y: { type: "number" } },
+                },
+              },
+            });
+          }
+        }
+      },
+      results: { getResult: async () => null },
+      newId: () => `id${++n}`,
+    };
+
+    const r = await startEvalRun(deps, { agentId: "a1", target: "draft", userId: "u1" });
+    expect(taskIds).toHaveLength(3);
+    const configs = await Promise.all(
+      taskIds.map(async (id) => (await runs.getPayload(id))?.agentConfig),
+    );
+    expect(configs.every((c) => JSON.stringify(c) === JSON.stringify(configs[0]))).toBe(true);
+    expect((configs[0] as { systemPrompt: string }).systemPrompt).toBe("A 版提示词");
+
+    if (!original || !r.ok) throw new Error("setup");
+    expect(r.run.configHash).toBe(contentHash(snapshotOf(original)));
+
+    // 改过草稿之后再跑一次:摘要不同,历史里认得出两次跑的不是同一份配置
+    const again = await startEvalRun(deps, { agentId: "a1", target: "draft", userId: "u1" });
+    expect(again.ok && again.run.configHash).not.toBe(r.run.configHash);
   });
 });

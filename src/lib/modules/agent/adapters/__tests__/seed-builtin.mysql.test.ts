@@ -64,5 +64,40 @@ if (!TEST_DB_URL) {
       );
       expect((await repo.get(id))?.config.systemPrompt).toBe("管理员改的");
     });
+
+    it("旧数据(没有种子摘要):内容等于当前定义 → 只开始跟踪;管理员改过 → 原样保留", async () => {
+      const def = (id: string): Agent => ({
+        id,
+        ownerId: "system",
+        name: "内置",
+        config: {
+          systemPrompt: "当前定义",
+          model: "sonnet",
+          outputSchema: { type: "object", properties: { v: { type: "string" } } },
+        },
+      });
+      // 修复前写进去的行:只有内容,没有种子摘要
+      const same = `builtin-legacy-${randomUUID().slice(0, 8)}`;
+      const edited = `builtin-legacy-${randomUUID().slice(0, 8)}`;
+      ids.push(same, edited);
+      await repo.upsert(def(same));
+      await repo.upsert({
+        ...def(edited),
+        config: { ...def(edited).config, systemPrompt: "管理员改的" },
+      });
+
+      // 存取规整(空值、契约拆列、JSON 键序)不能让"内容等于定义"判成不等
+      expect(await seedBuiltin(deps, def(same))).toBe("adopt");
+      expect((await repo.get(same))?.seedHash).toBeTruthy();
+      expect(
+        await seedBuiltin(deps, {
+          ...def(same),
+          config: { ...def(same).config, systemPrompt: "新定义" },
+        }),
+      ).toBe("upgrade");
+
+      expect(await seedBuiltin(deps, def(edited))).toBe("keep-unknown");
+      expect((await repo.get(edited))?.config.systemPrompt).toBe("管理员改的");
+    });
   });
 }

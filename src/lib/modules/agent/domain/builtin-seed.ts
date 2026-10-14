@@ -13,16 +13,25 @@
 export type SeedDecision =
   /** 不存在:写入定义 */
   | "insert"
-  /** 没被改过(或旧数据没有种子摘要):升级到代码里的定义 */
+  /** 上次写入后没被改过:升级到代码里的定义 */
   | "upgrade"
+  /** 旧数据(没有种子摘要)且内容就是代码里的定义:不写内容,只记下摘要开始跟踪 */
+  | "adopt"
   /** 被人改过:保留不动 */
-  | "keep-modified";
+  | "keep-modified"
+  /** 旧数据且内容与代码里的定义不同:无从判断是不是被改过,保守保留 */
+  | "keep-unknown";
 
 export function decideSeed(
   existing: { contentHash: string; seedHash?: string } | null,
+  /** 代码里这份定义的内容摘要 */
+  definitionHash: string,
 ): SeedDecision {
   if (!existing) return "insert";
-  // 旧数据(引入种子摘要之前)无从判断:按此前的行为升级一次,之后开始跟踪
-  if (!existing.seedHash) return "upgrade";
+  if (!existing.seedHash) {
+    // 引入种子摘要之前的旧数据:看不出是不是被改过。"不知道"不能当成"没人改过" ——
+    // 曾经直接升级,于是装上这次修复后的第一次重启,仍会把管理员改过的内容整份覆盖掉
+    return existing.contentHash === definitionHash ? "adopt" : "keep-unknown";
+  }
   return existing.contentHash === existing.seedHash ? "upgrade" : "keep-modified";
 }
