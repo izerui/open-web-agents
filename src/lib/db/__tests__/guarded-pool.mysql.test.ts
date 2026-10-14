@@ -2,7 +2,7 @@
 // 握手与执行中的命令有期限、到期真正断开套接字、连接池自己恢复;事务里的非数据库空档不计时。
 
 import { randomUUID } from "node:crypto";
-import { createDb } from "@/lib/db/client";
+import { createDb, databaseProbe } from "@/lib/db/client";
 import { DbCommandTimeout } from "@/lib/db/guarded-pool";
 import { runs as runsTable } from "@/lib/db/schema";
 import { MysqlRunRepo } from "@/lib/modules/run/adapters/mysql-run-repo";
@@ -149,6 +149,57 @@ if (!TEST_DB_URL) {
         sql`SELECT prompt FROM runs WHERE id = ${id}`,
       )) as unknown as [{ prompt: string }[]];
       expect(rows[0][0]?.prompt).toBe("p");
+    });
+
+    it("健康检查的数据库探测单一在途:连接都停在事务空档(不能强杀)时,频繁探测按时报不可用,连接池里只排一个;放行后恢复", async () => {
+      const id = await newRun();
+      // 不经代理的单连接池:数据库正常,只是唯一的连接被事务占着
+      const { db, pool } = createDb(TEST_DB_URL as string, {
+        connectionLimit: 1,
+        commandMs: 2_000,
+      });
+      cleanups.push(() => pool.end());
+      let enqueued = 0;
+      pool.raw.on("enqueue", () => {
+        enqueued++;
+      });
+      const probeDatabase = databaseProbe(pool);
+      /** 与 health/route.ts 的 probe 同样:外层超时只是不再等 */
+      const healthCheck = () =>
+        Promise.race([probeDatabase().then(() => "ok"), sleep(300).then(() => "unavailable")]);
+
+      let releaseTx!: () => void;
+      const txGap = new Promise<void>((r) => {
+        releaseTx = r;
+      });
+      let inGap!: () => void;
+      const reachedGap = new Promise<void>((r) => {
+        inGap = r;
+      });
+      const tx = db.transaction(async (t) => {
+        await t.execute(sql`SELECT id FROM runs WHERE id = ${id} FOR UPDATE`);
+        inGap();
+        await txGap; // 事务里的文件操作空档:没有命令在执行,不会被强杀
+        await t.execute(sql`UPDATE runs SET prompt = 'tx-done' WHERE id = ${id}`);
+      });
+      await reachedGap;
+
+      for (let i = 0; i < 5; i++) {
+        const t0 = Date.now();
+        expect(await healthCheck()).toBe("unavailable");
+        expect(Date.now() - t0).toBeLessThan(800);
+      }
+      // 5 次探测,连接池里只排了一个获取连接的请求
+      expect(enqueued).toBe(1);
+
+      releaseTx();
+      await tx; // 事务照常提交,行锁全程持有
+      expect(await healthCheck()).toBe("ok");
+      expect(enqueued).toBe(1);
+      const rows = (await direct.db.execute(
+        sql`SELECT prompt FROM runs WHERE id = ${id}`,
+      )) as unknown as [{ prompt: string }[]];
+      expect(rows[0][0]?.prompt).toBe("tx-done");
     });
 
     it("更短命令期限的视图(健康检查用)共享同一个连接池,卡住时按自己的期限收尾", async () => {

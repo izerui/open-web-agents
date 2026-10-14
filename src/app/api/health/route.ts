@@ -2,7 +2,6 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { getContainer } from "@/lib/container";
 import { EnvModelGateway } from "@/lib/modules/model-gateway/adapters/env-gateway";
-import { sql } from "drizzle-orm";
 
 const execFileAsync = promisify(execFile);
 
@@ -86,10 +85,11 @@ export async function GET(req: Request) {
     return Response.json({ status: "alive", uptimeSec: Math.round(process.uptime()) });
   }
 
-  const { probeDb, bus, env, worker } = getContainer();
+  const { probeDatabase, bus, env, worker } = getContainer();
 
   const [database, redis] = await Promise.all([
-    probe(() => probeDb.execute(sql`SELECT 1`)),
+    // 单一在途:这里超时只是不再等,底层那一次探测仍在,后来的探测共用它,不会在连接池里积压
+    probe(() => probeDatabase()),
     probe(async () => {
       if (bus.ready) await bus.ready();
     }),

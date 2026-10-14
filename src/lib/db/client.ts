@@ -1,7 +1,9 @@
+import { sql } from "drizzle-orm";
 import { type MySql2Database, drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
 import { GuardedPool, handshakeGuard } from "./guarded-pool";
 import * as schema from "./schema";
+import { singleFlight } from "./single-flight";
 
 export type Db = MySql2Database<typeof schema>;
 
@@ -51,6 +53,18 @@ export function createDb(
 export function dbOver(pool: GuardedPool): Db {
   // drizzle 只用到连接池的 query / execute / getConnection(见 guarded-pool.ts)
   return drizzle(pool as unknown as mysql.Pool, { schema, mode: "default" });
+}
+
+/**
+ * 健康检查的数据库探测:同一个连接池上命令期限 2 秒的 SELECT 1,且同一时刻只有一个在途。
+ *
+ * 命令期限要拿到连接才开始计时;主池被占满时(比如连接都停在事务里的文件操作空档 —— 这些不能强杀),
+ * 获取连接会一直排队,探测方的超时又撤不掉这个排队。若每次探测都各自发起,频繁的健康检查会在池里
+ * 排出一长串等待。所以在途的那一次真正结束(拿到连接并查完,或失败)之前,后来的探测都等它。
+ */
+export function databaseProbe(pool: GuardedPool, commandMs = 2_000): () => Promise<void> {
+  const view = dbOver(pool.withCommandTimeout(commandMs));
+  return singleFlight(() => view.execute(sql`SELECT 1`).then(() => undefined));
 }
 
 export { schema };
