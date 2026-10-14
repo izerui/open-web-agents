@@ -8,7 +8,7 @@ import { MysqlGrantRepo } from "@/lib/modules/access/adapters/mysql-grant-repo";
 import { PUBLIC_PRINCIPAL } from "@/lib/modules/access/domain/grants";
 import type { NewGrant } from "@/lib/modules/access/ports";
 import { MysqlAgentRepo } from "@/lib/modules/agent/adapters/mysql-agent-repo";
-import { seedBuiltin } from "@/lib/modules/agent/application/seed-builtin";
+import { type SeedBuiltinDeps, seedBuiltin } from "@/lib/modules/agent/application/seed-builtin";
 import type { Agent } from "@/lib/modules/agent/ports";
 import { mysqlSeedInRowLock } from "@/lib/seed-in-row-lock";
 import { eq } from "drizzle-orm";
@@ -148,6 +148,37 @@ if (!TEST_DB_URL) {
         // 障碍消失后再启动:仍判为首次写入,创建和授权一起完成
         await grantRepo.revoke(grantId);
         expect(await seedBuiltin(depsFor(id, grantId), def(id))).toBe("insert");
+        expect((await repo.get(id))?.seedHash).toBeTruthy();
+        expect(await publicGrantsOf(id)).toHaveLength(1);
+      });
+
+      it("播种(含授权)都已写成功、事务提交前失败:智能体与公开授权一起回滚;再次启动正常初始化", async () => {
+        const id = `builtin-commit-${randomUUID().slice(0, 8)}`;
+        ids.push(id);
+        const real = mysqlSeedInRowLock(db, publicGrant(id));
+        let grantWritten = false;
+        const failBeforeCommit: SeedBuiltinDeps["inRowLock"] = (fn) =>
+          real(async (tx) => {
+            await fn({
+              ...tx,
+              grantPublicRead: async () => {
+                await tx.grantPublicRead();
+                grantWritten = true;
+              },
+            });
+            // 播种已完整执行(智能体、摘要、授权都写了),在提交前失败
+            throw new Error("提交前失败");
+          });
+
+        await expect(
+          seedBuiltin({ inRowLock: failBeforeCommit, warn: () => {} }, def(id)),
+        ).rejects.toThrow("提交前失败");
+        expect(grantWritten).toBe(true); // 授权确实写成功过,不是没走到
+        expect(await repo.idTaken(id)).toBe(false);
+        // 授权若没走同一个事务,这里会留下一条指向不存在智能体的公开授权
+        expect(await publicGrantsOf(id)).toEqual([]);
+
+        expect(await seedBuiltin(depsFor(id), def(id))).toBe("insert");
         expect((await repo.get(id))?.seedHash).toBeTruthy();
         expect(await publicGrantsOf(id)).toHaveLength(1);
       });
