@@ -19,9 +19,18 @@ const RECORD = {
   endedAt: new Date("2026-01-01T00:00:05Z"),
 };
 
-const state: { getResult: (id: string) => Promise<unknown>; reads: number } = {
+const state: {
+  getResult: (id: string) => Promise<unknown>;
+  reads: number;
+  /** worker 发到总线上的事件(runId 由测试替换) */
+  events: (runId: string) => AgentEvent[];
+} = {
   getResult: async () => null,
   reads: 0,
+  events: (runId) => [
+    { kind: "text", text: "事件里的正文" } as AgentEvent,
+    { kind: "result", status: "success", runId } as AgentEvent,
+  ],
 };
 
 vi.mock("@/lib/container", () => {
@@ -54,8 +63,7 @@ vi.mock("@/lib/container", () => {
           setTimeout(() => {
             for (const [topic, cb] of handlers) {
               if (!topic.includes(r.runId)) continue;
-              cb({ kind: "text", text: "事件里的正文" } as AgentEvent, "1-0");
-              cb({ kind: "result", status: "success", runId: r.runId } as AgentEvent, "2-0");
+              state.events(r.runId).forEach((e, i) => cb(e, `${i + 1}-0`));
             }
           }, 0);
         },
@@ -77,8 +85,10 @@ async function runBlocking() {
 }
 
 describe("阻塞模式:终态之后补读结果记录", () => {
+  const defaultEvents = state.events;
   beforeEach(() => {
     state.reads = 0;
+    state.events = defaultEvents;
   });
 
   it("补读永不兑现:仍在等待上限内结束,用事件兜底收尾", { timeout: 10_000 }, async () => {
@@ -102,6 +112,56 @@ describe("阻塞模式:终态之后补读结果记录", () => {
     });
     expect(warn).toHaveBeenCalledWith(expect.stringMatching(/底层查询未取消/));
     warn.mockRestore();
+  });
+
+  it(
+    "过程正文丢了、只收到带 summary 的成功终态,补读又永不兑现:有界结束且正文完整",
+    { timeout: 10_000 },
+    async () => {
+      state.events = (runId) => [
+        { kind: "result", status: "success", summary: "终态里的完整答案", runId } as AgentEvent,
+      ];
+      state.getResult = () => new Promise(() => {});
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const start = Date.now();
+      const res = await runBlocking();
+      expect(Date.now() - start).toBeLessThan(3_500);
+      warn.mockRestore();
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({
+        status: "success",
+        done: true,
+        text: "终态里的完整答案",
+        error: null,
+      });
+    },
+  );
+
+  it("成功终态的 summary 优先于过程增量(增量可能不全)", { timeout: 10_000 }, async () => {
+    state.events = (runId) => [
+      { kind: "text", text: "只到一半" } as AgentEvent,
+      { kind: "result", status: "success", summary: "完整答案", runId } as AgentEvent,
+    ];
+    state.getResult = async () => {
+      throw new Error("db down");
+    };
+    expect(await (await runBlocking()).json()).toMatchObject({ text: "完整答案" });
+  });
+
+  it("失败终态的 summary 是错误信息:进 error,不当正文", { timeout: 10_000 }, async () => {
+    state.events = (runId) => [
+      { kind: "result", status: "failed", summary: "模型调用失败", runId } as AgentEvent,
+    ];
+    state.getResult = async () => {
+      throw new Error("db down");
+    };
+    const res = await runBlocking();
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({
+      status: "failed",
+      text: null,
+      error: { message: "模型调用失败" },
+    });
   });
 
   it("补读失败(拒绝):立即用事件兜底", { timeout: 10_000 }, async () => {

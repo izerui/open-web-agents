@@ -311,7 +311,9 @@ function assembleBlockingResponse(
         agentVersion: null,
         structured: last?.structured ?? null,
         salvaged: false,
-        text: textParts.join("") || null,
+        // 成功终态的 summary 就是最终正文(总线事件与库里补发的终态都这样带);过程增量可能丢,
+        // 只作退路。失败 / 取消时 summary 是错误信息,归到 error,不当正文
+        text: (last?.status === "success" ? last.summary : undefined) || textParts.join("") || null,
         error:
           last && last.status !== "success"
             ? { kind: "unknown", message: last.summary ?? "运行未成功" }
