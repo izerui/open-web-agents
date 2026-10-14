@@ -124,7 +124,6 @@ export class RunOrchestrator {
     const chain: CredentialChain = {
       platform: this.deps.platformCredentials,
       user: userCreds,
-      session: { baseUrl: session.baseUrl, key: session.key, model: session.model },
       request: cmd.override,
     };
     const credentials = resolveCredentials(chain);

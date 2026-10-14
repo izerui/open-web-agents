@@ -9,7 +9,6 @@ import type {
   SkillPackage,
   SubagentDef,
   ToolDef,
-  VerifyRule,
 } from "@/lib/shared";
 
 /**
@@ -40,7 +39,6 @@ export interface AgentConfig {
    */
   inputSchema?: JsonSchema;
   outputSchema?: JsonSchema;
-  verifyRules?: VerifyRule[];
   /** 人工审批规则(HITL)。不配则不审批。 */
   approvalRules?: { tools?: string[]; commandPatterns?: string[]; all?: boolean };
   /**
@@ -82,7 +80,6 @@ const AGENT_CONFIG_KEYS: Record<keyof AgentConfig, true> = {
   maxTurns: true,
   inputSchema: true,
   outputSchema: true,
-  verifyRules: true,
   approvalRules: true,
   permissionMode: true,
   escapeHatch: true,

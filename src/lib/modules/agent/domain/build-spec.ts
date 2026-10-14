@@ -26,7 +26,6 @@ export function buildSpec(
     subagents: cfg.subagents?.map((s) => ({ ...s, background: false as const })),
     model: { alias: overrides?.model ?? cfg.model },
     outputSchema: cfg.outputSchema,
-    verifyRules: cfg.verifyRules,
     approvalRules: cfg.approvalRules,
     permissionMode: cfg.permissionMode,
     limits: { maxTurns: cfg.maxTurns, effort: cfg.effort },

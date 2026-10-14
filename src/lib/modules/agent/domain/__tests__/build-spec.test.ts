@@ -36,16 +36,14 @@ describe("buildSpec", () => {
     expect(spec.limits).toEqual({ maxTurns: 20, effort: "high" });
   });
 
-  it("outputSchema / verifyRules 透传", () => {
+  it("outputSchema 透传", () => {
     const cfg: AgentConfig = {
       systemPrompt: "p",
       model: "opus",
       outputSchema: { type: "object" },
-      verifyRules: [{ kind: "artifact_exists" }],
     };
     const spec = buildSpec(cfg, ctx);
     expect(spec.outputSchema).toEqual({ type: "object" });
-    expect(spec.verifyRules).toEqual([{ kind: "artifact_exists" }]);
   });
 
   it("escapeHatch 透传", () => {

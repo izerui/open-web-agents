@@ -28,8 +28,6 @@ interface Row {
   agentVersion: number | null;
   workspacePurgedAt: number | null;
   workspaceTouchedAt: number | null;
-  baseUrl: string | null;
-  model: string | null;
   createdAt: Date;
 }
 
@@ -50,8 +48,6 @@ function toSession(r: Row): Session {
     agentVersion: r.agentVersion ?? undefined,
     workspacePurgedAt: r.workspacePurgedAt ?? undefined,
     workspaceTouchedAt: r.workspaceTouchedAt ?? undefined,
-    baseUrl: r.baseUrl ?? undefined,
-    model: (r.model as ModelAlias | null) ?? undefined,
     createdAt: r.createdAt.getTime(),
   };
 }
@@ -72,8 +68,6 @@ const COLUMNS = {
   agentVersion: sessions.agentVersion,
   workspacePurgedAt: sessions.workspacePurgedAt,
   workspaceTouchedAt: sessions.workspaceTouchedAt,
-  baseUrl: sessions.baseUrl,
-  model: sessions.model,
   createdAt: sessions.createdAt,
 };
 

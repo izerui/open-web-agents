@@ -79,8 +79,7 @@ export function CredentialsView() {
         <CardHeader>
           <CardTitle className="text-sm">我的模型凭证</CardTitle>
           <CardDescription>
-            优先级:请求覆盖 &gt; 会话 &gt; 这里 &gt; 平台默认。密钥加密入库,只在运行时解密注入
-            agent。
+            优先级:请求覆盖 &gt; 这里 &gt; 平台默认。密钥加密入库,只在运行时解密注入 agent。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

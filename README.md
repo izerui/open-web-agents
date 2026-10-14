@@ -187,8 +187,7 @@ const bus = new RedisBus(env.redisUrl); // 曾是 InMemoryBus
 
 ### 凭证三级覆盖
 
-`请求级 override > 会话级 > 用户自带 > 平台默认`,`baseUrl` 与 `key` 各自独立回退 ——
-允许用户只覆盖 key 而沿用平台网关。用户自带的 key 用 AES-256-GCM 加密入库,
+`请求级 override > 用户自带 > 平台默认`。允许只覆盖 key 而沿用上一层的网关(见下方同层绑定)。用户自带的 key 用 AES-256-GCM 加密入库,
 只在运行时解密注入 agent 子进程;界面只回掩码。
 
 请求级 override(`invoke` 的 `override` 字段)整体加密后随任务入队,只在 worker 执行时解密;

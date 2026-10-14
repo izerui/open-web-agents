@@ -35,10 +35,6 @@ export interface Session {
   workspacePurgedAt?: number;
   /** 最近一次有人要写工作目录的时刻(运行启动、文件上传)。 */
   workspaceTouchedAt?: number;
-  /** 会话级凭证覆盖(三级链的中间层)。 */
-  baseUrl?: string;
-  key?: string;
-  model?: ModelAlias;
   createdAt: number;
 }
 

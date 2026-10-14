@@ -56,9 +56,7 @@ export const agents = mysqlTable(
     inputSchema: json("input_schema"),
     /** 定义了才能被企业系统当接口消费(设计文档 §3) */
     outputSchema: json("output_schema"),
-    verifyRules: json("verify_rules"),
     webhookUrl: varchar("webhook_url", { length: 1024 }),
-    visibility: varchar("visibility", { length: 16 }).notNull().default("private"),
     /**
      * 当前发布的版本号;NULL = 从未发布,所有入口都用草稿(本行的配置)。
      * 本行的 name/config/schema 始终是【草稿】—— 构建器与设计师只改草稿,
@@ -156,10 +154,6 @@ export const sessions = mysqlTable(
      */
     workspaceTouchedAt: bigint("workspace_touched_at", { mode: "number" }),
     status: varchar("status", { length: 16 }).notNull().default("active"),
-    /** 会话级凭证覆盖(三级链中间层) */
-    baseUrl: varchar("base_url", { length: 512 }),
-    keyEnc: varchar("key_enc", { length: 1024 }),
-    model: varchar("model", { length: 32 }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (t) => ({
@@ -272,7 +266,6 @@ export const apiKeys = mysqlTable(
     /** 只存哈希,明文只在创建时返回一次 */
     hashedKey: varchar("hashed_key", { length: 128 }).notNull().unique(),
     name: varchar("name", { length: 255 }),
-    quota: json("quota"),
     /** 这把 Key 每分钟的新调用上限;NULL = 用平台默认(OWA_INVOKE_RATE_LIMIT_PER_KEY) */
     rateLimitPerMinute: int("rate_limit_per_minute"),
     lastUsedAt: timestamp("last_used_at"),
@@ -344,18 +337,6 @@ export const groupMembers = mysqlTable(
     uniqMember: uniqueIndex("uniq_group_member").on(t.groupId, t.userId),
     byUser: index("idx_group_members_user").on(t.userId),
   }),
-);
-
-/** 工具级每用户配置(admin 全局 + 每用户两层里的用户层)。 */
-export const userValves = mysqlTable(
-  "user_valves",
-  {
-    id: varchar("id", { length: 36 }).primaryKey(),
-    userId: varchar("user_id", { length: 36 }).notNull(),
-    toolId: varchar("tool_id", { length: 128 }).notNull(),
-    config: json("config").notNull(),
-  },
-  (t) => ({ byUser: index("idx_valves_user").on(t.userId) }),
 );
 
 /**

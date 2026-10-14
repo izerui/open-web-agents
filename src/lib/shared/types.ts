@@ -16,11 +16,14 @@ export interface ModelSelection {
   alias: ModelAlias;
 }
 
-/** 三级凭证链,优先级 request > session > user > 平台默认。 */
+/**
+ * 三级凭证链,优先级 request > user > 平台默认。
+ * (曾经还有一层"会话级凭证",但从没有任何代码写入它:base_url / model 读出来恒为空,
+ * key_enc 连读都没读 —— 半截链路只会让人误以为能按会话换网关,已删除。)
+ */
 export interface CredentialChain {
   platform?: { baseUrl?: string; key?: string };
   user?: { baseUrl?: string; key?: string };
-  session?: { baseUrl?: string; key?: string; model?: ModelAlias };
   request?: { baseUrl?: string; key?: string; model?: ModelAlias };
 }
 
@@ -61,12 +64,6 @@ export interface SubagentDef {
 }
 
 export type JsonSchema = Record<string, unknown>;
-
-/** 机械验收规则,防 agent 伪造成功(如产物文件必须存在)。 */
-export interface VerifyRule {
-  kind: string;
-  args?: Record<string, unknown>;
-}
 
 export type Effort = "low" | "medium" | "high";
 
@@ -110,7 +107,6 @@ export interface AgentSpec {
   model: ModelSelection;
   /** 有则启用结构化输出 —— 决定该智能体能否被企业系统当接口消费。 */
   outputSchema?: JsonSchema;
-  verifyRules?: VerifyRule[];
   /** 人工审批规则(HITL);不配则不审批。 */
   approvalRules?: { tools?: string[]; commandPatterns?: string[]; all?: boolean };
   /** 权限模式;不配等同 "default"。 */

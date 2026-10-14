@@ -7,7 +7,7 @@ function pick(...vals: (string | undefined)[]): string | undefined {
 }
 
 /**
- * 四级凭证解析,优先级 request > session > user > platform。
+ * 三级凭证解析,优先级 request > user > platform。
  *
  * 【同层绑定】baseUrl 取最高优先的那一层;key 必须来自【同一层或更高优先的层】。
  * 允许"只覆盖 key、沿用平台网关"(key 层比 baseUrl 层高),
@@ -18,7 +18,7 @@ function pick(...vals: (string | undefined)[]): string | undefined {
  * 用户设置页的 baseUrl、invoke 的 override 都能触发。
  */
 export function resolveCredentials(chain: CredentialChain): ResolvedCredentials {
-  const layers = [chain.request, chain.session, chain.user, chain.platform];
+  const layers = [chain.request, chain.user, chain.platform];
   const baseIdx = layers.findIndex((l) => pick(l?.baseUrl) !== undefined);
   const keyIdx = layers.findIndex((l) => pick(l?.key) !== undefined);
   // 这两句会原样显示在界面与 /result 里 —— 要让人看得懂该去配什么
@@ -43,7 +43,7 @@ export function resolveCredentials(chain: CredentialChain): ResolvedCredentials 
   };
 }
 
-/** 模型别名解析,优先级 request > session > 智能体配置兜底。 */
+/** 模型别名解析,优先级 request > 智能体配置兜底。 */
 export function resolveModelAlias(chain: CredentialChain, fallback: ModelAlias): ModelAlias {
-  return chain.request?.model ?? chain.session?.model ?? fallback;
+  return chain.request?.model ?? fallback;
 }

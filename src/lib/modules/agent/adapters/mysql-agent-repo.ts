@@ -111,7 +111,6 @@ export class MysqlAgentRepo implements AgentRepo {
       inputSchema: inputSchema ?? null,
       outputSchema: outputSchema ?? null,
       webhookUrl: a.webhookUrl ?? null,
-      visibility: "private" as const,
     };
     await this.db
       .insert(agents)
