@@ -19,9 +19,14 @@ import { afterAll, describe, expect, it } from "vitest";
 
 const TEST_DB_URL = process.env.OWA_TEST_DATABASE_URL;
 
-/** TCP 代理:frozen 时两头都不转发(连接保持打开);记录当前与峰值打开的连接数 */
+/**
+ * TCP 代理:frozen 时两头都不转发(连接保持打开)。
+ * stallAuth 时新连接只放过服务器的第一段数据(握手问候),之后两个方向都丢弃 ——
+ * 停在"问候之后、认证完成之前";服务器自己的 connect_timeout 报错也到不了客户端,和真实断网一样。
+ * 记录当前与峰值打开的连接数、送达客户端的服务器字节数。
+ */
 async function startFreezeProxy(target: URL) {
-  const state = { frozen: false, open: 0, peak: 0 };
+  const state = { frozen: false, stallAuth: false, open: 0, peak: 0, serverBytes: 0 };
   const sockets = new Set<net.Socket>();
   const server = net.createServer((client) => {
     const upstream = net.connect(Number(target.port || 3306), target.hostname);
@@ -37,16 +42,27 @@ async function startFreezeProxy(target: URL) {
       client.destroy();
       upstream.destroy();
     };
+    // 这条连接是否卡在问候之后(建立时处于 stallAuth 才算)
+    const stalled = state.stallAuth;
+    let greeted = false;
     client.on("data", (d) => {
-      if (!state.frozen) upstream.write(d);
+      if (!state.frozen && !stalled) upstream.write(d);
     });
     upstream.on("data", (d) => {
-      if (!state.frozen) client.write(d);
+      if (state.frozen || (stalled && greeted)) return;
+      greeted = true;
+      state.serverBytes += d.length;
+      client.write(d);
     });
-    for (const s of [client, upstream]) {
-      s.on("close", close);
-      s.on("error", close);
-    }
+    client.on("close", close);
+    client.on("error", close);
+    // 卡住期间服务器那头关闭(如它自己的 connect_timeout 到期)也传不到客户端 —— 真实断网时同样如此;
+    // 客户端这头保持打开,直到客户端自己断开
+    const upstreamGone = () => {
+      if (!(stalled || state.frozen)) close();
+    };
+    upstream.on("close", upstreamGone);
+    upstream.on("error", upstreamGone);
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
   const port = (server.address() as net.AddressInfo).port;
@@ -92,19 +108,22 @@ if (!TEST_DB_URL) {
     return id;
   }
 
-  /** 经代理连库的读取源:连接池只有 1 条连接 —— 卡住的连接若没被真正释放,之后一条都读不了 */
+  /** 经代理连库的读取源:只允许 1 条连接 —— 卡住的连接若没被真正断开,之后一条都读不了 */
   async function readerViaProxy(timeoutMs: number) {
     const proxy = await startFreezeProxy(new URL(TEST_DB_URL as string));
-    const { pool: readerPool } = createDb(proxy.url, {
-      connectionLimit: 1,
-      connectTimeoutMs: 300,
+    const reader = new BoundedResultReader({
+      databaseUrl: proxy.url,
+      maxConnections: 1,
+      timeoutMs,
+      closeWaitMs: 1_000,
     });
     cleanups.push(async () => {
       proxy.state.frozen = false;
-      await Promise.race([readerPool.end(), sleep(1_000)]);
+      proxy.state.stallAuth = false;
+      await reader.end();
       await proxy.close();
     });
-    return { proxy, reader: new BoundedResultReader(readerPool, timeoutMs, 1_000) };
+    return { proxy, reader };
   }
 
   describe("有时限的结果读取(真实 MySQL,连接卡死)", { timeout: 30_000 }, () => {
@@ -118,7 +137,7 @@ if (!TEST_DB_URL) {
       for (let i = 0; i < 4; i++) {
         const t0 = Date.now();
         await expect(reader.getResult(id)).rejects.toBeInstanceOf(Error);
-        // 有上限:查询时限 300ms / 建连时限 300ms,加上等套接字关闭
+        // 有上限:一次读取的总期限 300ms(排队 + 握手 + 查询),加上等套接字关闭
         expect(Date.now() - t0).toBeLessThan(2_000);
         // 返回时那条连接已经断开:没有卡住的连接留在池里或代理上
         await sleep(50);
@@ -143,6 +162,45 @@ if (!TEST_DB_URL) {
       await expect(reader.getResult(id)).rejects.toBeInstanceOf(ResultReadTimeout);
       await sleep(50);
       expect(proxy.state.open).toBe(0);
+    });
+
+    it("问候已到、认证卡住(驱动的建连计时器已被第一段数据清掉):读取有界失败,握手中的连接被断开;恢复后单连接照常收尾", async () => {
+      const id = await newRun();
+      const { proxy, reader } = await readerViaProxy(300);
+      proxy.state.stallAuth = true; // 还没有任何连接:第一次读取就要新建,卡在认证
+      for (let i = 0; i < 3; i++) {
+        const before = proxy.state.serverBytes;
+        const t0 = Date.now();
+        await expect(reader.getResult(id)).rejects.toBeInstanceOf(ResultReadTimeout);
+        expect(Date.now() - t0).toBeLessThan(2_000);
+        // 确实停在问候之后:服务器的问候送到了客户端
+        expect(proxy.state.serverBytes).toBeGreaterThan(before);
+        // 握手中的那条连接被断开,没有半开的连接占着名额
+        await sleep(50);
+        expect(proxy.state.open).toBe(0);
+      }
+      expect(proxy.state.peak).toBe(1);
+
+      proxy.state.stallAuth = false;
+      await db
+        .update(runsTable)
+        .set({ status: "success", finalText: "完成" })
+        .where(eq(runsTable.id, id));
+      expect(await reader.getResult(id)).toMatchObject({ status: "success", finalText: "完成" });
+    });
+
+    it("名额被占满时并发的读取都在期限内结束(占用者到期断开即唤醒排队者),之后照常可读", async () => {
+      const id = await newRun();
+      const { proxy, reader } = await readerViaProxy(300);
+      await reader.getResult(id); // 建好唯一的连接
+      proxy.state.frozen = true;
+      const t0 = Date.now();
+      // 两次并发:一次占着唯一连接卡在查询,另一次排队 —— 都在期限内失败
+      const results = await Promise.allSettled([reader.getResult(id), reader.getResult(id)]);
+      expect(results.map((r) => r.status)).toEqual(["rejected", "rejected"]);
+      expect(Date.now() - t0).toBeLessThan(2_000);
+      proxy.state.frozen = false;
+      expect((await reader.getResult(id))?.id).toBe(id);
     });
 
     it("终态兜底接在它上面:数据库卡死期间不积压连接,恢复后照常收尾", async () => {

@@ -237,11 +237,13 @@ function build(): Container {
   );
   const bus = new RedisBus(env.redisUrl);
   const runs = new MysqlRunRepo(db);
-  // 独立的小连接池:主池被别处卡住的查询占满时,终态兜底仍能读到库里的结果。
-  // 建连也限时(驱动默认 10 秒):连接被销毁后要新建,数据库卡住时握手同样会卡
-  const runResults = new BoundedResultReader(
-    createDb(env.databaseUrl, { connectionLimit: 4, connectTimeoutMs: 2_000 }).pool,
-  );
+  // 独立于主连接池、自己管连接:主池被别处卡住的查询占满时,终态兜底仍能读到库里的结果;
+  // 排队、建连握手、查询共用一个期限,到期即断开所用的连接(见 bounded-result-reader.ts)
+  const runResults = new BoundedResultReader({
+    databaseUrl: env.databaseUrl,
+    maxConnections: 4,
+    timeoutMs: 2_000,
+  });
   const storage = new LocalFsStorage();
   const transcript = new JsonlTranscript();
   const approval = new RedisApproval(env.redisUrl);
