@@ -154,8 +154,8 @@ function handleBlocking(req: Request, ctx: RunRouteContext): Promise<Response> {
 
     const settleWithResult = async (e: Extract<AgentEvent, { kind: "result" }>) => {
       // 结果契约以库为准(worker 先落库再发 result 事件,这里读到的必是终态);
-      // 读不到时退回用事件拼,不让一次已经结束的运行因为读库失败而报错
-      const record = await results.getResult(runId).catch(() => null);
+      // 读失败或超过等待上限都退回用事件拼 —— 运行已经结束,不能因为读库慢就让请求挂着
+      const record = await readRecordBounded(results, runId);
       settle(
         Response.json(assembleBlockingResponse(runId, events, record), {
           status:
@@ -221,6 +221,37 @@ function handleBlocking(req: Request, ctx: RunRouteContext): Promise<Response> {
       }
     })();
   });
+}
+
+/** 终态事件到了之后补读结果记录的等待上限。 */
+const RESULT_READ_TIMEOUT_MS = 2_000;
+
+/**
+ * 有等待上限的补读:失败或超时返回 null,由调用方用事件兜底。
+ * 【超时只是不再等】底层查询没有取消,之后仍可能返回(结果被丢弃)或一直占着连接直到驱动超时。
+ */
+async function readRecordBounded(
+  results: RunRouteContext["results"],
+  runId: string,
+): Promise<RunRecord | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      results.getResult(runId),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => {
+          console.warn(
+            `[owa][run] 补读运行结果超过 ${RESULT_READ_TIMEOUT_MS}ms 未返回,改用事件拼装响应(run=${runId};底层查询未取消)`,
+          );
+          resolve(null);
+        }, RESULT_READ_TIMEOUT_MS);
+      }),
+    ]);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** 结果契约取自库里的记录(record),过程信息取自事件流;记录缺失时用事件兜底。 */
