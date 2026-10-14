@@ -10,6 +10,78 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 
+type LineOp = { op: "same" | "add" | "del"; text: string };
+type Change =
+  | { path: string; kind: "added"; after: unknown }
+  | { path: string; kind: "removed"; before: unknown }
+  | { path: string; kind: "changed"; before: unknown; after: unknown; lines?: LineOp[] };
+
+const short = (v: unknown) => {
+  const s = typeof v === "string" ? v : JSON.stringify(v);
+  return s.length > 200 ? `${s.slice(0, 200)}…` : s;
+};
+
+/** 一次对比的结果:每处改动一行;长文本给出行级差异(只显示改动行及其上下各一行) */
+function DiffView({ title, changes }: { title: string; changes: Change[] }) {
+  return (
+    <div className="space-y-2 rounded border border-border bg-muted/30 p-2 text-xs">
+      <p className="font-medium">{title}</p>
+      {changes.length === 0 && <p className="text-muted-foreground">没有差异</p>}
+      {changes.map((c) => (
+        <div key={`${c.kind}:${c.path}`} className="space-y-1">
+          <p className="font-mono">
+            <span
+              className={
+                c.kind === "added"
+                  ? "text-emerald-600"
+                  : c.kind === "removed"
+                    ? "text-destructive"
+                    : "text-amber-600"
+              }
+            >
+              {c.kind === "added" ? "+ 新增" : c.kind === "removed" ? "- 删除" : "~ 修改"}
+            </span>{" "}
+            {c.path}
+          </p>
+          {c.kind === "changed" && c.lines ? (
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-background p-1.5 font-mono text-[0.6875rem]">
+              {c.lines
+                .map((l, i, all) => ({ l, i, all }))
+                .filter(
+                  ({ l, i, all }) =>
+                    l.op !== "same" || all[i - 1]?.op !== "same" || all[i + 1]?.op !== "same",
+                )
+                .map(({ l, i }) => (
+                  <div
+                    key={i}
+                    className={
+                      l.op === "add"
+                        ? "bg-emerald-500/10 text-emerald-700"
+                        : l.op === "del"
+                          ? "bg-destructive/10 text-destructive line-through"
+                          : "text-muted-foreground"
+                    }
+                  >
+                    {l.op === "add" ? "+ " : l.op === "del" ? "- " : "  "}
+                    {l.text}
+                  </div>
+                ))}
+            </pre>
+          ) : c.kind === "changed" ? (
+            <p className="break-all font-mono text-[0.6875rem] text-muted-foreground">
+              {short(c.before)} → {short(c.after)}
+            </p>
+          ) : (
+            <p className="break-all font-mono text-[0.6875rem] text-muted-foreground">
+              {short(c.kind === "added" ? c.after : c.before)}
+            </p>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 interface VersionMeta {
   version: number;
   name: string;
@@ -43,6 +115,23 @@ export function ReleasePanel({
   const [versions, setVersions] = useState<VersionMeta[] | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  /** 正在看的对比:哪一版、跟谁比、结果 */
+  const [diff, setDiff] = useState<{ key: string; title: string; changes: Change[] } | null>(null);
+
+  async function compare(key: string, from: string, to: string, title: string) {
+    if (diff?.key === key) {
+      setDiff(null); // 再点一次收起
+      return;
+    }
+    try {
+      const d = await fetchJson<{ changes: Change[] }>(
+        `/api/agents/${encodeURIComponent(agentId)}/versions/diff?from=${from}&to=${to}`,
+      );
+      setDiff({ key, title, changes: d.changes });
+    } catch (e) {
+      toast.error(`对比失败:${errorText(e)}`);
+    }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -192,6 +281,38 @@ export function ReleasePanel({
                   variant="link"
                   size="sm"
                   className="h-8 shrink-0 px-2"
+                  onClick={() =>
+                    void compare(
+                      `draft-${v.version}`,
+                      String(v.version),
+                      "draft",
+                      `v${v.version} → 当前草稿(已保存的)`,
+                    )
+                  }
+                >
+                  对比草稿
+                </Button>
+                {v.version > 1 && (
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="h-8 shrink-0 px-2"
+                    onClick={() =>
+                      void compare(
+                        `prev-${v.version}`,
+                        String(v.version - 1),
+                        String(v.version),
+                        `v${v.version - 1} → v${v.version}`,
+                      )
+                    }
+                  >
+                    对比上一版
+                  </Button>
+                )}
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="h-8 shrink-0 px-2"
                   disabled={busy !== null || unsaved}
                   title={unsaved ? "表单有未保存的修改" : "用这一版的内容覆盖草稿"}
                   onClick={() => {
@@ -214,6 +335,7 @@ export function ReleasePanel({
             );
           })}
         </div>
+        {diff && <DiffView title={diff.title} changes={diff.changes} />}
       </CardContent>
     </Card>
   );

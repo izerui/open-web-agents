@@ -321,6 +321,7 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 | GET             | `/api/agents/{id}/versions/{v}`            | cookie / key           | 某个版本的完整内容            |
 | POST            | `/api/agents/{id}/versions/{v}/activate`   | cookie(write)          | 把发布指针切到该版本(回滚)    |
 | POST            | `/api/agents/{id}/versions/{v}/restore`    | cookie(write)          | 把该版本载入草稿            |
+| GET             | `/api/agents/{id}/versions/diff?from=&to=` | cookie / key           | 两个版本(或与 `draft`)的差异:提示词给行级差异,子代理 / MCP / 技能按名字对齐;只读者同样脱敏 |
 | POST            | `/api/embed/token`                         | **key**                | 换短时效嵌入令牌(服务端调)      |
 | POST            | `/api/embed/run`                           | **embed token**        | widget 发起运行         |
 | GET             | `/api/embed/script`                        | —                      | 嵌入脚本                |
