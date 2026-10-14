@@ -10,7 +10,12 @@ import { describe, expect, it } from "vitest";
 /** 一条待投递的内存发件箱。 */
 class OneJobOutbox implements WebhookOutbox {
   marks: { state: string; nextAt?: number }[] = [];
-  constructor(private job: { runId: string; sessionId: string; attempts: number } | null) {}
+  /** 写回是否被接受(模拟令牌失效时为 false) */
+  accept = true;
+  private job: { runId: string; sessionId: string; attempts: number; lease: string } | null;
+  constructor(job: { runId: string; sessionId: string; attempts: number } | null) {
+    this.job = job ? { ...job, lease: "L1" } : null;
+  }
   async claimWebhook() {
     const j = this.job;
     this.job = null;
@@ -18,10 +23,13 @@ class OneJobOutbox implements WebhookOutbox {
   }
   async markWebhook(
     _runId: string,
+    lease: string,
     state: "delivered" | "failed" | "skipped" | "pending",
     nextAt?: number,
   ) {
+    expect(lease).toBe("L1"); // 写回必须带上认领时拿到的令牌
     this.marks.push({ state, nextAt });
+    return this.accept;
   }
   async requeueWebhook() {
     return false;
@@ -160,6 +168,16 @@ describe("WebhookDispatcher:投递记录", () => {
     const t0 = Date.now();
     await d.runOnce();
     expect(Date.now() - t0).toBeLessThan(4000);
+    expect(box.marks).toEqual([{ state: "delivered", nextAt: undefined }]);
+  });
+});
+
+describe("WebhookDispatcher:过期的投递结果", () => {
+  it("写回被拒(令牌已失效):不抛错,只丢弃这次结果", async () => {
+    const box = new OneJobOutbox({ runId: "r1", sessionId: "s1", attempts: 1 });
+    box.accept = false;
+    const { d } = make(box);
+    await expect(d.runOnce()).resolves.toBe(1);
     expect(box.marks).toEqual([{ state: "delivered", nextAt: undefined }]);
   });
 });

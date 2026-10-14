@@ -6,17 +6,25 @@
  * "跑完了却没登记回调"就不可能发生。
  */
 export interface WebhookOutbox {
-  /** 认领一条到期的待投递回调,认领期间别的投递器拿不到它。attempts 含本次。 */
+  /**
+   * 认领一条到期的待投递回调,认领期间别的投递器拿不到它。attempts 含本次。
+   * lease 是本次认领的令牌,写回结果时必须带上。
+   */
   claimWebhook(
     now: number,
     leaseMs: number,
-  ): Promise<{ runId: string; sessionId: string; attempts: number } | null>;
-  /** 记下结局;pending 表示稍后重试,nextAt 是下一次可投递的时刻。 */
+  ): Promise<{ runId: string; sessionId: string; attempts: number; lease: string } | null>;
+  /**
+   * 写回本次投递的结局;pending 表示稍后重试,nextAt 是下一次可投递的时刻。
+   * 只有状态仍是 delivering 且令牌一致时才写入,返回是否写入 ——
+   * 租约过期被别人接手、或已被手动重发,旧投递的结果一律丢弃。
+   */
   markWebhook(
     runId: string,
+    lease: string,
     state: "delivered" | "failed" | "skipped" | "pending",
     nextAt?: number,
-  ): Promise<void>;
+  ): Promise<boolean>;
   /**
    * 手动重发:把一条已经结束的投递(delivered / failed / skipped)放回发件箱,立即可投,
    * 尝试次数清零(退避表重新开始)。还在待投 / 投递中的返回 false,不重复入队。

@@ -241,6 +241,13 @@ export const runs = mysqlTable(
      */
     webhookState: varchar("webhook_state", { length: 16 }),
     webhookAttempts: int("webhook_attempts").notNull().default(0),
+    /**
+     * 本次投递认领的令牌(每次认领新生成)。投递结果的写回必须带上它、且状态仍是 delivering:
+     * 租约过期被别人接手、或被手动重发清掉之后,旧投递的结果写不回来 ——
+     * 否则卡住的旧投递返回成功时会把"已受理的重发"覆盖成 delivered,重发就不会再执行。
+     * (不用 attempts 判断身份:手动重发会把它清零。)
+     */
+    webhookLease: varchar("webhook_lease", { length: 36 }),
     /** 下一次可投递的时刻(ms);投递中时兼作租约到期时刻。 */
     webhookNextAt: bigint("webhook_next_at", { mode: "number" }),
     createdAt: timestamp("created_at").defaultNow().notNull(),

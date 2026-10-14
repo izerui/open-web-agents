@@ -73,24 +73,38 @@ export class WebhookDispatcher {
     return n;
   }
 
-  private async handle(job: { runId: string; sessionId: string; attempts: number }) {
+  private async handle(job: { runId: string; sessionId: string; attempts: number; lease: string }) {
     const { outbox } = this.deps;
+    /*
+     * 写回本次投递的结局,带上认领令牌:租约过期被别人接手、或期间被手动重发,
+     * 这次的结果就是过期的,丢弃 —— 不能覆盖别人的结局,更不能把已受理的重发吞掉。
+     */
+    const mark = async (
+      state: "delivered" | "failed" | "skipped" | "pending",
+      nextAt?: number,
+    ): Promise<void> => {
+      if (!(await outbox.markWebhook(job.runId, job.lease, state, nextAt))) {
+        console.warn(
+          `[owa][webhook] 投递结果已过期,丢弃(run=${job.runId},结局=${state}):租约已被接手或已被手动重发`,
+        );
+      }
+    };
     let target: WebhookTarget | null;
     try {
       target = await this.deps.loadTarget(job.sessionId);
     } catch (err) {
       console.warn(`[owa][webhook] 无法准备投递(run=${job.runId}):${errText(err)}`);
-      await outbox.markWebhook(job.runId, "failed");
+      await mark("failed");
       return;
     }
     if (!target) {
-      await outbox.markWebhook(job.runId, "skipped");
+      await mark("skipped");
       return;
     }
 
     const payload = await this.deps.loadPayload(job.runId, job.sessionId);
     if (!payload) {
-      await outbox.markWebhook(job.runId, "skipped");
+      await mark("skipped");
       return;
     }
 
@@ -117,7 +131,7 @@ export class WebhookDispatcher {
       if (err instanceof WebhookTargetRejected) {
         console.warn(`[owa][webhook] 目标被拒(run=${job.runId}):${err.message}`);
         await record({ delivered: false, attempts: 1, error: `目标被拒:${err.message}` });
-        await outbox.markWebhook(job.runId, "failed");
+        await mark("failed");
         return;
       }
       result = { delivered: false, attempts: 1, error: errText(err) };
@@ -125,7 +139,7 @@ export class WebhookDispatcher {
     await record(result);
 
     if (result.delivered) {
-      await outbox.markWebhook(job.runId, "delivered");
+      await mark("delivered");
       return;
     }
     // 4xx(除 408/429)是对方明确拒收,重试没有意义
@@ -135,9 +149,9 @@ export class WebhookDispatcher {
     if (delay === null) {
       const reason = `${s ?? ""} ${result.error ?? ""}`.trim();
       console.warn(`[owa][webhook] 放弃投递(run=${job.runId},第 ${job.attempts} 次):${reason}`);
-      await outbox.markWebhook(job.runId, "failed");
+      await mark("failed");
     } else {
-      await outbox.markWebhook(job.runId, "pending", this.now() + delay);
+      await mark("pending", this.now() + delay);
     }
   }
 

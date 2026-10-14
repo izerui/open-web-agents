@@ -222,12 +222,15 @@ if (!TEST_DB_URL) {
       // 投递中租约未过期:拿不到
       expect(await repo.claimWebhook(now + 1000, 60_000)).toBeNull();
       // 安排重试:到期前拿不到,到期后能拿到,attempts 累加
-      await repo.markWebhook(id, "pending", now + 10_000);
+      expect(await repo.markWebhook(id, claimed[0]?.lease ?? "", "pending", now + 10_000)).toBe(
+        true,
+      );
       expect(await repo.claimWebhook(now + 5_000, 60_000)).toBeNull();
       expect((await repo.claimWebhook(now + 10_000, 60_000))?.attempts).toBe(2);
       // 投递中的进程崩了:租约过期后可被重新认领
-      expect((await repo.claimWebhook(now + 80_000, 60_000))?.attempts).toBe(3);
-      await repo.markWebhook(id, "delivered");
+      const third = await repo.claimWebhook(now + 80_000, 60_000);
+      expect(third?.attempts).toBe(3);
+      expect(await repo.markWebhook(id, third?.lease ?? "", "delivered")).toBe(true);
       expect(await repo.claimWebhook(now + 999_999, 60_000)).toBeNull();
     });
 

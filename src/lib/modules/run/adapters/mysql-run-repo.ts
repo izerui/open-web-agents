@@ -346,7 +346,7 @@ export class MysqlRunRepo implements RunRepo {
   async claimWebhook(
     now: number,
     leaseMs: number,
-  ): Promise<{ runId: string; sessionId: string; attempts: number } | null> {
+  ): Promise<{ runId: string; sessionId: string; attempts: number; lease: string } | null> {
     const due = or(
       and(eq(runs.webhookState, "pending"), lte(runs.webhookNextAt, now)),
       and(eq(runs.webhookState, "delivering"), lt(runs.webhookNextAt, now)),
@@ -368,12 +368,14 @@ export class MysqlRunRepo implements RunRepo {
       if (!row) return null;
 
       // 条件里带上读到的旧值:被别人抢先改过就 affectedRows=0,换下一条
+      const lease = randomUUID();
       const res = await this.db
         .update(runs)
         .set({
           webhookState: "delivering",
           webhookNextAt: now + leaseMs,
           webhookAttempts: sql`${runs.webhookAttempts} + 1`,
+          webhookLease: lease,
         })
         .where(
           and(
@@ -383,7 +385,7 @@ export class MysqlRunRepo implements RunRepo {
           ),
         );
       if (affectedRows(res) > 0) {
-        return { runId: row.id, sessionId: row.sessionId, attempts: row.attempts + 1 };
+        return { runId: row.id, sessionId: row.sessionId, attempts: row.attempts + 1, lease };
       }
     }
     return null;
@@ -392,19 +394,29 @@ export class MysqlRunRepo implements RunRepo {
   /** 记下投递结局。retry 时 nextAt 是下一次可投递的时刻。 */
   async markWebhook(
     runId: string,
+    lease: string,
     state: "delivered" | "failed" | "skipped" | "pending",
     nextAt?: number,
-  ): Promise<void> {
-    await this.db
+  ): Promise<boolean> {
+    const res = await this.db
       .update(runs)
-      .set({ webhookState: state, webhookNextAt: state === "pending" ? (nextAt ?? 0) : null })
-      .where(eq(runs.id, runId));
+      .set({
+        webhookState: state,
+        webhookNextAt: state === "pending" ? (nextAt ?? 0) : null,
+        // 结局已定,令牌作废;pending 时下一次认领会换新令牌
+        webhookLease: null,
+      })
+      .where(
+        and(eq(runs.id, runId), eq(runs.webhookState, "delivering"), eq(runs.webhookLease, lease)),
+      );
+    return affectedRows(res) > 0;
   }
 
   async requeueWebhook(runId: string, now: number): Promise<boolean> {
     const res = await this.db
       .update(runs)
-      .set({ webhookState: "pending", webhookNextAt: now, webhookAttempts: 0 })
+      // 清掉旧令牌:还卡在路上的旧投递,结果再也写不回来
+      .set({ webhookState: "pending", webhookNextAt: now, webhookAttempts: 0, webhookLease: null })
       .where(
         and(eq(runs.id, runId), inArray(runs.webhookState, ["delivered", "failed", "skipped"])),
       );
