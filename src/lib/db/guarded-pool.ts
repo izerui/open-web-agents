@@ -49,19 +49,50 @@ function socketOf(conn: unknown): net.Socket | undefined {
  * 必须在 createPool 时传入 —— 套接字由这里建,握手期间才有句柄。
  */
 export function handshakeGuard(handshakeMs: number) {
-  const timers = new WeakMap<net.Socket, ReturnType<typeof setTimeout>>();
+  /** 还在握手中的原始套接字 → 它的握手计时 */
+  const pending = new Map<net.Socket, ReturnType<typeof setTimeout>>();
+  const settle = (raw: net.Socket) => {
+    clearTimeout(pending.get(raw));
+    pending.delete(raw);
+  };
   const stream = (opts: { config: { host?: string; port?: number; socketPath?: string } }) => {
     const { host, port, socketPath } = opts.config;
     const socket = socketPath ? net.connect(socketPath) : net.connect(port ?? 3306, host);
     // 空闲连接的对端若已不在,早些发现(原本由驱动的 enableKeepAlive 做,自己建套接字后要自己开)
     socket.once("connect", () => socket.setKeepAlive(true, 10_000));
-    timers.set(
+    pending.set(
       socket,
       setTimeout(() => socket.destroy(), handshakeMs),
     );
-    socket.once("close", () => clearTimeout(timers.get(socket)));
+    socket.once("close", () => settle(socket));
     return socket;
   };
+
+  /**
+   * 握手完成的连接对应的原始套接字。
+   * 启用 TLS 时 mysql2 会把 connection.stream 换成包在原始套接字外的 TLS 套接字(lib/base/connection.js
+   * 的 startTLS),拿它直接查是查不到的 —— 计时器照走,健康连接到期被断开。
+   * 依次按:套接字本身 → 地址四元组(公开属性,TLS 升级前后不变,同一时刻活着的连接不重复)
+   * → TLS 套接字的 _parent(Node 内部字段,只在没有端口可比时兜底,如 unix 套接字)。
+   */
+  const rawOf = (stream: net.Socket): net.Socket | undefined => {
+    if (pending.has(stream)) return stream;
+    if (stream.localPort !== undefined) {
+      for (const raw of pending.keys()) {
+        if (
+          raw.localPort === stream.localPort &&
+          raw.localAddress === stream.localAddress &&
+          raw.remotePort === stream.remotePort &&
+          raw.remoteAddress === stream.remoteAddress
+        ) {
+          return raw;
+        }
+      }
+    }
+    const parent = (stream as unknown as { _parent?: net.Socket })._parent;
+    return parent && pending.has(parent) ? parent : undefined;
+  };
+
   /**
    * 握手完成:解除这条连接的握手计时。
    * 【这个监听器绝不能抛】mysql2 在交出连接(getConnection 的回调)之前同步触发 connection 事件,
@@ -70,10 +101,16 @@ export function handshakeGuard(handshakeMs: number) {
   const attach = (pool: mysql.Pool) => {
     pool.on("connection", (conn) => {
       try {
-        const socket = socketOf(conn);
-        if (socket) clearTimeout(timers.get(socket));
-      } catch {
-        // 取不到套接字也只是少解除一个计时:握手早已完成,到期销毁的是一条健康连接 —— 宁可如此也不能卡死
+        const current = socketOf(conn);
+        const raw = current ? rawOf(current) : undefined;
+        if (raw) {
+          settle(raw);
+        } else {
+          // 对应不上就解除不了计时:这条健康连接会在握手期限到时被断开。不能悄悄发生
+          console.warn("[owa][db] 握手已完成但找不到对应的原始套接字,握手计时未能解除");
+        }
+      } catch (err) {
+        console.warn("[owa][db] 解除握手计时出错:", err instanceof Error ? err.message : err);
       }
     });
   };

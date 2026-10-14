@@ -151,6 +151,73 @@ if (!TEST_DB_URL) {
       expect(rows[0][0]?.prompt).toBe("p");
     });
 
+    it("启用 TLS:握手完成后不被握手计时误断 —— 事务空档停过握手期限,连接不重建、行锁仍持有,随后查询并提交", async () => {
+      const id = await newRun();
+      // TLS 升级后 mysql2 把 connection.stream 换成新的 TLS 套接字;握手计时挂在原始 TCP 套接字上
+      const tlsUrl = new URL(TEST_DB_URL as string);
+      tlsUrl.searchParams.set("ssl", JSON.stringify({ rejectUnauthorized: false }));
+      const track = trackClientSockets(Number(tlsUrl.port || 3306));
+      const { db, pool } = createDb(tlsUrl.toString(), {
+        connectionLimit: 1,
+        handshakeMs: 300,
+        commandMs: 5_000,
+      });
+      cleanups.push(() => pool.end());
+
+      const cipher = (await db.execute(
+        sql`SELECT VARIABLE_VALUE AS c FROM performance_schema.session_status WHERE VARIABLE_NAME = 'Ssl_cipher'`,
+      )) as unknown as [{ c: string }[]];
+      expect(cipher[0][0]?.c).toBeTruthy(); // 确实走了 TLS
+
+      let otherGotLock = false;
+      let other: Promise<void> | undefined;
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT id FROM runs WHERE id = ${id} FOR UPDATE`);
+        other = direct.db.transaction(async (t2) => {
+          await t2.execute(sql`SELECT id FROM runs WHERE id = ${id} FOR UPDATE`);
+          otherGotLock = true;
+        });
+        await sleep(1_000); // 事务空档:握手期限的 3 倍多
+        expect(otherGotLock).toBe(false); // 行锁仍在
+        await tx.execute(sql`UPDATE runs SET prompt = 'tls-after-gap' WHERE id = ${id}`);
+      });
+      await other;
+      expect(otherGotLock).toBe(true);
+      // 全程只有一条连接,没被断开重建(track 记的是原始 TCP 套接字)
+      expect(track.sockets).toHaveLength(1);
+      expect(track.alive()).toBe(1);
+      const rows = (await direct.db.execute(
+        sql`SELECT prompt FROM runs WHERE id = ${id}`,
+      )) as unknown as [{ prompt: string }[]];
+      expect(rows[0][0]?.prompt).toBe("tls-after-gap");
+    });
+
+    it("启用 TLS:执行中的命令卡死时到期断开,底层 TCP 套接字真正关闭,恢复后照常可用", async () => {
+      const proxy = await startFreezeProxy(new URL(TEST_DB_URL as string));
+      const tlsUrl = new URL(proxy.url);
+      tlsUrl.searchParams.set("ssl", JSON.stringify({ rejectUnauthorized: false }));
+      const track = trackClientSockets(proxy.port);
+      const { db, pool } = createDb(tlsUrl.toString(), {
+        connectionLimit: 1,
+        handshakeMs: 2_000,
+        commandMs: 300,
+      });
+      cleanups.push(async () => {
+        proxy.heal();
+        await Promise.race([pool.end(), sleep(1_000)]);
+        await proxy.close();
+      });
+      await db.execute(sql`SELECT 1`);
+      proxy.state.frozen = true;
+      proxy.state.ignoreFin = true;
+      await expect(db.execute(sql`SELECT 1`)).rejects.toBeInstanceOf(DbCommandTimeout);
+      await sleep(50);
+      expect(track.sockets).toHaveLength(1);
+      expect(track.alive()).toBe(0);
+      proxy.heal();
+      await expect(db.execute(sql`SELECT 1`)).resolves.toBeDefined();
+    });
+
     it("健康检查的数据库探测单一在途:连接都停在事务空档(不能强杀)时,频繁探测按时报不可用,连接池里只排一个;放行后恢复", async () => {
       const id = await newRun();
       // 不经代理的单连接池:数据库正常,只是唯一的连接被事务占着
