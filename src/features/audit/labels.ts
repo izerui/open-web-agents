@@ -18,6 +18,7 @@ export const ACTION_LABEL: Record<AuditAction, string> = {
   "api_key.revoke": "吊销 API Key",
   "api_key.rate_limit": "调整 Key 限额",
   "approval.decide": "审批",
+  "approval.revoke_grant": "撤销同类授权",
   "account.create": "创建账号",
   "account.update": "修改账号",
   "account.reset_password": "重置密码",
@@ -39,6 +40,7 @@ export const ACTION_LABEL: Record<AuditAction, string> = {
 export const SENSITIVE: ReadonlySet<string> = new Set([
   "auth.login_failed",
   "approval.decide",
+  "approval.revoke_grant",
   "account.reset_password",
   "account.update",
   "api_key.issue",
@@ -101,7 +103,11 @@ export function describeAudit(e: AuditItem): string {
     case "api_key.rate_limit":
       return `「${s(d.name) || "未命名"}」每分钟上限 ${d.from ?? "默认"} → ${d.to ?? "默认"}`;
     case "approval.decide":
-      return `${d.decision === "approved" ? "批准" : "拒绝"} ${s(d.tool)}${d.runId ? `(运行 ${s(d.runId)})` : ""}`;
+      return `${d.decision === "approved" ? "批准" : "拒绝"} ${s(d.tool)}${
+        d.remember ? `,并授权本会话内同类(${s(d.grantLabel)})不再询问` : ""
+      }${d.runId ? `(运行 ${s(d.runId)})` : ""}`;
+    case "approval.revoke_grant":
+      return `撤销本会话的同类授权:${s(d.grantLabel) || s(d.grantCategory)}`;
     case "account.create":
       return `${s(d.email)}(${s(d.role)})`;
     case "account.update": {

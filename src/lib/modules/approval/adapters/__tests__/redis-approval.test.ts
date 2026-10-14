@@ -373,4 +373,79 @@ if (!URL) {
       expect(await p).toMatchObject({ decision: "approved" });
     });
   });
+
+  describe("本会话内同类授权(真实 Redis)", { timeout: 20_000 }, () => {
+    const grantOf = (key: string) => ({ key, label: `类别 ${key}`, by: "u1", at: Date.now() });
+
+    it("批准并授权:裁决与授权一起落地;撤销后没有了", async () => {
+      const r = req({ grant: { key: "bash:curl", label: "含「curl」的命令" } });
+      const p = approval.request(r);
+      await new Promise((ok) => setTimeout(ok, 50));
+      expect(
+        await approval.resolve(
+          r.id,
+          { decision: "approved", by: "u1" },
+          {
+            sessionId: r.sessionId,
+            grant: grantOf("bash:curl"),
+          },
+        ),
+      ).toBe(true);
+      expect(await p).toMatchObject({ decision: "approved" });
+      expect((await approval.grants(r.sessionId)).map((g) => g.key)).toEqual(["bash:curl"]);
+      expect(await approval.revokeGrant(r.sessionId, "bash:curl")).toBe(true);
+      expect(await approval.grants(r.sessionId)).toEqual([]);
+      expect(await approval.revokeGrant(r.sessionId, "bash:curl")).toBe(false);
+    });
+
+    it("待审已失效(没批成):不会留下授权", async () => {
+      const r = req();
+      // 从未登记的待审 = 已过期 / 已被别人裁决
+      expect(
+        await approval.resolve(
+          r.id,
+          { decision: "approved" },
+          {
+            sessionId: r.sessionId,
+            grant: grantOf("bash:curl"),
+          },
+        ),
+      ).toBe(false);
+      expect(await approval.grants(r.sessionId)).toEqual([]);
+    });
+
+    it("拒绝时即使带了授权也不写入", async () => {
+      const r = req();
+      const p = approval.request(r);
+      await new Promise((ok) => setTimeout(ok, 50));
+      expect(
+        await approval.resolve(
+          r.id,
+          { decision: "denied", message: "不行" },
+          {
+            sessionId: r.sessionId,
+            grant: grantOf("bash:curl"),
+          },
+        ),
+      ).toBe(true);
+      expect(await p).toMatchObject({ decision: "denied", message: "不行" });
+      expect(await approval.grants(r.sessionId)).toEqual([]);
+    });
+
+    it("授权按会话隔离", async () => {
+      const a = req({ grant: { key: "tool:Write", label: "工具 Write" } });
+      const p = approval.request(a);
+      await new Promise((ok) => setTimeout(ok, 50));
+      await approval.resolve(
+        a.id,
+        { decision: "approved" },
+        {
+          sessionId: a.sessionId,
+          grant: grantOf("tool:Write"),
+        },
+      );
+      await p;
+      expect(await approval.grants(`other-${a.sessionId}`)).toEqual([]);
+    });
+  });
 }

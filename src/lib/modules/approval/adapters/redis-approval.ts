@@ -8,6 +8,7 @@ import {
   type ApprovalPort,
   type ApprovalRequest,
   ApprovalUnavailable,
+  type SessionGrant,
 } from "@/lib/modules/approval/ports";
 import Redis from "ioredis";
 
@@ -31,8 +32,17 @@ const RESOLVE_SCRIPT = `
 if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
 redis.call('SET', KEYS[2], ARGV[1], 'PX', tonumber(ARGV[2]))
 redis.call('DEL', KEYS[1])
+if ARGV[3] ~= '' then
+  redis.call('HSET', KEYS[3], ARGV[3], ARGV[4])
+  redis.call('PEXPIRE', KEYS[3], tonumber(ARGV[5]))
+end
 return 1
 `;
+
+/** 会话级同类授权:field = 类别键,value = SessionGrant JSON */
+const GRANTS_KEY = (sessionId: string) => `owa:approval:grants:${sessionId}`;
+/** 授权随会话的活跃期续期;一周没再被授权就自然过期 */
+const GRANTS_TTL_MS = 7 * 24 * 60 * 60_000;
 
 /**
  * 原子收尾(到期时):已有裁决就返回它;否则删除待审,让之后的 resolve 一律落空,返回 nil。
@@ -221,15 +231,25 @@ export class RedisApproval implements ApprovalPort {
    * 【广播失败不算失败】裁决落地之后,它就已经生效了:等待方的轮询会读到它。
    * 此时再向调用方报错,只会让审批人以为没批成、再点一次,看到"已被裁决"一头雾水。
    */
-  async resolve(id: string, outcome: ApprovalOutcome): Promise<boolean> {
+  async resolve(
+    id: string,
+    outcome: ApprovalOutcome,
+    remember?: { sessionId: string; grant: SessionGrant },
+  ): Promise<boolean> {
+    // 授权只跟批准一起落地,且在同一段脚本里:待审已失效(没批成)就不会留下授权
+    const g = outcome.decision === "approved" ? remember : undefined;
     const won = await this.bounded(
       this.cmd.eval(
         RESOLVE_SCRIPT,
-        2,
+        3,
         PENDING_KEY(id),
         DECISION_KEY(id),
+        GRANTS_KEY(g?.sessionId ?? "-"),
         JSON.stringify(outcome),
         String(DECISION_TTL_MS),
+        g?.grant.key ?? "",
+        g ? JSON.stringify(g.grant) : "",
+        String(GRANTS_TTL_MS),
       ),
       `审批 ${id} 的裁决提交结果未知(连接恢复后可能仍会生效)`,
     );
@@ -241,6 +261,30 @@ export class RedisApproval implements ApprovalPort {
       `审批 ${id} 的裁决广播`,
     ).catch(() => {});
     return true;
+  }
+
+  async grants(sessionId: string): Promise<SessionGrant[]> {
+    const raw = await this.bounded(
+      this.cmd.hgetall(GRANTS_KEY(sessionId)),
+      `无法读取会话 ${sessionId} 的同类授权`,
+    );
+    const out: SessionGrant[] = [];
+    for (const v of Object.values(raw)) {
+      try {
+        out.push(JSON.parse(v) as SessionGrant);
+      } catch {
+        // 坏数据:跳过,不当成授权
+      }
+    }
+    return out.sort((a, b) => a.at - b.at);
+  }
+
+  async revokeGrant(sessionId: string, key: string): Promise<boolean> {
+    const n = await this.bounded(
+      this.cmd.hdel(GRANTS_KEY(sessionId), key),
+      `撤销会话 ${sessionId} 的同类授权结果未知`,
+    );
+    return n > 0;
   }
 
   async listPending(sessionId: string): Promise<ApprovalRequest[]> {

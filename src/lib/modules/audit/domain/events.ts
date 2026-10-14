@@ -18,6 +18,7 @@ export const AUDIT_ACTIONS = [
   "api_key.revoke",
   "api_key.rate_limit",
   "approval.decide",
+  "approval.revoke_grant",
   "account.create",
   "account.update",
   "account.reset_password",

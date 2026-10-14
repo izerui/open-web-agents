@@ -206,6 +206,8 @@ export interface SdkOptionsDeps {
       toolName: string;
       summary: string;
       reason: string;
+      /** 这次调用所属的类别 —— 本会话若已授权同类,就不必再问人 */
+      grant?: { key: string; label: string };
     },
     signal?: AbortSignal,
   ) => Promise<{ approved: boolean; message?: string }>;
@@ -417,6 +419,7 @@ export function buildSdkOptions(
             toolName,
             summary: describeToolCall(toolName, input),
             reason: need.reason ?? "需人工确认",
+            ...(need.grant ? { grant: need.grant } : {}),
           },
           // 本轮被取消/超时中止时,挂着的审批要跟着立刻收场
           deps.abort.signal,

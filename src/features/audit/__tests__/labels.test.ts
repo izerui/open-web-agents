@@ -36,3 +36,21 @@ describe("审计展示", () => {
     );
   });
 });
+
+describe("审批分级的审计文案", () => {
+  it("批准并授权同类、撤销同类授权", () => {
+    expect(
+      describeAudit(
+        item("approval.decide", {
+          decision: "approved",
+          tool: "Bash",
+          remember: true,
+          grantLabel: "含「curl」的命令",
+        }),
+      ),
+    ).toContain("并授权本会话内同类(含「curl」的命令)不再询问");
+    expect(describeAudit(item("approval.revoke_grant", { grantLabel: "工具 Write" }))).toBe(
+      "撤销本会话的同类授权:工具 Write",
+    );
+  });
+});

@@ -24,7 +24,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   try {
     const principal = await auth.resolveWeb(req);
     await auth.assertSessionAccess(principal, id);
-    return Response.json({ pending: await approval.listPending(id) });
+    const [pending, grants] = await Promise.all([approval.listPending(id), approval.grants(id)]);
+    return Response.json({ pending, grants });
   } catch (err) {
     const down = unavailable(err);
     if (down) return down;
@@ -37,8 +38,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 interface Body {
   approvalId?: string;
   decision?: "approved" | "denied";
+  /** 拒绝时告诉智能体为什么、该怎么改 —— 会作为拒绝原因交给模型 */
   message?: string;
+  /** 批准并授权本会话内同类调用不再询问 */
+  remember?: "session";
 }
+
+/** 拒绝说明的上限:它会原样交给模型 */
+const MAX_MESSAGE_CHARS = 2_000;
 
 /**
  * 裁决一条待审请求。
@@ -65,6 +72,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (body.decision !== "approved" && body.decision !== "denied") {
     return Response.json({ error: "decision must be approved/denied" }, { status: 400 });
   }
+  if (body.remember !== undefined && body.remember !== "session") {
+    return Response.json({ error: "remember 只能是 session" }, { status: 400 });
+  }
+  if (body.remember && body.decision !== "approved") {
+    return Response.json({ error: "只有批准时才能授权同类" }, { status: 400 });
+  }
+  const message = typeof body.message === "string" ? body.message.trim() : "";
+  if (message.length > MAX_MESSAGE_CHARS) {
+    return Response.json({ error: `拒绝说明不能超过 ${MAX_MESSAGE_CHARS} 字` }, { status: 400 });
+  }
 
   let ok: boolean;
   let target: ApprovalRequest | undefined;
@@ -75,11 +92,21 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (!target) {
       return Response.json({ error: "该待审请求不存在或已失效" }, { status: 404 });
     }
+    if (body.remember && !target.grant) {
+      return Response.json({ error: "这类调用不支持授权同类,只能逐次审批" }, { status: 400 });
+    }
+    // 批准并授权同类:与裁决在同一步原子落地 —— 待审已失效(没批成)就不会留下授权
     ok = await approval.resolve(
       body.approvalId,
       body.decision === "approved"
         ? { decision: "approved", by }
-        : { decision: "denied", by, message: body.message },
+        : { decision: "denied", by, ...(message ? { message } : {}) },
+      body.remember && target.grant
+        ? {
+            sessionId: id,
+            grant: { key: target.grant.key, label: target.grant.label, by, at: Date.now() },
+          }
+        : undefined,
     );
   } catch (err) {
     // 审批服务不可用:如实告诉审批人"结果未知",而不是让他以为批成了或被拒了
@@ -112,10 +139,61 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         runId: target?.runId,
         tool: target?.toolName,
         decision: body.decision,
+        ...(body.remember && target?.grant
+          ? { remember: true, grantCategory: target.grant.key, grantLabel: target.grant.label }
+          : {}),
       },
       req,
     };
   });
 
-  return Response.json({ resolved: body.approvalId, decision: body.decision });
+  return Response.json({
+    resolved: body.approvalId,
+    decision: body.decision,
+    remembered: Boolean(body.remember),
+  });
+}
+
+/** 撤销本会话的一条同类授权:之后同类调用重新逐次审批。 */
+export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const { approval, auth, sessions, audit } = getContainer();
+
+  let principal: Principal;
+  try {
+    principal = await auth.resolveWeb(req);
+    await auth.assertSessionAccess(principal, id);
+  } catch (err) {
+    const res = authErrorResponse(err);
+    if (res) return res;
+    throw err;
+  }
+
+  const key = new URL(req.url).searchParams.get("grant")?.trim() ?? "";
+  if (!key) return Response.json({ error: "grant is required" }, { status: 400 });
+
+  let label: string | undefined;
+  let removed: boolean;
+  try {
+    label = (await approval.grants(id)).find((g) => g.key === key)?.label;
+    removed = await approval.revokeGrant(id, key);
+  } catch (err) {
+    const down = unavailable(err);
+    if (down) return down;
+    throw err;
+  }
+  if (!removed) return Response.json({ error: "该授权不存在或已撤销" }, { status: 404 });
+
+  await audit.record(async () => {
+    const session = await sessions.get(id).catch(() => null);
+    return {
+      actor: principal,
+      action: "approval.revoke_grant",
+      resource: { type: "session", id },
+      ownerId: session?.billingUserId ?? session?.ownerId,
+      details: { grantCategory: key, grantLabel: label },
+      req,
+    };
+  });
+  return Response.json({ revoked: key });
 }

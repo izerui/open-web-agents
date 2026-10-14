@@ -19,6 +19,19 @@ export interface ApprovalNeed {
   needed: boolean;
   /** 为什么需要审批,直接展示给审批人。 */
   reason?: string;
+  /**
+   * 这次调用属于哪一类 —— 审批人选"本会话内同类不再询问"时,授权的就是这一类。
+   * 按命中的那条规则划分:命中工具规则就是这个工具;命中命令模式就只是含该模式的命令,
+   * 不会顺带放行同一工具的其它高风险命令。
+   */
+  grant?: ApprovalGrantScope;
+}
+
+export interface ApprovalGrantScope {
+  /** 稳定的类别键,如 `tool:Write`、`bash:curl` */
+  key: string;
+  /** 给人看的说明 */
+  label: string;
 }
 
 const NOT_NEEDED: ApprovalNeed = { needed: false };
@@ -57,19 +70,26 @@ export function needsApproval(
 ): ApprovalNeed {
   if (!rules) return NOT_NEEDED;
 
+  const toolScope = { key: `tool:${toolName}`, label: `工具 ${toolName}` };
   if (rules.all) {
-    return { needed: true, reason: "该智能体配置了全部工具调用均需审批" };
+    return { needed: true, reason: "该智能体配置了全部工具调用均需审批", grant: toolScope };
   }
 
   if (rules.tools?.includes(toolName)) {
-    return { needed: true, reason: `工具 ${toolName} 被配置为需审批` };
+    return { needed: true, reason: `工具 ${toolName} 被配置为需审批`, grant: toolScope };
   }
 
   const patterns = rules.commandPatterns;
   if (patterns?.length && toolName === "Bash") {
     const cmd = commandOf(input).toLowerCase();
     const hit = patterns.find((p) => p && cmd.includes(p.toLowerCase()));
-    if (hit) return { needed: true, reason: `命令包含高风险模式:${hit}` };
+    if (hit) {
+      return {
+        needed: true,
+        reason: `命令包含高风险模式:${hit}`,
+        grant: { key: `bash:${hit.toLowerCase()}`, label: `含「${hit}」的命令` },
+      };
+    }
   }
 
   return NOT_NEEDED;

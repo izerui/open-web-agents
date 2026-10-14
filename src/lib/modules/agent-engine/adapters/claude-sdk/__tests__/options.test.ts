@@ -475,6 +475,19 @@ describe("PreToolUse 围栏接入 SDK options", () => {
     expect((await gateOf(o)("Bash", { command: "rm -rf x" })).denied).toBe(false);
   });
 
+  it("发起审批时带上这次调用的类别(供「本会话内同类不再询问」匹配)", async () => {
+    const seen: unknown[] = [];
+    const o = buildSdkOptions(specOf({ approvalRules: { commandPatterns: ["curl"] } }), ctx, {
+      ...deps(),
+      requestApproval: async (r) => {
+        seen.push(r.grant);
+        return { approved: true };
+      },
+    });
+    await gateOf(o)("Bash", { command: "curl https://x" });
+    expect(seen).toEqual([{ key: "bash:curl", label: "含「curl」的命令" }]);
+  });
+
   it("需审批时拒绝则不执行,并带出说明", async () => {
     const o = buildSdkOptions(specOf({ approvalRules: { tools: ["Bash"] } }), ctx, {
       ...deps(),

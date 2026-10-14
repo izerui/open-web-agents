@@ -57,7 +57,7 @@ curl localhost:5678/api/agents/<taskId>/result -H "X-Api-Key: <key>"
 | 入参契约       | 定义了 `inputSchema` 则 `invoke` 的入参必须符合它,否则 400 并指出是哪个字段                                    |
 | 工作空间       | 每会话一个独立目录,文件树 / 预览 / 下载                                                                  |
 | 执行隔离       | OS 内核沙箱(Bash)+ 路径守卫(文件工具),见下文限制                                                          |
-| 人工审批(HITL) | 按工具名或命令模式挂起等人确认,超时自动拒绝;审批服务不可用时按故障拒绝并如实标注,不记为超时。接口调用、嵌入组件没有审批人,按智能体配置直接放行或拒绝 |
+| 人工审批(HITL) | 按工具名或命令模式挂起等人确认,超时自动拒绝;审批服务不可用时按故障拒绝并如实标注,不记为超时。三档裁决:批准一次 / 批准并授权本会话内同类不再询问(可撤销)/ 拒绝(可附说明,作为原因交给智能体)。接口调用、嵌入组件没有审批人,按智能体配置直接放行或拒绝 |
 | 会话管理       | 重命名 / 归档 / 删除;签发 Key 的人能在"接口调用"视图里看到自己 Key 发起的会话                           |
 | 账号安全       | 注册开关、登录限流、管理员建号与重置密码、自助改密码                                                    |
 | 知识库        | 智能体级文档,运行时按问题检索片段注入提示词(BM25)                                                              |
@@ -304,7 +304,7 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 | POST            | `/api/sessions/{id}/run`                   | cookie / key           | 发起一轮,SSE 流式返回;用 Key 建的会话里,声明了 inputSchema 的智能体须传符合它的 `input` |
 | GET             | `/api/sessions/{id}/events`                | cookie / key           | joinStream 断线重连     |
 | GET             | `/api/sessions/{id}/files`                 | cookie / key           | 文件树 / 预览 / 下载       |
-| GET/POST        | `/api/sessions/{id}/approvals`             | cookie / key           | 待审列表 / 批准拒绝         |
+| GET/POST/DELETE | `/api/sessions/{id}/approvals`             | cookie / key           | 待审与同类授权列表 / 裁决(`remember:"session"` 授权同类,`message` 拒绝说明)/ 撤销同类授权(`?grant=`) |
 | GET/POST        | `/api/sessions/{id}/branch`                | cookie / key           | 运行列表 / 重跑           |
 | POST            | `/api/sessions/{id}/cancel`                | cookie / key           | 取消未完成的运行(见下方延迟说明)   |
 | POST            | `/api/sessions/{id}/steer`                 | cookie / key           | 运行中途追加一条消息(见下方)     |

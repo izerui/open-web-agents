@@ -25,6 +25,7 @@ import { ARCHITECT_AGENT_ID, ARCHITECT_CONFIG } from "@/lib/modules/agent/domain
 import { validateInput } from "@/lib/modules/agent/domain/validate-output";
 import type { AgentRepo } from "@/lib/modules/agent/ports";
 import { RedisApproval } from "@/lib/modules/approval/adapters/redis-approval";
+import { requestApproval as requestApprovalWithGrants } from "@/lib/modules/approval/application/request-approval";
 import { type ApprovalPort, ApprovalUnavailable } from "@/lib/modules/approval/ports";
 import { LocalFsStorage } from "@/lib/modules/artifacts/adapters/local-fs-storage";
 import { RedisGcLock } from "@/lib/modules/artifacts/adapters/redis-gc-lock";
@@ -256,72 +257,19 @@ function build(): Container {
       return !!u && !u.disabled;
     },
   });
-  // 审批钩子:先把待审事件推上总线(界面才看得到),再挂起等裁决。
-  // 超时兜底在 RedisApproval 里 —— 没人审批时到点自动拒,绝不永久占住 worker。
-  const requestApproval: NonNullable<EngineDeps["requestApproval"]> = async (r, signal) => {
-    const id = randomUUID().replace(/-/g, "").slice(0, 24);
-    const expiresAt = Date.now() + APPROVAL_TIMEOUT_MS;
-
-    await bus
-      .publish(topicOf(r.sessionId, r.runId), {
-        kind: "status",
-        label: `待审批:${r.toolName} — ${r.summary}(${r.reason})`,
-        state: "awaiting_approval",
-      })
-      .catch(() => {});
-
-    let outcome: Awaited<ReturnType<typeof approval.request>>;
-    try {
-      outcome = await approval.request(
-        {
-          id,
-          sessionId: r.sessionId,
-          runId: r.runId,
-          toolName: r.toolName,
-          summary: r.summary,
-          reason: r.reason,
-          createdAt: Date.now(),
-          expiresAt,
-        },
-        // 运行被取消/超时中止时,这条待审请求要立刻收场并清掉 Redis 记录 ——
-        // 否则界面上它还挂着,用户点批准还会收到"已裁决",而运行早就没了
-        signal,
-      );
-    } catch (err) {
-      // 审批服务不可用:如实标成"无法确认",不冒充超时拒绝。异常继续抛给引擎,
-      // 由它按 fail-closed 拒绝这次工具调用并带上原因
-      if (err instanceof ApprovalUnavailable) {
-        await bus
-          .publish(topicOf(r.sessionId, r.runId), {
-            kind: "status",
-            label: `审批结果无法确认(审批服务不可用):${r.toolName}`,
-            state: "approval_unavailable",
-          })
-          .catch(() => {});
-      }
-      throw err;
-    }
-
-    const label =
-      outcome.decision === "approved"
-        ? `审批通过:${r.toolName}`
-        : outcome.decision === "expired"
-          ? `审批超时自动拒绝:${r.toolName}`
-          : `审批被拒:${r.toolName}`;
-    await bus
-      .publish(topicOf(r.sessionId, r.runId), { kind: "status", label, state: outcome.decision })
-      .catch(() => {});
-
-    return {
-      approved: outcome.decision === "approved",
-      message:
-        outcome.decision === "expired"
-          ? "审批超时,已自动拒绝"
-          : outcome.decision === "denied"
-            ? (outcome.message ?? "人工审批未通过")
-            : undefined,
-    };
-  };
+  // 审批钩子:本会话有同类授权就放行;否则推待审事件、挂起等裁决(见 approval/application/request-approval.ts)
+  const requestApproval: NonNullable<EngineDeps["requestApproval"]> = (r, signal) =>
+    requestApprovalWithGrants(
+      {
+        approval,
+        publish: (sessionId, runId, e) => bus.publish(topicOf(sessionId, runId), e).then(() => {}),
+        newId: () => randomUUID().replace(/-/g, "").slice(0, 24),
+        now: () => Date.now(),
+        timeoutMs: APPROVAL_TIMEOUT_MS,
+      },
+      r,
+      signal,
+    );
   const engine = createClaudeSdkEngine(
     env.dataDir,
     gateway,

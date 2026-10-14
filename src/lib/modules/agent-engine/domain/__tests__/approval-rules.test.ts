@@ -105,4 +105,29 @@ describe("describeToolCall", () => {
     const long = "x".repeat(1000);
     expect(describeToolCall("Bash", { command: long }).length).toBeLessThan(320);
   });
+
+  describe("授权类别(本会话内同类不再询问)", () => {
+    it("命中工具规则:类别就是这个工具", () => {
+      expect(needsApproval("Write", {}, { tools: ["Write"] }).grant).toEqual({
+        key: "tool:Write",
+        label: "工具 Write",
+      });
+      expect(needsApproval("Bash", { command: "ls" }, { all: true }).grant?.key).toBe("tool:Bash");
+    });
+
+    it("命中命令模式:类别只是含该模式的命令,不会放行同一工具的其它高风险命令", () => {
+      const rules = { commandPatterns: ["curl", "rm -rf"] };
+      expect(needsApproval("Bash", { command: "CURL x" }, rules).grant).toEqual({
+        key: "bash:curl",
+        label: "含「curl」的命令",
+      });
+      expect(needsApproval("Bash", { command: "rm -rf /tmp/x" }, rules).grant?.key).toBe(
+        "bash:rm -rf",
+      );
+    });
+
+    it("不需要审批时没有类别", () => {
+      expect(needsApproval("Read", {}, { tools: ["Write"] }).grant).toBeUndefined();
+    });
+  });
 });
