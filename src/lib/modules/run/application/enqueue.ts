@@ -41,6 +41,10 @@ export interface EnqueueRequest {
   /** 请求级凭证覆盖。含明文 key,入库前加密。 */
   override?: RunCommand["override"];
   /**
+   * 不投回调(评测里的运行):快照记为"无回调",之后智能体配上地址也不投。
+   */
+  noCallback?: boolean;
+  /**
    * 调用方为这次指定的回调地址,入口已按回调地址策略校验过。
    * 不传则快照智能体此刻配置的默认地址(没配就记"无回调")。
    */
@@ -103,11 +107,13 @@ export class RunEnqueuer {
       agentVersion: release.version ?? undefined,
       overrideEnc,
       // 回调目标在受理时定下:之后改智能体的地址,不会把这次转投到新地址
-      callback: req.callbackUrl
-        ? { source: "caller", url: req.callbackUrl }
-        : agent.webhookUrl
-          ? { source: "agent", url: agent.webhookUrl }
-          : { source: "none" },
+      callback: req.noCallback
+        ? { source: "none" }
+        : req.callbackUrl
+          ? { source: "caller", url: req.callbackUrl }
+          : agent.webhookUrl
+            ? { source: "agent", url: agent.webhookUrl }
+            : { source: "none" },
       idempotencyKey: req.idempotencyKey,
       idempotencyHash: req.idempotencyHash,
     });

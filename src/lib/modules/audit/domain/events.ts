@@ -35,6 +35,7 @@ export const AUDIT_ACTIONS = [
   "group.member_remove",
   "webhook.test",
   "webhook.redeliver",
+  "eval.run",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

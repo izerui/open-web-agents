@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const STATES: RunState[] = ["pending", "running", "success", "failed", "cancelled"];
-const SOURCES: SessionSource[] = ["web", "api", "invoke", "embed"];
+const SOURCES: SessionSource[] = ["web", "api", "invoke", "embed", "eval"];
 
 /** 逗号分隔的枚举值;含未知值返回 null。 */
 function parseList<T extends string>(raw: string | null, allowed: T[]): T[] | undefined | null {

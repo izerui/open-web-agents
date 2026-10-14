@@ -1,7 +1,8 @@
 import type { ModelAlias } from "@/lib/shared";
 
 /** 会话从哪个入口来。决定审批怎么走、结果是否推 webhook、在哪个列表里展示。 */
-export type SessionSource = "web" | "api" | "invoke" | "embed";
+/** eval = 评测里每个用例的运行:无人值守,不推回调,不进工作台的会话列表 */
+export type SessionSource = "web" | "api" | "invoke" | "embed" | "eval";
 
 /** active 正常 / archived 归档(列表默认不显示) / deleted 已删除(视同不存在)。 */
 export type SessionStatus = "active" | "archived" | "deleted";

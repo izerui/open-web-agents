@@ -173,7 +173,8 @@ export class RunOrchestrator {
       unattended: session.unattended === true,
       // 有没有人能审批取决于入口:接口调用没人;嵌入组件里的访客不是审批人
       approvalPolicy:
-        session.source === "invoke"
+        // 评测与接口调用一样无人值守:按智能体对无人值守的配置走
+        session.source === "invoke" || session.source === "eval"
           ? (config.unattendedApproval ?? "allow")
           : session.source === "embed"
             ? (config.unattendedApproval ?? "deny")

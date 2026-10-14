@@ -8,6 +8,7 @@ import {
   json,
   mediumtext,
   mysqlTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -455,3 +456,66 @@ export const platformState = mysqlTable("platform_state", {
   v: varchar("v", { length: 255 }).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+/** 评测用例:一个智能体的标准输入与规则断言(见 eval/domain/assertions.ts)。 */
+export const evalCases = mysqlTable(
+  "eval_cases",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    agentId: varchar("agent_id", { length: 36 }).notNull(),
+    name: varchar("name", { length: 255 }).notNull(),
+    /** 字符串 = 文本输入;对象 = 按 inputSchema 的结构化输入 */
+    input: json("input").notNull(),
+    assertions: json("assertions").notNull(),
+    createdBy: varchar("created_by", { length: 36 }),
+    createdAt: timestamp("created_at", { fsp: 3 }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { fsp: 3 }).defaultNow().notNull(),
+  },
+  (t) => ({ byAgent: index("idx_eval_cases_agent").on(t.agentId, t.createdAt) }),
+);
+
+/** 一次评测:对某个版本(或草稿)跑一遍全部用例。 */
+export const evalRuns = mysqlTable(
+  "eval_runs",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    agentId: varchar("agent_id", { length: 36 }).notNull(),
+    /** 跑的是哪一版;NULL = 草稿 */
+    agentVersion: int("agent_version"),
+    /** running / done */
+    status: varchar("status", { length: 16 }).notNull(),
+    total: int("total").notNull(),
+    passed: int("passed").notNull().default(0),
+    failed: int("failed").notNull().default(0),
+    startedBy: varchar("started_by", { length: 36 }).notNull(),
+    createdAt: timestamp("created_at", { fsp: 3 }).defaultNow().notNull(),
+    finishedAt: timestamp("finished_at", { fsp: 3 }),
+  },
+  (t) => ({ byAgent: index("idx_eval_runs_agent").on(t.agentId, t.createdAt) }),
+);
+
+/**
+ * 评测里每个用例的结果。用例的名称、输入与断言在开跑时快照下来 ——
+ * 之后改了用例,历史评测仍按当时的标准判分、显示当时的内容。
+ */
+export const evalResults = mysqlTable(
+  "eval_results",
+  {
+    evalRunId: varchar("eval_run_id", { length: 36 }).notNull(),
+    caseId: varchar("case_id", { length: 36 }).notNull(),
+    caseName: varchar("case_name", { length: 255 }).notNull(),
+    input: json("input").notNull(),
+    assertions: json("assertions").notNull(),
+    /** 这个用例对应的运行;没能发起(如入参不符合契约)时为空 */
+    taskId: varchar("task_id", { length: 36 }),
+    sessionId: varchar("session_id", { length: 36 }),
+    /** pending / passed / failed / error */
+    status: varchar("status", { length: 16 }).notNull(),
+    failures: json("failures"),
+    /** 花费,微美元(金额一律整数) */
+    costMicroUsd: bigint("cost_micro_usd", { mode: "number" }),
+    durationMs: int("duration_ms"),
+    gradedAt: timestamp("graded_at", { fsp: 3 }),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.evalRunId, t.caseId] }) }),
+);

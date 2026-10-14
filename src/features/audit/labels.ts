@@ -35,6 +35,7 @@ export const ACTION_LABEL: Record<AuditAction, string> = {
   "group.member_remove": "移除组成员",
   "webhook.test": "测试回调",
   "webhook.redeliver": "重发回调",
+  "eval.run": "运行评测",
 };
 
 /** 需要特别留意的动作:界面上用醒目颜色标出。 */
@@ -136,6 +137,8 @@ export function describeAudit(e: AuditItem): string {
         : `失败${d.httpStatus ? `(HTTP ${s(d.httpStatus)})` : ""}`;
     case "webhook.redeliver":
       return "已放回发件箱";
+    case "eval.run":
+      return `对 ${s(d.target) === "draft" ? "草稿" : `v${s(d.target)}`} 跑 ${s(d.cases)} 个用例`;
     case "group.member_remove":
       return `「${s(d.group)}」移除 ${s(d.memberId)}`;
     default:

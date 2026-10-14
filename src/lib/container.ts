@@ -36,6 +36,9 @@ import { taskFilesForResult } from "@/lib/modules/artifacts/application/task-fil
 import type { StoragePort } from "@/lib/modules/artifacts/ports";
 import { MysqlAuditRepo } from "@/lib/modules/audit/adapters/mysql-audit-repo";
 import { AuditLog } from "@/lib/modules/audit/application/audit-log";
+import { MysqlEvalRepo } from "@/lib/modules/eval/adapters/mysql-eval-repo";
+import type { EvalDeps } from "@/lib/modules/eval/application/eval-runner";
+import type { EvalRepo } from "@/lib/modules/eval/ports";
 import { RedisBus } from "@/lib/modules/events/adapters/redis-bus";
 import type { BusPort } from "@/lib/modules/events/ports";
 import { MysqlApiKeyRepo } from "@/lib/modules/identity/adapters/mysql-api-key-repo";
@@ -76,6 +79,7 @@ import {
 import { RunWorker } from "@/lib/modules/run/application/worker";
 import type { CancelSignal, SteerChannel } from "@/lib/modules/run/ports";
 import { MysqlSessionRepo } from "@/lib/modules/session/adapters/mysql-session-repo";
+import { workspacePathFor } from "@/lib/modules/session/domain/workspace";
 import type { SessionRepo } from "@/lib/modules/session/ports";
 import { MysqlUsageRepo } from "@/lib/modules/usage/adapters/mysql-usage-repo";
 import { QuotaExceeded, assertWithinQuota } from "@/lib/modules/usage/application/quota-guard";
@@ -122,6 +126,9 @@ export interface Container {
   webhooks: WebhookDispatcher;
   /** 投递记录、测试投递、手动重发。 */
   webhookConsole: WebhookConsole;
+  evals: EvalRepo;
+  /** 发起 / 读取评测用到的依赖(见 eval/application/eval-runner.ts) */
+  evalDeps: EvalDeps;
   /** 取消通知:取消接口落库后发出,执行中的 worker 立即中止。 */
   cancelSignal: CancelSignal;
   steerChannel: SteerChannel;
@@ -434,6 +441,23 @@ function build(): Container {
     outbox: runs,
   });
 
+  // 评测:每个用例一个评测会话,按选定版本入队,与接口调用同一个运行内核
+  const evals = new MysqlEvalRepo(db);
+  const evalDeps: EvalDeps = {
+    evals,
+    agents,
+    releases,
+    sessions,
+    workspaceFor: async (sessionId) => {
+      const dir = workspacePathFor(env.dataDir, sessionId);
+      await fs.mkdir(dir, { recursive: true });
+      return dir;
+    },
+    enqueue: (r) => enqueuer.enqueue(r),
+    results: runs,
+    newId: () => randomUUID().replace(/-/g, "").slice(0, 24),
+  };
+
   if (process.env.OWA_EMBEDDED_WORKER !== "0") {
     worker.start();
     webhooks.start();
@@ -491,6 +515,8 @@ function build(): Container {
     knowledge,
     orchestrator,
     enqueuer,
+    evals,
+    evalDeps,
     worker,
     webhooks,
     webhookConsole,
