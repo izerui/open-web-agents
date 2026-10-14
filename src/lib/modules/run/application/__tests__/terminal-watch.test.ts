@@ -62,7 +62,7 @@ describe("watchTerminal", () => {
       error: null,
     });
 
-    it("查询不重叠:上一条挂着时不再发新查询", async () => {
+    it("查询永不返回:无论过多久都只有这一条,不会发新查询", async () => {
       vi.useFakeTimers();
       let calls = 0;
       const stop = watchTerminal(
@@ -75,40 +75,73 @@ describe("watchTerminal", () => {
         "r1",
         () => {},
         3_000,
-        10_000,
       );
       await vi.advanceTimersByTimeAsync(3_000);
       expect(calls).toBe(1);
-      // 原先每 3 秒一条:到 12 秒时会有 4 条挂着
-      await vi.advanceTimersByTimeAsync(9_000);
+      // 推进很多个间隔(原先每 3 秒一条;"超时就排下一次"的版本也会每 13 秒多一条)
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
       expect(calls).toBe(1);
       stop();
     });
 
-    it("单次查询超过上限就放弃,下一轮照常查;数据库恢复后仍能收尾", async () => {
+    it("挂了很久的那条终于返回终态:照常收尾,且只回调一次", async () => {
       vi.useFakeTimers();
       let calls = 0;
+      let release!: (v: ReturnType<typeof row>) => void;
       const got: unknown[] = [];
       const stop = watchTerminal(
         {
           getResult: () => {
             calls++;
-            // 第一次挂住,之后恢复并已落终态
-            return calls === 1 ? new Promise(() => {}) : Promise.resolve(row("success"));
+            return new Promise((r) => {
+              release = r;
+            });
           },
         },
         "r1",
         (e) => got.push(e),
         3_000,
-        10_000,
       );
-      await vi.advanceTimersByTimeAsync(3_000 + 10_000 - 1);
+      await vi.advanceTimersByTimeAsync(3_000 + 5 * 60_000);
       expect(calls).toBe(1);
-      expect(got).toEqual([]);
-      // 第 13 秒放弃第一条,再等一个间隔发第二条
-      await vi.advanceTimersByTimeAsync(1 + 3_000);
-      expect(calls).toBe(2);
+      release(row("success"));
+      await vi.advanceTimersByTimeAsync(0);
       expect(got).toMatchObject([{ kind: "result", status: "success", summary: "答案" }]);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(calls).toBe(1);
+      expect(got).toHaveLength(1);
+      stop();
+    });
+
+    it("挂着的那条最后返回未终态或被拒绝:这条结束后才排下一次", async () => {
+      vi.useFakeTimers();
+      let calls = 0;
+      const pending: ((v: ReturnType<typeof row>) => void)[] = [];
+      let rejectNext: ((e: Error) => void) | undefined;
+      const stop = watchTerminal(
+        {
+          getResult: () => {
+            calls++;
+            return new Promise((resolve, reject) => {
+              pending.push(resolve);
+              rejectNext = reject;
+            });
+          },
+        },
+        "r1",
+        () => {},
+        3_000,
+      );
+      await vi.advanceTimersByTimeAsync(3_000 + 60_000);
+      expect(calls).toBe(1);
+      pending[0]?.(row("running")); // 返回了,还没结束
+      await vi.advanceTimersByTimeAsync(3_000 - 1);
+      expect(calls).toBe(1); // 返回之后再等一个间隔
+      await vi.advanceTimersByTimeAsync(1);
+      expect(calls).toBe(2);
+      rejectNext?.(new Error("db down")); // 第二条被驱动拒绝
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(calls).toBe(3);
       stop();
     });
 
@@ -129,7 +162,6 @@ describe("watchTerminal", () => {
         "r1",
         (e) => got.push(e),
         3_000,
-        10_000,
       );
       await vi.advanceTimersByTimeAsync(3_000);
       stop();

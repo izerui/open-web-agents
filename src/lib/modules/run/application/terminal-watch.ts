@@ -45,47 +45,38 @@ export function resultEventFromRow(
  * 开始盯一条运行。到终态时调用一次 onTerminal 并自行停止。返回取消函数。
  * 第一次查询也要等一个间隔 —— 正常情况下总线上的事件会先到,不该抢在它前面。
  *
- * 【查询不重叠】上一次查询返回(或被放弃)之后才排下一次。曾经用 setInterval 每个间隔发一次,
- * 数据库不返回时挂住的查询每 3 秒多一条,积多了能把连接池占满。
- * 【单次查询有等待上限】超过 queryTimeoutMs 就放弃这次、照常排下一次 —— 数据库恢复后仍能收尾。
- * 放弃只是不再等,底层查询没有取消:最坏每个 queryTimeoutMs 积压一条,而不是每个间隔一条。
+ * 【同一时刻最多一条查询】上一次查询真正完成(返回或拒绝)之后才排下一次。
+ * 曾经用 setInterval 每个间隔发一次,数据库不返回时挂住的查询每 3 秒多一条,积多了能把连接池占满。
+ * 也不设"等待超时就排下一次":超时只是不再等,底层查询并没有结束,照样会一条条积压下去。
+ * 所以数据库一直不返回时这里就一直等着那一条 —— 它晚些返回(或被驱动判超时拒绝)后照常继续。
  */
 export function watchTerminal(
   source: TerminalSource,
   runId: string,
   onTerminal: (e: ResultEvent) => void,
   intervalMs = 3_000,
-  queryTimeoutMs = 10_000,
 ): () => void {
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   const schedule = () => {
-    if (!stopped) timer = setTimeout(() => void tick(), intervalMs);
+    if (!stopped) timer = setTimeout(tick, intervalMs);
   };
 
-  const tick = async () => {
-    let deadline: ReturnType<typeof setTimeout> | undefined;
-    let row: Awaited<ReturnType<TerminalSource["getResult"]>> = null;
-    try {
-      row = await Promise.race([
-        source.getResult(runId),
-        new Promise<null>((resolve) => {
-          deadline = setTimeout(() => resolve(null), queryTimeoutMs);
-        }),
-      ]);
-    } catch {
-      row = null;
-    } finally {
-      clearTimeout(deadline);
-    }
-    if (stopped) return;
-    if (row && isTerminal(row.status)) {
-      stopped = true;
-      onTerminal(resultEventFromRow(runId, { ...row, status: row.status }));
-      return;
-    }
-    schedule();
+  const tick = () => {
+    source.getResult(runId).then(
+      (row) => {
+        if (stopped) return;
+        if (row && isTerminal(row.status)) {
+          stopped = true;
+          onTerminal(resultEventFromRow(runId, { ...row, status: row.status }));
+          return;
+        }
+        schedule();
+      },
+      // 查询失败:这一条已经结束,下一轮照常查
+      () => schedule(),
+    );
   };
 
   schedule();
