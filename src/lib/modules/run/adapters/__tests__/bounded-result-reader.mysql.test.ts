@@ -15,7 +15,7 @@ import {
 import { MysqlRunRepo } from "@/lib/modules/run/adapters/mysql-run-repo";
 import { watchTerminal } from "@/lib/modules/run/application/terminal-watch";
 import { eq, inArray } from "drizzle-orm";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 const TEST_DB_URL = process.env.OWA_TEST_DATABASE_URL;
 
@@ -26,9 +26,18 @@ const TEST_DB_URL = process.env.OWA_TEST_DATABASE_URL;
  * 记录当前与峰值打开的连接数、送达客户端的服务器字节数。
  */
 async function startFreezeProxy(target: URL) {
-  const state = { frozen: false, stallAuth: false, open: 0, peak: 0, serverBytes: 0 };
+  const state = {
+    frozen: false,
+    stallAuth: false,
+    /** 收到客户端的 FIN(半关闭)后不回应、不关闭 —— 对端不响应 FIN 的情形 */
+    ignoreFin: false,
+    open: 0,
+    peak: 0,
+    serverBytes: 0,
+  };
   const sockets = new Set<net.Socket>();
-  const server = net.createServer((client) => {
+  // allowHalfOpen:收到客户端 FIN 时不自动回 FIN,由下面按模式决定
+  const server = net.createServer({ allowHalfOpen: true }, (client) => {
     const upstream = net.connect(Number(target.port || 3306), target.hostname);
     sockets.add(client);
     state.open++;
@@ -56,6 +65,10 @@ async function startFreezeProxy(target: URL) {
     });
     client.on("close", close);
     client.on("error", close);
+    // 客户端半关闭:正常时随之关闭;ignoreFin 时什么也不做,客户端那条套接字若只是 end() 就一直半开着
+    client.on("end", () => {
+      if (!state.ignoreFin) close();
+    });
     // 卡住期间服务器那头关闭(如它自己的 connect_timeout 到期)也传不到客户端 —— 真实断网时同样如此;
     // 客户端这头保持打开,直到客户端自己断开
     const upstreamGone = () => {
@@ -82,6 +95,22 @@ async function startFreezeProxy(target: URL) {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * 记下读取源(经 mysql2)建立的每条客户端套接字 —— 从代理那头看,客户端 end() 与 destroy()
+ * 都只是一个 FIN,分不出来;要验证"旧套接字真的关闭了",得看客户端这一侧。
+ */
+const clientSockets: net.Socket[] = [];
+const realConnect = net.connect;
+function trackClientSockets(port: number) {
+  vi.spyOn(net, "connect").mockImplementation(((...args: Parameters<typeof net.connect>) => {
+    const socket = (realConnect as (...a: unknown[]) => net.Socket)(...args);
+    const opts = args[0] as { port?: number } | number;
+    if ((typeof opts === "number" ? opts : opts?.port) === port) clientSockets.push(socket);
+    return socket;
+  }) as typeof net.connect);
+}
+const aliveClientSockets = () => clientSockets.filter((s) => !s.closed).length;
+
 if (!TEST_DB_URL) {
   console.warn("[skip] 有时限结果读取的 MySQL 测试未运行 —— 需设置 OWA_TEST_DATABASE_URL");
   describe.skip("有时限的结果读取(未配置测试库,已跳过)", () => {
@@ -95,6 +124,10 @@ if (!TEST_DB_URL) {
   const repo = new MysqlRunRepo(db);
   const ids: string[] = [];
   const cleanups: (() => Promise<void>)[] = [];
+  afterEach(() => {
+    vi.restoreAllMocks();
+    clientSockets.length = 0;
+  });
   afterAll(async () => {
     for (const c of cleanups) await c();
     if (ids.length) await db.delete(runsTable).where(inArray(runsTable.id, ids));
@@ -201,6 +234,33 @@ if (!TEST_DB_URL) {
       expect(Date.now() - t0).toBeLessThan(2_000);
       proxy.state.frozen = false;
       expect((await reader.getResult(id))?.id).toBe(id);
+    });
+
+    it("超时断开时对端不响应 FIN:旧套接字也被强制关闭,连续超时不累积,恢复后照常读到终态", async () => {
+      const id = await newRun();
+      const { proxy, reader } = await readerViaProxy(300);
+      trackClientSockets(Number(new URL(proxy.url).port));
+      await reader.getResult(id); // 建好连接
+      expect(clientSockets).toHaveLength(1);
+
+      proxy.state.frozen = true;
+      proxy.state.ignoreFin = true;
+      for (let i = 0; i < 3; i++) {
+        const t0 = Date.now();
+        await expect(reader.getResult(id)).rejects.toBeInstanceOf(ResultReadTimeout);
+        expect(Date.now() - t0).toBeLessThan(2_000);
+        // 返回时用过的套接字都已真正关闭 —— 只发 FIN(end)的话对端不回应,它会一直半开着
+        expect(aliveClientSockets()).toBe(0);
+      }
+      expect(clientSockets.length).toBeGreaterThanOrEqual(3);
+
+      proxy.state.frozen = false;
+      await db
+        .update(runsTable)
+        .set({ status: "success", finalText: "完成" })
+        .where(eq(runsTable.id, id));
+      expect(await reader.getResult(id)).toMatchObject({ status: "success", finalText: "完成" });
+      expect(aliveClientSockets()).toBe(1); // 只剩恢复后新建的那一条
     });
 
     it("终态兜底接在它上面:数据库卡死期间不积压连接,恢复后照常收尾", async () => {

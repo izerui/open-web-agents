@@ -175,16 +175,26 @@ export class BoundedResultReader {
     this.waiters.shift()?.();
   }
 
-  /** 断开连接并等套接字关闭 */
+  /**
+   * 断开连接,等套接字确认关闭后才释放名额。
+   *
+   * mysql2 的 destroy() 只是 close() 的别名,而 close() 只调用 stream.end() —— 发 FIN 半关闭,
+   * 不是强制销毁(lib/base/connection.js)。对端不回应 FIN 时套接字会一直半开着。
+   * 所以先让驱动进入关闭状态(不再接受新命令),再直接销毁底层套接字。
+   */
   private async discard(conn: Conn) {
-    this.forget(conn);
     const socket = socketOf(conn);
     const closed =
       socket && !socket.closed
-        ? new Promise<void>((resolve) => socket.once("close", () => resolve()))
-        : Promise.resolve();
+        ? new Promise<"closed">((resolve) => socket.once("close", () => resolve("closed")))
+        : Promise.resolve("closed" as const);
     conn.destroy();
-    await raceDeadline(closed, Date.now() + this.closeWaitMs);
+    socket?.destroy();
+    // 强制销毁后 close 必然触发;上限只是保险,真到了要说出来,而不是悄悄当作已关闭
+    if ((await raceDeadline(closed, Date.now() + this.closeWaitMs)) === "timeout") {
+      console.warn(`[owa][run] 结果读取连接销毁后 ${this.closeWaitMs}ms 仍未关闭`);
+    }
+    this.forget(conn);
   }
 }
 
