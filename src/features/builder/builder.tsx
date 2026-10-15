@@ -23,8 +23,20 @@ import type { AgentSummary } from "@/features/workbench/types";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import type { ModelAlias } from "@/lib/shared";
 import { PERMISSION_MODES, type PermissionMode } from "@/lib/shared";
+import { isSafeSkillPath } from "@/lib/shared/skill-package";
 import { cn } from "@/lib/utils";
-import { Bot, FileCode, Play, Plus, Save, Sparkles, Trash2 } from "lucide-react";
+import {
+  Bot,
+  ChevronDown,
+  ChevronRight,
+  FileCode,
+  FilePlus,
+  Play,
+  Plus,
+  Save,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -91,19 +103,17 @@ function newSubagentRow(): SubagentDraft {
 }
 
 /**
- * 技能包:SKILL.md 之外的附带文件(脚本、模板)在这里原样保留、不提供编辑 ——
- * 多文件的技能请用"AI 设计"修改。曾经构建器不认识技能包,保存一次就把它们全清掉了。
+ * 技能包草稿:直接持有完整的 files 字典，SKILL.md 和附属文件（脚本、模板等）统一管理。
  */
 interface SkillDraft {
   uid: string;
   name: string;
   description: string;
-  body: string;
-  extraFiles: Record<string, string>;
+  files: Record<string, string>;
 }
 
 function newSkillRow(): SkillDraft {
-  return { uid: crypto.randomUUID(), name: "", description: "", body: "", extraFiles: {} };
+  return { uid: crypto.randomUUID(), name: "", description: "", files: { "SKILL.md": "" } };
 }
 
 interface Draft {
@@ -438,7 +448,7 @@ export function Builder() {
               .map((k) => ({
                 name: k.name.trim(),
                 description: k.description.trim(),
-                files: { ...k.extraFiles, "SKILL.md": k.body },
+                files: k.files,
               })),
             permissionMode: draft.permissionMode,
             unattendedApproval: draft.unattendedApproval || undefined,
@@ -553,16 +563,12 @@ export function Builder() {
                   description: string;
                   files: Record<string, string>;
                 }[]
-              ).map((k) => {
-                const { "SKILL.md": body = "", ...extraFiles } = k.files ?? {};
-                return {
-                  uid: crypto.randomUUID(),
-                  name: k.name,
-                  description: k.description,
-                  body,
-                  extraFiles,
-                };
-              })
+              ).map((k) => ({
+                uid: crypto.randomUUID(),
+                name: k.name,
+                description: k.description,
+                files: k.files ?? { "SKILL.md": "" },
+              }))
             : [],
           approvalToolsText: Array.isArray(
             (cfg.approvalRules as { tools?: string[] } | undefined)?.tools,
@@ -917,50 +923,29 @@ export function Builder() {
               list[i] = { ...k, ...next };
               setDraft({ ...draft, skillPackages: list });
             };
-            const extra = Object.keys(k.extraFiles).length;
+            const patchFile = (path: string, content: string) => {
+              patch({ files: { ...k.files, [path]: content } });
+            };
+            const removeFile = (path: string) => {
+              const { [path]: _, ...rest } = k.files;
+              patch({ files: rest });
+            };
+            const otherFiles = Object.keys(k.files).filter((p) => p !== "SKILL.md");
             return (
-              <div key={k.uid} className="space-y-2 border-b border-border pb-3 last:border-b-0">
-                <div className="flex gap-2">
-                  <Input
-                    value={k.name}
-                    onChange={(e) => patch({ name: e.target.value })}
-                    placeholder="技能名(小写字母、数字、连字符)"
-                    aria-label="技能名"
-                  />
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    aria-label="删除这个技能"
-                    onClick={() =>
-                      setDraft({
-                        ...draft,
-                        skillPackages: draft.skillPackages.filter((x) => x.uid !== k.uid),
-                      })
-                    }
-                  >
-                    <Trash2 />
-                  </Button>
-                </div>
-                <Input
-                  value={k.description}
-                  onChange={(e) => patch({ description: e.target.value })}
-                  placeholder="何时使用,如:需要把数学推导做成动画时使用"
-                  aria-label="技能描述"
-                />
-                <Textarea
-                  className="h-28 resize-y font-mono"
-                  value={k.body}
-                  onChange={(e) => patch({ body: e.target.value })}
-                  placeholder="SKILL.md 正文:步骤、约定、示例"
-                  aria-label="SKILL.md"
-                />
-                {extra > 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    另附 {extra} 个文件({Object.keys(k.extraFiles).slice(0, 3).join("、")}
-                    {extra > 3 ? "…" : ""}),保存时原样保留
-                  </p>
-                )}
-              </div>
+              <SkillEditor
+                key={k.uid}
+                skill={k}
+                otherFiles={otherFiles}
+                onPatch={patch}
+                onPatchFile={patchFile}
+                onRemoveFile={removeFile}
+                onDelete={() =>
+                  setDraft({
+                    ...draft,
+                    skillPackages: draft.skillPackages.filter((x) => x.uid !== k.uid),
+                  })
+                }
+              />
             );
           })}
         </CardContent>
@@ -1438,8 +1423,191 @@ export function Builder() {
   );
 }
 
+function SkillEditor({
+  skill,
+  otherFiles,
+  onPatch,
+  onPatchFile,
+  onRemoveFile,
+  onDelete,
+}: {
+  skill: SkillDraft;
+  otherFiles: string[];
+  onPatch: (next: Partial<SkillDraft>) => void;
+  onPatchFile: (path: string, content: string) => void;
+  onRemoveFile: (path: string) => void;
+  onDelete: () => void;
+}) {
+  const [expandedFile, setExpandedFile] = useState<string | null>(null);
+  const [addingFile, setAddingFile] = useState(false);
+  const [newPath, setNewPath] = useState("");
+  const [pathError, setPathError] = useState<string | null>(null);
+
+  function addFile() {
+    const p = newPath.trim();
+    if (!p) return;
+    if (p === "SKILL.md") {
+      setPathError("SKILL.md 已存在");
+      return;
+    }
+    if (p in skill.files) {
+      setPathError("文件已存在");
+      return;
+    }
+    if (!isSafeSkillPath(p)) {
+      setPathError("路径不合法（只允许字母数字._-，不能 .. 或绝对路径）");
+      return;
+    }
+    onPatchFile(p, "");
+    setNewPath("");
+    setPathError(null);
+    setAddingFile(false);
+    setExpandedFile(p);
+  }
+
+  return (
+    <div className="space-y-2 border-b border-border pb-3 last:border-b-0">
+      <div className="flex gap-2">
+        <Input
+          value={skill.name}
+          onChange={(e) => onPatch({ name: e.target.value })}
+          placeholder="技能名(小写字母、数字、连字符)"
+          aria-label="技能名"
+        />
+        <Button variant="ghost" size="sm" aria-label="删除这个技能" onClick={onDelete}>
+          <Trash2 />
+        </Button>
+      </div>
+      <Input
+        value={skill.description}
+        onChange={(e) => onPatch({ description: e.target.value })}
+        placeholder="何时使用,如:需要把数学推导做成动画时使用"
+        aria-label="技能描述"
+      />
+
+      {/* SKILL.md 置顶 */}
+      <div className="rounded border border-border">
+        <button
+          type="button"
+          className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-muted/50"
+          onClick={() => setExpandedFile(expandedFile === "SKILL.md" ? null : "SKILL.md")}
+        >
+          {expandedFile === "SKILL.md" ? (
+            <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+          )}
+          <FileCode className="size-3.5 shrink-0" />
+          <span className="flex-1 font-medium">SKILL.md</span>
+          <span className="text-muted-foreground">
+            {(skill.files["SKILL.md"] ?? "").length} 字符
+          </span>
+        </button>
+        {expandedFile === "SKILL.md" && (
+          <div className="border-t px-2 py-1.5">
+            <Textarea
+              className="h-32 resize-y font-mono text-xs"
+              value={skill.files["SKILL.md"] ?? ""}
+              onChange={(e) => onPatchFile("SKILL.md", e.target.value)}
+              placeholder="SKILL.md 正文:步骤、约定、示例"
+            />
+          </div>
+        )}
+      </div>
+
+      {/* 附属文件 */}
+      {otherFiles.map((path) => (
+        <div key={path} className="rounded border border-border">
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-muted/50"
+            onClick={() => setExpandedFile(expandedFile === path ? null : path)}
+          >
+            {expandedFile === path ? (
+              <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+            )}
+            <FileCode className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="flex-1 truncate font-mono">{path}</span>
+            <span className="text-muted-foreground">{skill.files[path]?.length ?? 0} 字符</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="text-muted-foreground hover:text-destructive"
+              aria-label={`删除 ${path}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onRemoveFile(path);
+                if (expandedFile === path) setExpandedFile(null);
+              }}
+            >
+              <Trash2 />
+            </Button>
+          </button>
+          {expandedFile === path && (
+            <div className="border-t px-2 py-1.5">
+              <Textarea
+                className="h-32 resize-y font-mono text-xs"
+                value={skill.files[path] ?? ""}
+                onChange={(e) => onPatchFile(path, e.target.value)}
+                placeholder={`${path} 内容`}
+              />
+            </div>
+          )}
+        </div>
+      ))}
+
+      {/* 添加文件 */}
+      {addingFile ? (
+        <div className="flex items-start gap-2">
+          <div className="flex-1">
+            <Input
+              value={newPath}
+              onChange={(e) => {
+                setNewPath(e.target.value);
+                setPathError(null);
+              }}
+              onKeyDown={(e) => e.key === "Enter" && addFile()}
+              placeholder="文件路径，如 scripts/render.py"
+              autoFocus
+            />
+            {pathError && <p className="mt-1 text-xs text-destructive">{pathError}</p>}
+          </div>
+          <Button type="button" size="sm" onClick={addFile} disabled={!newPath.trim()}>
+            确定
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setAddingFile(false);
+              setNewPath("");
+              setPathError(null);
+            }}
+          >
+            取消
+          </Button>
+        </div>
+      ) : (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground"
+          onClick={() => setAddingFile(true)}
+        >
+          <FilePlus className="size-3.5" />
+          添加文件
+        </Button>
+      )}
+    </div>
+  );
+}
+
 /**
- * 接口调用示例。
  *
  * 曾经是一段复制即 401 的 curl:没有 X-Api-Key、用相对地址、入参写死成纯文本
  * (声明了 inputSchema 的智能体会直接 400),而且只有填了 outputSchema 才显示。

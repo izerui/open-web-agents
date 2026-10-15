@@ -23,6 +23,9 @@ import type { SnapshotChange } from "@/lib/modules/agent/domain/snapshot-diff";
 import {
   ArrowLeft,
   Check,
+  ChevronDown,
+  ChevronRight,
+  FileCode,
   FileDiff,
   FlaskConical,
   Loader2,
@@ -670,16 +673,7 @@ export function DesignWorkspace({ initialSessionId }: { initialSessionId?: strin
                         <fieldset className="space-y-2">
                           <legend className="mb-2 text-sm font-medium">技能包（inline）</legend>
                           {draft.skillPackages?.map((s) => (
-                            <div key={s.name} className="rounded border p-2 text-xs">
-                              <p className="font-medium">{s.name}</p>
-                              {s.description && (
-                                <p className="text-muted-foreground">{s.description}</p>
-                              )}
-                              <p className="mt-1 text-muted-foreground">
-                                {Object.keys(s.files).length} 个文件
-                                {s.files["SKILL.md"] ? ` · ${s.files["SKILL.md"].length} 字符` : ""}
-                              </p>
-                            </div>
+                            <SkillPreview key={s.name} skill={s} />
                           ))}
                         </fieldset>
                       )}
@@ -911,6 +905,57 @@ function TrialRunFeedback({
               </div>
             ))
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SkillPreview({
+  skill,
+}: { skill: { name: string; description: string; files: Record<string, string> } }) {
+  const [expanded, setExpanded] = useState(false);
+  const [openFile, setOpenFile] = useState<string | null>(null);
+  const fileKeys = Object.keys(skill.files);
+
+  return (
+    <div className="rounded border p-2 text-xs">
+      <button
+        type="button"
+        className="flex w-full items-center gap-1.5 text-left"
+        onClick={() => setExpanded(!expanded)}
+      >
+        {expanded ? (
+          <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
+        )}
+        <span className="flex-1 font-medium">{skill.name}</span>
+        <span className="text-muted-foreground">{fileKeys.length} 个文件</span>
+      </button>
+      {skill.description && (
+        <p className="mt-0.5 pl-4.5 text-muted-foreground">{skill.description}</p>
+      )}
+      {expanded && (
+        <div className="mt-1.5 space-y-1 pl-4.5">
+          {fileKeys.map((path) => (
+            <div key={path}>
+              <button
+                type="button"
+                className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left hover:bg-muted/50"
+                onClick={() => setOpenFile(openFile === path ? null : path)}
+              >
+                <FileCode className="size-3 shrink-0 text-muted-foreground" />
+                <span className="flex-1 truncate font-mono">{path}</span>
+                <span className="text-muted-foreground">{skill.files[path]?.length ?? 0} 字符</span>
+              </button>
+              {openFile === path && (
+                <pre className="mt-1 max-h-48 overflow-auto rounded bg-muted/30 p-2 font-mono text-[11px] leading-relaxed">
+                  {skill.files[path]}
+                </pre>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>
