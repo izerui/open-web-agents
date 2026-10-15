@@ -27,8 +27,13 @@ const sourceAgent = {
     mcpServers: [
       {
         type: "http" as const,
-        name: "mixed-url",
+        name: "template-url",
         url: "https://{{BASE_URL}}/v1?token={{API_KEY}}",
+      },
+      {
+        type: "http" as const,
+        name: "mixed-secret-url",
+        url: "https://{{BASE_URL}}/v1?token={{API_KEY}}&secret=hardcoded-author-key",
       },
       { type: "http" as const, name: "pure-url", url: "{{BASE_URL}}" },
       {
@@ -36,7 +41,7 @@ const sourceAgent = {
         name: "tool",
         command: "node",
         args: ["run.js"],
-        env: { KEY: "{{API_KEY}}", MIXED: "prefix-{{API_KEY}}", HOST: "hardcoded-secret" },
+        env: { KEY: "{{API_KEY}}", MIXED: "Bearer {{API_KEY}}", HOST: "hardcoded-secret" },
       },
     ],
     starters: ["Hello"],
@@ -203,10 +208,15 @@ describe("POST /api/agents/{id}/clone", () => {
       env?: Record<string, string>;
     }[];
 
-    // Mixed URL redacted — prevents "https://{{HOST}}/mcp?token=real-secret" from leaking
-    const mixedUrl = mcpServers.find((m) => m.name === "mixed-url");
-    expect(mixedUrl?.url).not.toContain("{{API_KEY}}");
-    expect(mixedUrl?.url).not.toContain("token=");
+    // Template URL with only var ref params → preserved fully
+    const templateUrl = mcpServers.find((m) => m.name === "template-url");
+    expect(templateUrl?.url).toContain("{{BASE_URL}}");
+    expect(templateUrl?.url).toContain("{{API_KEY}}");
+
+    // URL with mix of var ref and hardcoded params → var ref param kept, hardcoded removed
+    const mixedSecretUrl = mcpServers.find((m) => m.name === "mixed-secret-url");
+    expect(mixedSecretUrl?.url).toContain("{{API_KEY}}");
+    expect(mixedSecretUrl?.url).not.toContain("hardcoded-author-key");
 
     // Pure var ref URL preserved
     const pureUrl = mcpServers.find((m) => m.name === "pure-url");
@@ -215,8 +225,8 @@ describe("POST /api/agents/{id}/clone", () => {
     const stdioMcp = mcpServers.find((m) => m.name === "tool");
     // Pure var ref preserved
     expect(stdioMcp?.env?.KEY).toBe("{{API_KEY}}");
-    // Mixed value (hardcoded + var ref) redacted
-    expect(stdioMcp?.env?.MIXED).toBe("***");
+    // Mixed template (contains var ref) preserved
+    expect(stdioMcp?.env?.MIXED).toBe("Bearer {{API_KEY}}");
     // Pure hardcoded redacted
     expect(stdioMcp?.env?.HOST).toBe("***");
 

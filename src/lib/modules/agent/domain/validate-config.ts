@@ -11,6 +11,7 @@ import {
   validateSkillPackages,
 } from "@/lib/shared";
 import type { AgentConfig } from "./config";
+import { checkUrlTemplate } from "./config";
 
 export interface ConfigIssue {
   field: string;
@@ -26,19 +27,6 @@ const EFFORTS = new Set(["low", "medium", "high"]);
 
 /** MCP 名称会作为 SDK mcpServers 的 key,必须是安全标识符。 */
 const MCP_NAME = /^[A-Za-z0-9_-]{1,64}$/;
-
-function checkUrl(raw: string): string | null {
-  let u: URL;
-  try {
-    u = new URL(raw);
-  } catch {
-    return "URL 格式不正确";
-  }
-  if (u.protocol !== "http:" && u.protocol !== "https:") {
-    return "只支持 http/https";
-  }
-  return null;
-}
 
 /** 返回所有问题(而非遇到第一个就停)—— 一次性把配置问题都告诉用户。 */
 export function validateAgentConfig(
@@ -83,7 +71,7 @@ export function validateAgentConfig(
     if (m.type === "http") {
       if (!m.url) issues.push({ field: `${at}.url`, message: "http 类型必须给 url" });
       else {
-        const err = checkUrl(m.url);
+        const err = checkUrlTemplate(m.url);
         if (err) issues.push({ field: `${at}.url`, message: err });
       }
     } else if (m.type === "stdio") {

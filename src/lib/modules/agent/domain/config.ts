@@ -139,28 +139,41 @@ function redactUrl(raw: string): string {
 }
 
 const PURE_VAR_REF = /^\{\{[A-Za-z_][A-Za-z0-9_]*\}\}$/;
+const CONTAINS_VAR_REF = /\{\{[A-Za-z_][A-Za-z0-9_]*\}\}/;
 
 /**
- * 克隆专用的值脱敏：只保留纯变量引用（整个值就是 {{VAR}}），
- * 混合内容（硬编码+变量引用）和纯硬编码都脱敏为 ***。
+ * 克隆 env 值脱敏：含变量引用的保留（包括混合模板如 "Bearer {{KEY}}"），
+ * 纯硬编码脱敏为 ***。
  */
-function cloneRedactValue(value: string): string {
-  return PURE_VAR_REF.test(value) ? value : "***";
+function cloneRedactEnvValue(value: string): string {
+  return CONTAINS_VAR_REF.test(value) ? value : "***";
 }
 
 /**
- * 克隆专用 URL 脱敏：整个 URL 是纯变量引用时保留，否则脱敏。
- * 不尝试部分保留 URL 中的变量引用——混合 URL 可能泄露作者凭证。
+ * 克隆 URL 模板脱敏：
+ * - 纯变量引用 {{URL}} → 保留
+ * - 不含变量引用 → 常规脱敏
+ * - 含变量引用的模板 → 保留协议/主机/路径（含变量引用），
+ *   查询参数逐个检查：含变量引用的保留，纯硬编码的移除
  */
 function cloneRedactUrl(url: string): string {
   if (PURE_VAR_REF.test(url)) return url;
-  return redactUrl(url);
+  if (!CONTAINS_VAR_REF.test(url)) return redactUrl(url);
+
+  const qIdx = url.indexOf("?");
+  if (qIdx === -1) return url;
+
+  const base = url.slice(0, qIdx);
+  const query = url.slice(qIdx + 1);
+  const pairs = query.split("&").filter((p) => CONTAINS_VAR_REF.test(p));
+  return pairs.length > 0 ? `${base}?${pairs.join("&")}` : base;
 }
 
 /**
- * 克隆专用脱敏：保留纯 {{变量名}} 引用，脱敏一切硬编码和混合内容。
- * 混合值（如 "sk-real-key-{{VAR}}"）不保留——它可能包含作者的真实密钥。
- * 克隆者需要用自己的变量值重新配置被脱敏的字段。
+ * 克隆专用脱敏：
+ * - env 值含变量引用 → 保留（含混合模板）；纯硬编码 → ***
+ * - URL 含变量引用 → 保留引用部分，清除硬编码查询参数
+ * - args 含变量引用 → 保留；纯硬编码 → ***
  */
 export function redactAgentConfigForClone(cfg: AgentConfig): AgentConfig {
   const { escapeHatch: _hatch, ...rest } = cfg;
@@ -171,12 +184,29 @@ export function redactAgentConfigForClone(cfg: AgentConfig): AgentConfig {
       ...(m.env
         ? {
             env: Object.fromEntries(
-              Object.entries(m.env).map(([k, v]) => [k, cloneRedactValue(v)]),
+              Object.entries(m.env).map(([k, v]) => [k, cloneRedactEnvValue(v)]),
             ),
           }
         : {}),
       ...(m.url !== undefined ? { url: cloneRedactUrl(m.url) } : {}),
-      ...(m.args ? { args: m.args.map((a) => cloneRedactValue(a)) } : {}),
+      ...(m.args ? { args: m.args.map((a) => (CONTAINS_VAR_REF.test(a) ? a : "***")) } : {}),
     })),
   };
+}
+
+/**
+ * 含 {{变量名}} 的 URL 模板校验：先替换占位符为合法 URL 值再校验格式。
+ */
+export function checkUrlTemplate(raw: string): string | null {
+  const expanded = raw.replace(/\{\{[A-Za-z_][A-Za-z0-9_]*\}\}/g, "placeholder");
+  let u: URL;
+  try {
+    u = new URL(expanded);
+  } catch {
+    return "URL 格式不正确";
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") {
+    return "只支持 http/https";
+  }
+  return null;
 }
