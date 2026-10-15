@@ -28,6 +28,7 @@ const JSON_FIELDS = [
   "approvalRules",
   "inputSchema",
   "outputSchema",
+  "variables",
 ] as const satisfies readonly (keyof AgentConfig)[];
 
 export interface BundleAgent {

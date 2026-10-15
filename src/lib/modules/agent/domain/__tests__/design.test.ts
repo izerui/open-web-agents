@@ -165,4 +165,36 @@ describe("platform design drafts", () => {
     expect(designHash(draftOf(source))).not.toBe(designHash({ ...draftOf(source), mcpRefs: [] }));
     expect(resourceRef("a,b", "skill", "c")).not.toBe(resourceRef("a", "skill", "b,c"));
   });
+
+  it("variables survive draftOf → resolveDesign round trip without leaking values", () => {
+    const agentWithVars: Agent = {
+      ...source,
+      config: {
+        ...source.config,
+        variables: [
+          { name: "API_KEY", description: "密钥", required: true, secret: true },
+          { name: "BASE_URL", description: "地址", required: false, secret: false },
+        ],
+        mcpServers: [
+          { type: "http", name: "api", url: "https://{{BASE_URL}}/v1?token={{API_KEY}}" },
+        ],
+      },
+    };
+
+    const draft = draftOf(agentWithVars);
+
+    expect(draft.parameters.variables).toEqual([
+      { name: "API_KEY", description: "密钥", required: true, secret: true },
+      { name: "BASE_URL", description: "地址", required: false, secret: false },
+    ]);
+
+    const snapshot = resolveDesign(draft, [agentWithVars]);
+    expect(snapshot.config.variables).toEqual(agentWithVars.config.variables);
+
+    expect(snapshot.config.mcpServers?.[0]?.url).toContain("{{BASE_URL}}");
+    expect(snapshot.config.mcpServers?.[0]?.url).toContain("{{API_KEY}}");
+
+    expect(JSON.stringify(draft)).not.toContain("sk-");
+    expect(JSON.stringify(snapshot)).not.toContain("sk-");
+  });
 });
