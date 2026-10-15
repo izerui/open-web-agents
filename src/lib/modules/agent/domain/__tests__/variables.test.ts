@@ -135,4 +135,48 @@ describe("variable injection", () => {
     expect(secretEnv.OWA_VAR_API_KEY).toBe("sk-secret");
     expect(secretEnv.OWA_VAR_BASE_URL).toBe("example.com");
   });
+
+  it("AI-generated skill using OWA_VAR env gets values, file has no secrets", () => {
+    const cfg: AgentConfig = {
+      systemPrompt: "Serve at {{BASE_URL}}",
+      model: "sonnet",
+      maxTurns: 5,
+      skillPackages: [
+        {
+          name: "fetcher",
+          description: "Fetch data",
+          files: {
+            "SKILL.md":
+              "# Fetcher\nUse process.env.OWA_VAR_API_KEY to authenticate.\nCall process.env.OWA_VAR_BASE_URL for the endpoint.",
+          },
+        },
+      ],
+      mcpServers: [{ type: "http", name: "api", url: "https://{{BASE_URL}}/v1?token={{API_KEY}}" }],
+      variables: [
+        { name: "API_KEY", description: "密钥", required: true, secret: true },
+        { name: "BASE_URL", description: "地址", required: true, secret: false },
+      ],
+    };
+
+    const values = { API_KEY: "sk-real-secret", BASE_URL: "api.example.com" };
+    const spec = buildSpec(cfg, ctx, { resolvedVariables: values });
+    const { secretEnv } = splitVariables(cfg.variables, values);
+
+    // Skill file doesn't contain actual secrets
+    const skillContent = spec.skillPackages?.[0]?.files["SKILL.md"] ?? "";
+    expect(skillContent).not.toContain("sk-real-secret");
+    expect(skillContent).toContain("OWA_VAR_API_KEY");
+    expect(skillContent).toContain("OWA_VAR_BASE_URL");
+
+    // Environment variables carry actual values for skill scripts
+    expect(secretEnv.OWA_VAR_API_KEY).toBe("sk-real-secret");
+    expect(secretEnv.OWA_VAR_BASE_URL).toBe("api.example.com");
+
+    // MCP URL is substituted with actual values
+    expect(spec.mcpServers?.[0]?.url).toBe("https://api.example.com/v1?token=sk-real-secret");
+
+    // System prompt has plain var substituted but not secret
+    expect(spec.systemPrompt).toContain("api.example.com");
+    expect(spec.systemPrompt).not.toContain("sk-real-secret");
+  });
 });
