@@ -1,5 +1,6 @@
 "use client";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -23,6 +24,7 @@ import {
   ArrowLeft,
   Check,
   FileDiff,
+  FlaskConical,
   Loader2,
   MessageSquare,
   Plus,
@@ -417,6 +419,11 @@ export function DesignWorkspace({ initialSessionId }: { initialSessionId?: strin
                   <label className="sr-only" htmlFor="design-prompt">
                     编辑要求
                   </label>
+                  <TrialRunFeedback
+                    sessionId={id}
+                    disabled={running || !view || view.legacy}
+                    onSelect={(feedback) => setPrompt(feedback)}
+                  />
                   <Textarea
                     id="design-prompt"
                     value={prompt}
@@ -747,5 +754,112 @@ export function DesignWorkspace({ initialSessionId }: { initialSessionId?: strin
         </DialogContent>
       </Dialog>
     </main>
+  );
+}
+
+interface TrialRun {
+  runId: string;
+  status: string;
+  promptPreview: string;
+  text?: string;
+  structured?: string;
+  error?: { kind?: string; message?: string };
+  at: number;
+}
+
+function TrialRunFeedback({
+  sessionId,
+  disabled,
+  onSelect,
+}: {
+  sessionId: string;
+  disabled: boolean;
+  onSelect: (feedback: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [runs, setRuns] = useState<TrialRun[] | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/agents/design/${encodeURIComponent(sessionId)}/runs`);
+      if (res.ok) {
+        const data = (await res.json()) as { runs: TrialRun[] };
+        setRuns(data.runs);
+      }
+    } catch {}
+    setLoading(false);
+  }
+
+  function select(run: TrialRun) {
+    const parts = ["基于以下试运行结果改进智能体配置：\n"];
+    parts.push(`【输入】\n${run.promptPreview}\n`);
+    if (run.text) parts.push(`【输出】\n${run.text}\n`);
+    if (run.structured) parts.push(`【结构化结果】\n${run.structured}\n`);
+    if (run.error) parts.push(`【错误】\n${run.error.message ?? run.error.kind ?? "未知错误"}\n`);
+    parts.push("请分析问题并修改草稿。");
+    onSelect(parts.join("\n"));
+    setOpen(false);
+  }
+
+  return (
+    <div className="mb-1">
+      <button
+        type="button"
+        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+        disabled={disabled}
+        onClick={() => {
+          if (!open) void load();
+          setOpen(!open);
+        }}
+      >
+        <FlaskConical className="size-3" />
+        {open ? "收起试运行反馈" : "从试运行结果反馈"}
+      </button>
+      {open && (
+        <div className="mt-2 max-h-48 space-y-1 overflow-y-auto rounded border p-2">
+          {loading ? (
+            <p className="text-xs text-muted-foreground">载入中…</p>
+          ) : !runs?.length ? (
+            <p className="text-xs text-muted-foreground">暂无试运行记录</p>
+          ) : (
+            runs.map((run) => (
+              <div
+                key={run.runId}
+                className="flex items-center gap-2 rounded p-1.5 text-xs hover:bg-muted/50"
+              >
+                <Badge
+                  variant={
+                    run.status === "success"
+                      ? "secondary"
+                      : run.status === "failed"
+                        ? "destructive"
+                        : "outline"
+                  }
+                  className="shrink-0 text-[10px]"
+                >
+                  {run.status === "success" ? "成功" : run.status === "failed" ? "失败" : "取消"}
+                </Badge>
+                <span className="min-w-0 flex-1 truncate">{run.promptPreview}</span>
+                <span className="shrink-0 text-muted-foreground">
+                  {new Date(run.at).toLocaleString()}
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 shrink-0 px-2 text-[10px]"
+                  disabled={disabled}
+                  onClick={() => select(run)}
+                >
+                  反馈给 AI
+                </Button>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
   );
 }
