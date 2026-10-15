@@ -7,6 +7,16 @@ import { isSystemAgent } from "@/lib/modules/agent/domain/system-agent";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+function mergeVariableDefs(...sources: (VariableDef[] | undefined)[]): VariableDef[] {
+  const byName = new Map<string, VariableDef>();
+  for (const defs of sources) {
+    for (const d of defs ?? []) {
+      if (!byName.has(d.name)) byName.set(d.name, d);
+    }
+  }
+  return [...byName.values()];
+}
+
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { agents, auth, grants, variables, releases } = getContainer();
@@ -27,8 +37,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
     const release =
       agent.publishedVersion != null ? await releases.get(id, agent.publishedVersion) : null;
+
     const defs: VariableDef[] =
-      (level !== "none" ? agent.config.variables : release?.config.variables) ?? [];
+      level === "write"
+        ? mergeVariableDefs(agent.config.variables, release?.config.variables)
+        : (release?.config.variables ?? agent.config.variables ?? []);
 
     const raw = await variables.get(id, subject.userId);
     const values: Record<string, string> = {};
@@ -76,12 +89,16 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 
     const release =
       agent.publishedVersion != null ? await releases.get(id, agent.publishedVersion) : null;
-    const defs: VariableDef[] =
-      (level !== "none" ? agent.config.variables : release?.config.variables) ?? [];
-    const defNames = new Set(defs.map((d) => d.name));
+    const allDefs = mergeVariableDefs(agent.config.variables, release?.config.variables);
+    const defNames = new Set(allDefs.map((d) => d.name));
 
     const existing = await variables.get(id, subject.userId);
     const merged: Record<string, string> = {};
+
+    for (const name of defNames) {
+      if (existing[name] !== undefined) merged[name] = existing[name];
+    }
+
     for (const [key, val] of Object.entries(body)) {
       if (!defNames.has(key)) continue;
       if (typeof val !== "string") {
@@ -90,12 +107,20 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
       if (val.length > 4000) {
         return Response.json({ error: `变量 ${key} 的值不能超过 4000 字符` }, { status: 400 });
       }
-      const def = defs.find((d) => d.name === key);
+      const def = allDefs.find((d) => d.name === key);
       if (def?.secret && val === "***") {
-        if (existing[key]) merged[key] = existing[key];
         continue;
       }
-      if (val.trim()) merged[key] = val;
+      if (val.trim()) {
+        merged[key] = val;
+      } else {
+        delete merged[key];
+      }
+    }
+
+    const totalSize = JSON.stringify(merged).length;
+    if (totalSize > 500_000) {
+      return Response.json({ error: "变量总数据量不能超过 500KB" }, { status: 400 });
     }
 
     await variables.set(id, subject.userId, merged);

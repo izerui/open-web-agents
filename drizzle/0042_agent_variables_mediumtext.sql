@@ -1,0 +1,1 @@
+ALTER TABLE `agent_variables` MODIFY COLUMN `values_enc` mediumtext NOT NULL;

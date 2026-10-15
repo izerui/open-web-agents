@@ -1,0 +1,92 @@
+import { randomUUID } from "node:crypto";
+import { createDb } from "@/lib/db/client";
+import { agentVariables } from "@/lib/db/schema";
+import { MysqlVariableRepo } from "@/lib/modules/agent/adapters/mysql-variable-repo";
+import { SecretBox } from "@/lib/modules/identity/domain/secret-box";
+import { eq } from "drizzle-orm";
+import { afterAll, describe, expect, it } from "vitest";
+
+const url = process.env.OWA_TEST_DATABASE_URL;
+if (!url) {
+  describe.skip("MysqlVariableRepo (requires owa_test)", () => {
+    it("not configured", () => {});
+  });
+} else {
+  const { db, pool } = createDb(url);
+  const secrets = new SecretBox("test-key-for-variable-repo");
+  const repo = new MysqlVariableRepo(db, secrets);
+  const pairs: [string, string][] = [];
+
+  afterAll(async () => {
+    try {
+      for (const [agentId, userId] of pairs) {
+        await db
+          .delete(agentVariables)
+          .where(eq(agentVariables.agentId, agentId))
+          .catch(() => {});
+      }
+    } finally {
+      await pool.end();
+    }
+  });
+
+  describe("MysqlVariableRepo", () => {
+    it("round-trips a large value through encryption and decryption", async () => {
+      const agentId = `var-test-${randomUUID().slice(0, 16)}`;
+      const userId = `user-${randomUUID().slice(0, 16)}`;
+      pairs.push([agentId, userId]);
+
+      const largeValue = "x".repeat(3500);
+      const values = {
+        SHORT_KEY: "sk-abc123",
+        LONG_KEY: largeValue,
+        ANOTHER: "some-value",
+      };
+
+      await repo.set(agentId, userId, values);
+      const read = await repo.get(agentId, userId);
+      expect(read.SHORT_KEY).toBe("sk-abc123");
+      expect(read.LONG_KEY).toBe(largeValue);
+      expect(read.LONG_KEY).toHaveLength(3500);
+      expect(read.ANOTHER).toBe("some-value");
+    });
+
+    it("returns empty object for nonexistent agent/user pair", async () => {
+      expect(await repo.get("nonexistent", "nobody")).toEqual({});
+    });
+
+    it("overwrites previous values on set", async () => {
+      const agentId = `var-test-${randomUUID().slice(0, 16)}`;
+      const userId = `user-${randomUUID().slice(0, 16)}`;
+      pairs.push([agentId, userId]);
+
+      await repo.set(agentId, userId, { A: "1", B: "2" });
+      await repo.set(agentId, userId, { A: "updated", C: "3" });
+      const read = await repo.get(agentId, userId);
+      expect(read).toEqual({ A: "updated", C: "3" });
+      expect(read.B).toBeUndefined();
+    });
+
+    it("deletes variable values", async () => {
+      const agentId = `var-test-${randomUUID().slice(0, 16)}`;
+      const userId = `user-${randomUUID().slice(0, 16)}`;
+      pairs.push([agentId, userId]);
+
+      await repo.set(agentId, userId, { K: "v" });
+      await repo.delete(agentId, userId);
+      expect(await repo.get(agentId, userId)).toEqual({});
+    });
+
+    it("isolates values between users for the same agent", async () => {
+      const agentId = `var-test-${randomUUID().slice(0, 16)}`;
+      const userA = `user-a-${randomUUID().slice(0, 12)}`;
+      const userB = `user-b-${randomUUID().slice(0, 12)}`;
+      pairs.push([agentId, userA], [agentId, userB]);
+
+      await repo.set(agentId, userA, { KEY: "a-secret" });
+      await repo.set(agentId, userB, { KEY: "b-secret" });
+      expect((await repo.get(agentId, userA)).KEY).toBe("a-secret");
+      expect((await repo.get(agentId, userB)).KEY).toBe("b-secret");
+    });
+  });
+}

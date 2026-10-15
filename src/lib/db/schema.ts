@@ -659,7 +659,7 @@ export const agentVariables = mysqlTable(
   {
     agentId: varchar("agent_id", { length: 36 }).notNull(),
     userId: varchar("user_id", { length: 36 }).notNull(),
-    valuesEnc: varchar("values_enc", { length: 4096 }).notNull(),
+    valuesEnc: mediumtext("values_enc").notNull(),
     updatedAt: timestamp("updated_at", { fsp: 3 }).notNull(),
   },
   (t) => ({
