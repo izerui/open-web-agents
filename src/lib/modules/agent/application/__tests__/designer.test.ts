@@ -502,6 +502,44 @@ describe("AgentDesigner", () => {
     expect(savedUrl).toContain("timeout=30");
   });
 
+  it("deleting a visible param removes it while hidden params stay", async () => {
+    const targetMcp: Agent = {
+      ...target,
+      config: {
+        ...target.config,
+        mcpServers: [
+          {
+            name: "api",
+            type: "http",
+            url: "https://host.test/mcp?token={{KEY}}&visible_opt=yes&hidden_secret=abc",
+          },
+        ],
+        variables: [{ name: "KEY", description: "", required: true, secret: true }],
+      },
+    };
+    const h = await setup({ target: targetMcp });
+
+    const state = (await h.sessions.get("design"))?.designState;
+    if (!state?.draft.mcpServers?.[0]) throw new Error("no mcp");
+    // baseline has token={{KEY}} (visible), visible_opt (redacted/removed by clone)
+    // AI removes token={{KEY}} from query
+    const baselineUrl = state.draft.mcpServers[0].url ?? "";
+    // Remove token param from the baseline URL
+    state.draft.mcpServers[0] = {
+      ...state.draft.mcpServers[0],
+      url: baselineUrl.replace(/[?&]token=\{\{KEY\}\}/, "").replace(/\?&/, "?"),
+    };
+    await h.sessions.update("design", { designState: state });
+
+    const view = await h.inspect();
+    const saved = await h.designer.apply(owner, "design", view.previewToken);
+    const savedUrl = saved.saved.config.mcpServers?.[0]?.url;
+    // token was visible in baseline and deleted from draft → actually removed
+    expect(savedUrl).not.toContain("token=");
+    // hidden_secret was NOT in baseline → preserved from original
+    expect(savedUrl).toContain("hidden_secret=abc");
+  });
+
   it("source content changes invalidate preview even when the draft revision has not changed", async () => {
     const h = await setup();
     await h.edit({ ...validDraft(), mcpRefs: [resourceRef(source.id, "mcp", "search")] }, [

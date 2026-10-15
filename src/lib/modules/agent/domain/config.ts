@@ -275,7 +275,13 @@ function mergeUrl(
   const oParams = parseParams(oQuery);
 
   const merged = new Map<string, string>();
+  // Start with all original params (including hidden ones stripped by redaction)
   for (const [k, v] of oParams) merged.set(k, v);
+  // Remove params that were visible in baseline but explicitly deleted from draft
+  for (const [k] of bParams) {
+    if (!dParams.has(k)) merged.delete(k);
+  }
+  // Add/override params from draft
   for (const [k, v] of dParams) {
     if (!bParams.has(k)) merged.set(k, v);
     else if (v !== bParams.get(k)) merged.set(k, v);
