@@ -113,12 +113,14 @@ export function renderSkillMarkdown(pkg: SkillPackage): string {
 }
 
 export function findPathConflict(paths: string[]): string | null {
-  const sorted = [...paths].sort();
-  for (let i = 0; i < sorted.length - 1; i++) {
-    const a = sorted[i];
-    const b = sorted[i + 1];
-    if (a && b && b.startsWith(`${a}/`)) {
-      return `路径冲突:「${a}」是文件,不能同时作为「${b}」的目录`;
+  const fileSet = new Set(paths);
+  for (const p of paths) {
+    const segments = p.split("/");
+    for (let depth = 1; depth < segments.length; depth++) {
+      const ancestor = segments.slice(0, depth).join("/");
+      if (fileSet.has(ancestor)) {
+        return `路径冲突:「${ancestor}」是文件,不能同时作为「${p}」的目录`;
+      }
     }
   }
   return null;

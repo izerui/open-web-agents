@@ -70,6 +70,18 @@ describe("findPathConflict", () => {
   it("同前缀但不是父子关系不报冲突", () => {
     expect(findPathConflict(["scripts-v2.py", "scripts/run.py"])).toBeNull();
   });
+
+  it("中间隔着干扰文件仍能检测到冲突", () => {
+    const msg = findPathConflict(["scripts", "scripts-old.py", "scripts/run.py"]);
+    expect(msg).toContain("scripts");
+    expect(msg).toContain("scripts/run.py");
+  });
+
+  it("深层祖先冲突也检测到", () => {
+    const msg = findPathConflict(["a", "a/b/c.txt"]);
+    expect(msg).toContain("a");
+    expect(msg).toContain("a/b/c.txt");
+  });
 });
 
 describe("validateSkillPackages 路径冲突", () => {
@@ -88,5 +100,19 @@ describe("validateSkillPackages 路径冲突", () => {
       files: { "SKILL.md": "x", "scripts/run.py": "print(1)", "config/settings.json": "{}" },
     };
     expect(validateSkillPackages([pkg])).toEqual([]);
+  });
+
+  it("中间隔着干扰文件的冲突也被拒", () => {
+    const pkg = {
+      ...ok,
+      files: {
+        "SKILL.md": "x",
+        scripts: "raw",
+        "scripts-old.py": "old",
+        "scripts/run.py": "print(1)",
+      },
+    };
+    const issues = validateSkillPackages([pkg]);
+    expect(issues.some((i) => /冲突/.test(i.message))).toBe(true);
   });
 });
