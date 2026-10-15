@@ -6,13 +6,27 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { NativeSelect as Select } from "@/components/ui/native-select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { formatCredits } from "@/lib/modules/capabilities/domain/catalog";
 import {
   type UsageBucket,
   type UsageTotals,
   formatUsd,
 } from "@/lib/modules/usage/domain/aggregate";
-import { AlertTriangle } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import type { RunCreditEstimate } from "@/lib/modules/usage/domain/estimate";
+import { AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+
+interface RunDetail {
+  runId: string;
+  agentId: string;
+  agentName?: string;
+  status: string;
+  costMicroUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  at: number;
+  estimatedCredits: RunCreditEstimate;
+}
 
 interface UsageData {
   days: number;
@@ -22,6 +36,8 @@ interface UsageData {
   totals: UsageTotals;
   byAgent: UsageBucket[];
   byDay: UsageBucket[];
+  runs?: RunDetail[];
+  creditEstimateNote?: string;
 }
 
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
@@ -184,8 +200,158 @@ export function UsageView({ scope = "self" }: { scope?: "self" | "all" }) {
               ))}
             </CardContent>
           </Card>
+
+          {data.runs && data.runs.length > 0 && (
+            <RunDetailSection runs={data.runs} note={data.creditEstimateNote} />
+          )}
         </>
       )}
     </SpaceShell>
+  );
+}
+
+function RunDetailSection({ runs, note }: { runs: RunDetail[]; note?: string }) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggle = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm font-medium">运行明细与积分估算</CardTitle>
+        {note && <p className="text-xs text-muted-foreground">{note}</p>}
+      </CardHeader>
+      <CardContent>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <caption className="sr-only">运行明细</caption>
+            <thead>
+              <tr className="border-b text-muted-foreground">
+                {["", "时间", "智能体", "状态", "输入", "输出", "积分估算"].map((h) => (
+                  <th scope="col" key={h} className="px-2 py-2">
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map((r) => {
+                const est = r.estimatedCredits;
+                const open = expanded.has(r.runId);
+                const hasModels = est.models.length > 0;
+                return (
+                  <Fragment key={r.runId}>
+                    <tr
+                      className={`border-b align-top ${hasModels ? "cursor-pointer hover:bg-muted/50" : ""}`}
+                      onClick={() => hasModels && toggle(r.runId)}
+                      onKeyDown={(e) => {
+                        if (hasModels && (e.key === "Enter" || e.key === " ")) {
+                          e.preventDefault();
+                          toggle(r.runId);
+                        }
+                      }}
+                      tabIndex={hasModels ? 0 : undefined}
+                      role={hasModels ? "button" : undefined}
+                    >
+                      <td className="px-2 py-2">
+                        {hasModels &&
+                          (open ? (
+                            <ChevronDown className="size-3" />
+                          ) : (
+                            <ChevronRight className="size-3" />
+                          ))}
+                      </td>
+                      <td className="whitespace-nowrap px-2 py-2">
+                        {new Date(r.at).toLocaleString()}
+                      </td>
+                      <td className="max-w-40 truncate px-2 py-2">{r.agentName ?? r.agentId}</td>
+                      <td className="px-2 py-2">
+                        <Badge
+                          variant={
+                            r.status === "success"
+                              ? "secondary"
+                              : r.status === "failed"
+                                ? "destructive"
+                                : "outline"
+                          }
+                          className="text-[10px]"
+                        >
+                          {r.status}
+                        </Badge>
+                      </td>
+                      <td className="whitespace-nowrap px-2 py-2 font-mono">
+                        {r.inputTokens.toLocaleString()}
+                      </td>
+                      <td className="whitespace-nowrap px-2 py-2 font-mono">
+                        {r.outputTokens.toLocaleString()}
+                      </td>
+                      <td className="whitespace-nowrap px-2 py-2 font-mono">
+                        {est.models.some((m) => m.unpriced) ? (
+                          <span title="部分模型未定价">
+                            ~{formatCredits(est.totalMicroCredits)}
+                          </span>
+                        ) : est.models.length === 0 ? (
+                          <span className="text-muted-foreground">—</span>
+                        ) : (
+                          formatCredits(est.totalMicroCredits)
+                        )}
+                        {!est.complete && (
+                          <Badge variant="outline" className="ml-1 text-[9px]">
+                            不完整
+                          </Badge>
+                        )}
+                      </td>
+                    </tr>
+                    {open &&
+                      est.models.map((m, i) => (
+                        <tr
+                          key={`${r.runId}-${m.modelId}-${i}`}
+                          className="border-b bg-muted/30 text-muted-foreground"
+                        >
+                          <td className="px-2 py-1" />
+                          <td colSpan={2} className="truncate px-2 py-1 font-mono text-[11px]">
+                            {m.modelId}
+                          </td>
+                          <td className="px-2 py-1">
+                            {m.unpriced && (
+                              <Badge variant="outline" className="text-[9px]">
+                                未定价
+                              </Badge>
+                            )}
+                          </td>
+                          <td className="whitespace-nowrap px-2 py-1 font-mono">
+                            {m.inputTokens.toLocaleString()}
+                            {m.cacheReadTokens > 0 && (
+                              <span className="ml-1 text-[10px]">
+                                (缓存读 {m.cacheReadTokens.toLocaleString()})
+                              </span>
+                            )}
+                          </td>
+                          <td className="whitespace-nowrap px-2 py-1 font-mono">
+                            {m.outputTokens.toLocaleString()}
+                            {m.cacheWriteTokens > 0 && (
+                              <span className="ml-1 text-[10px]">
+                                (缓存写 {m.cacheWriteTokens.toLocaleString()})
+                              </span>
+                            )}
+                          </td>
+                          <td className="whitespace-nowrap px-2 py-1 font-mono">
+                            {m.microCredits !== null ? formatCredits(m.microCredits) : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
