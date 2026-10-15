@@ -86,7 +86,7 @@ test.describe("知识库编辑浏览器验收", () => {
     await register(context, "kb-race");
     const agentId = await createAgent(context, "PW 竞态验收");
     const docAId = await addDoc(context, agentId, "文档A", "文档A的原始正文内容");
-    await addDoc(context, agentId, "文档B", "文档B的原始正文内容");
+    const docBId = await addDoc(context, agentId, "文档B", "文档B的原始正文内容");
 
     await page.goto(`${BASE}/agents?id=${agentId}`);
     const panel = knowledgePanel(page);
@@ -136,5 +136,18 @@ test.describe("知识库编辑浏览器验收", () => {
     const res = await context.request.get(`${BASE}/api/agents/${agentId}/knowledge/${docAId}`);
     const body = (await res.json()) as { content: string };
     expect(body.content).toBe("文档A的修改后正文");
+
+    // 关键: B 的编辑→保存仍可用(saving 没有卡住)
+    await panel.getByRole("button", { name: "编辑" }).click();
+    const editArea2 = panel.locator(".border-t");
+    await editArea2.locator("textarea").clear();
+    await editArea2.locator("textarea").fill("文档B的修改后正文");
+    await panel.getByRole("button", { name: /保存/ }).click();
+    await expect(docPre(panel)).toContainText("文档B的修改后正文", { timeout: 5_000 });
+
+    // API 验证 B 也确实保存了
+    const resB = await context.request.get(`${BASE}/api/agents/${agentId}/knowledge/${docBId}`);
+    const bodyB = (await resB.json()) as { content: string };
+    expect(bodyB.content).toBe("文档B的修改后正文");
   });
 });

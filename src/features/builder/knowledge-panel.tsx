@@ -204,7 +204,7 @@ export function KnowledgePanel({
     } catch (error) {
       if (seq === detailSeqRef.current) setMsg(`保存失败:${errorText(error)}`);
     } finally {
-      if (seq === detailSeqRef.current) setSaving(false);
+      setSaving(false);
     }
   }
 
