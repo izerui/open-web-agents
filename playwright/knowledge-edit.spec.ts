@@ -82,6 +82,32 @@ test.describe("知识库编辑浏览器验收", () => {
     await expect(docPre(panel)).not.toContainText("二叉树");
   });
 
+  test("清空正文被阻止并提示", async ({ page, context }) => {
+    await register(context, "kb-empty");
+    const agentId = await createAgent(context, "PW 空正文验收");
+    await addDoc(context, agentId, "测试文档", "原始正文内容不为空");
+
+    await page.goto(`${BASE}/agents?id=${agentId}`);
+    const panel = knowledgePanel(page);
+    await expect(panel.getByText("测试文档")).toBeVisible({ timeout: 15_000 });
+
+    // 展开 → 编辑 → 清空正文 → 保存
+    await panel.getByText("测试文档").click();
+    await expect(docPre(panel)).toContainText("原始正文内容", { timeout: 5_000 });
+    await panel.getByRole("button", { name: "编辑" }).click();
+
+    const editArea = panel.locator(".border-t");
+    await editArea.locator("textarea").clear();
+    await panel.getByRole("button", { name: /保存/ }).click();
+
+    // 应提示错误，不静默跳过
+    await expect(panel.getByText("正文不能为空")).toBeVisible({ timeout: 3_000 });
+
+    // 取消编辑，重新打开——原始内容应该还在
+    await panel.getByRole("button", { name: "取消" }).click();
+    await expect(docPre(panel)).toContainText("原始正文内容");
+  });
+
   test("A 保存慢 → 切到 B → A 返回不影响 B 的展示", async ({ page, context }) => {
     await register(context, "kb-race");
     const agentId = await createAgent(context, "PW 竞态验收");

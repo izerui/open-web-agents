@@ -183,7 +183,15 @@ export function KnowledgePanel({
       const body: Record<string, string> = { docId: targetDocId };
       if (editTitle.trim() !== detail.title) body.title = editTitle.trim();
       if (editContent !== detail.content) body.content = editContent;
-      if (!body.title && !body.content) {
+      if (!editTitle.trim()) {
+        setMsg("标题不能为空");
+        return;
+      }
+      if (body.content !== undefined && !body.content.trim()) {
+        setMsg("正文不能为空");
+        return;
+      }
+      if (body.title === undefined && body.content === undefined) {
         setEditMode(false);
         return;
       }

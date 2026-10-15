@@ -1,8 +1,8 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "50889e7d-0bfd-432d-8fc8-d80c32eb0a36",
-  "prevId": "09193f05-f87b-459d-8fc0-e22e8c6a1a18",
+  "id": "fbccead3-38a4-4424-97f9-0587f39ba505",
+  "prevId": "50889e7d-0bfd-432d-8fc8-d80c32eb0a36",
   "tables": {
     "access_grants": {
       "name": "access_grants",
