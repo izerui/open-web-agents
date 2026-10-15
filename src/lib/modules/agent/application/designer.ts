@@ -7,6 +7,7 @@ import type { RunRepo } from "@/lib/modules/run/ports";
 import type { Session, SessionRepo } from "@/lib/modules/session/ports";
 import { BrandedError } from "@/lib/shared";
 import { ARCHITECT_CONFIG } from "../domain/architect";
+import { restoreMcpSecrets } from "../domain/config";
 import {
   DRAFT_FILE,
   type DesignState,
@@ -262,7 +263,10 @@ export class AgentDesigner {
         id: target?.id ?? randomUUID().replace(/-/g, "").slice(0, 24),
         ownerId: target?.ownerId ?? subject.userId,
         icon: target?.icon,
-        config: { ...candidate.config, escapeHatch: target?.config.escapeHatch },
+        config: {
+          ...restoreMcpSecrets(candidate.config, target?.config),
+          escapeHatch: target?.config.escapeHatch,
+        },
       });
       await tx.sessions.update(id, {
         designTargetAgentId: agent.id,

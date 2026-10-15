@@ -310,6 +310,36 @@ describe("AgentDesigner", () => {
     expect(saved.saved.config.mcpServers).toEqual(source.config.mcpServers);
   });
 
+  it("modifying skill content saves the change while MCP secrets are restored from original", async () => {
+    const targetWithResources: Agent = {
+      ...target,
+      config: {
+        ...source.config,
+        escapeHatch: target.config.escapeHatch,
+      },
+    };
+    const h = await setup({ target: targetWithResources });
+
+    const state = (await h.sessions.get("design"))?.designState;
+    if (!state) throw new Error("no state");
+    // Simulate AI modifying the skill content
+    if (state.draft.skillPackages?.[0]) {
+      state.draft.skillPackages[0] = {
+        ...state.draft.skillPackages[0],
+        files: { ...state.draft.skillPackages[0].files, "SKILL.md": "# Modified by AI" },
+      };
+    }
+    await h.sessions.update("design", { designState: state });
+
+    const view = await h.inspect();
+    const saved = await h.designer.apply(owner, "design", view.previewToken);
+    // Skill edit is preserved
+    expect(saved.saved.config.skillPackages?.[0]?.files["SKILL.md"]).toBe("# Modified by AI");
+    // MCP secrets are restored from original (not the redacted ***)
+    expect(saved.saved.config.mcpServers?.[0]?.env?.KEY).toBe("secret-env");
+    expect(saved.saved.config.mcpServers?.[0]?.url).toContain("secret");
+  });
+
   it("source content changes invalidate preview even when the draft revision has not changed", async () => {
     const h = await setup();
     await h.edit({ ...validDraft(), mcpRefs: [resourceRef(source.id, "mcp", "search")] }, [

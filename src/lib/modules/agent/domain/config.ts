@@ -219,3 +219,32 @@ export function checkUrlTemplate(raw: string): string | null {
   }
   return null;
 }
+
+/**
+ * 编辑自己的智能体时，从原配置恢复被脱敏的 MCP 敏感字段。
+ * 草稿中 *** 的值用原配置的对应值替换；非 *** 的值（用户或 AI 明确修改过的）保留。
+ */
+export function restoreMcpSecrets(
+  candidate: AgentConfig,
+  original: AgentConfig | undefined,
+): AgentConfig {
+  if (!original?.mcpServers?.length || !candidate.mcpServers?.length) return candidate;
+  const origByName = new Map(original.mcpServers.map((m) => [m.name, m]));
+  return {
+    ...candidate,
+    mcpServers: candidate.mcpServers.map((m) => {
+      const orig = origByName.get(m.name);
+      if (!orig) return m;
+      return {
+        ...m,
+        url: m.url === "***" || m.url?.endsWith("?***") ? (orig.url ?? m.url) : m.url,
+        env: m.env
+          ? Object.fromEntries(
+              Object.entries(m.env).map(([k, v]) => [k, v === "***" ? (orig.env?.[k] ?? v) : v]),
+            )
+          : orig.env,
+        args: m.args?.map((a, i) => (a === "***" ? (orig.args?.[i] ?? a) : a)),
+      };
+    }),
+  };
+}
