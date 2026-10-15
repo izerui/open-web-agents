@@ -25,11 +25,22 @@ const sourceAgent = {
     maxTurns: 15,
     skillPackages: [{ name: "demo", description: "d", files: { "SKILL.md": "# Demo" } }],
     mcpServers: [
-      { type: "http" as const, name: "api", url: "https://api.example.com?token=secret" },
+      { type: "http" as const, name: "api", url: "https://{{BASE_URL}}/v1?token={{API_KEY}}" },
+      {
+        type: "stdio" as const,
+        name: "tool",
+        command: "node",
+        args: ["run.js"],
+        env: { KEY: "{{API_KEY}}", HOST: "hardcoded-secret" },
+      },
     ],
     starters: ["Hello"],
     inputSchema: { type: "object" },
     escapeHatch: { dangerouslyAllowBash: true },
+    variables: [
+      { name: "API_KEY", description: "密钥", required: true, secret: true },
+      { name: "BASE_URL", description: "地址", required: true, secret: false },
+    ],
   },
 };
 
@@ -123,7 +134,7 @@ vi.mock("@/lib/container", () => ({
         audited.push(entry);
       },
     },
-    env: { allowStdioMcp: false },
+    env: { allowStdioMcp: true },
     auth: {
       resolveWeb: async () => {
         if (!state.authenticated) throw new Unauthorized("login required");
@@ -181,9 +192,20 @@ describe("POST /api/agents/{id}/clone", () => {
     expect(config.starters).toEqual(["Hello"]);
     expect(config.escapeHatch).toBeUndefined();
 
-    const mcp = (config.mcpServers as { url: string }[])?.[0];
-    expect(mcp?.url).not.toContain("token=secret");
-    expect(mcp?.url).toContain("***");
+    const mcpServers = config.mcpServers as {
+      name: string;
+      url?: string;
+      env?: Record<string, string>;
+    }[];
+    const httpMcp = mcpServers.find((m) => m.name === "api");
+    expect(httpMcp?.url).toContain("{{BASE_URL}}");
+    expect(httpMcp?.url).toContain("{{API_KEY}}");
+
+    const stdioMcp = mcpServers.find((m) => m.name === "tool");
+    expect(stdioMcp?.env?.KEY).toBe("{{API_KEY}}");
+    expect(stdioMcp?.env?.HOST).toBe("***");
+
+    expect((config.variables as unknown[])?.length).toBe(2);
 
     expect(audited).toHaveLength(1);
     expect((audited[0] as { action: string }).action).toBe("agent.clone");

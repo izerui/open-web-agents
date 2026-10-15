@@ -137,3 +137,31 @@ function redactUrl(raw: string): string {
     return "***";
   }
 }
+
+const CONTAINS_VAR_REF = /\{\{[A-Za-z_][A-Za-z0-9_]*\}\}/;
+
+/**
+ * 克隆专用脱敏:保留 {{变量名}} 引用,脱敏硬编码的凭证。
+ * 纯变量引用原样保留;混合内容（含变量引用的字符串）也保留;
+ * 纯硬编码值脱敏为 ***。
+ */
+export function redactAgentConfigForClone(cfg: AgentConfig): AgentConfig {
+  const { escapeHatch: _hatch, ...rest } = cfg;
+  return {
+    ...rest,
+    mcpServers: cfg.mcpServers?.map((m) => ({
+      ...m,
+      ...(m.env
+        ? {
+            env: Object.fromEntries(
+              Object.entries(m.env).map(([k, v]) => [k, CONTAINS_VAR_REF.test(v) ? v : "***"]),
+            ),
+          }
+        : {}),
+      ...(m.url !== undefined
+        ? { url: CONTAINS_VAR_REF.test(m.url) ? m.url : redactUrl(m.url) }
+        : {}),
+      ...(m.args ? { args: m.args.map((a) => (CONTAINS_VAR_REF.test(a) ? a : "***")) } : {}),
+    })),
+  };
+}

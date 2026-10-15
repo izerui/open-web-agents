@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { cloneAgentInTransaction } from "@/lib/modules/agent/application/clone-agent";
-import { pickAgentConfig, redactAgentConfigForReader } from "@/lib/modules/agent/domain/config";
+import { pickAgentConfig, redactAgentConfigForClone } from "@/lib/modules/agent/domain/config";
 import { isSystemAgent } from "@/lib/modules/agent/domain/system-agent";
 import { validateAgentConfig } from "@/lib/modules/agent/domain/validate-config";
 
@@ -37,7 +37,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       includeKnowledge?: boolean;
     };
 
-    const clonedConfig = redactAgentConfigForReader(published.config);
+    const clonedConfig = redactAgentConfigForClone(published.config);
     const { escapeHatch: _, ...safeConfig } = clonedConfig;
     const picked = pickAgentConfig(safeConfig);
 
