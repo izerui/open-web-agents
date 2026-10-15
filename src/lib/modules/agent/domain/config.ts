@@ -221,10 +221,11 @@ export function checkUrlTemplate(raw: string): string | null {
 }
 
 /**
- * URL 级合并：修改的部分采用，脱敏的部分从原值恢复。
+ * URL 合并：按 ? 分割为 base+query 两部分独立比较。
  * - 与 baseline 完全相同 → 恢复原值
- * - 主机/路径被修改、查询参数未改（仍含 *** 或与 baseline 相同）→ 取新主机+原查询参数
- * - 完全不同且不含 *** → 采用修改后的值
+ * - base 部分（协议+主机+路径）被修改 → 取新 base + 原 query
+ * - query 部分被修改 → 取原 base + 新 query
+ * - 两部分都改了 → 全采用新值
  */
 function mergeUrl(
   draft: string | undefined,
@@ -234,17 +235,23 @@ function mergeUrl(
   if (draft === undefined) return orig;
   if (draft === base) return orig;
   if (!base || !orig) return draft;
-  if (!draft.includes("***") && !draft.includes("?***")) return draft;
-  try {
-    const draftUrl = new URL(draft.replace(/\?\*\*\*$/, ""));
-    const origUrl = new URL(orig);
-    origUrl.host = draftUrl.host;
-    origUrl.pathname = draftUrl.pathname;
-    origUrl.protocol = draftUrl.protocol;
-    return origUrl.toString();
-  } catch {
-    return orig;
-  }
+
+  const splitQ = (s: string) => {
+    const i = s.indexOf("?");
+    return i < 0 ? [s, ""] : [s.slice(0, i), s.slice(i)];
+  };
+
+  const [dBase, dQuery] = splitQ(draft) as [string, string];
+  const [bBase, bQuery] = splitQ(base) as [string, string];
+  const [oBase, oQuery] = splitQ(orig) as [string, string];
+
+  const baseChanged = dBase !== bBase;
+  const queryChanged = dQuery !== bQuery;
+
+  if (!baseChanged && !queryChanged) return orig;
+  if (baseChanged && !queryChanged) return dBase + oQuery;
+  if (!baseChanged && queryChanged) return oBase + dQuery;
+  return draft;
 }
 
 export function restoreMcpSecrets(

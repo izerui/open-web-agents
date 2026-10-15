@@ -132,7 +132,9 @@ export class AgentDesigner {
     }
     let candidate: AgentSnapshot | undefined;
     try {
-      candidate = { ...resolveDesign(state.draft, resources), icon: target?.icon };
+      const resolved = resolveDesign(state.draft, resources);
+      const restoredConfig = restoreMcpSecrets(resolved.config, target?.config, state.mcpBaseline);
+      candidate = { ...resolved, icon: target?.icon, config: restoredConfig };
       issues.push(
         ...validateAgentConfig(candidate.config, { allowStdioMcp: this.deps.allowStdioMcp }),
       );
@@ -248,7 +250,9 @@ export class AgentDesigner {
       const resources = await Promise.all(
         state.resourceAgentIds.map((sourceId) => this.target(tx, subject, sourceId)),
       );
-      const candidate = { ...resolveDesign(state.draft, resources), icon: target?.icon };
+      const resolved = resolveDesign(state.draft, resources);
+      const restoredConfig = restoreMcpSecrets(resolved.config, target?.config, state.mcpBaseline);
+      const candidate = { ...resolved, icon: target?.icon, config: restoredConfig };
       // 资源在预览到应用之间改变时不能静默使用另一个版本。
       if (
         designHash({
@@ -266,7 +270,7 @@ export class AgentDesigner {
         ownerId: target?.ownerId ?? subject.userId,
         icon: target?.icon,
         config: {
-          ...restoreMcpSecrets(candidate.config, target?.config, state.mcpBaseline),
+          ...candidate.config,
           escapeHatch: target?.config.escapeHatch,
         },
       });

@@ -388,6 +388,43 @@ describe("AgentDesigner", () => {
     expect(saved.saved.config.mcpServers?.[0]?.env?.KEY).toBe("env-secret");
   });
 
+  it("variable template URL: only change path, original hidden params preserved", async () => {
+    const targetVarUrl: Agent = {
+      ...target,
+      config: {
+        ...target.config,
+        mcpServers: [
+          {
+            name: "api",
+            type: "http",
+            url: "https://{{HOST}}/mcp?token={{KEY}}&tenant=school",
+          },
+        ],
+        variables: [
+          { name: "HOST", description: "", required: true, secret: false },
+          { name: "KEY", description: "", required: true, secret: true },
+        ],
+      },
+    };
+    const h = await setup({ target: targetVarUrl });
+
+    const state = (await h.sessions.get("design"))?.designState;
+    if (!state?.draft.mcpServers?.[0]) throw new Error("no mcp");
+    // AI changes path from /mcp to /v2/mcp, keeps everything else
+    state.draft.mcpServers[0] = {
+      ...state.draft.mcpServers[0],
+      url: "https://{{HOST}}/v2/mcp?token={{KEY}}",
+    };
+    await h.sessions.update("design", { designState: state });
+
+    const view = await h.inspect();
+    const saved = await h.designer.apply(owner, "design", view.previewToken);
+    const savedUrl = saved.saved.config.mcpServers?.[0]?.url;
+    expect(savedUrl).toContain("/v2/mcp");
+    expect(savedUrl).toContain("token={{KEY}}");
+    expect(savedUrl).toContain("tenant=school");
+  });
+
   it("source content changes invalidate preview even when the draft revision has not changed", async () => {
     const h = await setup();
     await h.edit({ ...validDraft(), mcpRefs: [resourceRef(source.id, "mcp", "search")] }, [
