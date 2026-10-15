@@ -129,3 +129,56 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
     throw err;
   }
 }
+
+export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const { knowledge } = getContainer();
+  try {
+    const r = await requirePermission(req, id, "write");
+    if (r.error) return r.error;
+
+    const body = (await req.json().catch(() => null)) as {
+      docId?: string;
+      title?: string;
+      content?: string;
+    } | null;
+    if (!body?.docId) return Response.json({ error: "docId is required" }, { status: 400 });
+    if (body.title !== undefined && (typeof body.title !== "string" || !body.title.trim())) {
+      return Response.json({ error: "title 不能为空" }, { status: 400 });
+    }
+    if (body.content !== undefined && typeof body.content !== "string") {
+      return Response.json({ error: "content 必须是文本" }, { status: 400 });
+    }
+
+    const doc = await knowledge.get(body.docId);
+    if (!doc || doc.agentId !== id) {
+      return Response.json({ error: "该文档不属于本智能体" }, { status: 404 });
+    }
+
+    const updated = await knowledge.update(body.docId, {
+      title: body.title?.trim(),
+      content: body.content,
+    });
+    if (!updated) return Response.json({ error: "更新失败" }, { status: 500 });
+
+    await getContainer().audit.record({
+      actor: r.principal,
+      action: "knowledge.update",
+      resource: { type: "agent", id },
+      ownerId: r.agent.ownerId,
+      details: { docId: body.docId, title: updated.title },
+      req,
+    });
+
+    return Response.json({
+      doc: { id: updated.id, title: updated.title, chars: [...updated.content].length },
+    });
+  } catch (err) {
+    if (err instanceof KnowledgeLimitExceeded) {
+      return Response.json({ error: err.message }, { status: 400 });
+    }
+    const res = authErrorResponse(err);
+    if (res) return res;
+    throw err;
+  }
+}

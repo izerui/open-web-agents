@@ -131,16 +131,45 @@ export class MysqlKnowledgeRepo {
     await this.db.delete(knowledgeDocs).where(eq(knowledgeDocs.id, id));
   }
 
+  async update(
+    id: string,
+    data: { title?: string; content?: string },
+  ): Promise<KnowledgeDoc | null> {
+    const existing = await this.get(id);
+    if (!existing) return null;
+    const newContent = data.content ?? existing.content;
+    if (data.content !== undefined) {
+      const [u] = await this.db
+        .select({
+          chars: sql<number>`COALESCE(SUM(CHAR_LENGTH(${knowledgeDocs.content})), 0)`,
+        })
+        .from(knowledgeDocs)
+        .where(eq(knowledgeDocs.agentId, existing.agentId));
+      const currentChars = Number(u?.chars ?? 0);
+      const delta = [...newContent].length - [...existing.content].length;
+      if (currentChars + delta > this.limits.maxTotalChars) {
+        throw new KnowledgeLimitExceeded("修改后总字符数超出限制");
+      }
+      if ([...newContent].length > this.limits.maxDocChars) {
+        throw new KnowledgeLimitExceeded("单篇文档字符数超出限制");
+      }
+    }
+    const patch: Record<string, unknown> = { updatedAt: new Date() };
+    if (data.title !== undefined) patch.title = data.title;
+    if (data.content !== undefined) patch.content = data.content;
+    await this.db.update(knowledgeDocs).set(patch).where(eq(knowledgeDocs.id, id));
+    return this.get(id);
+  }
+
   /**
-   * 该智能体文档集合的指纹:数量 + 最新创建时间 + 全部 id 的 CRC 异或。
-   * 只碰 id 与时间列,不读正文 —— 每次运行都要查一次,必须足够便宜。
-   * 文档只有增删、没有原地修改,这三项足以判断"集合变没变"。
+   * 文档集合指纹：数量 + 最新创建/修改时间 + 全部 id 的 CRC 异或。
+   * 修改正文或标题后 updatedAt 变化，指纹随之变化，缓存失效。
    */
   async signatureOf(agentId: string): Promise<string> {
     const rows = await this.db
       .select({
         n: sql<number>`COUNT(*)`,
-        latest: sql<string>`COALESCE(MAX(${knowledgeDocs.createdAt}), '')`,
+        latest: sql<string>`COALESCE(GREATEST(MAX(${knowledgeDocs.createdAt}), COALESCE(MAX(${knowledgeDocs.updatedAt}), '1970-01-01')), '')`,
         ids: sql<number>`COALESCE(BIT_XOR(CRC32(${knowledgeDocs.id})), 0)`,
       })
       .from(knowledgeDocs)

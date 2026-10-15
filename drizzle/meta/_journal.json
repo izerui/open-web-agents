@@ -302,6 +302,13 @@
       "when": 1792056037292,
       "tag": "0042_agent_variables_mediumtext",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "5",
+      "when": 1792064554691,
+      "tag": "0043_knowledge_updated_at",
+      "breakpoints": true
     }
   ]
 }

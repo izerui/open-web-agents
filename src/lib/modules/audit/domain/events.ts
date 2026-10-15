@@ -14,6 +14,7 @@ export const AUDIT_ACTIONS = [
   "agent.unshare",
   "knowledge.add",
   "knowledge.delete",
+  "knowledge.update",
   "api_key.issue",
   "api_key.revoke",
   "api_key.rotate",

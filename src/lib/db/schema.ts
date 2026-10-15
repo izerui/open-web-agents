@@ -353,12 +353,9 @@ export const knowledgeDocs = mysqlTable(
     id: varchar("id", { length: 36 }).primaryKey(),
     agentId: varchar("agent_id", { length: 36 }).notNull(),
     title: varchar("title", { length: 255 }).notNull(),
-    /**
-     * 原文。切块与索引在读取时算 —— 文档量级不大时省掉一层一致性维护。
-     * MEDIUMTEXT:接口允许 20 万字符,中文按 3 字节算远超 TEXT 的 64KB。
-     */
     content: mediumtext("content").notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { fsp: 3 }),
   },
   (t) => ({ byAgent: index("idx_knowledge_agent").on(t.agentId) }),
 );

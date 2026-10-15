@@ -1,0 +1,1 @@
+ALTER TABLE `knowledge_docs` ADD `updated_at` timestamp(3);

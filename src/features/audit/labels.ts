@@ -14,6 +14,7 @@ export const ACTION_LABEL: Record<AuditAction, string> = {
   "agent.unshare": "撤销分享",
   "knowledge.add": "添加知识文档",
   "knowledge.delete": "删除知识文档",
+  "knowledge.update": "修改知识文档",
   "api_key.issue": "签发 API Key",
   "api_key.revoke": "吊销 API Key",
   "api_key.rotate": "轮换 API Key",
