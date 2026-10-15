@@ -275,7 +275,7 @@ describe("platform design drafts", () => {
   });
 
   it("超过容量上限时报明确错误", () => {
-    const huge = "x".repeat(2_700_000);
+    const huge = "x".repeat(7_000_000);
     const draft = {
       name: "t",
       description: "",

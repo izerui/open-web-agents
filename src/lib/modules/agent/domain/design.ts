@@ -133,7 +133,7 @@ export function parseDesign(raw: unknown): DesignDraft {
     throw new Error("mcpServers 必须是数组");
   }
   const jsonBytes = new TextEncoder().encode(JSON.stringify(raw)).length;
-  const limit = SKILL_LIMITS.maxTotalBytes * 2 + 1_048_576;
+  const limit = SKILL_LIMITS.maxTotalBytes * 6 + 1_048_576;
   if (jsonBytes > limit) {
     const mbUsed = (jsonBytes / 1_048_576).toFixed(1);
     const mbLimit = (limit / 1_048_576).toFixed(1);
