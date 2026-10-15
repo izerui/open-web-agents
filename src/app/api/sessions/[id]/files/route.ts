@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
-import { canRenderInline } from "@/lib/modules/artifacts/domain/mime";
+import { canRenderInline, mimeOf } from "@/lib/modules/artifacts/domain/mime";
 import { PathEscapeError, resolveInWorkspace } from "@/lib/modules/artifacts/domain/safe-path";
 
 export const runtime = "nodejs";
@@ -122,7 +122,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
   try {
     if (download !== null) {
-      const { bytes, mime } = await storage.read(session.workspaceDir, download);
+      const mime = mimeOf(download);
       const filename = download.split("/").pop() ?? "download";
       const inline = wantInline && canRenderInline(mime);
 
@@ -130,12 +130,18 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         return streamResponse(req, storage, session.workspaceDir, download, mime, filename);
       }
 
+      const { bytes } = await storage.read(session.workspaceDir, download);
+      const csp =
+        mime === "application/pdf"
+          ? "sandbox; default-src 'self'; style-src 'unsafe-inline'"
+          : "sandbox; default-src 'none'; style-src 'unsafe-inline'";
+
       return new Response(new Uint8Array(bytes), {
         headers: {
           "Content-Type": mime,
           "Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${encodeURIComponent(filename)}"`,
           "X-Content-Type-Options": "nosniff",
-          "Content-Security-Policy": "sandbox; default-src 'none'; style-src 'unsafe-inline'",
+          "Content-Security-Policy": csp,
           ...NO_STORE_HEADERS,
         },
       });
