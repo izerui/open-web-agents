@@ -98,7 +98,18 @@ export async function POST(req: Request) {
     /* 旧字段,仅供回退 */
     assistantId?: string;
     title?: string;
+    versionMode?: "published" | "draft";
   };
+  if (
+    body.versionMode !== undefined &&
+    body.versionMode !== "published" &&
+    body.versionMode !== "draft"
+  ) {
+    return Response.json(
+      { error: "versionMode 须为 published 或 draft", code: "invalid_request" },
+      { status: 400 },
+    );
+  }
   const agentId = body.agentId ?? body.assistantId ?? "default";
   try {
     await auth.assertCanInvoke(principal, agentId);
@@ -111,20 +122,30 @@ export async function POST(req: Request) {
   /*
    * 这个会话跑哪一版:
    * - API Key 建的会话是对外调用,跑已发布版本;
-   * - 网页上,能改这个智能体的人(作者)跟随草稿 —— 改完马上能试;
+   * - 市场入口显式传 published,包括作者也锁定发布版;
+   * - 不传模式时,网页上能改这个智能体的人(作者)跟随草稿 —— 改完马上能试;
    *   其他人跑已发布版本,作者没发布的改动不会出现在他们的对话里。
    * 从未发布的智能体一律跑草稿。
    */
   let agentVersion: number | undefined;
   const agent = await agents.get(agentId);
-  if (agent?.publishedVersion !== undefined) {
-    let followDraft = false;
-    if (principal.type === "web") {
-      const subject = await auth.subjectOf(principal);
-      const list = await grants.listForResource("agent", agentId);
-      followDraft = hasResourceAccess(subject, agent, "write", list);
-    }
-    if (!followDraft) agentVersion = (await releases.resolve(agent)).version ?? undefined;
+  let canUseDraft = false;
+  if (agent && principal.type === "web") {
+    const subject = await auth.subjectOf(principal);
+    const list = await grants.listForResource("agent", agentId);
+    canUseDraft = hasResourceAccess(subject, agent, "write", list);
+  }
+  if (body.versionMode === "draft" && !canUseDraft) {
+    return Response.json(
+      { error: "仅有编辑权限的登录用户可试运行草稿", code: "forbidden" },
+      { status: 403 },
+    );
+  }
+  if (body.versionMode === "published" && agent?.publishedVersion === undefined) {
+    return Response.json({ error: "智能体尚未发布", code: "not_published" }, { status: 409 });
+  }
+  if (agent?.publishedVersion !== undefined && (body.versionMode === "published" || !canUseDraft)) {
+    agentVersion = (await releases.resolve(agent)).version ?? undefined;
   }
 
   const id = randomUUID().replace(/-/g, "").slice(0, 24);

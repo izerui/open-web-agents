@@ -20,6 +20,7 @@ import {
   MessageSquare,
   Plus,
   ScrollText,
+  Store,
   Terminal,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -35,6 +36,7 @@ import type { AgentSummary, SessionSummary } from "./types";
  * 一个搜得到却用不了的结果比没有更让人困惑。管理入口只在用户菜单里出现。
  */
 const PAGES = [
+  { href: "/market", label: "智能体市场", icon: Store },
   { href: "/agents", label: "我的智能体", icon: Bot },
   { href: "/settings/runs", label: "运行记录", icon: History },
   { href: "/settings/keys", label: "接入中心", icon: Terminal },

@@ -134,7 +134,7 @@ interface Draft {
   startersText: string;
 }
 
-type BuilderAgent = AgentSummary & { config: Record<string, unknown> };
+type BuilderAgent = AgentSummary & { config: Record<string, unknown>; canRead?: boolean };
 
 interface AgentsResponse {
   agents?: BuilderAgent[];
@@ -257,7 +257,7 @@ export function Builder() {
     () =>
       fetchJson<AgentsResponse>("/api/agents")
         .then((d) => {
-          setList(d.agents ?? []);
+          setList((d.agents ?? []).filter((agent) => agent.canRead !== false));
           setAllowStdioMcp(d.capabilities?.stdioMcp === true);
         })
         .catch((e: unknown) => toast.error(`智能体列表加载失败:${errorText(e)}`)),
@@ -508,7 +508,7 @@ export function Builder() {
         if (seq !== editSeqRef.current) return;
         setAllowStdioMcp(d.capabilities?.stdioMcp === true);
         const full = d.agents?.find((x) => x.id === a.id);
-        if (!full) return;
+        if (!full || full.canRead === false) return;
         const cfg = full.config as Record<string, unknown>;
         loadedConfigRef.current = cfg;
         const nextDraft: Draft = {

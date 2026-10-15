@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
-import { hasResourceAccess } from "@/lib/modules/access/domain/grants";
+import { canInvokeAgent } from "@/lib/modules/access/domain/principal";
 import {
   generateApiKey,
   hashApiKey,
@@ -59,7 +59,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (old.agentId) {
     const a = await agents.get(old.agentId);
     const list = await grants.listForResource("agent", old.agentId);
-    if (!a || !hasResourceAccess(subject, a, "read", list)) {
+    if (!a || !canInvokeAgent(await auth.resolveWeb(req), a, subject, list).allowed) {
       return Response.json(
         { error: "已无权使用这把 Key 绑定的智能体,不能轮换", code: "forbidden" },
         { status: 403 },

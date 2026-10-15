@@ -36,6 +36,7 @@ export const ACTION_LABEL: Record<AuditAction, string> = {
   "webhook.test": "测试回调",
   "webhook.redeliver": "重发回调",
   "eval.run": "运行评测",
+  "capability.update": "更新模型能力与价目",
 };
 
 /** 需要特别留意的动作:界面上用醒目颜色标出。 */

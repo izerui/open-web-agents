@@ -26,6 +26,7 @@ import {
   Lock,
   ScrollText,
   ShieldCheck,
+  Store,
   Terminal,
   User,
   Users,
@@ -57,10 +58,11 @@ export const PERSONAL_NAV = [
  */
 export const ADMIN_NAV = [
   { href: "/admin/accounts", label: "账号管理", icon: Users },
+  { href: "/admin/capabilities", label: "模型与价目", icon: Cpu },
   { href: "/admin/usage", label: "全平台用量", icon: BarChart3 },
 ] as const;
 
-export type SpaceArea = "agents" | "personal" | "admin";
+export type SpaceArea = "agents" | "personal" | "admin" | "market";
 
 /**
  * 三个【互不重叠】的子空间。
@@ -81,6 +83,12 @@ export type SpaceArea = "agents" | "personal" | "admin";
  * 先返回工作台再找齿轮,子空间之间没有互通的路。
  */
 const AREAS = {
+  market: {
+    label: "智能体市场",
+    hint: "已发布的智能体",
+    icon: Store,
+    items: [{ href: "/market", label: "浏览市场", icon: Store }],
+  },
   agents: {
     label: "我的智能体",
     hint: "企业自己的员工",

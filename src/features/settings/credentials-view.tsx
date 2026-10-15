@@ -1,4 +1,5 @@
 import { SpaceShell } from "@/components/space-shell";
+import { PriceList } from "@/features/capabilities/price-list";
 import { MODEL_ALIASES } from "@/lib/shared";
 import Link from "next/link";
 
@@ -38,6 +39,7 @@ export function CredentialsView({ configured }: { configured: boolean }) {
           接入中心与 API Key
         </Link>
       </nav>
+      <PriceList />
     </SpaceShell>
   );
 }

@@ -1,4 +1,5 @@
 import type { Agent, AgentListFilter, AgentRepo } from "@/lib/modules/agent/ports";
+import { isSystemAgent } from "../domain/system-agent";
 
 /** 内存智能体仓储。垂直切片先内置一个通用智能体,构建器与 MySQL adapter 后续接入。 */
 export class InMemoryAgentRepo implements AgentRepo {
@@ -21,7 +22,11 @@ export class InMemoryAgentRepo implements AgentRepo {
       ? all.filter(
           (a) =>
             (filter.ownerId !== undefined && a.ownerId === filter.ownerId) ||
-            (filter.ids?.includes(a.id) ?? false),
+            (filter.ids?.includes(a.id) ?? false) ||
+            (filter.includeMarket === true &&
+              a.marketListed === true &&
+              a.publishedVersion !== undefined) ||
+            (filter.includePublished === true && a.publishedVersion !== undefined),
         )
       : all;
     return picked.map((a) => structuredClone(a));
@@ -43,6 +48,8 @@ export class InMemoryAgentRepo implements AgentRepo {
       publishedVersion: prev?.publishedVersion,
       publishedHash: prev?.publishedHash,
       seedHash: prev?.seedHash,
+      marketListed: prev?.marketListed ?? false,
+      marketCategory: prev?.marketCategory,
     };
     this.items.set(a.id, next);
     return structuredClone(next);
@@ -50,6 +57,23 @@ export class InMemoryAgentRepo implements AgentRepo {
 
   /** 内存实现没有事务与行锁:单测里串行执行,无需加锁 */
   async lockRow(_id: string): Promise<void> {}
+
+  async setMarketListing(
+    id: string,
+    listing: { listed: boolean; category: string },
+  ): Promise<boolean> {
+    const agent = this.items.get(id);
+    if (
+      !agent ||
+      this.deleted.has(id) ||
+      isSystemAgent(id) ||
+      (listing.listed && agent.publishedVersion === undefined)
+    )
+      return false;
+    agent.marketListed = listing.listed;
+    agent.marketCategory = listing.category;
+    return true;
+  }
 
   async setSeedHash(id: string, hash: string): Promise<void> {
     const a = this.items.get(id);

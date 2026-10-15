@@ -11,6 +11,7 @@
 ```bash
 node scripts/sdk-probe/deny-blocks-tool.mjs   # 围栏拒绝时,命令是否真的没执行
 node scripts/sdk-probe/guard-matrix.mjs       # 四种权限配置 × 新旧两种围栏的对照
+node scripts/sdk-probe/model-metering.mjs     # 多 result 的模型用量是否累计
 ```
 
 不花钱、不联网、不需要 API key。单次十几秒到两分钟。
@@ -58,6 +59,14 @@ CLAUDE_CONFIG_DIR: 临时空目录,  // 隔离 ~/.claude.json 里的登录态
 生产代码 `aliasEnv` 里那行 `ANTHROPIC_AUTH_TOKEN: ""` 就是同一个理由。
 
 ## 已验证的结论
+
+### 模型用量(2026-10-15)
+
+`model-metering.mjs` 用真实 SDK 与本地假网关验证:同一 query 中追加输入产生两条 result,
+第二条 `modelUsage` 保留并增加第一条的 token 数,因此取最后一份,不能相加。
+SDK 的标题等辅助模型调用也进入明细;原始标签可能带 `[1m]`,同时给出 `canonicalModel`。
+域内保留原始标签,用显式 canonical 标识匹配价目。缺失或非法明细不视为零消耗。
+这是 SDK 计量语义验证,不是第三方供应商账单或正式支付的验收。
 
 `guard-matrix.mjs` 的输出(2026-07-27):
 

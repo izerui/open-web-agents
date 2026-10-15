@@ -8,7 +8,11 @@ import {
   hasResourceAccess,
   isPublic,
 } from "@/lib/modules/access/domain/grants";
-import { type Principal, agentAccessLevel } from "@/lib/modules/access/domain/principal";
+import {
+  type Principal,
+  agentAccessLevel,
+  canInvokeAgent,
+} from "@/lib/modules/access/domain/principal";
 import {
   type AgentConfig,
   pickAgentConfig,
@@ -18,6 +22,7 @@ import { isSystemAgent } from "@/lib/modules/agent/domain/system-agent";
 import { validateAgentConfig } from "@/lib/modules/agent/domain/validate-config";
 import type { Agent } from "@/lib/modules/agent/ports";
 import { validateWebhookUrl } from "@/lib/modules/integration/domain/webhook-policy";
+import { marketSummary } from "@/lib/modules/market/domain/catalog";
 
 /**
  * 能否查看和修改智能体的 webhook:只有所有者(与平台管理员)。
@@ -54,6 +59,7 @@ export async function GET(req: Request) {
       const scoped = await agents.list({
         ownerId: subject.userId,
         ids: grantedResourceIds(subject, allGrants),
+        includeMarket: true,
       });
       // 管理员另外看到全库最近更新的(管理视图);与自己可见的合并去重
       const extra = principal.type === "web" && subject.role === "admin" ? await agents.list() : [];
@@ -62,46 +68,51 @@ export async function GET(req: Request) {
     const levels = new Map(
       all.map((a) => [a.id, agentAccessLevel(principal, a, subject, allGrants)] as const),
     );
-    const visible = all.filter((a) => levels.get(a.id) !== "none");
+    const visible = all.filter((a) => canInvokeAgent(principal, a, subject, allGrants).allowed);
     // 同理一次取齐各自当前发布的版本
     const published = await releases.publishedOf(visible);
 
     return Response.json({
-      agents: visible.map((a) => {
-        // 回调地址可能带接收方令牌:只给网页登录的所有者 / 管理员
-        const manage = principal.type === "web" && canManageWebhook(subject, a);
-        const canWrite = levels.get(a.id) === "write";
-        const pub = published.get(a.id);
-        /*
-         * 只读者看到的是【已发布版本】—— 他们的会话跑的就是这一版(见 POST /api/sessions),
-         * 列表若给草稿,开场建议、契约说明都会和实际运行对不上。作者看到草稿,在构建器里改。
-         */
-        const shown = !canWrite && pub ? pub : a;
-        return {
-          ...a,
-          name: shown.name,
-          icon: shown.icon,
-          description: shown.description,
-          // 只读者(含公开智能体的所有用户)看不到 MCP 环境变量与逃生舱
-          config: canWrite ? a.config : redactAgentConfigForReader(shown.config),
-          publishedVersion: a.publishedVersion ?? null,
-          hasUnpublishedChanges: canWrite ? releases.hasUnpublishedChanges(a) : undefined,
-          // 调用方默认拿到的契约(接入中心据此生成文档与示例);从未发布则为 null,调用跑草稿
-          published: pub
-            ? {
-                version: pub.version,
-                inputSchema: pub.config.inputSchema,
-                outputSchema: pub.config.outputSchema,
-              }
-            : null,
-          publishedHash: undefined,
-          // 回调地址可能带着接收方的令牌,非所有者不该看到
-          webhookUrl: manage ? a.webhookUrl : undefined,
-          isPublic: isPublic(a.id, allGrants),
-          canWrite,
-          canManageWebhook: manage,
-        };
-      }),
+      agents: visible
+        .filter((a) => levels.get(a.id) !== "none" || published.has(a.id))
+        .map((a) => {
+          // use-only 刻意不 spread 实体,防止新增字段意外暴露给市场用户。
+          const released = published.get(a.id);
+          if (levels.get(a.id) === "none" && released) return marketSummary(a, released);
+          // 回调地址可能带接收方令牌:只给网页登录的所有者 / 管理员
+          const manage = principal.type === "web" && canManageWebhook(subject, a);
+          const canWrite = levels.get(a.id) === "write";
+          const pub = published.get(a.id);
+          /*
+           * 只读者看到的是【已发布版本】—— 他们的会话跑的就是这一版(见 POST /api/sessions),
+           * 列表若给草稿,开场建议、契约说明都会和实际运行对不上。作者看到草稿,在构建器里改。
+           */
+          const shown = !canWrite && pub ? pub : a;
+          return {
+            ...a,
+            name: shown.name,
+            icon: shown.icon,
+            description: shown.description,
+            // 只读者(含公开智能体的所有用户)看不到 MCP 环境变量与逃生舱
+            config: canWrite ? a.config : redactAgentConfigForReader(shown.config),
+            publishedVersion: a.publishedVersion ?? null,
+            hasUnpublishedChanges: canWrite ? releases.hasUnpublishedChanges(a) : undefined,
+            // 调用方默认拿到的契约(接入中心据此生成文档与示例);从未发布则为 null,调用跑草稿
+            published: pub
+              ? {
+                  version: pub.version,
+                  inputSchema: pub.config.inputSchema,
+                  outputSchema: pub.config.outputSchema,
+                }
+              : null,
+            publishedHash: undefined,
+            // 回调地址可能带着接收方的令牌,非所有者不该看到
+            webhookUrl: manage ? a.webhookUrl : undefined,
+            isPublic: isPublic(a.id, allGrants),
+            canWrite,
+            canManageWebhook: manage,
+          };
+        }),
       capabilities: { stdioMcp: env.allowStdioMcp },
     });
   } catch (err) {

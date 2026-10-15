@@ -88,8 +88,15 @@ export function AccessCenterView() {
     } else toast.error(`API Key 列表加载失败:${errorText(k.reason)}`);
     setKeysLoaded(true);
 
-    if (a.status === "fulfilled") setAgents(a.value.agents ?? []);
-    else toast.error(`智能体列表加载失败:${errorText(a.reason)}`);
+    if (a.status === "fulfilled") {
+      const available = a.value.agents ?? [];
+      setAgents(available);
+      const requested = new URLSearchParams(window.location.search).get("agent");
+      if (requested && available.some((agent) => agent.id === requested)) {
+        setDocAgentId((current) => current || requested);
+        setKeyAgent((current) => current || requested);
+      }
+    } else toast.error(`智能体列表加载失败:${errorText(a.reason)}`);
   }, []);
 
   useEffect(() => {

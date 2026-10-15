@@ -5,15 +5,19 @@ import {
   SidebarContent,
   SidebarFooter,
   SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
 import { UserMenu } from "@/components/user-menu";
+import { Store } from "lucide-react";
 import Link from "next/link";
 
 /**
  * 工作台的侧栏。
  *
- * 【为什么这里没有导航】它曾经在品牌下面挂着一组"工作台 / 我的智能体"的
+ * 工作台保持会话为主,只增加一个前往市场的入口。此前品牌下面挂着一组"工作台 / 我的智能体"的
  * 平级导航项 —— 点一下,侧栏下半屏整个换掉,但顶部的智能体选择器还留在原地,
  * 而两个导航项和下面的会话条目又长得一模一样。人分不清刚才是换了页面
  * 还是换了智能体。
@@ -45,6 +49,16 @@ export function WorkbenchSidebar({
           </span>
         </Link>
         {headerExtra}
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton asChild tooltip="智能体市场">
+              <Link href="/market">
+                <Store />
+                <span>智能体市场</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
       </SidebarHeader>
 
       <SidebarContent className="scrollbar-fade">{children}</SidebarContent>

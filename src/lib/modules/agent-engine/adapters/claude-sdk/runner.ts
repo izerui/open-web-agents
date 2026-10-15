@@ -41,7 +41,15 @@ export function combineResults(rs: RunResult[]): RunResult | undefined {
   if (!last || rs.length === 1) return last;
   const input = rs.reduce((n, r) => n + (r.cost?.input ?? 0), 0);
   const output = rs.reduce((n, r) => n + (r.cost?.output ?? 0), 0);
-  return { ...last, cost: { ...(last.cost ?? {}), input, output } };
+  return {
+    ...last,
+    cost: {
+      ...(last.cost ?? {}),
+      input,
+      output,
+      // modelUsage 是累计快照,沿用最后一份而不累加;真实 SDK 探针见 scripts/sdk-probe/model-metering.mjs。
+    },
+  };
 }
 
 export interface EngineDeps {

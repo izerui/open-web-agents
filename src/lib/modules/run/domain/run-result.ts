@@ -5,6 +5,7 @@
 // 而且"结构化结果是从文本里捞出来的"这条降级信号(salvaged)哪里都看不到。
 // 三处都从同一行数据库记录、经同一个函数组装 —— 数据库是结果的唯一真相。
 
+import type { ModelMetering } from "@/lib/modules/agent-engine/domain/model-usage";
 import type { RunState } from "@/lib/shared";
 
 export interface RunRecord {
@@ -35,7 +36,13 @@ export interface RunResult {
   /** 最终回答文本 */
   text: string | null;
   error: { kind: string; message: string; status?: number } | null;
-  cost: { usd?: number; input: number; output: number; partial?: boolean } | null;
+  cost: {
+    usd?: number;
+    input: number;
+    output: number;
+    partial?: boolean;
+    metering?: ModelMetering;
+  } | null;
   /** ISO 时间;未开始 / 未结束为 null */
   startedAt: string | null;
   endedAt: string | null;

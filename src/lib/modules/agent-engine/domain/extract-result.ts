@@ -2,6 +2,7 @@
 
 import type { RunResult } from "@/lib/modules/agent-engine/ports";
 import { extractJsonObject } from "./extract-json";
+import { extractModelUsage } from "./model-usage";
 
 /**
  * 从 SDK `result` 消息提取 RunResult。
@@ -24,6 +25,7 @@ export function extractRunResult(resultMsg: unknown, opts: { hasSchema: boolean 
     usd: typeof m.total_cost_usd === "number" ? m.total_cost_usd : 0,
     input: usage.input_tokens ?? 0,
     output: usage.output_tokens ?? 0,
+    ...(m.modelUsage !== undefined ? { metering: extractModelUsage(m.modelUsage) } : {}),
   };
   const summary = typeof m.result === "string" ? m.result : undefined;
 

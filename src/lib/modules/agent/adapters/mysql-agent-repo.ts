@@ -1,10 +1,23 @@
 import type { Db } from "@/lib/db/client";
-import { agents } from "@/lib/db/schema";
+import { agentVersions, agents } from "@/lib/db/schema";
 import type { AgentConfig } from "@/lib/modules/agent/domain/config";
 import type { Agent, AgentRepo } from "@/lib/modules/agent/ports";
 import type { AgentListFilter } from "@/lib/modules/agent/ports";
 import type { JsonSchema } from "@/lib/shared";
-import { type SQL, and, count, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import {
+  type SQL,
+  and,
+  count,
+  desc,
+  eq,
+  exists,
+  inArray,
+  isNotNull,
+  isNull,
+  or,
+  sql,
+} from "drizzle-orm";
+import { isSystemAgent } from "../domain/system-agent";
 
 interface Row {
   id: string;
@@ -19,6 +32,8 @@ interface Row {
   publishedVersion: number | null;
   publishedHash: string | null;
   seedHash: string | null;
+  marketListed: number;
+  marketCategory: string | null;
 }
 
 const COLUMNS = {
@@ -34,6 +49,8 @@ const COLUMNS = {
   publishedVersion: agents.publishedVersion,
   publishedHash: agents.publishedHash,
   seedHash: agents.seedHash,
+  marketListed: agents.marketListed,
+  marketCategory: agents.marketCategory,
 };
 
 function toAgent(r: Row): Agent {
@@ -48,6 +65,8 @@ function toAgent(r: Row): Agent {
     publishedVersion: r.publishedVersion ?? undefined,
     publishedHash: r.publishedHash ?? undefined,
     seedHash: r.seedHash ?? undefined,
+    marketListed: r.marketListed === 1,
+    marketCategory: r.marketCategory ?? undefined,
     // 两个 schema 都单列存储(要按它们做接口契约查询/展示),回填进 config 供上层使用。
     // input_schema 这一列建表时就有,但此前【从没被读写过】—— 一个死列配一句谎话注释。
     config: {
@@ -88,6 +107,9 @@ export class MysqlAgentRepo implements AgentRepo {
     const conds: SQL[] = [];
     if (filter.ownerId !== undefined) conds.push(eq(agents.ownerId, filter.ownerId));
     if (filter.ids?.length) conds.push(inArray(agents.id, filter.ids));
+    if (filter.includeMarket)
+      conds.push(and(eq(agents.marketListed, 1), isNotNull(agents.publishedVersion)) as SQL);
+    if (filter.includePublished) conds.push(isNotNull(agents.publishedVersion));
     if (conds.length === 0) return [];
     const rows = await this.db
       .select(COLUMNS)
@@ -143,6 +165,39 @@ export class MysqlAgentRepo implements AgentRepo {
   async lockRow(id: string): Promise<void> {
     // 行不存在时 FOR UPDATE 锁住的是这个键所在的间隙,同 id 的插入同样要等
     await this.db.execute(sql`SELECT id FROM agents WHERE id = ${id} FOR UPDATE`);
+  }
+
+  async setMarketListing(
+    id: string,
+    listing: { listed: boolean; category: string },
+  ): Promise<boolean> {
+    if (isSystemAgent(id)) return false;
+    const result = await this.db
+      .update(agents)
+      .set({
+        marketListed: listing.listed ? 1 : 0,
+        marketCategory: listing.category,
+      })
+      .where(
+        and(
+          eq(agents.id, id),
+          isNull(agents.deletedAt),
+          listing.listed
+            ? exists(
+                this.db
+                  .select({ agentId: agentVersions.agentId })
+                  .from(agentVersions)
+                  .where(
+                    and(
+                      eq(agentVersions.agentId, agents.id),
+                      eq(agentVersions.version, agents.publishedVersion),
+                    ),
+                  ),
+              )
+            : undefined,
+        ),
+      );
+    return ((result as unknown as [{ affectedRows: number }])[0]?.affectedRows ?? 0) > 0;
   }
 
   async setSeedHash(id: string, hash: string): Promise<void> {

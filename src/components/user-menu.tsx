@@ -14,7 +14,7 @@ import {
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { clearMe, initialsOf, isAdminView, useMe } from "@/lib/use-me";
-import { Bot, ChevronsUpDown, LogIn, LogOut, Settings, ShieldCheck } from "lucide-react";
+import { Bot, ChevronsUpDown, LogIn, LogOut, Settings, ShieldCheck, Store } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -159,6 +159,12 @@ export function UserMenu() {
               侧栏本来就把它们列着。
             */}
             <DropdownMenuGroup>
+              <DropdownMenuItem asChild>
+                <Link href="/market">
+                  <Store />
+                  智能体市场
+                </Link>
+              </DropdownMenuItem>
               <DropdownMenuItem asChild>
                 <Link href="/agents">
                   <Bot />

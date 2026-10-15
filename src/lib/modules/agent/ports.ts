@@ -19,6 +19,9 @@ export interface Agent {
   publishedHash?: string;
   /** 内置智能体上次由平台写入定义后的内容摘要(见 builtin-seed.ts)。只读:upsert 不改它。 */
   seedHash?: string;
+  /** 只由市场管理接口维护;普通保存不改变上架状态。 */
+  marketListed?: boolean;
+  marketCategory?: string;
 }
 
 /** 发布时冻结下来的内容:名称、说明与完整配置。webhookUrl 属于运维设置,不进版本。 */
@@ -49,11 +52,15 @@ export interface AgentVersionRepo {
     snapshot: AgentSnapshot,
     meta: { contentHash: string; note?: string; createdBy: string },
   ): Promise<AgentVersion>;
+
   get(agentId: string, version: number): Promise<AgentVersion | null>;
+
   /** 按版本号倒序;不含 config,列表用。 */
   list(agentId: string): Promise<Omit<AgentVersion, "config">[]>;
+
   /** 一次取多个智能体当前发布的版本(列表页避免 N+1)。 */
   getMany(keys: { agentId: string; version: number }[]): Promise<AgentVersion[]>;
+
   /** 回滚:把发布指针指回一个已存在的版本。 */
   activate(agentId: string, version: number, contentHash: string): Promise<void>;
 }
@@ -62,6 +69,10 @@ export interface AgentVersionRepo {
 export interface AgentListFilter {
   ownerId?: string;
   ids?: string[];
+  /** 与 ownerId/ids 取并集,包含已上架且已发布的智能体。 */
+  includeMarket?: boolean;
+  /** 管理员市场候选:所有已发布智能体。 */
+  includePublished?: boolean;
 }
 
 /** 行锁事务里可用的操作 */
@@ -69,6 +80,7 @@ export type AgentRowOps = Pick<AgentRepo, "get" | "upsert" | "setSeedHash" | "id
 
 export interface AgentRepo {
   get(id: string): Promise<Agent | null>;
+
   /**
    * 列出智能体。
    *
@@ -78,21 +90,30 @@ export interface AgentRepo {
    * 不传过滤条件仍是"最新 200 条",只给管理视图用。
    */
   list(filter?: AgentListFilter): Promise<Agent[]>;
+
   /** 每个所有者名下的智能体数量(管理页统计用,不受列表条数上限影响)。 */
   countByOwner(): Promise<Map<string, number>>;
+
   upsert(a: Agent): Promise<Agent>;
+
+  /** 原子更新市场状态;上架要求当前已发布,不修改任何分享授权。 */
+  setMarketListing(id: string, listing: { listed: boolean; category: string }): Promise<boolean>;
+
   /** 记下内置智能体的种子摘要。 */
   setSeedHash(id: string, hash: string): Promise<void>;
+
   /**
    * 锁住这个智能体的行,直到所在事务结束 —— 只在事务里调用才有意义(事务由组装根开,见 container)。
    * 期间其它对这一行的写入(管理员保存、载入版本、应用设计)等这个事务提交后再执行。
    */
   lockRow(id: string): Promise<void>;
+
   /**
    * 软删除:之后 get / list / countByOwner 都当它不存在。返回是否删除了(已删除或不存在为 false)。
    * 行保留,历史会话与运行记录照常显示名称;id 不能被复用(见 idTaken)。
    */
   softDelete(id: string, at: number): Promise<boolean>;
+
   /** 这个 id 是否已被占用(含已删除的)—— 新建时用,防止撞上已删除的智能体。 */
   idTaken(id: string): Promise<boolean>;
 }

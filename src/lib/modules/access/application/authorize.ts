@@ -194,7 +194,7 @@ export class Authorizer {
   }
 
   /**
-   * 运行智能体前的授权关卡:key 绑定 + 资源 read 权限。
+   * 运行智能体前的授权关卡:key 绑定 + 资源 read 权限或市场使用权。
    *
    * 必须是 async —— 判定需要读智能体归属与授权表。曾经这里是同步的纯 key 绑定检查,
    * 看起来"有授权",实际上任何登录用户知道 id 就能跑别人的私有智能体。
@@ -205,7 +205,7 @@ export class Authorizer {
     if (!a) throw new Forbidden("no access to this agent");
     const subject = await this.subjectOf(p);
     const grants = await this.deps.grants.listForResource("agent", agentId);
-    this.assert(canInvokeAgent(p, { id: a.id, ownerId: a.ownerId }, subject, grants));
+    this.assert(canInvokeAgent(p, a, subject, grants));
   }
 
   assertCanManageAgents(p: Principal): void {

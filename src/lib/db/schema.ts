@@ -77,6 +77,9 @@ export const agents = mysqlTable(
      * 启动时可以升级到代码里的新定义;不一致 = 管理员改过,保留不动。普通智能体为空。
      */
     seedHash: varchar("seed_hash", { length: 64 }),
+    /** 市场上架仅授予使用能力,与已有 read/write 分享独立。 */
+    marketListed: int("market_listed").notNull().default(0),
+    marketCategory: varchar("market_category", { length: 32 }),
     /**
      * 软删除时刻(ms);非空即"已删除":列表、调用、嵌入、分享、继续对话都当它不存在。
      * 行保留 —— 历史会话、运行记录(按 JOIN 显示名称)、审计、版本都还要引用它。
@@ -86,7 +89,10 @@ export const agents = mysqlTable(
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
   },
-  (t) => ({ byOwner: index("idx_agents_owner").on(t.ownerId) }),
+  (t) => ({
+    byOwner: index("idx_agents_owner").on(t.ownerId),
+    byMarket: index("idx_agents_market").on(t.marketListed, t.publishedVersion),
+  }),
 );
 
 /**
@@ -527,4 +533,27 @@ export const evalResults = mysqlTable(
     gradedAt: timestamp("graded_at", { fsp: 3 }),
   },
   (t) => ({ pk: primaryKey({ columns: [t.evalRunId, t.caseId] }) }),
+);
+
+/** 平台模型能力目录。计价配置用整数字符串,历史版本只追加。 */
+export const capabilityCatalog = mysqlTable("capability_catalog", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  kind: varchar("kind", { length: 24 }).notNull(),
+  modelId: varchar("model_id", { length: 200 }).notNull(),
+  enabled: int("enabled").notNull().default(0),
+  version: int("version").notNull(),
+  definition: json("definition").notNull(),
+  updatedAt: timestamp("updated_at", { fsp: 3 }).notNull(),
+});
+
+export const capabilityVersions = mysqlTable(
+  "capability_versions",
+  {
+    capabilityId: varchar("capability_id", { length: 64 }).notNull(),
+    version: int("version").notNull(),
+    definition: json("definition").notNull(),
+    createdBy: varchar("created_by", { length: 36 }).notNull(),
+    createdAt: timestamp("created_at", { fsp: 3 }).notNull(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.capabilityId, t.version] }) }),
 );

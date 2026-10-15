@@ -32,6 +32,22 @@ export interface SessionOwnership {
 
 export type Decision = { allowed: true } | { allowed: false; reason: string };
 
+export interface InvokableResource extends OwnedResource {
+  marketListed?: boolean;
+  publishedVersion?: number;
+}
+
+/** 市场元数据只授予使用能力,不参与 read/write 分享判定。 */
+export function isMarketUsable(agent: InvokableResource): boolean {
+  return (
+    !isSystemAgent(agent.id) &&
+    agent.marketListed === true &&
+    typeof agent.publishedVersion === "number" &&
+    Number.isInteger(agent.publishedVersion) &&
+    agent.publishedVersion > 0
+  );
+}
+
 const ALLOW: Decision = { allowed: true };
 const deny = (reason: string): Decision => ({ allowed: false, reason });
 
@@ -65,7 +81,7 @@ export function canAccessSession(p: Principal, s: SessionOwnership): Decision {
  * 能否调用某智能体。两道关卡缺一不可:
  *
  * 1. **key 绑定**:key 若绑定了具体智能体,就只能调那一个 —— 便于给每个对接方发限定 key。
- * 2. **资源授权**:调用方必须对该智能体有 read 权限(owner / admin / 被分享)。
+ * 2. **资源授权**:已有 read 权限(owner / admin / 被分享),或市场上架的已发布使用权。
  *
  * 第 2 关曾经缺失,是个真实越权:当时 web 主体一律放行、未绑定的 key 也一律放行,
  * 于是【知道 agentId 就能运行别人的私有智能体】—— 撤销分享只是从列表里隐藏,
@@ -76,7 +92,7 @@ export function canAccessSession(p: Principal, s: SessionOwnership): Decision {
  */
 export function canInvokeAgent(
   p: Principal,
-  agent: OwnedResource,
+  agent: InvokableResource,
   subject: Subject,
   grants: Grant[],
 ): Decision {
@@ -85,7 +101,7 @@ export function canInvokeAgent(
     return deny("api key is bound to another agent");
   }
   // key 以其归属用户的身份参与判定 —— 不能靠签发 key 给自己提权
-  if (!hasResourceAccess(subject, agent, "read", grants)) {
+  if (!hasResourceAccess(subject, agent, "read", grants) && !isMarketUsable(agent)) {
     return deny("no access to this agent");
   }
   return ALLOW;

@@ -260,6 +260,20 @@
       "when": 1791992358199,
       "tag": "0036_platform_design",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "5",
+      "when": 1791994541132,
+      "tag": "0037_agent_market",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "5",
+      "when": 1791995190007,
+      "tag": "0038_capability_catalog",
+      "breakpoints": true
     }
   ]
 }

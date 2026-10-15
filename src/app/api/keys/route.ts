@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
-import { hasResourceAccess } from "@/lib/modules/access/domain/grants";
+import { canInvokeAgent } from "@/lib/modules/access/domain/principal";
 import { isSystemAgent } from "@/lib/modules/agent/domain/system-agent";
 import { validateKeyRateLimit } from "@/lib/modules/identity/application/invoke-rate-limit";
 import {
@@ -111,9 +111,10 @@ export async function POST(req: Request) {
     }
     const a = await agents.get(body.agentId);
     boundAgentName = a?.name;
-    const subject = await auth.subjectOf(await auth.resolveWeb(req));
+    const principal = await auth.resolveWeb(req);
+    const subject = await auth.subjectOf(principal);
     const list = await grants.listForResource("agent", body.agentId);
-    if (!a || !hasResourceAccess(subject, a, "read", list)) {
+    if (!a || !canInvokeAgent(principal, a, subject, list).allowed) {
       return Response.json({ error: "agent not found" }, { status: 404 });
     }
   }
