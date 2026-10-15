@@ -132,7 +132,13 @@ export function parseDesign(raw: unknown): DesignDraft {
   if (d.mcpServers !== undefined && !Array.isArray(d.mcpServers)) {
     throw new Error("mcpServers 必须是数组");
   }
-  if (JSON.stringify(raw).length > 500_000) throw new Error("设计草稿过大");
+  const jsonLen = JSON.stringify(raw).length;
+  const limit = 5_000_000;
+  if (jsonLen > limit) {
+    throw new Error(
+      `设计草稿过大(${(jsonLen / 1_000_000).toFixed(1)}MB,上限 ${limit / 1_000_000}MB)`,
+    );
+  }
   return d as unknown as DesignDraft;
 }
 

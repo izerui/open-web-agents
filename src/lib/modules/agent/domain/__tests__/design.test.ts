@@ -149,7 +149,6 @@ describe("platform design drafts", () => {
     { ...draftOf(), mcpRefs: ["a", "a"] },
     { ...draftOf(), skillPackages: "not-array" },
     { ...draftOf(), mcpServers: "not-array" },
-    { ...draftOf(), systemPrompt: "x".repeat(500_001) },
   ])("rejects malformed or oversized draft %#", (raw) => {
     expect(() => parseDesign(raw)).toThrow();
   });
@@ -210,5 +209,57 @@ describe("platform design drafts", () => {
 
     expect(JSON.stringify(draft)).not.toContain("sk-");
     expect(JSON.stringify(snapshot)).not.toContain("sk-");
+  });
+
+  it("合法多文件技能包超过旧 500K 限制仍能载入设计器", () => {
+    const bigScript = "x".repeat(300_000);
+    const bigAgent: Agent = {
+      id: "big-skill",
+      ownerId: "owner",
+      name: "大技能包",
+      config: {
+        model: "sonnet",
+        systemPrompt: "test",
+        skillPackages: [
+          {
+            name: "big-tool",
+            description: "大工具",
+            files: {
+              "SKILL.md": "# 步骤\n运行脚本",
+              "scripts/large.py": bigScript,
+              "data/corpus.txt": bigScript,
+            },
+          },
+        ],
+      },
+    };
+
+    const draft = draftOf(bigAgent);
+    const draftJson = JSON.stringify(draft);
+    expect(draftJson.length).toBeGreaterThan(500_000);
+
+    const parsed = parseDesign(JSON.parse(draftJson));
+    expect(parsed.skillPackages?.[0]?.name).toBe("big-tool");
+    expect(parsed.skillPackages?.[0]?.files["scripts/large.py"]).toBe(bigScript);
+
+    const resolved = resolveDesign(parsed, []);
+    expect(resolved.config.skillPackages?.[0]?.files["scripts/large.py"]).toBe(bigScript);
+    expect(resolved.config.skillPackages?.[0]?.files["data/corpus.txt"]).toBe(bigScript);
+  });
+
+  it("超过 5MB 上限时报明确错误", () => {
+    const huge = "x".repeat(2_600_000);
+    const draft = {
+      name: "t",
+      description: "",
+      systemPrompt: "",
+      parameters: {},
+      skillRefs: [],
+      mcpRefs: [],
+      skillPackages: [
+        { name: "huge", description: "d", files: { "SKILL.md": huge, "a.py": huge } },
+      ],
+    };
+    expect(() => parseDesign(draft)).toThrow(/设计草稿过大.*MB/);
   });
 });

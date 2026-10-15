@@ -102,8 +102,9 @@ export class AgentDesigner {
     try {
       const file = await this.deps.storage.read(session.workspaceDir, DRAFT_FILE);
       next.draft = parseDesign(JSON.parse(file.bytes.toString("utf8")));
-    } catch {
-      next.aiIssue = "AI 输出不是有效的设计草稿,已保留上一次草稿。可以继续对话修正。";
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : "未知错误";
+      next.aiIssue = `AI 输出不是有效的设计草稿:${reason}。已保留上一次草稿,可以继续对话修正。`;
     }
     await tx.sessions.update(session.id, { designState: next });
     session.designState = next;
