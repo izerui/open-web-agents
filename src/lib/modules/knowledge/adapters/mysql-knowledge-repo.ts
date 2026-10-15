@@ -178,8 +178,20 @@ export class MysqlKnowledgeRepo {
                 ${data.content !== undefined ? sql`, content = ${data.content}` : sql``}
             WHERE id = ${id}`,
       );
-      const after = await this.get(id);
-      return after;
+      const afterRows = await tx
+        .select()
+        .from(knowledgeDocs)
+        .where(eq(knowledgeDocs.id, id))
+        .limit(1);
+      const r = afterRows[0];
+      if (!r) return null;
+      return {
+        id: r.id,
+        agentId: r.agentId,
+        title: r.title,
+        content: r.content,
+        createdAt: r.createdAt.getTime(),
+      };
     });
   }
 

@@ -94,22 +94,22 @@ if (!TEST_DB_URL) {
       expect((await repo.list(agentId)).usage.docs).toBe(3);
     });
 
-    it("update 事务:并发扩充不同文档不超限", { timeout: 30_000 }, async () => {
+    it("update 事务:并发扩充撞限,恰好一个成功一个被拒", { timeout: 30_000 }, async () => {
       const agentId = await newAgent();
+      // 三篇各 30 字 = 90 字 (上限 100)
       const d1 = await repo.create(doc(agentId, "字".repeat(30)));
       const d2 = await repo.create(doc(agentId, "字".repeat(30)));
+      await repo.create(doc(agentId, "字".repeat(30)));
+      // 两篇同时改到 36 字: 第一个 90-30+36=96≤100 成功, 第二个 96-30+36=102>100 被拒
       const results = await Promise.allSettled([
-        repo.update(d1.id, { content: "字".repeat(45) }),
-        repo.update(d2.id, { content: "字".repeat(45) }),
+        repo.update(d1.id, { content: "字".repeat(36) }),
+        repo.update(d2.id, { content: "字".repeat(36) }),
       ]);
       const ok = results.filter((r) => r.status === "fulfilled");
       const fail = results.filter((r) => r.status === "rejected");
-      expect(ok.length + fail.length).toBe(2);
-      if (fail.length > 0) {
-        for (const r of fail) {
-          expect((r as PromiseRejectedResult).reason).toBeInstanceOf(KnowledgeLimitExceeded);
-        }
-      }
+      expect(ok).toHaveLength(1);
+      expect(fail).toHaveLength(1);
+      expect((fail[0] as PromiseRejectedResult).reason).toBeInstanceOf(KnowledgeLimitExceeded);
       const listing = await repo.list(agentId);
       expect(listing.usage.chars).toBeLessThanOrEqual(limits.maxTotalChars);
     });
@@ -148,6 +148,15 @@ if (!TEST_DB_URL) {
       await repo.update(d.id, { title: "新标题" });
       const after = await cache.chunksOf(agentId);
       expect(after[0]?.docTitle).toBe("新标题");
+    });
+
+    it("update 返回值是更新后的数据,不是旧数据", async () => {
+      const agentId = await newAgent();
+      const d = await repo.create(doc(agentId, "旧正文"));
+      const result = await repo.update(d.id, { title: "新标题", content: "新正文" });
+      expect(result).not.toBeNull();
+      expect(result?.title).toBe("新标题");
+      expect(result?.content).toBe("新正文");
     });
   });
 }
