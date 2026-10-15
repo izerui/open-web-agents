@@ -292,12 +292,19 @@ function RunDetailSection({ runs, note }: { runs: RunDetail[]; note?: string }) 
                         {r.outputTokens.toLocaleString()}
                       </td>
                       <td className="whitespace-nowrap px-2 py-2 font-mono">
-                        {est.models.some((m) => m.unpriced) ? (
-                          <span title="部分模型未定价">
-                            ~{formatCredits(est.totalMicroCredits)}
-                          </span>
-                        ) : est.models.length === 0 ? (
+                        {est.models.length === 0 ? (
                           <span className="text-muted-foreground">—</span>
+                        ) : est.models.every((m) => m.unpriced) ? (
+                          <span className="text-muted-foreground" title="所有模型均未配置价目">
+                            无法估算
+                          </span>
+                        ) : est.models.some((m) => m.unpriced) ? (
+                          <span title="已知部分的估算，含未定价模型">
+                            ≥{formatCredits(est.totalMicroCredits)}
+                            <Badge variant="outline" className="ml-1 text-[9px]">
+                              含未定价
+                            </Badge>
+                          </span>
                         ) : (
                           formatCredits(est.totalMicroCredits)
                         )}
