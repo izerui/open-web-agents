@@ -1,6 +1,8 @@
 // 用量聚合的纯逻辑:把原始运行记录汇总成看板需要的形状。
 // 与 SQL 解耦 —— 聚合规则能被穷举单测,不必起数据库。
 
+import type { ModelMetering } from "@/lib/modules/agent-engine/domain/model-usage";
+
 export interface RunUsageRecord {
   runId: string;
   agentId: string;
@@ -13,6 +15,8 @@ export interface RunUsageRecord {
   outputTokens: number;
   /** 运行结束时间(ms);未结束用创建时间。 */
   at: number;
+  /** SDK 按模型拆分的 token 快照;缺失时为 undefined。 */
+  metering?: ModelMetering;
 }
 
 export interface UsageTotals {

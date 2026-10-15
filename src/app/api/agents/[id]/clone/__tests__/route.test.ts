@@ -115,6 +115,9 @@ vi.mock("@/lib/container", () => ({
         return result;
       },
     },
+    knowledgeWriterFactory: () => ({
+      create: async (doc: unknown) => doc,
+    }),
     audit: {
       record: async (entry: unknown) => {
         audited.push(entry);

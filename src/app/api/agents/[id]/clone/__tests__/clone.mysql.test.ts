@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { createDb } from "@/lib/db/client";
+import { type Db, createDb } from "@/lib/db/client";
 import { agentVersions, agents, knowledgeDocs } from "@/lib/db/schema";
 import { MysqlAgentRepo } from "@/lib/modules/agent/adapters/mysql-agent-repo";
 import { MysqlAgentVersionRepo } from "@/lib/modules/agent/adapters/mysql-agent-version-repo";
@@ -42,6 +42,7 @@ if (!url) {
         agents: g._testAgentRepo,
         knowledge: g._testKnowledgeRepo,
         releases: g._testReleases,
+        knowledgeWriterFactory: (txDb: unknown) => new MysqlKnowledgeRepo(txDb as Db),
         audit: { record: async () => {} },
         env: { allowStdioMcp: false },
         auth: {

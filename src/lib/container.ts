@@ -68,6 +68,7 @@ import { WebhookDispatcher } from "@/lib/modules/integration/application/webhook
 import { resolveRunTarget } from "@/lib/modules/integration/application/webhook-target";
 import { signingSecretsOf } from "@/lib/modules/integration/domain/signing-secrets";
 import { isAddressAllowed } from "@/lib/modules/integration/domain/webhook-policy";
+import type { KnowledgeWriter } from "@/lib/modules/agent/application/clone-agent";
 import { MysqlKnowledgeRepo } from "@/lib/modules/knowledge/adapters/mysql-knowledge-repo";
 import { ChunkCache } from "@/lib/modules/knowledge/application/chunk-cache";
 import { formatContext, retrieve } from "@/lib/modules/knowledge/domain/retrieval";
@@ -156,6 +157,7 @@ export interface Container {
   capabilities: CapabilityRepo;
   billing: BillingRepo;
   packages: PackageRepo;
+  knowledgeWriterFactory: (txDb: Db) => KnowledgeWriter;
 }
 
 /** 人工审批的等待上限。到点自动拒绝,避免 worker 被无人值守的审批永久占住。 */
@@ -528,6 +530,7 @@ function build(): Container {
     runQuery: new MysqlRunQuery(db),
     usage,
     knowledge,
+    knowledgeWriterFactory: (txDb: Db) => new MysqlKnowledgeRepo(txDb),
     orchestrator,
     enqueuer,
     evals,

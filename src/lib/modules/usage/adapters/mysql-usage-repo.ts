@@ -1,3 +1,4 @@
+import type { ModelMetering } from "@/lib/modules/agent-engine/domain/model-usage";
 import type { Db } from "@/lib/db/client";
 import { agents, runs, sessions } from "@/lib/db/schema";
 import { type RunUsageRecord, toMicroUsd } from "@/lib/modules/usage/domain/aggregate";
@@ -70,7 +71,12 @@ export class MysqlUsageRepo {
       .limit(q.limit ?? DEFAULT_LIMIT);
 
     return rows.map((r) => {
-      const cost = (r.cost ?? {}) as { usd?: number; input?: number; output?: number };
+      const cost = (r.cost ?? {}) as {
+        usd?: number;
+        input?: number;
+        output?: number;
+        metering?: ModelMetering;
+      };
       return {
         runId: r.runId,
         agentId: r.agentId,
@@ -80,6 +86,7 @@ export class MysqlUsageRepo {
         costMicroUsd: toMicroUsd(cost.usd),
         inputTokens: Number(cost.input ?? 0),
         outputTokens: Number(cost.output ?? 0),
+        metering: cost.metering,
         // 未结束的用创建时间,保证一定落在某一天里
         at: (r.endedAt ?? r.createdAt).getTime(),
       };

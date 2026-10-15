@@ -2,6 +2,7 @@ import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { ownerFilter, resolveScope } from "@/lib/modules/access/domain/scope";
 import { aggregateUsage } from "@/lib/modules/usage/domain/aggregate";
+import { estimateRunCredits } from "@/lib/modules/usage/domain/estimate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,12 +14,11 @@ const MAX_DAYS = 90;
  * 普通用户只看自己的;admin 看全平台(`?scope=all`)。
  */
 export async function GET(req: Request) {
-  const { usage, auth } = getContainer();
+  const { usage, auth, capabilities } = getContainer();
 
   let principal: Awaited<ReturnType<typeof auth.resolveWeb>>;
   try {
     principal = await auth.resolveWeb(req);
-    // 对外 key 不该看到平台运营数据
     auth.assertCanManageAgents(principal);
   } catch (err) {
     const res = authErrorResponse(err);
@@ -34,20 +34,33 @@ export async function GET(req: Request) {
   const ownerId = ownerFilter(scope, (principal as { userId: string }).userId);
 
   const since = Date.now() - days * 24 * 60 * 60 * 1000;
-  const [records, truncated] = await Promise.all([
+  const [records, truncated, catalog] = await Promise.all([
     usage.list({ ownerId, since }),
     usage.isTruncated({ ownerId, since }),
+    capabilities.list(),
   ]);
+
+  const runs = records.map((r) => ({
+    runId: r.runId,
+    agentId: r.agentId,
+    agentName: r.agentName,
+    status: r.status,
+    costMicroUsd: r.costMicroUsd,
+    inputTokens: r.inputTokens,
+    outputTokens: r.outputTokens,
+    at: r.at,
+    estimatedCredits: estimateRunCredits(r.metering, catalog),
+  }));
 
   return Response.json({
     days,
     scope,
     canViewAll: isAdmin,
     queue: await usage.queueDepth(),
-    // 结果被截断时必须说明 —— 否则「最新 5000 条的合计」会被当成总花费,
-    // 而它只会偏小,超预算时反而没人察觉
     truncated,
     ...(truncated ? { truncatedNote: "记录数超过单次查询上限,以下为最近部分记录的合计" } : {}),
     ...aggregateUsage(records),
+    runs,
+    creditEstimateNote: "积分估算基于 SDK 用量快照与当前价目，尚未启用积分扣款",
   });
 }

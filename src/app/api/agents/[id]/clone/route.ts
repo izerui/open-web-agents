@@ -1,19 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { getContainer } from "@/lib/container";
-import type { Db } from "@/lib/db/client";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
-import { MysqlAgentRepo } from "@/lib/modules/agent/adapters/mysql-agent-repo";
+import { cloneAgentInTransaction } from "@/lib/modules/agent/application/clone-agent";
 import { pickAgentConfig, redactAgentConfigForReader } from "@/lib/modules/agent/domain/config";
 import { isSystemAgent } from "@/lib/modules/agent/domain/system-agent";
 import { validateAgentConfig } from "@/lib/modules/agent/domain/validate-config";
-import { MysqlKnowledgeRepo } from "@/lib/modules/knowledge/adapters/mysql-knowledge-repo";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { agents, auth, knowledge, releases, audit, env, db } = getContainer();
+    const { agents, auth, knowledge, releases, audit, env, db, knowledgeWriterFactory } =
+      getContainer();
     const principal = await auth.resolveWeb(req);
     auth.assertCanManageAgents(principal);
     const subject = await auth.subjectOf(principal);
@@ -51,11 +50,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const clonedId = randomUUID().replace(/-/g, "").slice(0, 24);
     const includeKnowledge = body.includeKnowledge !== false;
 
-    const sourceDocs = includeKnowledge ? (await knowledge.list(id)).docs : [];
-
     const fullDocs: { title: string; content: string }[] = [];
     if (includeKnowledge) {
-      for (const item of sourceDocs) {
+      const listing = await knowledge.list(id);
+      for (const item of listing.docs) {
         const doc = await knowledge.get(item.id);
         if (!doc) {
           return Response.json(
@@ -67,10 +65,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       }
     }
 
-    const result = await db.transaction(async (tx) => {
-      const txAgents = new MysqlAgentRepo(tx as unknown as Db);
-      const saved = await txAgents.upsert({
-        id: clonedId,
+    const result = await cloneAgentInTransaction(
+      db,
+      {
+        clonedId,
         ownerId: subject.userId,
         name: clonedName,
         icon: published.icon,
@@ -81,24 +79,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           model: picked.model ?? "sonnet",
           maxTurns: picked.maxTurns ?? 20,
         },
-      });
-
-      let knowledgeCopied = 0;
-      if (fullDocs.length > 0) {
-        const txKnowledge = new MysqlKnowledgeRepo(tx as unknown as Db);
-        for (const doc of fullDocs) {
-          await txKnowledge.create({
-            id: randomUUID().replace(/-/g, "").slice(0, 24),
-            agentId: clonedId,
-            title: doc.title,
-            content: doc.content,
-          });
-          knowledgeCopied++;
-        }
-      }
-
-      return { agent: saved, knowledgeCopied };
-    });
+        docs: fullDocs,
+      },
+      knowledgeWriterFactory,
+    );
 
     await audit.record({
       actor: principal,
