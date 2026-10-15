@@ -69,6 +69,7 @@ export function splitVariables(
       secretEnv[`OWA_VAR_${def.name}`] = value;
     } else {
       plain[def.name] = value;
+      secretEnv[`OWA_VAR_${def.name}`] = value;
     }
   }
   return { plain, secrets, secretEnv };

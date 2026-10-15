@@ -7,7 +7,7 @@ const ctx = {
   runId: "r1",
   workspaceDir: "/tmp/ws",
   prompt: "test",
-  env: {},
+  env: {} as Record<string, string>,
   credentials: { baseUrl: "http://localhost", key: "k" },
 };
 
@@ -16,7 +16,14 @@ const baseCfg: AgentConfig = {
   model: "sonnet",
   maxTurns: 10,
   mcpServers: [
-    { type: "http", name: "api", url: "https://{{BASE_URL}}/v1", env: { TOKEN: "{{API_KEY}}" } },
+    { type: "http", name: "web-api", url: "https://{{BASE_URL}}/v1?token={{API_KEY}}" },
+    {
+      type: "stdio",
+      name: "local-tool",
+      command: "node",
+      args: ["tool.js"],
+      env: { API_KEY: "{{API_KEY}}", BASE_URL: "{{BASE_URL}}" },
+    },
   ],
   skillPackages: [
     {
@@ -47,17 +54,20 @@ describe("variable injection", () => {
     expect(skillContent).toContain("{{BASE_URL}}");
   });
 
-  it("secret variables ARE injected into MCP env values", () => {
+  it("secret and plain variables ARE injected into MCP configs", () => {
     const spec = buildSpec(baseCfg, ctx, {
       resolvedVariables: { API_KEY: "sk-secret-123", BASE_URL: "api.example.com" },
     });
 
-    const mcp = spec.mcpServers?.[0];
-    expect(mcp?.env?.TOKEN).toBe("sk-secret-123");
-    expect(mcp?.url).toContain("api.example.com");
+    const httpMcp = spec.mcpServers?.find((m) => m.name === "web-api");
+    expect(httpMcp?.url).toBe("https://api.example.com/v1?token=sk-secret-123");
+
+    const stdioMcp = spec.mcpServers?.find((m) => m.name === "local-tool");
+    expect(stdioMcp?.env?.API_KEY).toBe("sk-secret-123");
+    expect(stdioMcp?.env?.BASE_URL).toBe("api.example.com");
   });
 
-  it("splitVariables separates plain and secret, creates OWA_VAR_ env entries", () => {
+  it("splitVariables puts all declared vars in secretEnv with OWA_VAR_ prefix", () => {
     const { plain, secrets, secretEnv } = splitVariables(baseCfg.variables, {
       API_KEY: "sk-secret",
       BASE_URL: "example.com",
@@ -65,7 +75,10 @@ describe("variable injection", () => {
 
     expect(plain).toEqual({ BASE_URL: "example.com" });
     expect(secrets).toEqual({ API_KEY: "sk-secret" });
-    expect(secretEnv).toEqual({ OWA_VAR_API_KEY: "sk-secret" });
+    expect(secretEnv).toEqual({
+      OWA_VAR_API_KEY: "sk-secret",
+      OWA_VAR_BASE_URL: "example.com",
+    });
   });
 
   it("checkRequiredVariables reports missing required variables", () => {
@@ -106,11 +119,20 @@ describe("variable injection", () => {
     const { plain, secrets, secretEnv } = splitVariables(cfg.variables, staleValues);
     expect(plain).toEqual({ PLAIN_VAR: "visible" });
     expect(secrets).toEqual({});
-    expect(secretEnv).toEqual({});
-    expect(Object.keys(plain)).not.toContain("OLD_SECRET");
+    expect(Object.keys(secretEnv)).toEqual(["OWA_VAR_PLAIN_VAR"]);
+    expect(Object.values(secretEnv)).not.toContain("leaked-key");
 
     const spec = buildSpec(cfg, ctx, { resolvedVariables: staleValues });
     expect(spec.systemPrompt).not.toContain("leaked-key");
     expect(spec.systemPrompt).toContain("visible");
+  });
+
+  it("skill scripts can read both plain and secret variables via process.env.OWA_VAR_*", () => {
+    const { secretEnv } = splitVariables(baseCfg.variables, {
+      API_KEY: "sk-secret",
+      BASE_URL: "example.com",
+    });
+    expect(secretEnv.OWA_VAR_API_KEY).toBe("sk-secret");
+    expect(secretEnv.OWA_VAR_BASE_URL).toBe("example.com");
   });
 });
