@@ -35,6 +35,11 @@ const sourceAgent = {
         name: "mixed-secret-url",
         url: "https://{{BASE_URL}}/v1?token={{API_KEY}}&secret=hardcoded-author-key",
       },
+      {
+        type: "http" as const,
+        name: "mixed-param-value",
+        url: "https://{{BASE_URL}}/v1?token=author-secret-{{API_KEY}}",
+      },
       { type: "http" as const, name: "pure-url", url: "{{BASE_URL}}" },
       {
         type: "stdio" as const,
@@ -44,6 +49,7 @@ const sourceAgent = {
         env: {
           KEY: "{{API_KEY}}",
           AUTH: "Bearer {{API_KEY}}",
+          FAKE_BEARER: "AuthorSecret {{API_KEY}}",
           LEAK: "作者密钥-{{API_KEY}}",
           HOST: "hardcoded-secret",
         },
@@ -223,6 +229,11 @@ describe("POST /api/agents/{id}/clone", () => {
     expect(mixedSecretUrl?.url).toContain("{{API_KEY}}");
     expect(mixedSecretUrl?.url).not.toContain("hardcoded-author-key");
 
+    // URL param value mixing hardcoded and var ref → param removed (value not pure ref)
+    const mixedParamValue = mcpServers.find((m) => m.name === "mixed-param-value");
+    expect(mixedParamValue?.url).not.toContain("author-secret");
+    expect(mixedParamValue?.url).toContain("{{BASE_URL}}");
+
     // Pure var ref URL preserved
     const pureUrl = mcpServers.find((m) => m.name === "pure-url");
     expect(pureUrl?.url).toBe("{{BASE_URL}}");
@@ -230,6 +241,8 @@ describe("POST /api/agents/{id}/clone", () => {
     const stdioMcp = mcpServers.find((m) => m.name === "tool");
     expect(stdioMcp?.env?.KEY).toBe("{{API_KEY}}");
     expect(stdioMcp?.env?.AUTH).toBe("Bearer {{API_KEY}}");
+    // Non-Bearer prefix with var ref → redacted (AuthorSecret is not Bearer)
+    expect(stdioMcp?.env?.FAKE_BEARER).toBe("***");
     // Mixed with hardcoded secret → redacted
     expect(stdioMcp?.env?.LEAK).toBe("***");
     expect(stdioMcp?.env?.HOST).toBe("***");

@@ -140,12 +140,12 @@ function redactUrl(raw: string): string {
 
 const PURE_VAR_REF = /^\{\{[A-Za-z_][A-Za-z0-9_]*\}\}$/;
 const CONTAINS_VAR_REF = /\{\{[A-Za-z_][A-Za-z0-9_]*\}\}/;
-const SAFE_PREFIX_TEMPLATE = /^[A-Za-z]+\s+\{\{[A-Za-z_][A-Za-z0-9_]*\}\}$/;
+const BEARER_TEMPLATE = /^Bearer\s+\{\{[A-Za-z_][A-Za-z0-9_]*\}\}$/;
 const PLACEHOLDER_PREFIX = "__owa_var_";
 
 function cloneRedactValue(value: string): string {
   if (PURE_VAR_REF.test(value)) return value;
-  if (SAFE_PREFIX_TEMPLATE.test(value)) return value;
+  if (BEARER_TEMPLATE.test(value)) return value;
   return "***";
 }
 
@@ -168,10 +168,9 @@ function cloneRedactUrl(url: string): string {
   u.password = "";
   u.hash = "";
   const kept: [string, string][] = [];
-  const placeholderLower = /__owa_var_([a-z_][a-z0-9_]*)/g;
+  const purePlaceholder = /^__owa_var_[a-z_][a-z0-9_]*$/;
   for (const [k, v] of u.searchParams) {
-    placeholderLower.lastIndex = 0;
-    if (placeholderLower.test(v)) {
+    if (purePlaceholder.test(v)) {
       kept.push([k, v]);
     }
   }
