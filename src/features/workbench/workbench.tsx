@@ -30,6 +30,7 @@ import { SessionActions } from "./session-actions";
 import { activityOf, groupSessions, relativeTime } from "./session-groups";
 import { sendSteer } from "./steer-client";
 import type { AgentSummary, SessionSummary, Turn } from "./types";
+import { VariablePrompt } from "./variable-prompt";
 import {
   agentIdFromSearch,
   filterSessionsForAgent,
@@ -1237,6 +1238,7 @@ export function Workbench() {
                   同一个失败出现两遍。
                 */}
                 {/* 对话区域 */}
+                <VariablePrompt agentId={agentId} />
                 <div className="relative flex min-h-0 flex-1 flex-col">
                   {historyLoading ? (
                     <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
