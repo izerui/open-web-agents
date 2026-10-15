@@ -109,4 +109,18 @@ describe("知识库编辑", () => {
     });
     expect(r.status).toBe(404);
   });
+
+  it("PUT 空正文返回 400,原内容不变", async () => {
+    for (const empty of ["", "   "]) {
+      const r = await owner.put(`/api/agents/${agentId}/knowledge`, {
+        docId: docAId,
+        content: empty,
+      });
+      expect(r.status).toBe(400);
+    }
+    const after = await owner.get<{ content: string }>(
+      `/api/agents/${agentId}/knowledge/${docAId}`,
+    );
+    expect(after.body.content).toContain("哈希表");
+  });
 });

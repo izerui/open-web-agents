@@ -146,8 +146,8 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     if (body.title !== undefined && (typeof body.title !== "string" || !body.title.trim())) {
       return Response.json({ error: "title 不能为空" }, { status: 400 });
     }
-    if (body.content !== undefined && typeof body.content !== "string") {
-      return Response.json({ error: "content 必须是文本" }, { status: 400 });
+    if (body.content !== undefined && (typeof body.content !== "string" || !body.content.trim())) {
+      return Response.json({ error: "content 不能为空" }, { status: 400 });
     }
 
     const doc = await knowledge.get(body.docId);
