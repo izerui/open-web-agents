@@ -425,6 +425,52 @@ describe("AgentDesigner", () => {
     expect(savedUrl).toContain("tenant=school");
   });
 
+  it("consecutive edits: change path → save → change back → save again, both preserve credentials", async () => {
+    const targetMcp: Agent = {
+      ...target,
+      config: {
+        ...target.config,
+        mcpServers: [
+          {
+            name: "api",
+            type: "http",
+            url: "https://host.test/mcp?token=secret123",
+            env: { K: "env-val" },
+          },
+        ],
+      },
+    };
+    const h = await setup({ target: targetMcp });
+
+    // First edit: change path /mcp → /v2/mcp
+    let state = (await h.sessions.get("design"))?.designState;
+    if (!state?.draft.mcpServers?.[0]) throw new Error("no mcp");
+    state.draft.mcpServers[0] = {
+      ...state.draft.mcpServers[0],
+      url: "https://host.test/v2/mcp?***",
+    };
+    await h.sessions.update("design", { designState: state });
+
+    let view = await h.inspect();
+    let saved = await h.designer.apply(owner, "design", view.previewToken);
+    expect(saved.saved.config.mcpServers?.[0]?.url).toContain("/v2/mcp");
+    expect(saved.saved.config.mcpServers?.[0]?.url).toContain("token=secret123");
+    expect(saved.saved.config.mcpServers?.[0]?.env?.K).toBe("env-val");
+
+    // Second edit: change path back to /mcp
+    state = (await h.sessions.get("design"))?.designState;
+    if (!state?.draft.mcpServers?.[0]) throw new Error("no mcp after first save");
+    state.draft.mcpServers[0] = { ...state.draft.mcpServers[0], url: "https://host.test/mcp?***" };
+    await h.sessions.update("design", { designState: state });
+
+    view = await h.inspect();
+    saved = await h.designer.apply(owner, "design", view.previewToken);
+    expect(saved.saved.config.mcpServers?.[0]?.url).toContain("/mcp");
+    expect(saved.saved.config.mcpServers?.[0]?.url).not.toContain("/v2/mcp");
+    expect(saved.saved.config.mcpServers?.[0]?.url).toContain("token=secret123");
+    expect(saved.saved.config.mcpServers?.[0]?.env?.K).toBe("env-val");
+  });
+
   it("source content changes invalidate preview even when the draft revision has not changed", async () => {
     const h = await setup();
     await h.edit({ ...validDraft(), mcpRefs: [resourceRef(source.id, "mcp", "search")] }, [

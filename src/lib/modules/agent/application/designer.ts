@@ -277,7 +277,12 @@ export class AgentDesigner {
       await tx.sessions.update(id, {
         designTargetAgentId: agent.id,
         title: `设计:${agent.name}`,
-        designState: { ...state, baseHash: contentHash(snapshotOf(agent)) },
+        designState: {
+          ...state,
+          baseHash: contentHash(snapshotOf(agent)),
+          draft: draftOf(agent),
+          mcpBaseline: mcpBaselineOf(agent),
+        },
       });
       return {
         agent: { id: agent.id, name: agent.name },
