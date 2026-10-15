@@ -37,6 +37,7 @@ export const AUDIT_ACTIONS = [
   "webhook.redeliver",
   "eval.run",
   "capability.update",
+  "agent.clone",
   "billing.credit",
   "billing.package_update",
   "billing.order_create",

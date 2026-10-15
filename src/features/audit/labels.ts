@@ -37,6 +37,7 @@ export const ACTION_LABEL: Record<AuditAction, string> = {
   "webhook.redeliver": "重发回调",
   "eval.run": "运行评测",
   "capability.update": "更新模型能力与价目",
+  "agent.clone": "克隆智能体",
   "billing.credit": "人工发放积分",
   "billing.package_update": "更新积分套餐",
   "billing.order_create": "创建套餐订单",
@@ -147,6 +148,8 @@ export function describeAudit(e: AuditItem): string {
       return `对 ${s(d.target) === "draft" ? "草稿" : `v${s(d.target)}`} 跑 ${s(d.cases)} 个用例`;
     case "group.member_remove":
       return `「${s(d.group)}」移除 ${s(d.memberId)}`;
+    case "agent.clone":
+      return `克隆自「${s(d.sourceAgentId)}」v${s(d.sourceVersion)}`;
     default:
       return "";
   }
