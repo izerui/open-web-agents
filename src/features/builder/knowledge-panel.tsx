@@ -174,10 +174,12 @@ export function KnowledgePanel({
 
   async function saveEdit() {
     if (!detail || saving) return;
+    const targetDocId = detail.id;
+    const seq = detailSeqRef.current;
     setSaving(true);
     setMsg(null);
     try {
-      const body: Record<string, string> = { docId: detail.id };
+      const body: Record<string, string> = { docId: targetDocId };
       if (editTitle.trim() !== detail.title) body.title = editTitle.trim();
       if (editContent !== detail.content) body.content = editContent;
       if (!body.title && !body.content) {
@@ -189,15 +191,17 @@ export function KnowledgePanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      setDetail({
-        ...detail,
-        title: body.title ?? detail.title,
-        content: body.content ?? detail.content,
-      });
-      setEditMode(false);
+      if (seq === detailSeqRef.current && expandedId === targetDocId) {
+        setDetail({
+          ...detail,
+          title: body.title ?? detail.title,
+          content: body.content ?? detail.content,
+        });
+        setEditMode(false);
+      }
       await reload();
     } catch (error) {
-      setMsg(`保存失败:${errorText(error)}`);
+      if (seq === detailSeqRef.current) setMsg(`保存失败:${errorText(error)}`);
     } finally {
       setSaving(false);
     }
@@ -307,7 +311,7 @@ export function KnowledgePanel({
           {expandedId === d.id && (
             <div className="border-t border-border px-3 py-2">
               {loadingDetail && <p className="text-xs text-muted-foreground">加载正文中…</p>}
-              {detail && !editMode && (
+              {detail?.id === d.id && !editMode && (
                 <div className="space-y-2">
                   <pre className="max-h-60 overflow-auto whitespace-pre-wrap text-xs leading-relaxed">
                     {detail.content}
@@ -320,7 +324,7 @@ export function KnowledgePanel({
                   )}
                 </div>
               )}
-              {detail && editMode && (
+              {detail?.id === d.id && editMode && (
                 <div className="space-y-2">
                   <Input
                     value={editTitle}
