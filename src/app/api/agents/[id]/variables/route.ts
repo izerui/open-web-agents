@@ -1,6 +1,7 @@
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { agentAccessLevel, canInvokeAgent } from "@/lib/modules/access/domain/principal";
+import { VariableSizeExceeded } from "@/lib/modules/agent/adapters/mysql-variable-repo";
 import type { VariableDef } from "@/lib/modules/agent/domain/config";
 import { isSystemAgent } from "@/lib/modules/agent/domain/system-agent";
 
@@ -9,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { agents, auth, grants, variables, releases } = getContainer();
+    const { agents, auth, grants, variables, releases, sessions } = getContainer();
     const principal = await auth.resolveWeb(req);
     const subject = await auth.subjectOf(principal);
     const { id } = await params;
@@ -27,9 +28,21 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
     const query = new URL(req.url).searchParams;
     const versionParam = query.get("version");
+    const sessionParam = query.get("sessionId");
 
     let defs: VariableDef[];
-    if (versionParam !== null) {
+    if (sessionParam) {
+      const session = await sessions.get(sessionParam);
+      if (!session || session.agentId !== id) {
+        return Response.json({ error: "会话不存在或不属于此智能体" }, { status: 404 });
+      }
+      if (session.agentVersion != null) {
+        const ver = await releases.get(id, session.agentVersion);
+        defs = ver?.config.variables ?? [];
+      } else {
+        defs = agent.config.variables ?? [];
+      }
+    } else if (versionParam !== null) {
       const v = Number(versionParam);
       if (!Number.isInteger(v) || v < 1) {
         return Response.json({ error: "version 须为正整数" }, { status: 400 });
@@ -101,14 +114,12 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
       updates[key] = val.trim() ? val : null;
     }
 
-    const merged = await variables.merge(id, subject.userId, updates);
-
-    const totalSize = JSON.stringify(merged).length;
-    if (totalSize > 500_000) {
-      return Response.json({ error: "变量总数据量不能超过 500KB" }, { status: 400 });
-    }
+    await variables.merge(id, subject.userId, updates);
     return Response.json({ ok: true });
   } catch (err) {
+    if (err instanceof VariableSizeExceeded) {
+      return Response.json({ error: err.message }, { status: 400 });
+    }
     const r = authErrorResponse(err);
     if (r) return r;
     throw err;

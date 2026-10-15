@@ -14,6 +14,15 @@ export interface VariableRepo {
   delete(agentId: string, userId: string): Promise<void>;
 }
 
+export class VariableSizeExceeded extends Error {
+  constructor() {
+    super("变量总数据量不能超过 500KB");
+    this.name = "VariableSizeExceeded";
+  }
+}
+
+const MAX_TOTAL_SIZE = 500_000;
+
 export class MysqlVariableRepo implements VariableRepo {
   constructor(
     private readonly db: Db,
@@ -72,7 +81,10 @@ export class MysqlVariableRepo implements VariableRepo {
         }
       }
 
-      const enc = this.secrets.encrypt(JSON.stringify(merged));
+      const json = JSON.stringify(merged);
+      if (json.length > MAX_TOTAL_SIZE) throw new VariableSizeExceeded();
+
+      const enc = this.secrets.encrypt(json);
       const now = new Date();
       if (row) {
         await tx

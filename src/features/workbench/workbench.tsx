@@ -1239,9 +1239,9 @@ export function Workbench() {
                 */}
                 {/* 对话区域 */}
                 <VariablePrompt
-                  key={agentId}
+                  key={`${agentId}-${sessionId ?? ""}`}
                   agentId={agentId}
-                  agentVersion={current?.publishedVersion}
+                  sessionId={sessionId}
                 />
                 <div className="relative flex min-h-0 flex-1 flex-col">
                   {historyLoading ? (
