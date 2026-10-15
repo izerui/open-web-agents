@@ -32,8 +32,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
     let defs: VariableDef[];
     if (sessionParam) {
+      await auth.assertSessionAccess(principal, sessionParam);
       const session = await sessions.get(sessionParam);
-      if (!session || session.agentId !== id) {
+      if (!session || session.status === "deleted" || session.agentId !== id) {
         return Response.json({ error: "会话不存在或不属于此智能体" }, { status: 404 });
       }
       if (session.agentVersion != null) {
