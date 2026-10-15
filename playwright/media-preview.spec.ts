@@ -152,7 +152,7 @@ test.describe("视频/PDF/音频预览", () => {
     expect(timeAfterResume).toBeGreaterThan(2.1);
   });
 
-  test("PDF: 视觉回归确认页面渲染", async ({ page, context }) => {
+  test("PDF: 视觉回归确认页面文字渲染", async ({ page, context }) => {
     await register(context, "pdf-render");
     const sessionId = await createSession(context);
     await uploadBuffer(context, sessionId, fs.readFileSync(fixtures.pdf), "render-test.pdf");
@@ -165,9 +165,60 @@ test.describe("视频/PDF/音频预览", () => {
     await expect(pdfFrame).toBeVisible({ timeout: 5_000 });
     await page.waitForTimeout(3000);
 
-    await expect(pdfFrame).toHaveScreenshot("pdf-preview-baseline.png", {
-      maxDiffPixelRatio: 0.05,
+    // 只截取包含文字的顶部区域（约 60px 高），文字消失就会超出容差
+    const box = await pdfFrame.boundingBox();
+    expect(box).toBeTruthy();
+    await expect(page).toHaveScreenshot("pdf-text-region.png", {
+      clip: { x: box!.x, y: box!.y, width: box!.width, height: 60 },
+      maxDiffPixels: 100,
     });
+  });
+
+  test("PDF 负向验证: 空白 PDF 不能通过文字基准", async ({ page, context }) => {
+    await register(context, "pdf-neg");
+    const sessionId = await createSession(context);
+
+    // 生成一个没有文字的空白 PDF
+    const blankContent = "BT ET";
+    const blankHeader = "%PDF-1.4\n";
+    const blankObjs = [
+      "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n",
+      "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n",
+      "3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R/Contents 4 0 R>>endobj\n",
+      `4 0 obj<</Length ${blankContent.length}>>stream\n${blankContent}\nendstream\nendobj\n`,
+    ];
+    const blankObjOffsets: number[] = [];
+    let bpos = blankHeader.length;
+    for (const obj of blankObjs) {
+      blankObjOffsets.push(bpos);
+      bpos += obj.length;
+    }
+    const blankBody = blankHeader + blankObjs.join("");
+    const blankXrefPos = blankBody.length;
+    let blankXref = "xref\n0 5\n0000000000 65535 f \n";
+    for (const o of blankObjOffsets) blankXref += `${String(o).padStart(10, "0")} 00000 n \n`;
+    blankXref += `trailer<</Size 5/Root 1 0 R>>\nstartxref\n${blankXrefPos}\n%%EOF\n`;
+    const blankPdf = Buffer.from(blankBody + blankXref);
+
+    await uploadBuffer(context, sessionId, blankPdf, "blank-test.pdf");
+    await page.goto(`${BASE}/?session=${sessionId}`);
+    await expect(page.getByText("blank-test.pdf")).toBeVisible({ timeout: 15_000 });
+    await page.getByText("blank-test.pdf").click();
+
+    const pdfFrame = page.locator('iframe[title*="blank-test.pdf"]');
+    await expect(pdfFrame).toBeVisible({ timeout: 5_000 });
+    await page.waitForTimeout(3000);
+
+    const box = await pdfFrame.boundingBox();
+    expect(box).toBeTruthy();
+    // 空白 PDF 应该无法通过有文字的基准
+    await expect(
+      expect(page).toHaveScreenshot("pdf-text-region.png", {
+        clip: { x: box!.x, y: box!.y, width: box!.width, height: 60 },
+        maxDiffPixels: 100,
+        timeout: 3_000,
+      }),
+    ).rejects.toThrow();
   });
 
   test("音频: duration 有效", async ({ page, context }) => {
