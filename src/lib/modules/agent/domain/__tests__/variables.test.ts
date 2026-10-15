@@ -94,4 +94,23 @@ describe("variable injection", () => {
     const spec = buildSpec(cfg, ctx, { resolvedVariables: { FOO: "replaced" } });
     expect(spec.systemPrompt).toBe("{{FOO}} bar");
   });
+
+  it("deleted secret definition does not leak old value into prompt or environment", () => {
+    const cfg: AgentConfig = {
+      systemPrompt: "hello {{PLAIN_VAR}}",
+      model: "sonnet",
+      maxTurns: 5,
+      variables: [{ name: "PLAIN_VAR", description: "保留的", required: false, secret: false }],
+    };
+    const staleValues = { PLAIN_VAR: "visible", OLD_SECRET: "leaked-key" };
+    const { plain, secrets, secretEnv } = splitVariables(cfg.variables, staleValues);
+    expect(plain).toEqual({ PLAIN_VAR: "visible" });
+    expect(secrets).toEqual({});
+    expect(secretEnv).toEqual({});
+    expect(Object.keys(plain)).not.toContain("OLD_SECRET");
+
+    const spec = buildSpec(cfg, ctx, { resolvedVariables: staleValues });
+    expect(spec.systemPrompt).not.toContain("leaked-key");
+    expect(spec.systemPrompt).toContain("visible");
+  });
 });

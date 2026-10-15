@@ -61,13 +61,14 @@ export function splitVariables(
   const secrets: Record<string, string> = {};
   const secretEnv: Record<string, string> = {};
   if (!defs?.length) return { plain, secrets, secretEnv };
-  const secretNames = new Set(defs.filter((d) => d.secret).map((d) => d.name));
-  for (const [name, value] of Object.entries(values)) {
-    if (secretNames.has(name)) {
-      secrets[name] = value;
-      secretEnv[`OWA_VAR_${name}`] = value;
+  for (const def of defs) {
+    const value = values[def.name];
+    if (value === undefined) continue;
+    if (def.secret) {
+      secrets[def.name] = value;
+      secretEnv[`OWA_VAR_${def.name}`] = value;
     } else {
-      plain[name] = value;
+      plain[def.name] = value;
     }
   }
   return { plain, secrets, secretEnv };

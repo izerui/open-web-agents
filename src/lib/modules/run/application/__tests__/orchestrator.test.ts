@@ -391,4 +391,58 @@ describe("RunOrchestrator:工作目录已被清理", () => {
     expect(existedAtRun).toBe(true);
     await fs.rm(root, { recursive: true, force: true });
   });
+
+  it("secret variables do not leak between sequential runs via shared baseEnv", async () => {
+    const ctxCaptures: RunContext[] = [];
+    const engine: EnginePort = {
+      async run(_spec, ctx, _onEvent, _signal) {
+        ctxCaptures.push(ctx);
+        return { status: "success", summary: "ok", sessionId: "sdk_x" };
+      },
+    };
+    const sessions = new InMemorySessionRepo();
+    const agents = new InMemoryAgentRepo([
+      {
+        id: "a-vars",
+        ownerId: "u1",
+        name: "V",
+        config: {
+          systemPrompt: "test",
+          model: "sonnet" as const,
+          variables: [{ name: "TOKEN", description: "", required: false, secret: true }],
+        },
+      },
+    ]);
+    await sessions.create({
+      id: "s-a",
+      agentId: "a-vars",
+      workspaceDir: "/ws/sa",
+      billingUserId: "userA",
+    });
+    await sessions.create({
+      id: "s-b",
+      agentId: "a-vars",
+      workspaceDir: "/ws/sb",
+      billingUserId: "userB",
+    });
+    const baseEnv = { SHARED: "base" };
+    const orch = new RunOrchestrator({
+      sessions,
+      agents,
+      engine,
+      bus: new InMemoryBus(),
+      platformCredentials: PLATFORM,
+      baseEnv,
+      resolveVariables: async (_agentId, userId) =>
+        userId === "userA" ? ({ TOKEN: "secret-A" } as Record<string, string>) : {},
+    });
+    const signal = new AbortController().signal;
+
+    await orch.execute({ sessionId: "s-a", runId: "r-a", prompt: "go" }, signal);
+    await orch.execute({ sessionId: "s-b", runId: "r-b", prompt: "go" }, signal);
+
+    expect(ctxCaptures[0]?.env.OWA_VAR_TOKEN).toBe("secret-A");
+    expect(ctxCaptures[1]?.env.OWA_VAR_TOKEN).toBeUndefined();
+    expect(baseEnv).toEqual({ SHARED: "base" });
+  });
 });

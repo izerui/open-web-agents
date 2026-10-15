@@ -175,7 +175,7 @@ export class RunOrchestrator {
             ? (config.unattendedApproval ?? "deny")
             : ("ask" as const),
       credentials,
-      env: this.deps.baseEnv ?? {},
+      env: { ...(this.deps.baseEnv ?? {}) },
     };
     // 知识检索:命中才注入。检索挂了就当没有知识库,不牵连整轮运行
     const knowledgeContext = this.deps.retrieveKnowledge
