@@ -140,41 +140,53 @@ function redactUrl(raw: string): string {
 
 const PURE_VAR_REF = /^\{\{[A-Za-z_][A-Za-z0-9_]*\}\}$/;
 const CONTAINS_VAR_REF = /\{\{[A-Za-z_][A-Za-z0-9_]*\}\}/;
+const SAFE_PREFIX_TEMPLATE = /^[A-Za-z]+\s+\{\{[A-Za-z_][A-Za-z0-9_]*\}\}$/;
+const PLACEHOLDER_PREFIX = "__owa_var_";
 
-/**
- * 克隆 env 值脱敏：含变量引用的保留（包括混合模板如 "Bearer {{KEY}}"），
- * 纯硬编码脱敏为 ***。
- */
-function cloneRedactEnvValue(value: string): string {
-  return CONTAINS_VAR_REF.test(value) ? value : "***";
+function cloneRedactValue(value: string): string {
+  if (PURE_VAR_REF.test(value)) return value;
+  if (SAFE_PREFIX_TEMPLATE.test(value)) return value;
+  return "***";
 }
 
-/**
- * 克隆 URL 模板脱敏：
- * - 纯变量引用 {{URL}} → 保留
- * - 不含变量引用 → 常规脱敏
- * - 含变量引用的模板 → 保留协议/主机/路径（含变量引用），
- *   查询参数逐个检查：含变量引用的保留，纯硬编码的移除
- */
 function cloneRedactUrl(url: string): string {
   if (PURE_VAR_REF.test(url)) return url;
   if (!CONTAINS_VAR_REF.test(url)) return redactUrl(url);
-
-  const qIdx = url.indexOf("?");
-  if (qIdx === -1) return url;
-
-  const base = url.slice(0, qIdx);
-  const query = url.slice(qIdx + 1);
-  const pairs = query.split("&").filter((p) => CONTAINS_VAR_REF.test(p));
-  return pairs.length > 0 ? `${base}?${pairs.join("&")}` : base;
+  const varMap = new Map<string, string>();
+  const expanded = url.replace(/\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}/g, (_, name: string) => {
+    const lower = name.toLowerCase();
+    varMap.set(lower, name);
+    return `${PLACEHOLDER_PREFIX}${lower}`;
+  });
+  let u: URL;
+  try {
+    u = new URL(expanded);
+  } catch {
+    return "***";
+  }
+  u.username = "";
+  u.password = "";
+  u.hash = "";
+  const kept: [string, string][] = [];
+  const placeholderLower = /__owa_var_([a-z_][a-z0-9_]*)/g;
+  for (const [k, v] of u.searchParams) {
+    placeholderLower.lastIndex = 0;
+    if (placeholderLower.test(v)) {
+      kept.push([k, v]);
+    }
+  }
+  u.search = "";
+  let result = u.toString();
+  if (kept.length > 0) {
+    const qs = kept.map(([k, v]) => `${k}=${v}`).join("&");
+    result += `?${qs}`;
+  }
+  return result.replace(/__owa_var_([a-z_][a-z0-9_]*)/g, (_, lower: string) => {
+    const original = varMap.get(lower) ?? lower;
+    return `{{${original}}}`;
+  });
 }
 
-/**
- * 克隆专用脱敏：
- * - env 值含变量引用 → 保留（含混合模板）；纯硬编码 → ***
- * - URL 含变量引用 → 保留引用部分，清除硬编码查询参数
- * - args 含变量引用 → 保留；纯硬编码 → ***
- */
 export function redactAgentConfigForClone(cfg: AgentConfig): AgentConfig {
   const { escapeHatch: _hatch, ...rest } = cfg;
   return {
@@ -184,20 +196,18 @@ export function redactAgentConfigForClone(cfg: AgentConfig): AgentConfig {
       ...(m.env
         ? {
             env: Object.fromEntries(
-              Object.entries(m.env).map(([k, v]) => [k, cloneRedactEnvValue(v)]),
+              Object.entries(m.env).map(([k, v]) => [k, cloneRedactValue(v)]),
             ),
           }
         : {}),
       ...(m.url !== undefined ? { url: cloneRedactUrl(m.url) } : {}),
-      ...(m.args ? { args: m.args.map((a) => (CONTAINS_VAR_REF.test(a) ? a : "***")) } : {}),
+      ...(m.args ? { args: m.args.map((a) => cloneRedactValue(a)) } : {}),
     })),
   };
 }
 
-/**
- * 含 {{变量名}} 的 URL 模板校验：先替换占位符为合法 URL 值再校验格式。
- */
 export function checkUrlTemplate(raw: string): string | null {
+  if (PURE_VAR_REF.test(raw)) return null;
   const expanded = raw.replace(/\{\{[A-Za-z_][A-Za-z0-9_]*\}\}/g, "placeholder");
   let u: URL;
   try {

@@ -41,7 +41,12 @@ const sourceAgent = {
         name: "tool",
         command: "node",
         args: ["run.js"],
-        env: { KEY: "{{API_KEY}}", MIXED: "Bearer {{API_KEY}}", HOST: "hardcoded-secret" },
+        env: {
+          KEY: "{{API_KEY}}",
+          AUTH: "Bearer {{API_KEY}}",
+          LEAK: "作者密钥-{{API_KEY}}",
+          HOST: "hardcoded-secret",
+        },
       },
     ],
     starters: ["Hello"],
@@ -223,11 +228,10 @@ describe("POST /api/agents/{id}/clone", () => {
     expect(pureUrl?.url).toBe("{{BASE_URL}}");
 
     const stdioMcp = mcpServers.find((m) => m.name === "tool");
-    // Pure var ref preserved
     expect(stdioMcp?.env?.KEY).toBe("{{API_KEY}}");
-    // Mixed template (contains var ref) preserved
-    expect(stdioMcp?.env?.MIXED).toBe("Bearer {{API_KEY}}");
-    // Pure hardcoded redacted
+    expect(stdioMcp?.env?.AUTH).toBe("Bearer {{API_KEY}}");
+    // Mixed with hardcoded secret → redacted
+    expect(stdioMcp?.env?.LEAK).toBe("***");
     expect(stdioMcp?.env?.HOST).toBe("***");
 
     expect((config.variables as unknown[])?.length).toBe(2);
