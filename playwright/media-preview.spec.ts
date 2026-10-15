@@ -25,26 +25,26 @@ test.beforeAll(() => {
 
   fixtures.pdf = path.join(dir, "test.pdf");
   const content = "BT /F1 24 Tf 72 720 Td (OWA Preview Test) Tj ET";
-  const pdfParts = [
-    "%PDF-1.4\n",
+  const header = "%PDF-1.4\n";
+  const objects = [
     "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n",
     "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n",
     "3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R/Resources<</Font<</F1 4 0 R>>>>/Contents 5 0 R>>endobj\n",
     "4 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\n",
     `5 0 obj<</Length ${content.length}>>stream\n${content}\nendstream\nendobj\n`,
   ];
-  const bodyBuf = Buffer.from(pdfParts.join(""));
-  const offsets: number[] = [];
-  let pos = 0;
-  for (const part of pdfParts) {
-    offsets.push(pos);
-    pos += part.length;
+  const objOffsets: number[] = [];
+  let pos = header.length;
+  for (const obj of objects) {
+    objOffsets.push(pos);
+    pos += obj.length;
   }
-  const xrefPos = bodyBuf.length;
-  let xref = `xref\n0 ${pdfParts.length + 1}\n0000000000 65535 f \n`;
-  for (const o of offsets) xref += `${String(o).padStart(10, "0")} 00000 n \n`;
-  xref += `trailer<</Size ${pdfParts.length + 1}/Root 1 0 R>>\nstartxref\n${xrefPos}\n%%EOF\n`;
-  fs.writeFileSync(fixtures.pdf, Buffer.concat([bodyBuf, Buffer.from(xref)]));
+  const body = header + objects.join("");
+  const xrefPos = body.length;
+  let xref = "xref\n0 6\n0000000000 65535 f \n";
+  for (const o of objOffsets) xref += `${String(o).padStart(10, "0")} 00000 n \n`;
+  xref += `trailer<</Size 6/Root 1 0 R>>\nstartxref\n${xrefPos}\n%%EOF\n`;
+  fs.writeFileSync(fixtures.pdf, body + xref);
 
   fixtures.wav = path.join(dir, "test.wav");
   const sampleRate = 8000;
@@ -152,7 +152,7 @@ test.describe("视频/PDF/音频预览", () => {
     expect(timeAfterResume).toBeGreaterThan(2.1);
   });
 
-  test("PDF: 截图确认有内容渲染(非空白)", async ({ page, context }) => {
+  test("PDF: 截图确认有内容渲染(非空白)", async ({ page, context }, testInfo) => {
     await register(context, "pdf-render");
     const sessionId = await createSession(context);
     await uploadBuffer(context, sessionId, fs.readFileSync(fixtures.pdf), "render-test.pdf");
@@ -163,16 +163,38 @@ test.describe("视频/PDF/音频预览", () => {
 
     const pdfFrame = page.locator('iframe[title*="render-test.pdf"]');
     await expect(pdfFrame).toBeVisible({ timeout: 5_000 });
-    // 等 iframe 加载内容
-    await page.waitForTimeout(2000);
+    // 等 PDF 查看器渲染
+    await page.waitForTimeout(3000);
 
-    // 截取 iframe 区域的截图
+    // 截取 iframe 区域截图并保存为测试附件
     const screenshot = await pdfFrame.screenshot();
-    expect(screenshot.length).toBeGreaterThan(0);
+    await testInfo.attach("pdf-preview", { body: screenshot, contentType: "image/png" });
 
-    // 检查截图不是纯色(空白)——至少有一些像素变化
-    // 纯白图片压缩后极小(< 1KB),有内容的 PDF 截图会大得多
-    expect(screenshot.length).toBeGreaterThan(2000);
+    // 解析 PNG 像素数据，确认存在深色像素（文字渲染）
+    // PNG raw 数据中扫描非白色像素：对 screenshot buffer 做简单分析
+    // Playwright screenshot 是 PNG，用 page.evaluate 读取像素更可靠
+    const hasContent = await page.evaluate(async (pngBase64: string) => {
+      const img = new Image();
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = reject;
+        img.src = `data:image/png;base64,${pngBase64}`;
+      });
+      const canvas = document.createElement("canvas");
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, 0, 0);
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      let darkPixels = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i]! < 100 && data[i + 1]! < 100 && data[i + 2]! < 100) darkPixels++;
+      }
+      return darkPixels;
+    }, screenshot.toString("base64"));
+
+    // "OWA Preview Test" 以 24pt Helvetica 渲染，应该产生数百个深色像素
+    expect(hasContent).toBeGreaterThan(50);
   });
 
   test("音频: duration 有效", async ({ page, context }) => {
