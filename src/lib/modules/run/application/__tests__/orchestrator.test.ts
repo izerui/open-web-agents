@@ -492,4 +492,93 @@ describe("RunOrchestrator:工作目录已被清理", () => {
     ).rejects.toThrow("decryption failed");
     expect(engineCalled).toBe(false);
   });
+
+  it("AI-generated skill gets variables via env, skill file has no secrets, MCP URL substituted", async () => {
+    let capturedSpec: AgentSpec | undefined;
+    let capturedCtx: RunContext | undefined;
+    const engine: EnginePort = {
+      async run(spec, ctx, _onEvent, _signal) {
+        capturedSpec = spec;
+        capturedCtx = ctx;
+        return { status: "success", summary: "ok", sessionId: "sdk_y" };
+      },
+    };
+    const sessions = new InMemorySessionRepo();
+    const agents = new InMemoryAgentRepo([
+      {
+        id: "a-gen",
+        ownerId: "u1",
+        name: "Generated",
+        config: {
+          systemPrompt: "Serve at {{BASE_URL}}. Secret is in env.",
+          model: "sonnet" as const,
+          maxTurns: 5,
+          skillPackages: [
+            {
+              name: "fetcher",
+              description: "Fetch data",
+              files: {
+                "SKILL.md":
+                  "# Fetcher\nRead API key from process.env.OWA_VAR_API_KEY.\nEndpoint from process.env.OWA_VAR_BASE_URL.",
+              },
+            },
+          ],
+          mcpServers: [
+            {
+              type: "http" as const,
+              name: "api",
+              url: "https://{{BASE_URL}}/v1?token={{API_KEY}}",
+            },
+          ],
+          variables: [
+            { name: "API_KEY", description: "密钥", required: true, secret: true },
+            { name: "BASE_URL", description: "地址", required: true, secret: false },
+          ],
+        },
+      },
+    ]);
+    await sessions.create({
+      id: "s-gen",
+      agentId: "a-gen",
+      workspaceDir: "/ws/sg",
+      billingUserId: "userGen",
+    });
+    const orch = new RunOrchestrator({
+      sessions,
+      agents,
+      engine,
+      bus: new InMemoryBus(),
+      platformCredentials: PLATFORM,
+      resolveVariables: async () =>
+        ({ API_KEY: "sk-real-secret", BASE_URL: "api.example.com" }) as Record<string, string>,
+    });
+
+    await orch.execute(
+      { sessionId: "s-gen", runId: "r-gen", prompt: "go" },
+      new AbortController().signal,
+    );
+
+    // Engine was called
+    expect(capturedSpec).toBeDefined();
+    expect(capturedCtx).toBeDefined();
+
+    // Skill file doesn't contain actual secret
+    const skillContent = capturedSpec?.skillPackages?.[0]?.files["SKILL.md"] ?? "";
+    expect(skillContent).toContain("OWA_VAR_API_KEY");
+    expect(skillContent).not.toContain("sk-real-secret");
+
+    // Environment variables carry actual values for skill scripts
+    expect(capturedCtx?.env.OWA_VAR_API_KEY).toBe("sk-real-secret");
+    expect(capturedCtx?.env.OWA_VAR_BASE_URL).toBe("api.example.com");
+
+    // MCP URL is substituted with actual values
+    expect(capturedSpec?.mcpServers?.[0]?.url).toBe(
+      "https://api.example.com/v1?token=sk-real-secret",
+    );
+
+    // System prompt: plain var substituted, secret not present (never was in prompt)
+    expect(capturedSpec?.systemPrompt).toContain("api.example.com");
+    expect(capturedSpec?.systemPrompt).not.toContain("sk-real-secret");
+    expect(capturedSpec?.systemPrompt).not.toContain("{{BASE_URL}}");
+  });
 });
