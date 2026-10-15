@@ -51,7 +51,7 @@ export const MICRO_CREDITS = 1_000_000n;
 const INTEGER = /^(0|[1-9]\d{0,29})$/;
 
 export function unitsOf(raw: unknown, field: string): bigint {
-  if (typeof raw !== "string" || !INTEGER.test(raw)) {
+  if (typeof raw !== "string" || raw.trim() !== raw || !INTEGER.test(raw)) {
     throw new Error(`${field} 须为最多 30 位的非负整数字符串`);
   }
   return BigInt(raw);
@@ -60,7 +60,11 @@ export function unitsOf(raw: unknown, field: string): bigint {
 export function validateCapability(raw: unknown): CapabilityDefinition {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("能力定义必须是对象");
   const v = raw as Record<string, unknown>;
-  if (typeof v.id !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(v.id)) {
+  if (
+    typeof v.id !== "string" ||
+    v.id.trim() !== v.id ||
+    !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(v.id)
+  ) {
     throw new Error("ID 须为最多 64 个小写字母、数字、下划线或连字符");
   }
   if (typeof v.name !== "string" || !v.name.trim() || v.name.length > 120)

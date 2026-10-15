@@ -38,6 +38,10 @@ export const AUDIT_ACTIONS = [
   "eval.run",
   "capability.update",
   "billing.credit",
+  "billing.package_update",
+  "billing.order_create",
+  "billing.order_cancel",
+  "billing.order_confirm",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

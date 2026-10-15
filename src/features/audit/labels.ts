@@ -38,6 +38,10 @@ export const ACTION_LABEL: Record<AuditAction, string> = {
   "eval.run": "运行评测",
   "capability.update": "更新模型能力与价目",
   "billing.credit": "人工发放积分",
+  "billing.package_update": "更新积分套餐",
+  "billing.order_create": "创建套餐订单",
+  "billing.order_cancel": "取消套餐订单",
+  "billing.order_confirm": "人工确认套餐入账",
 };
 
 /** 需要特别留意的动作:界面上用醒目颜色标出。 */

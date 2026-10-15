@@ -28,6 +28,7 @@ describe("capability catalog", () => {
     expect(() => validateCapability({ ...llm, kind: "video" })).toThrow();
   });
   it("requires explicit prices before enabling a model", () => {
+    expect(() => validateCapability({ ...llm, id: "model\n" })).toThrow();
     expect(() => validateCapability({ ...llm, rates: [] })).toThrow(/价目/);
     expect(validateCapability({ ...llm, enabled: false, rates: [] }).enabled).toBe(false);
   });
@@ -40,6 +41,7 @@ describe("capability catalog", () => {
       { units: "1", microCredits: "-1" },
       { units: "1.5", microCredits: "1" },
       { units: "1", microCredits: "1e9" },
+      { units: "1", microCredits: "1\n" },
     ]) {
       expect(() =>
         validateCapability({ ...llm, rates: [{ meter: "input_token", ...bad }] }),

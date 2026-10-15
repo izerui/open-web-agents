@@ -24,6 +24,7 @@ import {
   Cpu,
   History,
   Lock,
+  Package,
   ScrollText,
   ShieldCheck,
   Store,
@@ -48,6 +49,7 @@ export const PERSONAL_NAV = [
   { href: "/settings/audit", label: "审计日志", icon: ScrollText },
   { href: "/settings/usage", label: "用量与成本", icon: BarChart3 },
   { href: "/settings/billing", label: "积分账户", icon: Wallet },
+  { href: "/settings/packages", label: "积分套餐", icon: Package },
   { href: "/settings/credentials", label: "平台算力", icon: Cpu },
   { href: "/settings/account", label: "账号安全", icon: Lock },
 ] as const;
@@ -62,6 +64,7 @@ export const ADMIN_NAV = [
   { href: "/admin/accounts", label: "账号管理", icon: Users },
   { href: "/admin/capabilities", label: "模型与价目", icon: Cpu },
   { href: "/admin/billing", label: "积分管理", icon: Wallet },
+  { href: "/admin/packages", label: "套餐与订单", icon: Package },
   { href: "/admin/usage", label: "全平台用量", icon: BarChart3 },
 ] as const;
 

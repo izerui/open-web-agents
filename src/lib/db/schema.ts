@@ -603,3 +603,52 @@ export const billingLedger = mysqlTable(
     byAccount: index("idx_billing_ledger_account").on(t.accountKey, t.createdAt, t.id),
   }),
 );
+
+/** 永久积分包当前定义;每次修改另存不可变版本。 */
+export const creditPackages = mysqlTable("credit_packages", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  definition: json("definition").notNull(),
+  enabled: int("enabled").notNull(),
+  version: int("version").notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+});
+
+export const creditPackageVersions = mysqlTable(
+  "credit_package_versions",
+  {
+    packageId: varchar("package_id", { length: 64 }).notNull(),
+    version: int("version").notNull(),
+    definition: json("definition").notNull(),
+    createdBy: varchar("created_by", { length: 36 }).notNull(),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.packageId, t.version] }) }),
+);
+
+/** 人工确认发放订单。价格和积分创建时冻结,不记录任何支付成功状态。 */
+export const creditOrders = mysqlTable(
+  "credit_orders",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    accountKey: varchar("account_key", { length: 64 }).notNull(),
+    accountId: varchar("account_id", { length: 36 }).notNull(),
+    operationKey: varchar("operation_key", { length: 64 }).notNull(),
+    packageId: varchar("package_id", { length: 64 }).notNull(),
+    packageVersion: int("package_version").notNull(),
+    packageName: varchar("package_name", { length: 120 }).notNull(),
+    creditsMicro: decimal("credits_micro", { precision: 30, scale: 0 }).notNull(),
+    priceMinor: decimal("price_minor", { precision: 18, scale: 0 }).notNull(),
+    currency: varchar("currency", { length: 3 }).notNull(),
+    status: varchar("status", { length: 16 }).notNull(),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    creditedAt: bigint("credited_at", { mode: "number" }),
+    creditedBy: varchar("credited_by", { length: 36 }),
+    ledgerId: varchar("ledger_id", { length: 36 }),
+    confirmationReason: varchar("confirmation_reason", { length: 512 }),
+  },
+  (t) => ({
+    operation: uniqueIndex("uniq_credit_orders_operation").on(t.operationKey),
+    byAccount: index("idx_credit_orders_account").on(t.accountKey, t.createdAt, t.id),
+    byTime: index("idx_credit_orders_time").on(t.createdAt, t.id),
+  }),
+);
