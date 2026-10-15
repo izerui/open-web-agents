@@ -7,12 +7,12 @@ import { chunkText, retrieve } from "../../domain/retrieval";
 class FakeKnowledgeRepo {
   private docs = new Map<
     string,
-    { agentId: string; title: string; content: string; updatedAt?: number }
+    { agentId: string; title: string; content: string; revision: number }
   >();
 
   async create(agentId: string, title: string, content: string) {
     const id = randomUUID().slice(0, 24);
-    this.docs.set(id, { agentId, title, content });
+    this.docs.set(id, { agentId, title, content, revision: 0 });
     return id;
   }
 
@@ -21,13 +21,13 @@ class FakeKnowledgeRepo {
     if (!doc) return;
     if (data.title !== undefined) doc.title = data.title;
     if (data.content !== undefined) doc.content = data.content;
-    doc.updatedAt = Date.now();
+    doc.revision += 1;
   }
 
   async signatureOf(agentId: string): Promise<string> {
-    const docs = [...this.docs.values()].filter((d) => d.agentId === agentId);
-    const latest = Math.max(0, ...docs.map((d) => d.updatedAt ?? 0));
-    return `${docs.length}:${latest}:${[...this.docs.keys()].length}`;
+    const docs = [...this.docs.entries()].filter(([, d]) => d.agentId === agentId);
+    const totalRev = docs.reduce((s, [, d]) => s + d.revision, 0);
+    return `${docs.length}:${totalRev}:${docs.length}`;
   }
 
   async chunksOf(agentId: string): Promise<Chunk[]> {

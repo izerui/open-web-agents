@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { cn } from "@/lib/utils";
-import { FileText, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, FileText, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 interface Doc {
@@ -13,13 +13,18 @@ interface Doc {
   title: string;
   createdAt: number;
   chars: number;
-  /** 是否参与检索(超出上限的旧文档不参与) */
   searchable: boolean;
 }
 
 interface Usage {
   usage: { docs: number; chars: number };
   limits: { maxDocs: number; maxDocChars: number; maxTotalChars: number };
+}
+
+interface DocDetail {
+  id: string;
+  title: string;
+  content: string;
 }
 
 /**
@@ -44,6 +49,14 @@ export function KnowledgePanel({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const reloadSeqRef = useRef(0);
+
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<DocDetail | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editContent, setEditContent] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const reload = useCallback(async () => {
     const seq = ++reloadSeqRef.current;
@@ -75,6 +88,9 @@ export function KnowledgePanel({
     setContent("");
     setMsg(null);
     setDenied(false);
+    setExpandedId(null);
+    setDetail(null);
+    setEditMode(false);
     void reload();
   }, [reload]);
 
@@ -106,11 +122,78 @@ export function KnowledgePanel({
       await fetchJson(`/api/agents/${agentId}/knowledge?docId=${encodeURIComponent(docId)}`, {
         method: "DELETE",
       });
+      if (expandedId === docId) {
+        setExpandedId(null);
+        setDetail(null);
+        setEditMode(false);
+      }
       await reload();
     } catch (error) {
       setMsg(`删除失败:${errorText(error)}`);
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  async function toggleExpand(docId: string) {
+    if (expandedId === docId) {
+      setExpandedId(null);
+      setDetail(null);
+      setEditMode(false);
+      return;
+    }
+    setExpandedId(docId);
+    setEditMode(false);
+    setDetail(null);
+    setLoadingDetail(true);
+    try {
+      const res = await fetch(`/api/agents/${agentId}/knowledge/${encodeURIComponent(docId)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as DocDetail;
+      setDetail(data);
+    } catch (error) {
+      setMsg(`加载文档失败:${errorText(error)}`);
+      setExpandedId(null);
+    } finally {
+      setLoadingDetail(false);
+    }
+  }
+
+  function enterEdit() {
+    if (!detail) return;
+    setEditTitle(detail.title);
+    setEditContent(detail.content);
+    setEditMode(true);
+  }
+
+  async function saveEdit() {
+    if (!detail || saving) return;
+    setSaving(true);
+    setMsg(null);
+    try {
+      const body: Record<string, string> = { docId: detail.id };
+      if (editTitle.trim() !== detail.title) body.title = editTitle.trim();
+      if (editContent !== detail.content) body.content = editContent;
+      if (!body.title && !body.content) {
+        setEditMode(false);
+        return;
+      }
+      await fetchJson(`/api/agents/${agentId}/knowledge`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      setDetail({
+        ...detail,
+        title: body.title ?? detail.title,
+        content: body.content ?? detail.content,
+      });
+      setEditMode(false);
+      await reload();
+    } catch (error) {
+      setMsg(`保存失败:${errorText(error)}`);
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -178,31 +261,94 @@ export function KnowledgePanel({
         <p className="text-xs text-muted-foreground">还没有知识文档</p>
       )}
       {docs.map((d) => (
-        <div
-          key={d.id}
-          className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-xs"
-        >
-          <FileText className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className={cn("flex-1 truncate", !d.searchable && "text-muted-foreground")}>
-            {d.title}
-          </span>
-          {!d.searchable && <span className="shrink-0 text-[11px] text-warning">不参与检索</span>}
-          <span className="shrink-0 text-[11px] text-muted-foreground">
-            {d.chars.toLocaleString()} 字
-          </span>
-          {canWrite && (
-            <Button
+        <div key={d.id} className="rounded-md border border-border">
+          <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs">
+            <button
               type="button"
-              variant="ghost"
-              size="icon-sm"
-              title="删除"
-              aria-label={`删除知识文档 ${d.title}`}
-              className="text-muted-foreground hover:text-destructive"
-              disabled={deletingId === d.id}
-              onClick={() => void remove(d.id)}
+              className="flex flex-1 cursor-pointer items-center gap-2 text-left hover:opacity-80"
+              onClick={() => void toggleExpand(d.id)}
             >
-              <Trash2 />
-            </Button>
+              {expandedId === d.id ? (
+                <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+              ) : (
+                <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+              )}
+              <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className={cn("flex-1 truncate", !d.searchable && "text-muted-foreground")}>
+                {d.title}
+              </span>
+            </button>
+            {!d.searchable && <span className="shrink-0 text-[11px] text-warning">不参与检索</span>}
+            <span className="shrink-0 text-[11px] text-muted-foreground">
+              {d.chars.toLocaleString()} 字
+            </span>
+            {canWrite && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                title="删除"
+                aria-label={`删除知识文档 ${d.title}`}
+                className="text-muted-foreground hover:text-destructive"
+                disabled={deletingId === d.id}
+                onClick={() => void remove(d.id)}
+              >
+                <Trash2 />
+              </Button>
+            )}
+          </div>
+
+          {expandedId === d.id && (
+            <div className="border-t border-border px-3 py-2">
+              {loadingDetail && <p className="text-xs text-muted-foreground">加载正文中…</p>}
+              {detail && !editMode && (
+                <div className="space-y-2">
+                  <pre className="max-h-60 overflow-auto whitespace-pre-wrap text-xs leading-relaxed">
+                    {detail.content}
+                  </pre>
+                  {canWrite && (
+                    <Button type="button" variant="outline" size="sm" onClick={enterEdit}>
+                      <Pencil className="size-3.5" />
+                      编辑
+                    </Button>
+                  )}
+                </div>
+              )}
+              {detail && editMode && (
+                <div className="space-y-2">
+                  <Input
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    placeholder="文档标题"
+                  />
+                  <Textarea
+                    className="h-40 resize-y font-mono text-xs"
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                  />
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => void saveEdit()}
+                      disabled={saving || !editTitle.trim()}
+                    >
+                      {saving ? "保存中…" : "保存"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setEditMode(false)}
+                      disabled={saving}
+                    >
+                      <X className="size-3.5" />
+                      取消
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
         </div>
       ))}

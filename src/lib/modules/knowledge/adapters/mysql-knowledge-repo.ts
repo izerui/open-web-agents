@@ -135,30 +135,52 @@ export class MysqlKnowledgeRepo {
     id: string,
     data: { title?: string; content?: string },
   ): Promise<KnowledgeDoc | null> {
-    const existing = await this.get(id);
-    if (!existing) return null;
-    const newContent = data.content ?? existing.content;
-    if (data.content !== undefined) {
-      const [u] = await this.db
-        .select({
-          chars: sql<number>`COALESCE(SUM(CHAR_LENGTH(${knowledgeDocs.content})), 0)`,
-        })
-        .from(knowledgeDocs)
-        .where(eq(knowledgeDocs.agentId, existing.agentId));
-      const currentChars = Number(u?.chars ?? 0);
-      const delta = [...newContent].length - [...existing.content].length;
-      if (currentChars + delta > this.limits.maxTotalChars) {
-        throw new KnowledgeLimitExceeded("修改后总字符数超出限制");
+    return this.db.transaction(async (tx) => {
+      const rows = await tx.execute(
+        sql`SELECT id, agent_id, title, content, created_at
+            FROM knowledge_docs WHERE id = ${id} LIMIT 1 FOR UPDATE`,
+      );
+      const locked = (rows as unknown as [unknown[]])[0];
+      if (!Array.isArray(locked) || locked.length === 0) return null;
+      const existing = locked[0] as {
+        id: string;
+        agent_id: string;
+        title: string;
+        content: string;
+      };
+
+      await tx.execute(
+        sql`SELECT id FROM agents WHERE id = ${existing.agent_id} LIMIT 1 FOR UPDATE`,
+      );
+
+      const newContent = data.content ?? existing.content;
+      if (data.content !== undefined) {
+        const [u] = await tx
+          .select({
+            chars: sql<number>`COALESCE(SUM(CHAR_LENGTH(${knowledgeDocs.content})), 0)`,
+          })
+          .from(knowledgeDocs)
+          .where(eq(knowledgeDocs.agentId, existing.agent_id));
+        const currentChars = Number(u?.chars ?? 0);
+        const delta = [...newContent].length - [...existing.content].length;
+        if (currentChars + delta > this.limits.maxTotalChars) {
+          throw new KnowledgeLimitExceeded("修改后总字符数超出限制");
+        }
+        if ([...newContent].length > this.limits.maxDocChars) {
+          throw new KnowledgeLimitExceeded("单篇文档字符数超出限制");
+        }
       }
-      if ([...newContent].length > this.limits.maxDocChars) {
-        throw new KnowledgeLimitExceeded("单篇文档字符数超出限制");
-      }
-    }
-    const patch: Record<string, unknown> = { updatedAt: new Date() };
-    if (data.title !== undefined) patch.title = data.title;
-    if (data.content !== undefined) patch.content = data.content;
-    await this.db.update(knowledgeDocs).set(patch).where(eq(knowledgeDocs.id, id));
-    return this.get(id);
+      await tx.execute(
+        sql`UPDATE knowledge_docs
+            SET revision = revision + 1,
+                updated_at = NOW(3)
+                ${data.title !== undefined ? sql`, title = ${data.title}` : sql``}
+                ${data.content !== undefined ? sql`, content = ${data.content}` : sql``}
+            WHERE id = ${id}`,
+      );
+      const after = await this.get(id);
+      return after;
+    });
   }
 
   /**
@@ -169,13 +191,13 @@ export class MysqlKnowledgeRepo {
     const rows = await this.db
       .select({
         n: sql<number>`COUNT(*)`,
-        latest: sql<string>`COALESCE(GREATEST(MAX(${knowledgeDocs.createdAt}), COALESCE(MAX(${knowledgeDocs.updatedAt}), '1970-01-01')), '')`,
+        rev: sql<number>`COALESCE(SUM(${knowledgeDocs.revision}), 0)`,
         ids: sql<number>`COALESCE(BIT_XOR(CRC32(${knowledgeDocs.id})), 0)`,
       })
       .from(knowledgeDocs)
       .where(eq(knowledgeDocs.agentId, agentId));
     const r = rows[0];
-    return `${Number(r?.n ?? 0)}:${String(r?.latest ?? "")}:${Number(r?.ids ?? 0)}`;
+    return `${Number(r?.n ?? 0)}:${Number(r?.rev ?? 0)}:${Number(r?.ids ?? 0)}`;
   }
 
   /**

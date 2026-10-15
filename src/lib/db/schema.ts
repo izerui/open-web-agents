@@ -356,6 +356,7 @@ export const knowledgeDocs = mysqlTable(
     content: mediumtext("content").notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { fsp: 3 }),
+    revision: bigint("revision", { mode: "number" }).notNull().default(0),
   },
   (t) => ({ byAgent: index("idx_knowledge_agent").on(t.agentId) }),
 );

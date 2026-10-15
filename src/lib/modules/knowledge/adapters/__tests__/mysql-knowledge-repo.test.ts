@@ -7,6 +7,7 @@ import { createDb } from "@/lib/db/client";
 import { knowledgeDocs } from "@/lib/db/schema";
 import { MysqlAgentRepo } from "@/lib/modules/agent/adapters/mysql-agent-repo";
 import { MysqlKnowledgeRepo } from "@/lib/modules/knowledge/adapters/mysql-knowledge-repo";
+import { ChunkCache } from "@/lib/modules/knowledge/application/chunk-cache";
 import { KnowledgeLimitExceeded } from "@/lib/modules/knowledge/domain/limits";
 import { afterAll, describe, expect, it } from "vitest";
 
@@ -91,6 +92,62 @@ if (!TEST_DB_URL) {
         if (r.status === "rejected") expect(r.reason).toBeInstanceOf(KnowledgeLimitExceeded);
       }
       expect((await repo.list(agentId)).usage.docs).toBe(3);
+    });
+
+    it("update 事务:并发扩充不同文档不超限", { timeout: 30_000 }, async () => {
+      const agentId = await newAgent();
+      const d1 = await repo.create(doc(agentId, "字".repeat(30)));
+      const d2 = await repo.create(doc(agentId, "字".repeat(30)));
+      const results = await Promise.allSettled([
+        repo.update(d1.id, { content: "字".repeat(45) }),
+        repo.update(d2.id, { content: "字".repeat(45) }),
+      ]);
+      const ok = results.filter((r) => r.status === "fulfilled");
+      const fail = results.filter((r) => r.status === "rejected");
+      expect(ok.length + fail.length).toBe(2);
+      if (fail.length > 0) {
+        for (const r of fail) {
+          expect((r as PromiseRejectedResult).reason).toBeInstanceOf(KnowledgeLimitExceeded);
+        }
+      }
+      const listing = await repo.list(agentId);
+      expect(listing.usage.chars).toBeLessThanOrEqual(limits.maxTotalChars);
+    });
+
+    it("update 后 signatureOf 变化、缓存失效", async () => {
+      const agentId = await newAgent();
+      const d = await repo.create(doc(agentId, "二叉树的遍历方式"));
+      const cache1 = new ChunkCache(repo);
+      const cache2 = new ChunkCache(repo);
+
+      const chunks1a = await cache1.chunksOf(agentId);
+      const chunks1b = await cache2.chunksOf(agentId);
+      expect(chunks1a.some((c) => c.text.includes("二叉树"))).toBe(true);
+      expect(chunks1b.some((c) => c.text.includes("二叉树"))).toBe(true);
+
+      const sigBefore = await repo.signatureOf(agentId);
+      await repo.update(d.id, { content: "哈希表的实现原理" });
+      const sigAfter = await repo.signatureOf(agentId);
+      expect(sigAfter).not.toBe(sigBefore);
+
+      const chunks2a = await cache1.chunksOf(agentId);
+      const chunks2b = await cache2.chunksOf(agentId);
+      expect(chunks2a.some((c) => c.text.includes("哈希表"))).toBe(true);
+      expect(chunks2a.some((c) => c.text.includes("二叉树"))).toBe(false);
+      expect(chunks2b.some((c) => c.text.includes("哈希表"))).toBe(true);
+    });
+
+    it("update 后编辑标题:缓存读到新标题", async () => {
+      const agentId = await newAgent();
+      const d = await repo.create(doc(agentId, "内容不变"));
+      const cache = new ChunkCache(repo);
+
+      const before = await cache.chunksOf(agentId);
+      expect(before[0]?.docTitle).toBe("t");
+
+      await repo.update(d.id, { title: "新标题" });
+      const after = await cache.chunksOf(agentId);
+      expect(after[0]?.docTitle).toBe("新标题");
     });
   });
 }

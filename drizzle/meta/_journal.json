@@ -309,6 +309,13 @@
       "when": 1792064554691,
       "tag": "0043_knowledge_updated_at",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "5",
+      "when": 1792064600000,
+      "tag": "0044_knowledge_revision",
+      "breakpoints": true
     }
   ]
 }
