@@ -91,6 +91,9 @@ async function setup(opts: { target?: Agent; legacy?: boolean } = {}) {
       if (!bytes) throw new Error("ENOENT");
       return { bytes, mime: "application/json" };
     }),
+    stream: vi.fn(async () => {
+      throw new Error("not implemented in test");
+    }),
     write: vi.fn(async (_, path, bytes) => {
       files.set(path, bytes);
     }),

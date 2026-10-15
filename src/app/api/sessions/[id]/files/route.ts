@@ -124,23 +124,17 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     if (download !== null) {
       const { bytes, mime } = await storage.read(session.workspaceDir, download);
       const filename = download.split("/").pop() ?? "download";
-
-      /**
-       * 内联渲染是【白名单】,不是开关。
-       *
-       * 请求里带了 inline 也只有图片放行:让浏览器在本站源下解析 agent 写出的
-       * HTML,等于给它一个能读 cookie、发同源请求的执行环境。
-       * 剩下的一律 attachment —— 浏览器会下载而不是执行。
-       */
       const inline = wantInline && canRenderInline(mime);
+
+      if (inline && (mime.startsWith("video/") || mime.startsWith("audio/"))) {
+        return streamResponse(req, storage, session.workspaceDir, download, mime, filename);
+      }
 
       return new Response(new Uint8Array(bytes), {
         headers: {
           "Content-Type": mime,
           "Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${encodeURIComponent(filename)}"`,
-          // 别让浏览器去猜类型 —— 猜错就可能把数据文件当 HTML 执行
           "X-Content-Type-Options": "nosniff",
-          // SVG 能带脚本。sandbox 把它丢进独立源并禁脚本,直接访问链接也跑不起来
           "Content-Security-Policy": "sandbox; default-src 'none'; style-src 'unsafe-inline'",
           ...NO_STORE_HEADERS,
         },
@@ -169,4 +163,46 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       { status: 500 },
     );
   }
+}
+
+function parseRange(header: string | null, size: number): { start: number; end: number } | null {
+  if (!header) return null;
+  const m = /^bytes=(\d+)-(\d*)$/.exec(header);
+  if (!m) return null;
+  const start = Number(m[1]);
+  const end = m[2] ? Math.min(Number(m[2]), size - 1) : size - 1;
+  if (start > end || start >= size) return null;
+  return { start, end };
+}
+
+async function streamResponse(
+  req: Request,
+  storage: import("@/lib/modules/artifacts/ports").StoragePort,
+  workspaceDir: string,
+  relPath: string,
+  mime: string,
+  filename: string,
+): Promise<Response> {
+  const { stream: fullStream, size } = await storage.stream(workspaceDir, relPath);
+  const rangeHeader = req.headers.get("range");
+  const range = parseRange(rangeHeader, size);
+
+  const headers: Record<string, string> = {
+    "Content-Type": mime,
+    "Content-Disposition": `inline; filename="${encodeURIComponent(filename)}"`,
+    "X-Content-Type-Options": "nosniff",
+    "Accept-Ranges": "bytes",
+    ...NO_STORE_HEADERS,
+  };
+
+  if (!range) {
+    headers["Content-Length"] = String(size);
+    return new Response(fullStream, { headers });
+  }
+
+  await fullStream.cancel();
+  const { stream: rangeStream } = await storage.stream(workspaceDir, relPath, range);
+  headers["Content-Length"] = String(range.end - range.start + 1);
+  headers["Content-Range"] = `bytes ${range.start}-${range.end}/${size}`;
+  return new Response(rangeStream, { status: 206, headers });
 }

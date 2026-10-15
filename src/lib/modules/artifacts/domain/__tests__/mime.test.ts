@@ -45,14 +45,22 @@ describe("canRenderInline —— 内联渲染的安全边界", () => {
     expect(canRenderInline("text/html")).toBe(false);
   });
 
+  it("视频和音频放行 —— 原生标签不执行脚本", () => {
+    for (const m of ["video/mp4", "video/quicktime", "audio/mpeg", "audio/wav"]) {
+      expect(canRenderInline(m)).toBe(true);
+    }
+  });
+
+  it("PDF 放行 —— 浏览器内置查看器 + CSP sandbox 兜底", () => {
+    expect(canRenderInline("application/pdf")).toBe(true);
+  });
+
   it("其余文本与二进制一律不放行", () => {
     for (const m of [
       "text/plain",
       "application/json",
-      "application/pdf",
       "application/zip",
       "application/octet-stream",
-      "video/mp4",
     ]) {
       expect(canRenderInline(m)).toBe(false);
     }

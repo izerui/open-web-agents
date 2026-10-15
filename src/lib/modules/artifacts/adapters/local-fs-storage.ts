@@ -1,6 +1,7 @@
-import { constants as fsConstants } from "node:fs";
+import { createReadStream, constants as fsConstants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { Readable } from "node:stream";
 import { isTextMime, mimeOf } from "@/lib/modules/artifacts/domain/mime";
 import {
   PathEscapeError,
@@ -127,5 +128,24 @@ export class LocalFsStorage implements StoragePort {
     const abs = resolveInWorkspace(workspaceDir, relPath);
     await assertRealPathInside(workspaceDir, abs);
     return { bytes: await fs.readFile(abs), mime: mimeOf(relPath) };
+  }
+
+  async stream(
+    workspaceDir: string,
+    relPath: string,
+    range?: { start: number; end: number },
+  ): Promise<{ stream: ReadableStream<Uint8Array>; size: number; mime: string }> {
+    const abs = resolveInWorkspace(workspaceDir, relPath);
+    await assertRealPathInside(workspaceDir, abs);
+    const stat = await fs.stat(abs);
+    const nodeStream = createReadStream(
+      abs,
+      range ? { start: range.start, end: range.end } : undefined,
+    );
+    return {
+      stream: Readable.toWeb(nodeStream) as ReadableStream<Uint8Array>,
+      size: stat.size,
+      mime: mimeOf(relPath),
+    };
   }
 }

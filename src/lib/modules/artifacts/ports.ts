@@ -23,6 +23,12 @@ export interface StoragePort {
   preview(workspaceDir: string, relPath: string): Promise<FilePreview>;
   /** 读原始字节用于下载。 */
   read(workspaceDir: string, relPath: string): Promise<{ bytes: Buffer; mime: string }>;
+  /** 流式读取,支持 Range(视频/音频 seek 拖动)。 */
+  stream(
+    workspaceDir: string,
+    relPath: string,
+    range?: { start: number; end: number },
+  ): Promise<{ stream: ReadableStream<Uint8Array>; size: number; mime: string }>;
   /** 写入用户上传的工作区文件。 */
   /** 默认只新建,已存在则 EEXIST;overwrite 时覆盖(拒绝符号链接)。 */
   write(

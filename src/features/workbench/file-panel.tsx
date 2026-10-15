@@ -466,11 +466,34 @@ export function FilePanel({
           <Separator />
           <div className="min-h-0 flex-1 overflow-auto px-3 pb-3 pt-2">
             {preview.mime.startsWith("image/") ? (
-              /* 图片走内联端点(服务端只对 image/* 放行,并带 nosniff + CSP sandbox) */
               <img
                 src={`/api/sessions/${sessionId}/files?download=${encodeURIComponent(preview.path)}&inline=1`}
                 alt={preview.path}
                 className="mx-auto max-w-full rounded-md border border-border"
+              />
+            ) : preview.mime.startsWith("video/") ? (
+              <video
+                controls
+                preload="metadata"
+                src={`/api/sessions/${sessionId}/files?download=${encodeURIComponent(preview.path)}&inline=1`}
+                className="mx-auto max-w-full rounded-md"
+              >
+                <track kind="captions" />
+              </video>
+            ) : preview.mime.startsWith("audio/") ? (
+              <audio
+                controls
+                preload="metadata"
+                src={`/api/sessions/${sessionId}/files?download=${encodeURIComponent(preview.path)}&inline=1`}
+                className="w-full"
+              >
+                <track kind="captions" />
+              </audio>
+            ) : preview.mime === "application/pdf" ? (
+              <iframe
+                title={`预览 ${preview.path}`}
+                src={`/api/sessions/${sessionId}/files?download=${encodeURIComponent(preview.path)}&inline=1`}
+                className="h-[70vh] w-full rounded-md border border-border"
               />
             ) : isHtml && showRendered && preview.text !== null ? (
               /**

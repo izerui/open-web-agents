@@ -28,6 +28,7 @@ describe.skipIf(!url)("AgentDesigner MySQL transactions", () => {
     tree: vi.fn(async () => []),
     preview: vi.fn(),
     read: vi.fn(),
+    stream: vi.fn(),
     write: vi.fn(async () => {}),
   };
   const id = () => randomUUID().replaceAll("-", "").slice(0, 24);
