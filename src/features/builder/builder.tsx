@@ -750,7 +750,7 @@ export function Builder() {
             </pre>
           </CardContent>
         </Card>
-        <KnowledgePanel agentId={selectedAgent.id} canWrite={false} />
+        <KnowledgePanel key={selectedAgent.id} agentId={selectedAgent.id} canWrite={false} />
       </SpaceShell>
     );
   }
@@ -1423,7 +1423,7 @@ export function Builder() {
         />
       )}
 
-      {openedId && <KnowledgePanel agentId={openedId} canWrite={canWrite} />}
+      {openedId && <KnowledgePanel key={openedId} agentId={openedId} canWrite={canWrite} />}
 
       {openedId && <SharePanel agentId={openedId} />}
 

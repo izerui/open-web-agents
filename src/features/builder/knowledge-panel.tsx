@@ -176,6 +176,7 @@ export function KnowledgePanel({
     if (!detail || saving) return;
     const targetDocId = detail.id;
     const seq = detailSeqRef.current;
+    const reloadBefore = reloadSeqRef.current;
     setSaving(true);
     setMsg(null);
     try {
@@ -199,11 +200,11 @@ export function KnowledgePanel({
         });
         setEditMode(false);
       }
-      await reload();
+      if (reloadBefore === reloadSeqRef.current) await reload();
     } catch (error) {
       if (seq === detailSeqRef.current) setMsg(`保存失败:${errorText(error)}`);
     } finally {
-      setSaving(false);
+      if (seq === detailSeqRef.current) setSaving(false);
     }
   }
 
