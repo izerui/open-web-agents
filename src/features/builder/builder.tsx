@@ -132,6 +132,16 @@ interface Draft {
   unattendedApproval: "" | "allow" | "deny";
   /** 开场建议,一行一条 */
   startersText: string;
+  /** 变量定义 */
+  variables: VariableDraft[];
+}
+
+interface VariableDraft {
+  uid: string;
+  name: string;
+  description: string;
+  required: boolean;
+  secret: boolean;
 }
 
 type BuilderAgent = AgentSummary & { config: Record<string, unknown>; canRead?: boolean };
@@ -160,6 +170,7 @@ const EMPTY: Draft = {
   permissionMode: "default",
   unattendedApproval: "",
   startersText: "",
+  variables: [],
 };
 
 /**
@@ -459,6 +470,14 @@ export function Builder() {
                 ...(s.model ? { model: s.model as ModelAlias } : {}),
                 background: false,
               })),
+            variables: draft.variables
+              .filter((v) => v.name.trim())
+              .map((v) => ({
+                name: v.name.trim(),
+                description: v.description.trim() || undefined,
+                required: v.required,
+                secret: v.secret,
+              })),
           }),
         }),
       });
@@ -603,6 +622,22 @@ export function Builder() {
                 description: s.description ?? "",
                 prompt: s.prompt ?? "",
                 model: s.model ?? "",
+              }))
+            : [],
+          variables: Array.isArray(cfg.variables)
+            ? (
+                cfg.variables as {
+                  name?: string;
+                  description?: string;
+                  required?: boolean;
+                  secret?: boolean;
+                }[]
+              ).map((v) => ({
+                uid: crypto.randomUUID(),
+                name: v.name ?? "",
+                description: v.description ?? "",
+                required: v.required === true,
+                secret: v.secret === true,
               }))
             : [],
         };
@@ -1131,6 +1166,109 @@ export function Builder() {
               >
                 <Trash2 />
               </Button>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-sm">变量与密钥</CardTitle>
+              <CardDescription>
+                使用者运行前需要填写的参数，引用方式: {"{{变量名}}"}
+              </CardDescription>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() =>
+                setDraft({
+                  ...draft,
+                  variables: [
+                    ...draft.variables,
+                    {
+                      uid: crypto.randomUUID(),
+                      name: "",
+                      description: "",
+                      required: false,
+                      secret: false,
+                    },
+                  ],
+                })
+              }
+            >
+              <Plus /> 添加
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {draft.variables.length === 0 && (
+            <p className="text-xs text-muted-foreground">未定义变量，使用者不需要填写额外参数</p>
+          )}
+          {draft.variables.map((v, i) => (
+            <div key={v.uid} className="space-y-2 border-b border-border pb-3 last:border-b-0">
+              <div className="flex gap-2">
+                <Input
+                  value={v.name}
+                  onChange={(e) => {
+                    const next = [...draft.variables];
+                    next[i] = {
+                      ...v,
+                      name: e.target.value.replace(/[^A-Za-z0-9_]/g, "").toUpperCase(),
+                    };
+                    setDraft({ ...draft, variables: next });
+                  }}
+                  placeholder="变量名 (如 API_KEY)"
+                  className="font-mono"
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={`删除变量 ${v.name || i + 1}`}
+                  onClick={() =>
+                    setDraft({ ...draft, variables: draft.variables.filter((_, j) => j !== i) })
+                  }
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
+              <Input
+                value={v.description}
+                onChange={(e) => {
+                  const next = [...draft.variables];
+                  next[i] = { ...v, description: e.target.value };
+                  setDraft({ ...draft, variables: next });
+                }}
+                placeholder="说明（给填写者看）"
+              />
+              <div className="flex gap-4 text-xs">
+                <label className="flex items-center gap-1.5">
+                  <input
+                    type="checkbox"
+                    checked={v.required}
+                    onChange={(e) => {
+                      const next = [...draft.variables];
+                      next[i] = { ...v, required: e.target.checked };
+                      setDraft({ ...draft, variables: next });
+                    }}
+                  />
+                  必填
+                </label>
+                <label className="flex items-center gap-1.5">
+                  <input
+                    type="checkbox"
+                    checked={v.secret}
+                    onChange={(e) => {
+                      const next = [...draft.variables];
+                      next[i] = { ...v, secret: e.target.checked };
+                      setDraft({ ...draft, variables: next });
+                    }}
+                  />
+                  密钥（加密存储，不进提示词）
+                </label>
+              </div>
             </div>
           ))}
         </CardContent>
