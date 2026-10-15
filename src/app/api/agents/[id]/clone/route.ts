@@ -117,6 +117,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   } catch (err) {
     const response = authErrorResponse(err);
     if (response) return response;
-    throw err;
+    return Response.json({ error: "克隆失败" }, { status: 500 });
   }
 }
