@@ -45,21 +45,31 @@ describe("SKILL_EXAMPLE", () => {
     expect(skillMd).toContain("步骤");
     const script = path.join(skillDir, "scripts", "summarize.py");
     const scriptContent = await fs.readFile(script, "utf-8");
-    expect(scriptContent).toContain("__file__");
+    expect(scriptContent).toContain("SKILL_DIR");
+    expect(scriptContent).toContain("settings.json");
+    const cfgContent = await fs.readFile(path.join(skillDir, "config", "settings.json"), "utf-8");
+    expect(JSON.parse(cfgContent)).toEqual({ preview_rows: 3 });
 
-    // 在会话工作目录创建测试 CSV
+    // 在会话工作目录创建测试 CSV（5 行数据，但配置限制预览 3 行）
     const csvPath = path.join(sessionDir, "data.csv");
-    await fs.writeFile(csvPath, "name,age,city\nAlice,30,Beijing\nBob,25,Shanghai\n");
+    await fs.writeFile(
+      csvPath,
+      "name,age,city\nAlice,30,Beijing\nBob,25,Shanghai\nCharlie,28,Guangzhou\nDave,35,Shenzhen\nEve,22,Hangzhou\n",
+    );
 
-    // 从会话工作目录执行脚本（模拟真实运行环境）
+    // 从会话工作目录执行脚本（模拟真实运行环境：cwd ≠ 技能目录）
     const output = execSync(`python3 "${script}" "${csvPath}"`, {
       cwd: sessionDir,
       encoding: "utf-8",
     });
 
-    expect(output).toContain("name");
-    expect(output).toContain("age");
-    expect(output).toContain("行数: 2");
+    expect(output).toContain("列: name, age, city");
+    expect(output).toContain("行数: 5");
+    // config/settings.json 的 preview_rows=3 限制了预览行数
     expect(output).toContain("Alice");
+    expect(output).toContain("Bob");
+    expect(output).toContain("Charlie");
+    expect(output).not.toContain("Dave");
+    expect(output).not.toContain("Eve");
   });
 });
