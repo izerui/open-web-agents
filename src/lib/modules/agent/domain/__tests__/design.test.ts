@@ -43,39 +43,22 @@ function required<T>(value: T | undefined): T {
 }
 
 describe("platform design drafts", () => {
-  it("exports references without skill files, MCP secrets or escape hatch", () => {
+  it("exports inline skills and redacted MCP, without escape hatch or raw MCP secrets", () => {
     const draft = draftOf(source);
     expect(draft.skillRefs).toEqual([resourceRef("source", "skill", "report")]);
     expect(draft.mcpRefs).toEqual([resourceRef("source", "mcp", "search")]);
     expect(draft.parameters).toEqual({ model: "sonnet" });
-    expect(designResources([source])).toEqual([
-      {
-        ref: draft.skillRefs[0],
-        kind: "skill",
-        name: "report",
-        description: "Write a report",
-        agentId: "source",
-        agentName: source.name,
-      },
-      {
-        ref: draft.mcpRefs[0],
-        kind: "mcp",
-        name: "search",
-        agentId: "source",
-        agentName: source.name,
-      },
-    ]);
+    expect(draft.skillPackages).toEqual(source.config.skillPackages);
+    expect(draft.mcpServers?.[0]?.name).toBe("search");
+
     const visible = JSON.stringify([draft, designResources([source]), designSnapshot(source)]);
-    for (const secret of [
-      "private-script",
-      "hatch-secret",
-      "url-secret",
-      "query-secret",
-      "env-secret",
-      "arg-secret",
-    ]) {
+    for (const secret of ["hatch-secret", "url-secret", "query-secret", "env-secret"]) {
       expect(visible).not.toContain(secret);
     }
+    // Skill content IS visible in draft (AI can read/modify it)
+    expect(JSON.stringify(draft)).toContain("private-script");
+    // MCP secrets are redacted
+    expect(draft.mcpServers?.[0]?.env?.TOKEN).toBe("***");
     expect(designSnapshot(source).config.skillPackages?.[0]?.files).toEqual({});
     expect(designSnapshot(source).config.mcpServers).toEqual([{ name: "search", type: "http" }]);
   });
@@ -112,16 +95,22 @@ describe("platform design drafts", () => {
     expect(() => resolveDesign({ ...draft, skillRefs: draft.mcpRefs }, [source])).toThrow(/资源/);
   });
 
-  it.each(["skill", "mcp"] as const)(
-    "rejects duplicate %s names from different sources",
-    (kind) => {
-      const second = { ...source, id: "second" };
-      const draft = draftOf(source);
-      if (kind === "skill") draft.skillRefs.push(resourceRef(second.id, kind, "report"));
-      else draft.mcpRefs.push(resourceRef(second.id, kind, "search"));
-      expect(() => resolveDesign(draft, [source, second])).toThrow(/名称重复/);
-    },
-  );
+  it("rejects duplicate ref names from different sources", () => {
+    const second = { ...source, id: "second" };
+    const draft = draftOf(source);
+    draft.skillRefs.push(resourceRef(second.id, "skill", "report"));
+    expect(() => resolveDesign(draft, [source, second])).toThrow(/重复/);
+  });
+
+  it("inline skills add alongside refs without name conflict", () => {
+    const draft = draftOf(source);
+    draft.skillPackages = [
+      ...(draft.skillPackages ?? []),
+      { name: "new-skill", description: "AI generated", files: { "SKILL.md": "# New" } },
+    ];
+    const result = resolveDesign(draft, [source]);
+    expect(result.config.skillPackages?.map((s) => s.name).sort()).toEqual(["new-skill", "report"]);
+  });
 
   it.each([
     null,
@@ -136,7 +125,8 @@ describe("platform design drafts", () => {
     { ...draftOf(), mcpRefs: "mcp" },
     { ...draftOf(), skillRefs: ["a", "a"] },
     { ...draftOf(), mcpRefs: ["a", "a"] },
-    { ...draftOf(), skillPackages: [] },
+    { ...draftOf(), skillPackages: "not-array" },
+    { ...draftOf(), mcpServers: "not-array" },
     { ...draftOf(), systemPrompt: "x".repeat(500_001) },
   ])("rejects malformed or oversized draft %#", (raw) => {
     expect(() => parseDesign(raw)).toThrow();

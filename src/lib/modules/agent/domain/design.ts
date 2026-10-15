@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
+import type { McpDef, SkillPackage } from "@/lib/shared";
 import type { Agent, AgentSnapshot } from "../ports";
 import { agentToBundle, bundleToAgent } from "./agent-bundle";
 import type { AgentConfig } from "./config";
-import { redactAgentConfigForReader } from "./config";
+import { redactAgentConfigForClone, redactAgentConfigForReader } from "./config";
 import { stableStringify } from "./release";
 
 export interface DesignState {
@@ -22,6 +23,10 @@ export interface DesignDraft {
   parameters: Record<string, unknown>;
   skillRefs: string[];
   mcpRefs: string[];
+  /** AI 直接生成或从已有智能体载入的技能包。与 skillRefs 引用的合并，同名 inline 优先。 */
+  skillPackages?: SkillPackage[];
+  /** AI 直接生成或从已有智能体载入的 MCP 定义。凭证使用 {{变量名}} 引用。 */
+  mcpServers?: McpDef[];
 }
 
 export interface DesignResource {
@@ -64,7 +69,6 @@ export function designResources(agents: Agent[]): DesignResource[] {
 }
 
 export function draftOf(agent?: Agent): DesignDraft {
-  // 延用智能体包的字段清单,但技能与 MCP 只给引用,不把脚本或连接密钥复制到设计工作区。
   const files = agentToBundle({
     name: agent?.name ?? "",
     description: agent?.description,
@@ -74,8 +78,10 @@ export function draftOf(agent?: Agent): DesignDraft {
     name,
     description,
     mcpServers: _mcp,
+    skillPackages: _skills,
     ...parameters
   } = JSON.parse(files["agent/agent.json"] ?? "{}");
+  const redactedConfig = agent ? redactAgentConfigForClone(agent.config) : undefined;
   return {
     name,
     description,
@@ -87,13 +93,24 @@ export function draftOf(agent?: Agent): DesignDraft {
     mcpRefs: agent
       ? (agent.config.mcpServers ?? []).map((m) => resourceRef(agent.id, "mcp", m.name))
       : [],
+    skillPackages: agent?.config.skillPackages,
+    mcpServers: redactedConfig?.mcpServers,
   };
 }
 
 export function parseDesign(raw: unknown): DesignDraft {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("设计草稿必须是对象");
   const d = raw as Record<string, unknown>;
-  const keys = ["name", "description", "systemPrompt", "parameters", "skillRefs", "mcpRefs"];
+  const keys = [
+    "name",
+    "description",
+    "systemPrompt",
+    "parameters",
+    "skillRefs",
+    "mcpRefs",
+    "skillPackages",
+    "mcpServers",
+  ];
   if (Object.keys(d).some((k) => !keys.includes(k))) throw new Error("设计草稿包含不支持的字段");
   for (const k of ["name", "description", "systemPrompt"]) {
     if (typeof d[k] !== "string") throw new Error(`${k} 必须是文本`);
@@ -107,11 +124,17 @@ export function parseDesign(raw: unknown): DesignDraft {
     }
     if (new Set(d[k]).size !== d[k].length) throw new Error(`${k} 有重复引用`);
   }
+  if (d.skillPackages !== undefined && !Array.isArray(d.skillPackages)) {
+    throw new Error("skillPackages 必须是数组");
+  }
+  if (d.mcpServers !== undefined && !Array.isArray(d.mcpServers)) {
+    throw new Error("mcpServers 必须是数组");
+  }
   if (JSON.stringify(raw).length > 500_000) throw new Error("设计草稿过大");
   return d as unknown as DesignDraft;
 }
 
-/** 只从当前仍有权限的资源解析配置;AI 不能注入技能正文、MCP 密钥或逃生舱。 */
+/** 从 inline 定义和资源引用合并技能与 MCP，inline 同名优先。 */
 export function resolveDesign(draft: DesignDraft, resources: Agent[]): AgentSnapshot {
   const forbidden = [
     "name",
@@ -133,33 +156,53 @@ export function resolveDesign(draft: DesignDraft, resources: Agent[]): AgentSnap
     "agent/system-prompt.md": draft.systemPrompt,
   });
   if (!parsed.ok) throw new Error(parsed.issues.map((i) => `${i.field}: ${i.message}`).join("; "));
-  const skills = new Map(
+
+  const refSkills = new Map(
     resources.flatMap((a) =>
       (a.config.skillPackages ?? []).map((s) => [resourceRef(a.id, "skill", s.name), s] as const),
     ),
   );
-  const mcps = new Map(
+  const refMcps = new Map(
     resources.flatMap((a) =>
       (a.config.mcpServers ?? []).map((m) => [resourceRef(a.id, "mcp", m.name), m] as const),
     ),
   );
-  const choose = <T extends { name: string }>(refs: string[], available: Map<string, T>): T[] => {
-    const found = refs.map((ref) => {
-      const value = available.get(ref);
-      if (!value) throw new Error("资源已变化或无权使用,请重新选择 Skills/MCP");
-      return structuredClone(value);
-    });
-    if (new Set(found.map((v) => v.name)).size !== found.length)
-      throw new Error("选中的资源名称重复");
-    return found;
-  };
+
+  // Refs take priority (they have unredacted content from authorized resources).
+  // Inline adds resources that have no matching ref (AI-generated new content).
+  const refSkillNames = new Set<string>();
+  const resolvedSkills: import("@/lib/shared").SkillPackage[] = [];
+  for (const ref of draft.skillRefs) {
+    const s = refSkills.get(ref);
+    if (!s) throw new Error("资源已变化或无权使用,请重新选择 Skills/MCP");
+    if (refSkillNames.has(s.name)) throw new Error(`引用的技能名称 ${s.name} 重复`);
+    resolvedSkills.push(structuredClone(s));
+    refSkillNames.add(s.name);
+  }
+  for (const s of draft.skillPackages ?? []) {
+    if (!refSkillNames.has(s.name)) resolvedSkills.push(s);
+  }
+
+  const refMcpNames = new Set<string>();
+  const resolvedMcps: import("@/lib/shared").McpDef[] = [];
+  for (const ref of draft.mcpRefs) {
+    const m = refMcps.get(ref);
+    if (!m) throw new Error("资源已变化或无权使用,请重新选择 Skills/MCP");
+    if (refMcpNames.has(m.name)) throw new Error(`引用的 MCP 名称 ${m.name} 重复`);
+    resolvedMcps.push(structuredClone(m));
+    refMcpNames.add(m.name);
+  }
+  for (const m of draft.mcpServers ?? []) {
+    if (!refMcpNames.has(m.name)) resolvedMcps.push(m);
+  }
+
   return {
     name: parsed.agent.name,
     description: parsed.agent.description,
     config: {
       ...parsed.agent.config,
-      skillPackages: choose(draft.skillRefs, skills),
-      mcpServers: choose(draft.mcpRefs, mcps),
+      skillPackages: resolvedSkills.length > 0 ? resolvedSkills : undefined,
+      mcpServers: resolvedMcps.length > 0 ? resolvedMcps : undefined,
     },
   };
 }
