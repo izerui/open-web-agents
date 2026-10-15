@@ -152,7 +152,7 @@ test.describe("视频/PDF/音频预览", () => {
     expect(timeAfterResume).toBeGreaterThan(2.1);
   });
 
-  test("PDF: 截图确认有内容渲染(非空白)", async ({ page, context }, testInfo) => {
+  test("PDF: 视觉回归确认页面渲染", async ({ page, context }) => {
     await register(context, "pdf-render");
     const sessionId = await createSession(context);
     await uploadBuffer(context, sessionId, fs.readFileSync(fixtures.pdf), "render-test.pdf");
@@ -163,38 +163,11 @@ test.describe("视频/PDF/音频预览", () => {
 
     const pdfFrame = page.locator('iframe[title*="render-test.pdf"]');
     await expect(pdfFrame).toBeVisible({ timeout: 5_000 });
-    // 等 PDF 查看器渲染
     await page.waitForTimeout(3000);
 
-    // 截取 iframe 区域截图并保存为测试附件
-    const screenshot = await pdfFrame.screenshot();
-    await testInfo.attach("pdf-preview", { body: screenshot, contentType: "image/png" });
-
-    // 解析 PNG 像素数据，确认存在深色像素（文字渲染）
-    // PNG raw 数据中扫描非白色像素：对 screenshot buffer 做简单分析
-    // Playwright screenshot 是 PNG，用 page.evaluate 读取像素更可靠
-    const hasContent = await page.evaluate(async (pngBase64: string) => {
-      const img = new Image();
-      await new Promise<void>((resolve, reject) => {
-        img.onload = () => resolve();
-        img.onerror = reject;
-        img.src = `data:image/png;base64,${pngBase64}`;
-      });
-      const canvas = document.createElement("canvas");
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext("2d")!;
-      ctx.drawImage(img, 0, 0);
-      const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-      let darkPixels = 0;
-      for (let i = 0; i < data.length; i += 4) {
-        if (data[i]! < 100 && data[i + 1]! < 100 && data[i + 2]! < 100) darkPixels++;
-      }
-      return darkPixels;
-    }, screenshot.toString("base64"));
-
-    // "OWA Preview Test" 以 24pt Helvetica 渲染，应该产生数百个深色像素
-    expect(hasContent).toBeGreaterThan(50);
+    await expect(pdfFrame).toHaveScreenshot("pdf-preview-baseline.png", {
+      maxDiffPixelRatio: 0.05,
+    });
   });
 
   test("音频: duration 有效", async ({ page, context }) => {
