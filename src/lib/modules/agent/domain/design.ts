@@ -3,7 +3,7 @@ import type { McpDef, SkillPackage } from "@/lib/shared";
 import type { Agent, AgentSnapshot } from "../ports";
 import { agentToBundle, bundleToAgent } from "./agent-bundle";
 import type { AgentConfig } from "./config";
-import { redactAgentConfigForClone, redactAgentConfigForReader } from "./config";
+import { redactAgentConfigForClone } from "./config";
 import { stableStringify } from "./release";
 
 export interface DesignState {
@@ -87,12 +87,8 @@ export function draftOf(agent?: Agent): DesignDraft {
     description,
     systemPrompt: agent?.config.systemPrompt ?? "",
     parameters,
-    skillRefs: agent
-      ? (agent.config.skillPackages ?? []).map((s) => resourceRef(agent.id, "skill", s.name))
-      : [],
-    mcpRefs: agent
-      ? (agent.config.mcpServers ?? []).map((m) => resourceRef(agent.id, "mcp", m.name))
-      : [],
+    skillRefs: [],
+    mcpRefs: [],
     skillPackages: agent?.config.skillPackages,
     mcpServers: redactedConfig?.mcpServers,
   };
@@ -207,15 +203,12 @@ export function resolveDesign(draft: DesignDraft, resources: Agent[]): AgentSnap
   };
 }
 
-/** 差异只显示资源名字和安全配置,绝不把已有脚本与 MCP 凭证带回设计器。 */
+/** 差异预览：显示技能正文变化和脱敏后的 MCP 配置（保留 {{变量}} 引用），不暴露硬编码凭证。 */
 export function designSnapshot(snapshot: AgentSnapshot): AgentSnapshot {
-  const cfg = redactAgentConfigForReader(snapshot.config);
+  const cfg = redactAgentConfigForClone(snapshot.config);
+  const { escapeHatch: _hatch, ...safeCfg } = cfg;
   return {
     ...snapshot,
-    config: {
-      ...cfg,
-      skillPackages: cfg.skillPackages?.map((s) => ({ ...s, files: {} })),
-      mcpServers: cfg.mcpServers?.map((m) => ({ name: m.name, type: m.type })),
-    } as AgentConfig,
+    config: safeCfg as AgentConfig,
   };
 }

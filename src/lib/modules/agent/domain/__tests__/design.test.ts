@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Agent } from "../../ports";
 import {
+  type DesignDraft,
   designHash,
   designResources,
   designSnapshot,
@@ -37,16 +38,11 @@ const source: Agent = {
   },
 };
 
-function required<T>(value: T | undefined): T {
-  if (value === undefined) throw new Error("missing test fixture");
-  return value;
-}
-
 describe("platform design drafts", () => {
   it("exports inline skills and redacted MCP, without escape hatch or raw MCP secrets", () => {
     const draft = draftOf(source);
-    expect(draft.skillRefs).toEqual([resourceRef("source", "skill", "report")]);
-    expect(draft.mcpRefs).toEqual([resourceRef("source", "mcp", "search")]);
+    expect(draft.skillRefs).toEqual([]);
+    expect(draft.mcpRefs).toEqual([]);
     expect(draft.parameters).toEqual({ model: "sonnet" });
     expect(draft.skillPackages).toEqual(source.config.skillPackages);
     expect(draft.mcpServers?.[0]?.name).toBe("search");
@@ -55,23 +51,34 @@ describe("platform design drafts", () => {
     for (const secret of ["hatch-secret", "url-secret", "query-secret", "env-secret"]) {
       expect(visible).not.toContain(secret);
     }
-    // Skill content IS visible in draft (AI can read/modify it)
     expect(JSON.stringify(draft)).toContain("private-script");
-    // MCP secrets are redacted
     expect(draft.mcpServers?.[0]?.env?.TOKEN).toBe("***");
-    expect(designSnapshot(source).config.skillPackages?.[0]?.files).toEqual({});
-    expect(designSnapshot(source).config.mcpServers).toEqual([{ name: "search", type: "http" }]);
+    // Snapshot shows skill content for diff preview
+    expect(designSnapshot(source).config.skillPackages?.[0]?.files["SKILL.md"]).toBe("# Report");
+    // Snapshot shows redacted MCP (name + type preserved, secrets redacted)
+    expect(designSnapshot(source).config.mcpServers?.[0]?.name).toBe("search");
+    expect(designSnapshot(source).config.mcpServers?.[0]?.env?.TOKEN).toBe("***");
+    expect(designSnapshot(source).config.escapeHatch).toBeUndefined();
   });
 
-  it("resolves only existing references and clones their original content", () => {
+  it("resolves inline skills and redacted MCP from draft", () => {
     const saved = resolveDesign(draftOf(source), [source]);
     expect(saved.config.skillPackages).toEqual(source.config.skillPackages);
-    expect(saved.config.mcpServers).toEqual(source.config.mcpServers);
+    expect(saved.config.mcpServers?.[0]?.name).toBe("search");
+    expect(saved.config.mcpServers?.[0]?.env?.TOKEN).toBe("***");
     expect(saved.config.escapeHatch).toBeUndefined();
-    required(saved.config.skillPackages?.[0]).files["SKILL.md"] = "changed";
-    required(saved.config.mcpServers?.[0]?.env).TOKEN = "changed";
-    expect(source.config.skillPackages?.[0]?.files["SKILL.md"]).toBe("# Report");
-    expect(source.config.mcpServers?.[0]?.env?.TOKEN).toBe("env-secret");
+  });
+
+  it("AI editing inline skill content applies on resolve", () => {
+    const draft = draftOf(source);
+    if (draft.skillPackages?.[0]) {
+      draft.skillPackages[0] = {
+        ...draft.skillPackages[0],
+        files: { ...draft.skillPackages[0].files, "SKILL.md": "# Modified Report" },
+      };
+    }
+    const saved = resolveDesign(draft, [source]);
+    expect(saved.config.skillPackages?.[0]?.files["SKILL.md"]).toBe("# Modified Report");
   });
 
   it.each([
@@ -88,17 +95,25 @@ describe("platform design drafts", () => {
     expect(() => resolveDesign(draft, [source])).toThrow(/parameters/);
   });
 
-  it("rejects invented refs, wrong resource kinds and revoked resources", () => {
+  it("rejects invented refs and wrong resource kinds", () => {
     const draft = draftOf(source);
-    expect(() => resolveDesign(draft, [])).toThrow(/资源/);
     expect(() => resolveDesign({ ...draft, skillRefs: ["invented"] }, [source])).toThrow(/资源/);
-    expect(() => resolveDesign({ ...draft, skillRefs: draft.mcpRefs }, [source])).toThrow(/资源/);
+    expect(() =>
+      resolveDesign({ ...draft, skillRefs: [resourceRef("source", "mcp", "search")] }, [source]),
+    ).toThrow(/资源/);
   });
 
   it("rejects duplicate ref names from different sources", () => {
     const second = { ...source, id: "second" };
-    const draft = draftOf(source);
-    draft.skillRefs.push(resourceRef(second.id, "skill", "report"));
+    const draft: DesignDraft = {
+      ...draftOf(),
+      name: "test",
+      systemPrompt: "test",
+      skillRefs: [
+        resourceRef(source.id, "skill", "report"),
+        resourceRef(second.id, "skill", "report"),
+      ],
+    };
     expect(() => resolveDesign(draft, [source, second])).toThrow(/重复/);
   });
 
@@ -152,7 +167,9 @@ describe("platform design drafts", () => {
 
   it("hashes object key ordering consistently but detects content and reference changes", () => {
     expect(designHash({ b: 2, a: 1 })).toBe(designHash({ a: 1, b: 2 }));
-    expect(designHash(draftOf(source))).not.toBe(designHash({ ...draftOf(source), mcpRefs: [] }));
+    expect(designHash(draftOf(source))).not.toBe(
+      designHash({ ...draftOf(source), skillPackages: [] }),
+    );
     expect(resourceRef("a,b", "skill", "c")).not.toBe(resourceRef("a", "skill", "b,c"));
   });
 

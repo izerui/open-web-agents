@@ -300,9 +300,11 @@ describe("AgentDesigner", () => {
     await h.edit(draft, [source.id]);
     const view = await h.inspect();
     expect(view.issues).toEqual([]);
-    for (const secret of ["secret-token", "secret-env", "private-script"]) {
+    for (const secret of ["secret-token", "secret-env"]) {
       expect(JSON.stringify(view)).not.toContain(secret);
     }
+    // Skill content IS visible in diff preview (user reviews before saving)
+    expect(JSON.stringify(view)).toContain("private-script");
     const saved = await h.designer.apply(owner, "design", view.previewToken);
     expect(saved.saved.config.skillPackages).toEqual(source.config.skillPackages);
     expect(saved.saved.config.mcpServers).toEqual(source.config.mcpServers);
