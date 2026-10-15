@@ -91,6 +91,10 @@ export function validateSkillPackages(pkgs: unknown): { field: string; message: 
         issues.push({ field: `${at}.files`, message: `${path} 超过 256KB` });
       }
     }
+    const conflict = findPathConflict(entries.map(([p]) => p));
+    if (conflict) {
+      issues.push({ field: `${at}.files`, message: conflict });
+    }
   }
   if (total > SKILL_LIMITS.maxTotalBytes) {
     issues.push({ field: "skillPackages", message: "全部技能文件合计超过 2MB" });
@@ -106,4 +110,16 @@ export function renderSkillMarkdown(pkg: SkillPackage): string {
   const body = (pkg.files["SKILL.md"] ?? "").replace(/^---\n[\s\S]*?\n---\n?/, "");
   const desc = pkg.description.replace(/\r?\n/g, " ").trim();
   return `---\nname: ${pkg.name}\ndescription: ${JSON.stringify(desc)}\n---\n\n${body.trimStart()}`;
+}
+
+export function findPathConflict(paths: string[]): string | null {
+  const sorted = [...paths].sort();
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const a = sorted[i];
+    const b = sorted[i + 1];
+    if (a && b && b.startsWith(`${a}/`)) {
+      return `路径冲突:「${a}」是文件,不能同时作为「${b}」的目录`;
+    }
+  }
+  return null;
 }

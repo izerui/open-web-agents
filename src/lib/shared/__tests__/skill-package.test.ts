@@ -1,4 +1,4 @@
-import { renderSkillMarkdown, validateSkillPackages } from "@/lib/shared";
+import { findPathConflict, renderSkillMarkdown, validateSkillPackages } from "@/lib/shared";
 import { describe, expect, it } from "vitest";
 
 const ok = {
@@ -43,5 +43,50 @@ describe("renderSkillMarkdown", () => {
     expect(md).toBe(
       '---\nname: manim-scene\ndescription: "用 Manim 渲染数学推导动画"\n---\n\n正文',
     );
+  });
+});
+
+describe("findPathConflict", () => {
+  it("无冲突时返回 null", () => {
+    expect(findPathConflict(["SKILL.md", "scripts/run.py", "config/settings.json"])).toBeNull();
+  });
+
+  it("文件路径是另一个文件的父目录时报冲突", () => {
+    const msg = findPathConflict(["scripts", "scripts/run.py"]);
+    expect(msg).toContain("scripts");
+    expect(msg).toContain("scripts/run.py");
+  });
+
+  it("SKILL.md/notes.txt 被拒", () => {
+    const msg = findPathConflict(["SKILL.md", "SKILL.md/notes.txt"]);
+    expect(msg).toContain("SKILL.md");
+  });
+
+  it("先添加子路径再添加父路径同样被拒", () => {
+    const msg = findPathConflict(["scripts/run.py", "scripts"]);
+    expect(msg).toContain("scripts");
+  });
+
+  it("同前缀但不是父子关系不报冲突", () => {
+    expect(findPathConflict(["scripts-v2.py", "scripts/run.py"])).toBeNull();
+  });
+});
+
+describe("validateSkillPackages 路径冲突", () => {
+  it("文件与目录冲突在校验时被拒", () => {
+    const pkg = {
+      ...ok,
+      files: { "SKILL.md": "x", scripts: "raw content", "scripts/run.py": "print(1)" },
+    };
+    const issues = validateSkillPackages([pkg]);
+    expect(issues.some((i) => /冲突/.test(i.message))).toBe(true);
+  });
+
+  it("正常的脚本加配置目录通过校验", () => {
+    const pkg = {
+      ...ok,
+      files: { "SKILL.md": "x", "scripts/run.py": "print(1)", "config/settings.json": "{}" },
+    };
+    expect(validateSkillPackages([pkg])).toEqual([]);
   });
 });

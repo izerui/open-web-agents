@@ -23,7 +23,7 @@ import type { AgentSummary } from "@/features/workbench/types";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import type { ModelAlias } from "@/lib/shared";
 import { PERMISSION_MODES, type PermissionMode } from "@/lib/shared";
-import { isSafeSkillPath } from "@/lib/shared/skill-package";
+import { findPathConflict, isSafeSkillPath } from "@/lib/shared/skill-package";
 import { cn } from "@/lib/utils";
 import {
   Bot,
@@ -1456,6 +1456,12 @@ function SkillEditor({
     }
     if (!isSafeSkillPath(p)) {
       setPathError("路径不合法（只允许字母数字._-，不能 .. 或绝对路径）");
+      return;
+    }
+    const allPaths = [...Object.keys(skill.files), p];
+    const conflict = findPathConflict(allPaths);
+    if (conflict) {
+      setPathError(conflict);
       return;
     }
     onPatchFile(p, "");
