@@ -1238,7 +1238,11 @@ export function Workbench() {
                   同一个失败出现两遍。
                 */}
                 {/* 对话区域 */}
-                <VariablePrompt key={agentId} agentId={agentId} />
+                <VariablePrompt
+                  key={agentId}
+                  agentId={agentId}
+                  agentVersion={current?.publishedVersion}
+                />
                 <div className="relative flex min-h-0 flex-1 flex-col">
                   {historyLoading ? (
                     <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">

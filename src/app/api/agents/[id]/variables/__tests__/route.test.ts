@@ -32,6 +32,17 @@ vi.mock("@/lib/container", () => ({
         if (!storedValues[agentId]) storedValues[agentId] = {};
         storedValues[agentId][userId] = { ...values };
       },
+      merge: async (agentId: string, userId: string, updates: Record<string, string | null>) => {
+        if (!storedValues[agentId]) storedValues[agentId] = {};
+        const existing = storedValues[agentId][userId] ?? {};
+        const merged = { ...existing };
+        for (const [k, v] of Object.entries(updates)) {
+          if (v === null) delete merged[k];
+          else merged[k] = v;
+        }
+        storedValues[agentId][userId] = merged;
+        return merged;
+      },
     },
     auth: {
       resolveWeb: async () => {
@@ -80,7 +91,7 @@ describe("variable API version and secret safety", () => {
     storedValues.a1 = { "user-a": { KEY: "real-secret-value" } };
 
     expect((await put("a1", { KEY: "***" })).status).toBe(200);
-    expect(storedValues.a1["user-a"].KEY).toBe("real-secret-value");
+    expect(storedValues.a1?.["user-a"]?.KEY).toBe("real-secret-value");
   });
 
   it("PUT does not delete keys not included in the request body", async () => {
@@ -96,7 +107,7 @@ describe("variable API version and secret safety", () => {
     storedValues.a1 = { "user-a": { A: "old-a", B: "old-b" } };
 
     expect((await put("a1", { A: "new-a" })).status).toBe(200);
-    expect(storedValues.a1["user-a"]).toEqual({ A: "new-a", B: "old-b" });
+    expect(storedValues.a1?.["user-a"]).toEqual({ A: "new-a", B: "old-b" });
   });
 
   it("v1 session variables survive after publishing v2 with different definitions", async () => {
@@ -134,8 +145,8 @@ describe("variable API version and secret safety", () => {
 
     // PUT new value for NEW_KEY does NOT delete OLD_KEY
     expect((await put("a1", { NEW_KEY: "updated-new" })).status).toBe(200);
-    expect(storedValues.a1["user-a"].OLD_KEY).toBe("old-secret");
-    expect(storedValues.a1["user-a"].NEW_KEY).toBe("updated-new");
+    expect(storedValues.a1?.["user-a"]?.OLD_KEY).toBe("old-secret");
+    expect(storedValues.a1?.["user-a"]?.NEW_KEY).toBe("updated-new");
   });
 
   it("secret=true in published version but secret=false in draft: *** still preserves value", async () => {
@@ -156,6 +167,6 @@ describe("variable API version and secret safety", () => {
 
     // PUT *** — still preserved regardless of draft's secret flag
     expect((await put("a1", { KEY: "***" })).status).toBe(200);
-    expect(storedValues.a1["user-a"].KEY).toBe("real-secret");
+    expect(storedValues.a1?.["user-a"]?.KEY).toBe("real-secret");
   });
 });

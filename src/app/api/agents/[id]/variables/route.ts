@@ -88,8 +88,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
       return Response.json({ error: "请提供变量值对象" }, { status: 400 });
     }
 
-    const existing = await variables.get(id, subject.userId);
-    const merged = { ...existing };
+    const updates: Record<string, string | null> = {};
 
     for (const [key, val] of Object.entries(body)) {
       if (typeof val !== "string") {
@@ -99,19 +98,15 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
         return Response.json({ error: `变量 ${key} 的值不能超过 4000 字符` }, { status: 400 });
       }
       if (val === "***") continue;
-      if (val.trim()) {
-        merged[key] = val;
-      } else {
-        delete merged[key];
-      }
+      updates[key] = val.trim() ? val : null;
     }
+
+    const merged = await variables.merge(id, subject.userId, updates);
 
     const totalSize = JSON.stringify(merged).length;
     if (totalSize > 500_000) {
       return Response.json({ error: "变量总数据量不能超过 500KB" }, { status: 400 });
     }
-
-    await variables.set(id, subject.userId, merged);
     return Response.json({ ok: true });
   } catch (err) {
     const r = authErrorResponse(err);

@@ -6,6 +6,11 @@ import { and, eq } from "drizzle-orm";
 export interface VariableRepo {
   get(agentId: string, userId: string): Promise<Record<string, string>>;
   set(agentId: string, userId: string, values: Record<string, string>): Promise<void>;
+  merge(
+    agentId: string,
+    userId: string,
+    updates: Record<string, string | null>,
+  ): Promise<Record<string, string>>;
   delete(agentId: string, userId: string): Promise<void>;
 }
 
@@ -15,6 +20,16 @@ export class MysqlVariableRepo implements VariableRepo {
     private readonly secrets: SecretBox,
   ) {}
 
+  private decrypt(enc: string): Record<string, string> {
+    const plain = this.secrets.decrypt(enc);
+    if (plain === null) return {};
+    try {
+      return JSON.parse(plain) as Record<string, string>;
+    } catch {
+      return {};
+    }
+  }
+
   async get(agentId: string, userId: string): Promise<Record<string, string>> {
     const [row] = await this.db
       .select()
@@ -22,13 +37,7 @@ export class MysqlVariableRepo implements VariableRepo {
       .where(and(eq(agentVariables.agentId, agentId), eq(agentVariables.userId, userId)))
       .limit(1);
     if (!row) return {};
-    const plain = this.secrets.decrypt(row.valuesEnc);
-    if (plain === null) return {};
-    try {
-      return JSON.parse(plain) as Record<string, string>;
-    } catch {
-      return {};
-    }
+    return this.decrypt(row.valuesEnc);
   }
 
   async set(agentId: string, userId: string, values: Record<string, string>): Promise<void> {
@@ -38,6 +47,44 @@ export class MysqlVariableRepo implements VariableRepo {
       .insert(agentVariables)
       .values({ agentId, userId, valuesEnc: enc, updatedAt: now })
       .onDuplicateKeyUpdate({ set: { valuesEnc: enc, updatedAt: now } });
+  }
+
+  async merge(
+    agentId: string,
+    userId: string,
+    updates: Record<string, string | null>,
+  ): Promise<Record<string, string>> {
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(agentVariables)
+        .where(and(eq(agentVariables.agentId, agentId), eq(agentVariables.userId, userId)))
+        .for("update");
+
+      const existing = row ? this.decrypt(row.valuesEnc) : {};
+      const merged = { ...existing };
+
+      for (const [key, val] of Object.entries(updates)) {
+        if (val === null) {
+          delete merged[key];
+        } else {
+          merged[key] = val;
+        }
+      }
+
+      const enc = this.secrets.encrypt(JSON.stringify(merged));
+      const now = new Date();
+      if (row) {
+        await tx
+          .update(agentVariables)
+          .set({ valuesEnc: enc, updatedAt: now })
+          .where(and(eq(agentVariables.agentId, agentId), eq(agentVariables.userId, userId)));
+      } else {
+        await tx.insert(agentVariables).values({ agentId, userId, valuesEnc: enc, updatedAt: now });
+      }
+
+      return merged;
+    });
   }
 
   async delete(agentId: string, userId: string): Promise<void> {

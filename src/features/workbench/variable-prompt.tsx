@@ -24,9 +24,11 @@ interface VariableState {
 
 export function VariablePrompt({
   agentId,
+  agentVersion,
   onReady,
 }: {
   agentId: string;
+  agentVersion?: number | null;
   onReady?: () => void;
 }) {
   const [state, setState] = useState<VariableState | null>(null);
@@ -37,15 +39,18 @@ export function VariablePrompt({
 
   const load = useCallback(async () => {
     try {
+      const params = new URLSearchParams();
+      if (agentVersion != null) params.set("version", String(agentVersion));
+      const qs = params.toString();
       const data = await fetchJson<VariableState>(
-        `/api/agents/${encodeURIComponent(agentId)}/variables`,
+        `/api/agents/${encodeURIComponent(agentId)}/variables${qs ? `?${qs}` : ""}`,
       );
       setState(data);
       if (data.variables.length > 0) {
         setDraft(data.values);
       }
     } catch {}
-  }, [agentId]);
+  }, [agentId, agentVersion]);
 
   useEffect(() => {
     void load();

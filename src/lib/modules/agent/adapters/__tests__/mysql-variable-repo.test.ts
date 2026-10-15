@@ -88,5 +88,35 @@ if (!url) {
       expect((await repo.get(agentId, userA)).KEY).toBe("a-secret");
       expect((await repo.get(agentId, userB)).KEY).toBe("b-secret");
     });
+
+    it("concurrent merge of different keys preserves both", async () => {
+      const agentId = `var-test-${randomUUID().slice(0, 16)}`;
+      const userId = `user-${randomUUID().slice(0, 16)}`;
+      pairs.push([agentId, userId]);
+
+      await repo.set(agentId, userId, { EXISTING: "base" });
+
+      const results = await Promise.all([
+        repo.merge(agentId, userId, { KEY_A: "value-a" }),
+        repo.merge(agentId, userId, { KEY_B: "value-b" }),
+      ]);
+
+      const final = await repo.get(agentId, userId);
+      expect(final.EXISTING).toBe("base");
+      expect(final.KEY_A).toBe("value-a");
+      expect(final.KEY_B).toBe("value-b");
+    });
+
+    it("merge with null deletes a key without affecting others", async () => {
+      const agentId = `var-test-${randomUUID().slice(0, 16)}`;
+      const userId = `user-${randomUUID().slice(0, 16)}`;
+      pairs.push([agentId, userId]);
+
+      await repo.set(agentId, userId, { A: "1", B: "2", C: "3" });
+      await repo.merge(agentId, userId, { B: null, D: "4" });
+
+      const final = await repo.get(agentId, userId);
+      expect(final).toEqual({ A: "1", C: "3", D: "4" });
+    });
   });
 }
