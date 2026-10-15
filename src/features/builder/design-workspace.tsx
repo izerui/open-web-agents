@@ -651,6 +651,44 @@ export function DesignWorkspace({ initialSessionId }: { initialSessionId?: strin
                           </fieldset>
                         ))}
                       </fieldset>
+                      {(draft.skillPackages?.length ?? 0) > 0 && (
+                        <fieldset className="space-y-2">
+                          <legend className="mb-2 text-sm font-medium">技能包（inline）</legend>
+                          {draft.skillPackages?.map((s) => (
+                            <div key={s.name} className="rounded border p-2 text-xs">
+                              <p className="font-medium">{s.name}</p>
+                              {s.description && (
+                                <p className="text-muted-foreground">{s.description}</p>
+                              )}
+                              <p className="mt-1 text-muted-foreground">
+                                {Object.keys(s.files).length} 个文件
+                                {s.files["SKILL.md"] ? ` · ${s.files["SKILL.md"].length} 字符` : ""}
+                              </p>
+                            </div>
+                          ))}
+                        </fieldset>
+                      )}
+                      {(draft.mcpServers?.length ?? 0) > 0 && (
+                        <fieldset className="space-y-2">
+                          <legend className="mb-2 text-sm font-medium">MCP 服务（inline）</legend>
+                          {draft.mcpServers?.map((m) => (
+                            <div key={m.name} className="rounded border p-2 text-xs">
+                              <p className="font-medium">
+                                {m.name}{" "}
+                                <span className="font-normal text-muted-foreground">{m.type}</span>
+                              </p>
+                              {m.url && (
+                                <p className="mt-1 truncate text-muted-foreground">{m.url}</p>
+                              )}
+                              {m.env && (
+                                <p className="mt-1 text-muted-foreground">
+                                  env: {Object.keys(m.env).join(", ")}
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </fieldset>
+                      )}
                       {(view?.issues?.length ?? 0) > 0 && (
                         <ul className="space-y-1 text-xs text-destructive">
                           {view?.issues?.map((issue, i) => (
