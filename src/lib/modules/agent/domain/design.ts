@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { McpDef, SkillPackage } from "@/lib/shared";
+import { type McpDef, SKILL_LIMITS, type SkillPackage } from "@/lib/shared";
 import type { Agent, AgentSnapshot } from "../ports";
 import { agentToBundle, bundleToAgent } from "./agent-bundle";
 import type { AgentConfig } from "./config";
@@ -132,12 +132,12 @@ export function parseDesign(raw: unknown): DesignDraft {
   if (d.mcpServers !== undefined && !Array.isArray(d.mcpServers)) {
     throw new Error("mcpServers 必须是数组");
   }
-  const jsonLen = JSON.stringify(raw).length;
-  const limit = 5_000_000;
-  if (jsonLen > limit) {
-    throw new Error(
-      `设计草稿过大(${(jsonLen / 1_000_000).toFixed(1)}MB,上限 ${limit / 1_000_000}MB)`,
-    );
+  const jsonBytes = new TextEncoder().encode(JSON.stringify(raw)).length;
+  const limit = SKILL_LIMITS.maxTotalBytes + 1_048_576;
+  if (jsonBytes > limit) {
+    const mbUsed = (jsonBytes / 1_048_576).toFixed(1);
+    const mbLimit = (limit / 1_048_576).toFixed(1);
+    throw new Error(`设计草稿过大(${mbUsed}MB,上限 ${mbLimit}MB)`);
   }
   return d as unknown as DesignDraft;
 }

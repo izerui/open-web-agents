@@ -1,3 +1,4 @@
+import { validateSkillPackages } from "@/lib/shared/skill-package";
 import { describe, expect, it } from "vitest";
 import type { Agent } from "../../ports";
 import {
@@ -212,7 +213,7 @@ describe("platform design drafts", () => {
   });
 
   it("合法多文件技能包超过旧 500K 限制仍能载入设计器", () => {
-    const bigScript = "x".repeat(300_000);
+    const fileContent = "x".repeat(250 * 1024);
     const bigAgent: Agent = {
       id: "big-skill",
       ownerId: "owner",
@@ -226,13 +227,15 @@ describe("platform design drafts", () => {
             description: "大工具",
             files: {
               "SKILL.md": "# 步骤\n运行脚本",
-              "scripts/large.py": bigScript,
-              "data/corpus.txt": bigScript,
+              "scripts/large.py": fileContent,
+              "data/corpus.txt": fileContent,
             },
           },
         ],
       },
     };
+
+    expect(validateSkillPackages(bigAgent.config.skillPackages)).toEqual([]);
 
     const draft = draftOf(bigAgent);
     const draftJson = JSON.stringify(draft);
@@ -240,15 +243,15 @@ describe("platform design drafts", () => {
 
     const parsed = parseDesign(JSON.parse(draftJson));
     expect(parsed.skillPackages?.[0]?.name).toBe("big-tool");
-    expect(parsed.skillPackages?.[0]?.files["scripts/large.py"]).toBe(bigScript);
+    expect(parsed.skillPackages?.[0]?.files["scripts/large.py"]).toBe(fileContent);
 
     const resolved = resolveDesign(parsed, []);
-    expect(resolved.config.skillPackages?.[0]?.files["scripts/large.py"]).toBe(bigScript);
-    expect(resolved.config.skillPackages?.[0]?.files["data/corpus.txt"]).toBe(bigScript);
+    expect(resolved.config.skillPackages?.[0]?.files["scripts/large.py"]).toBe(fileContent);
+    expect(resolved.config.skillPackages?.[0]?.files["data/corpus.txt"]).toBe(fileContent);
   });
 
-  it("超过 5MB 上限时报明确错误", () => {
-    const huge = "x".repeat(2_600_000);
+  it("超过容量上限时报明确错误", () => {
+    const huge = "x".repeat(1_600_000);
     const draft = {
       name: "t",
       description: "",
