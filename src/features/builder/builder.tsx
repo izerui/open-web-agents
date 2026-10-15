@@ -1518,34 +1518,37 @@ function SkillEditor({
       {/* 附属文件 */}
       {otherFiles.map((path) => (
         <div key={path} className="rounded border border-border">
-          <button
-            type="button"
-            className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-muted/50"
-            onClick={() => setExpandedFile(expandedFile === path ? null : path)}
-          >
-            {expandedFile === path ? (
-              <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-            ) : (
-              <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
-            )}
-            <FileCode className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="flex-1 truncate font-mono">{path}</span>
-            <span className="text-muted-foreground">{skill.files[path]?.length ?? 0} 字符</span>
+          <div className="flex items-center gap-2 px-2 py-1.5 text-xs">
+            <button
+              type="button"
+              className="flex flex-1 items-center gap-2 text-left hover:opacity-80"
+              onClick={() => setExpandedFile(expandedFile === path ? null : path)}
+            >
+              {expandedFile === path ? (
+                <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+              ) : (
+                <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+              )}
+              <FileCode className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="flex-1 truncate font-mono">{path}</span>
+            </button>
+            <span className="shrink-0 text-muted-foreground">
+              {skill.files[path]?.length ?? 0} 字符
+            </span>
             <Button
               type="button"
               variant="ghost"
               size="icon-sm"
-              className="text-muted-foreground hover:text-destructive"
+              className="shrink-0 text-muted-foreground hover:text-destructive"
               aria-label={`删除 ${path}`}
-              onClick={(e) => {
-                e.stopPropagation();
+              onClick={() => {
                 onRemoveFile(path);
                 if (expandedFile === path) setExpandedFile(null);
               }}
             >
               <Trash2 />
             </Button>
-          </button>
+          </div>
           {expandedFile === path && (
             <div className="border-t px-2 py-1.5">
               <Textarea

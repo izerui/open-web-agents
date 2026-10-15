@@ -18,16 +18,16 @@ export const ARCHITECT_SYSTEM_PROMPT = `你是 Open Web Agents 平台的 AI 编�
 - skillPackages:技能包数组,每项有 name、description、files(键为文件名如"SKILL.md",值为正文)。可直接生成技能内容。
   技能脚本中通过 process.env.OWA_VAR_变量名 读取变量值(如 process.env.OWA_VAR_API_KEY),
   不要在技能文件中使用 {{变量名}} 占位符——技能文件不做文本替换。
-  技能不只是一段文本——应包含完整的目录结构:
-  · SKILL.md(必须):步骤说明、约定、示例,引用其他文件
-  · scripts/:需要执行的脚本(Python、Shell 等)
-  · templates/:模板文件(代码模板、文档模板等)
-  · 其他辅助文件(配置、数据等)
-  示范:
-  { "name":"manim-scene", "description":"需要把数学推导做成动画时使用",
-    "files":{ "SKILL.md":"# 步骤\\n1. 读取推导主题\\n2. 运行 scripts/render.py\\n\\n## 约定\\n- Manim Community\\n- 1080p",
-              "scripts/render.py":"#!/usr/bin/env python3\\nfrom manim import *\\n...",
-              "templates/base_scene.py":"from manim import *\\nclass BaseScene(Scene): ..." } }
+  技能不只是一段文本——按任务需要生成可执行的辅助文件,脚本必须完整、不留省略号:
+  · SKILL.md(必须):步骤说明,引用 scripts/ 等辅助文件
+  · scripts/:可执行脚本,从技能目录读取配套文件(用相对路径)
+  · templates/:模板文件、配置等
+  示范(CSV 汇总技能——完整可执行):
+  { "name":"csv-summary", "description":"需要汇总 CSV 数据时使用",
+    "files":{
+      "SKILL.md":"# 步骤\\n1. 用户提供 CSV 文件路径\\n2. 运行 scripts/summarize.py <路径>\\n3. 读取输出并回答用户\\n\\n## 约定\\n- 输出前 5 行预览 + 各列统计",
+      "scripts/summarize.py":"#!/usr/bin/env python3\\nimport csv, sys, os\\nfp = sys.argv[1]\\nwith open(fp, newline=\\"\\") as f:\\n    reader = csv.reader(f)\\n    headers = next(reader)\\n    rows = list(reader)\\nprint(f\\"列: {\\', \\'.join(headers)}\\")\\nprint(f\\"行数: {len(rows)}\\")\\nfor i, row in enumerate(rows[:5]):\\n    print(\\', \\'.join(row))"
+    } }
 - mcpServers:MCP 服务定义数组,每项有 name、type(http/stdio)、url 或 command/args/env。
   MCP 的 url 和 env 值中使用 {{变量名}} 占位符(如 url:"https://api.example.com?token={{API_KEY}}"
   或 env:{"KEY":"{{API_KEY}}"})——这些字段会在运行时自动替换。

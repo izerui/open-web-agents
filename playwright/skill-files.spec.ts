@@ -23,16 +23,25 @@ async function createAgent(ctx: BrowserContext, name: string) {
   return ((await res.json()) as { agent?: { id: string } }).agent!.id;
 }
 
+type AgentList = {
+  agents?: {
+    id: string;
+    config?: { skillPackages?: { name: string; files: Record<string, string> }[] };
+  }[];
+};
+
+function getSkillFiles(body: AgentList, agentId: string, skillName: string) {
+  return body.agents?.find((a) => a.id === agentId)?.config?.skillPackages?.find(
+    (s) => s.name === skillName,
+  )?.files;
+}
+
 test.describe("技能包多文件管理", () => {
-  test("通过 API 创建含多文件技能 → 页面加载 → 验证文件完整可编辑", async ({
-    page,
-    context,
-  }) => {
+  test("API 预创建 → 页面加载 → 编辑脚本 → 保存 → API 验证", async ({ page, context }) => {
     await register(context, "skill-api");
     const agentId = await createAgent(context, "PW 技能 API");
 
-    // 通过 POST 保存含多文件技能的智能体（构建器用 POST）
-    const putRes = await context.request.post(`${BASE}/api/agents`, {
+    await context.request.post(`${BASE}/api/agents`, {
       data: {
         id: agentId,
         name: "PW 技能 API",
@@ -53,50 +62,107 @@ test.describe("技能包多文件管理", () => {
         },
       },
     });
-    expect(putRes.ok(), `保存失败: ${putRes.status()}`).toBeTruthy();
 
-    // 打开构建器页面
     await page.goto(`${BASE}/agents?id=${agentId}`);
-    await page.waitForTimeout(3000);
-
-    // 验证技能名加载
     await expect(page.getByLabel("技能名")).toHaveValue("render-anim", { timeout: 10_000 });
 
-    // 验证 SKILL.md 文件按钮可见
-    const skillMdBtn = page.getByText("SKILL.md").first();
-    await expect(skillMdBtn).toBeVisible();
+    // 验证所有文件可见
+    await expect(page.getByText("SKILL.md").first()).toBeVisible();
+    const scriptRow = page.locator("button", { hasText: "scripts/render.py" }).first();
+    await expect(scriptRow).toBeVisible();
+    await expect(page.locator("button", { hasText: "templates/base.py" }).first()).toBeVisible();
 
-    // 展开 SKILL.md 查看内容
-    await skillMdBtn.click();
-    const skillMdTextarea = page.locator('textarea[placeholder*="SKILL.md"]');
-    await expect(skillMdTextarea).toHaveValue(/步骤/, { timeout: 3_000 });
+    // 展开 SKILL.md
+    await page.getByText("SKILL.md").first().click();
+    await expect(page.locator('textarea[placeholder*="SKILL.md"]')).toHaveValue(/步骤/);
 
-    // 验证附属文件可见
-    const renderBtn = page.getByRole("button", { name: /scripts\/render\.py/ }).first();
-    await expect(renderBtn).toBeVisible();
-    const templateBtn = page.getByRole("button", { name: /templates\/base\.py/ }).first();
-    await expect(templateBtn).toBeVisible();
-
-    // 展开脚本查看内容
-    await renderBtn.click();
-    const scriptTextarea = page.locator('textarea[placeholder="scripts/render.py 内容"]');
-    await expect(scriptTextarea).toHaveValue(/python3/, { timeout: 3_000 });
-
-    // 编辑脚本内容
-    await scriptTextarea.clear();
-    await scriptTextarea.fill("#!/usr/bin/env python3\nprint('modified')");
+    // 展开脚本并编辑
+    await scriptRow.click();
+    const scriptTa = page.locator('textarea[placeholder="scripts/render.py 内容"]');
+    await expect(scriptTa).toHaveValue(/python3/);
+    await scriptTa.clear();
+    await scriptTa.fill("#!/usr/bin/env python3\nprint('modified')");
 
     // 保存
     await page.getByRole("button", { name: /保存/ }).first().click();
     await page.waitForTimeout(3000);
 
-    // API 验证修改后的内容
-    const listRes = await context.request.get(`${BASE}/api/agents`);
-    const agents = ((await listRes.json()) as { agents?: { id: string; config?: { skillPackages?: { name: string; files: Record<string, string> }[] } }[] }).agents;
-    const saved = agents?.find((a) => a.id === agentId)?.config?.skillPackages?.find((s) => s.name === "render-anim");
-    expect(saved, "技能包应该保存").toBeTruthy();
-    expect(saved!.files["scripts/render.py"]).toContain("modified");
-    expect(saved!.files["SKILL.md"]).toContain("步骤");
-    expect(saved!.files["templates/base.py"]).toContain("class Base");
+    // API 验证
+    const body = (await (await context.request.get(`${BASE}/api/agents`)).json()) as AgentList;
+    const files = getSkillFiles(body, agentId, "render-anim");
+    expect(files?.["scripts/render.py"]).toContain("modified");
+    expect(files?.["SKILL.md"]).toContain("步骤");
+    expect(files?.["templates/base.py"]).toContain("class Base");
+  });
+
+  test("新增文件 → 写内容 → 保存 → 重新打开 → 删除文件 → 再保存", async ({
+    page,
+    context,
+  }) => {
+    await register(context, "skill-crud");
+    const agentId = await createAgent(context, "PW 技能增删");
+
+    await page.goto(`${BASE}/agents?id=${agentId}`);
+    await page.waitForTimeout(2000);
+
+    // 添加技能
+    await page.getByRole("button", { name: "添加" }).first().click();
+    await page.getByLabel("技能名").fill("data-tool");
+    await page.getByLabel("技能描述").fill("数据处理工具");
+
+    // 编辑 SKILL.md
+    await page.getByText("SKILL.md").first().click();
+    await page.locator('textarea[placeholder*="SKILL.md"]').fill("# 数据处理\n运行 scripts/proc.sh");
+
+    // 添加附属文件
+    await page.getByRole("button", { name: "添加文件" }).click();
+    await page.getByPlaceholder("文件路径").fill("scripts/proc.sh");
+    await page.getByRole("button", { name: "确定" }).click();
+
+    // 写脚本内容（添加后自动展开）
+    await page.locator('textarea[placeholder="scripts/proc.sh 内容"]').fill("#!/bin/bash\necho done");
+
+    // 再添加一个文件
+    await page.getByRole("button", { name: "添加文件" }).click();
+    await page.getByPlaceholder("文件路径").fill("config.json");
+    await page.getByRole("button", { name: "确定" }).click();
+    await page.locator('textarea[placeholder="config.json 内容"]').fill('{"key":"value"}');
+
+    // 保存
+    await page.getByRole("button", { name: /保存/ }).first().click();
+    await page.waitForTimeout(3000);
+
+    // API 验证 3 个文件都在
+    let body = (await (await context.request.get(`${BASE}/api/agents`)).json()) as AgentList;
+    let files = getSkillFiles(body, agentId, "data-tool");
+    expect(files?.["SKILL.md"]).toContain("数据处理");
+    expect(files?.["scripts/proc.sh"]).toContain("echo done");
+    expect(files?.["config.json"]).toContain("key");
+
+    // 重新打开页面
+    await page.reload();
+    await page.waitForTimeout(3000);
+    await expect(page.getByLabel("技能名")).toHaveValue("data-tool", { timeout: 10_000 });
+
+    // 验证文件列表
+    await expect(page.locator("button", { hasText: "scripts/proc.sh" }).first()).toBeVisible();
+    await expect(page.locator("button", { hasText: "config.json" }).first()).toBeVisible();
+
+    // 删除 config.json
+    await page.getByLabel("删除 config.json").click();
+
+    // config.json 应该消失
+    await expect(page.locator("button", { hasText: "config.json" })).not.toBeVisible();
+
+    // 再保存
+    await page.getByRole("button", { name: /保存/ }).first().click();
+    await page.waitForTimeout(3000);
+
+    // API 验证 config.json 被删除、其他文件保留
+    body = (await (await context.request.get(`${BASE}/api/agents`)).json()) as AgentList;
+    files = getSkillFiles(body, agentId, "data-tool");
+    expect(files?.["SKILL.md"]).toContain("数据处理");
+    expect(files?.["scripts/proc.sh"]).toContain("echo done");
+    expect(files?.["config.json"]).toBeUndefined();
   });
 });
