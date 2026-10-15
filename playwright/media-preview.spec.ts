@@ -269,22 +269,75 @@ test.describe("视频/PDF/音频预览", () => {
     expect(Buffer.compare(downloaded, originalPdf)).toBe(0);
   });
 
-  test("Range 请求返回正确字节区间", async ({ context }) => {
+  test("Range 请求: 精确区间", async ({ context }) => {
     if (!fixtures.mp4) test.skip(true, "ffmpeg 不可用");
-    await register(context, "range-bytes");
+    await register(context, "range-exact");
     const sessionId = await createSession(context);
-    const originalMp4 = fs.readFileSync(fixtures.mp4);
-    await uploadBuffer(context, sessionId, originalMp4, "range-bytes.mp4");
+    const original = fs.readFileSync(fixtures.mp4);
+    await uploadBuffer(context, sessionId, original, "range-exact.mp4");
+    const url = `${BASE}/api/sessions/${sessionId}/files?download=range-exact.mp4&inline=1`;
 
-    const res = await context.request.fetch(
-      `${BASE}/api/sessions/${sessionId}/files?download=range-bytes.mp4&inline=1`,
-      { headers: { Range: "bytes=10-109" } },
-    );
+    const res = await context.request.fetch(url, { headers: { Range: "bytes=10-109" } });
     expect(res.status()).toBe(206);
     const body = await res.body();
     expect(body.length).toBe(100);
-    expect(Buffer.compare(body, originalMp4.subarray(10, 110))).toBe(0);
-    expect(res.headers()["content-range"]).toBe(`bytes 10-109/${originalMp4.length}`);
+    expect(Buffer.compare(body, original.subarray(10, 110))).toBe(0);
+    expect(res.headers()["content-range"]).toBe(`bytes 10-109/${original.length}`);
+  });
+
+  test("Range 请求: 后缀范围 bytes=-500 取末尾", async ({ context }) => {
+    if (!fixtures.mp4) test.skip(true, "ffmpeg 不可用");
+    await register(context, "range-suffix");
+    const sessionId = await createSession(context);
+    const original = fs.readFileSync(fixtures.mp4);
+    await uploadBuffer(context, sessionId, original, "range-suffix.mp4");
+    const url = `${BASE}/api/sessions/${sessionId}/files?download=range-suffix.mp4&inline=1`;
+
+    const res = await context.request.fetch(url, { headers: { Range: "bytes=-500" } });
+    expect(res.status()).toBe(206);
+    const body = await res.body();
+    const expectedStart = Math.max(0, original.length - 500);
+    const expectedLen = original.length - expectedStart;
+    expect(body.length).toBe(expectedLen);
+    expect(Buffer.compare(body, original.subarray(expectedStart))).toBe(0);
+    expect(res.headers()["content-range"]).toBe(
+      `bytes ${expectedStart}-${original.length - 1}/${original.length}`,
+    );
+  });
+
+  test("Range 请求: 开放结束 bytes=100-", async ({ context }) => {
+    if (!fixtures.mp4) test.skip(true, "ffmpeg 不可用");
+    await register(context, "range-open");
+    const sessionId = await createSession(context);
+    const original = fs.readFileSync(fixtures.mp4);
+    await uploadBuffer(context, sessionId, original, "range-open.mp4");
+    const url = `${BASE}/api/sessions/${sessionId}/files?download=range-open.mp4&inline=1`;
+
+    const res = await context.request.fetch(url, { headers: { Range: "bytes=100-" } });
+    expect(res.status()).toBe(206);
+    const body = await res.body();
+    expect(body.length).toBe(original.length - 100);
+    expect(Buffer.compare(body, original.subarray(100))).toBe(0);
+  });
+
+  test("Range 请求: 越界范围返回 416", async ({ context }) => {
+    if (!fixtures.mp4) test.skip(true, "ffmpeg 不可用");
+    await register(context, "range-416");
+    const sessionId = await createSession(context);
+    const original = fs.readFileSync(fixtures.mp4);
+    await uploadBuffer(context, sessionId, original, "range-416.mp4");
+    const url = `${BASE}/api/sessions/${sessionId}/files?download=range-416.mp4&inline=1`;
+
+    // start >= size
+    const res = await context.request.fetch(url, {
+      headers: { Range: `bytes=${original.length}-` },
+    });
+    expect(res.status()).toBe(416);
+    expect(res.headers()["content-range"]).toBe(`bytes */${original.length}`);
+
+    // bytes=-0 (零后缀)
+    const res2 = await context.request.fetch(url, { headers: { Range: "bytes=-0" } });
+    expect(res2.status()).toBe(416);
   });
 
   test("流式分支错误处理: 不存在的视频返回 404", async ({ context }) => {

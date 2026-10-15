@@ -171,14 +171,29 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   }
 }
 
-function parseRange(header: string | null, size: number): { start: number; end: number } | null {
+type RangeResult =
+  | { ok: true; start: number; end: number }
+  | { ok: false }
+  | null;
+
+function parseRange(header: string | null, size: number): RangeResult {
   if (!header) return null;
+  // bytes=start-end, bytes=start-, bytes=-suffix
   const m = /^bytes=(\d+)-(\d*)$/.exec(header);
-  if (!m) return null;
-  const start = Number(m[1]);
-  const end = m[2] ? Math.min(Number(m[2]), size - 1) : size - 1;
-  if (start > end || start >= size) return null;
-  return { start, end };
+  if (m) {
+    const start = Number(m[1]);
+    const end = m[2] ? Math.min(Number(m[2]), size - 1) : size - 1;
+    if (start >= size || start > end) return { ok: false };
+    return { ok: true, start, end };
+  }
+  const suffix = /^bytes=-(\d+)$/.exec(header);
+  if (suffix) {
+    const len = Number(suffix[1]);
+    if (len === 0) return { ok: false };
+    const start = Math.max(0, size - len);
+    return { ok: true, start, end: size - 1 };
+  }
+  return { ok: false };
 }
 
 async function streamResponse(
@@ -201,12 +216,20 @@ async function streamResponse(
     ...NO_STORE_HEADERS,
   };
 
-  if (!range) {
+  if (range === null) {
     headers["Content-Length"] = String(size);
     return new Response(fullStream, { headers });
   }
 
   await fullStream.cancel();
+
+  if (!range.ok) {
+    return new Response(null, {
+      status: 416,
+      headers: { "Content-Range": `bytes */${size}`, ...NO_STORE_HEADERS },
+    });
+  }
+
   const { stream: rangeStream } = await storage.stream(workspaceDir, relPath, range);
   headers["Content-Length"] = String(range.end - range.start + 1);
   headers["Content-Range"] = `bytes ${range.start}-${range.end}/${size}`;
