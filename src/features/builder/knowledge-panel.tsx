@@ -57,6 +57,7 @@ export function KnowledgePanel({
   const [editTitle, setEditTitle] = useState("");
   const [editContent, setEditContent] = useState("");
   const [saving, setSaving] = useState(false);
+  const detailSeqRef = useRef(0);
 
   const reload = useCallback(async () => {
     const seq = ++reloadSeqRef.current;
@@ -82,6 +83,7 @@ export function KnowledgePanel({
 
   useEffect(() => {
     reloadSeqRef.current += 1;
+    detailSeqRef.current += 1;
     setLoaded(false);
     setDocs([]);
     setTitle("");
@@ -146,16 +148,20 @@ export function KnowledgePanel({
     setEditMode(false);
     setDetail(null);
     setLoadingDetail(true);
+    const seq = ++detailSeqRef.current;
     try {
       const res = await fetch(`/api/agents/${agentId}/knowledge/${encodeURIComponent(docId)}`);
+      if (seq !== detailSeqRef.current) return;
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as DocDetail;
+      if (seq !== detailSeqRef.current) return;
       setDetail(data);
     } catch (error) {
+      if (seq !== detailSeqRef.current) return;
       setMsg(`加载文档失败:${errorText(error)}`);
       setExpandedId(null);
     } finally {
-      setLoadingDetail(false);
+      if (seq === detailSeqRef.current) setLoadingDetail(false);
     }
   }
 
