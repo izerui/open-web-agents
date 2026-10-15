@@ -734,4 +734,75 @@ describe("AgentDesigner", () => {
       reason: { code: "design_changed" },
     });
   });
+
+  it("多文件技能包走完 designer 全链路: 载入→AI 回读→编辑→预览→应用→读回", async () => {
+    const scriptContent = "#!/usr/bin/env python3\nprint('hello')\n".repeat(100);
+    const configContent = '{"preview_rows": 3}';
+    const bigTarget: Agent = {
+      id: "multi-file",
+      ownerId: owner.userId,
+      name: "多文件技能",
+      config: {
+        systemPrompt: "原始提示",
+        model: "sonnet",
+        skillPackages: [
+          {
+            name: "data-tool",
+            description: "处理数据",
+            files: {
+              "SKILL.md": "# 步骤\n1. 运行脚本\n2. 读取配置",
+              "scripts/process.py": scriptContent,
+              "config/settings.json": configContent,
+            },
+          },
+        ],
+      },
+    };
+    const h = await setup({ target: bigTarget });
+
+    // 1. inspect 载入——draft 包含完整文件
+    const view1 = await h.inspect();
+    expect(view1.draft.skillPackages?.[0]?.files["scripts/process.py"]).toBe(scriptContent);
+    expect(view1.draft.skillPackages?.[0]?.files["config/settings.json"]).toBe(configContent);
+
+    // 2. 模拟 AI 回读: enqueue 把 draft 写入文件
+    const draftJson = JSON.stringify(view1.draft);
+    h.files.set(DRAFT_FILE, Buffer.from(draftJson));
+
+    // 3. 编辑——修改脚本内容,保留配置
+    const editedScript = `${scriptContent}\n# modified by AI\n`;
+    const editedDraft: DesignDraft = {
+      ...view1.draft,
+      skillPackages: [
+        {
+          name: "data-tool",
+          description: "处理数据(改进版)",
+          files: {
+            "SKILL.md": "# 步骤\n1. 运行改进脚本\n2. 读取配置",
+            "scripts/process.py": editedScript,
+            "config/settings.json": configContent,
+          },
+        },
+      ],
+    };
+    await h.edit(editedDraft);
+
+    // 4. preview——不应有 issues
+    const view2 = await h.inspect();
+    expect(view2.issues).toEqual([]);
+    expect(view2.previewToken).toBeTruthy();
+
+    // 5. apply
+    const result = await h.designer.apply(owner, "design", view2.previewToken);
+    expect(result.created).toBe(false);
+
+    // 6. 读回——所有文件完整保留
+    const saved = await h.agents.get("multi-file");
+    const pkg = saved?.config.skillPackages?.[0];
+    expect(pkg?.name).toBe("data-tool");
+    expect(pkg?.description).toBe("处理数据(改进版)");
+    expect(pkg?.files["SKILL.md"]).toContain("改进脚本");
+    expect(pkg?.files["scripts/process.py"]).toBe(editedScript);
+    expect(pkg?.files["config/settings.json"]).toBe(configContent);
+  });
 });

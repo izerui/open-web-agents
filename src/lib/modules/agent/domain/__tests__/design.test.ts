@@ -250,8 +250,32 @@ describe("platform design drafts", () => {
     expect(resolved.config.skillPackages?.[0]?.files["data/corpus.txt"]).toBe(fileContent);
   });
 
+  it("7 个 250KiB 换行文件(JSON 膨胀 2x)仍能通过设计草稿限制", () => {
+    const newlineContent = "\n".repeat(250 * 1024);
+    const files: Record<string, string> = { "SKILL.md": "# test" };
+    for (let i = 0; i < 7; i++) files[`scripts/f${i}.py`] = newlineContent;
+
+    const pkg = { name: "newline-heavy", description: "换行文件", files };
+    expect(validateSkillPackages([pkg])).toEqual([]);
+
+    const draft = {
+      name: "t",
+      description: "",
+      systemPrompt: "",
+      parameters: {},
+      skillRefs: [] as string[],
+      mcpRefs: [] as string[],
+      skillPackages: [pkg],
+    };
+    const jsonBytes = new TextEncoder().encode(JSON.stringify(draft)).length;
+    expect(jsonBytes).toBeGreaterThan(3_000_000);
+
+    const parsed = parseDesign(draft);
+    expect(parsed.skillPackages?.[0]?.files["scripts/f0.py"]).toBe(newlineContent);
+  });
+
   it("超过容量上限时报明确错误", () => {
-    const huge = "x".repeat(1_600_000);
+    const huge = "x".repeat(2_700_000);
     const draft = {
       name: "t",
       description: "",
