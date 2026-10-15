@@ -26,6 +26,7 @@ interface RunDetail {
   outputTokens: number;
   at: number;
   estimatedCredits: RunCreditEstimate;
+  estimateSource: "run_snapshot" | "current_price";
 }
 
 interface UsageData {
@@ -303,6 +304,15 @@ function RunDetailSection({ runs, note }: { runs: RunDetail[]; note?: string }) 
                         {!est.complete && (
                           <Badge variant="outline" className="ml-1 text-[9px]">
                             不完整
+                          </Badge>
+                        )}
+                        {r.estimateSource === "current_price" && est.models.length > 0 && (
+                          <Badge
+                            variant="outline"
+                            className="ml-1 text-[9px]"
+                            title="按当前价目估算，非运行时价目"
+                          >
+                            当前价
                           </Badge>
                         )}
                       </td>

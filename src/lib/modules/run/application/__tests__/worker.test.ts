@@ -502,4 +502,61 @@ describe("RunWorker 墙钟超时", () => {
     await w.tick();
     expect((await repo.get("r1"))?.state).toBe("success");
   });
+
+  it("enrichCost hook 增强 cost 后持久化,hook 抛错时原始 cost 仍保存", async () => {
+    const metering = {
+      source: "sdk_model_usage" as const,
+      complete: true,
+      models: [
+        {
+          modelId: "m1",
+          inputTokens: 100,
+          outputTokens: 50,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      ],
+    };
+    const costWithMetering = { usd: 0.01, input: 100, output: 50, metering };
+    let enrichCalls = 0;
+
+    // Run 1: enrichCost succeeds
+    const engine1 = new FakeEngine({ status: "success", summary: "ok", cost: costWithMetering });
+    const { repo: repo1, worker: w1 } = await setup(engine1, () => 1000, {
+      enrichCost: async (raw) => {
+        enrichCalls++;
+        return {
+          ...(raw as Record<string, unknown>),
+          creditEstimate: {
+            totalMicroCredits: "42",
+            complete: true,
+            source: "sdk_model_usage",
+            models: [],
+          },
+        };
+      },
+    });
+    await repo1.createWithPrompt("r1", "s1", "go");
+    await w1.tick();
+    const saved1 = repo1.savedResults.get("r1")?.cost as Record<string, unknown> | undefined;
+    expect(saved1?.creditEstimate).toBeDefined();
+    expect((saved1?.creditEstimate as { totalMicroCredits: string }).totalMicroCredits).toBe("42");
+    expect(saved1?.usd).toBe(0.01);
+    expect(enrichCalls).toBe(1);
+
+    // Run 2: enrichCost throws — original cost still saved without creditEstimate
+    const engine2 = new FakeEngine({ status: "success", summary: "ok", cost: costWithMetering });
+    const { repo: repo2, worker: w2 } = await setup(engine2, () => 1000, {
+      enrichCost: async () => {
+        throw new Error("enrichment failed");
+      },
+    });
+    await repo2.createWithPrompt("r2", "s1", "go");
+    await w2.tick();
+    const saved2 = repo2.savedResults.get("r2")?.cost as Record<string, unknown> | undefined;
+    expect(saved2?.usd).toBe(0.01);
+    expect(saved2?.metering).toBeDefined();
+    expect(saved2?.creditEstimate).toBeUndefined();
+    expect((await repo2.get("r2"))?.state).toBe("success");
+  });
 });
