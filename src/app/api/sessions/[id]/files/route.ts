@@ -127,7 +127,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       const inline = wantInline && canRenderInline(mime);
 
       if (inline && (mime.startsWith("video/") || mime.startsWith("audio/"))) {
-        return streamResponse(req, storage, session.workspaceDir, download, mime, filename);
+        return await streamResponse(req, storage, session.workspaceDir, download, mime, filename);
       }
 
       const { bytes } = await storage.read(session.workspaceDir, download);

@@ -286,4 +286,24 @@ test.describe("视频/PDF/音频预览", () => {
     expect(Buffer.compare(body, originalMp4.subarray(10, 110))).toBe(0);
     expect(res.headers()["content-range"]).toBe(`bytes 10-109/${originalMp4.length}`);
   });
+
+  test("流式分支错误处理: 不存在的视频返回 404", async ({ context }) => {
+    await register(context, "stream-404");
+    const sessionId = await createSession(context);
+
+    const res = await context.request.fetch(
+      `${BASE}/api/sessions/${sessionId}/files?download=nonexistent.mp4&inline=1`,
+    );
+    expect(res.status()).toBe(404);
+  });
+
+  test("流式分支错误处理: 越界路径返回 400", async ({ context }) => {
+    await register(context, "stream-400");
+    const sessionId = await createSession(context);
+
+    const res = await context.request.fetch(
+      `${BASE}/api/sessions/${sessionId}/files?download=../../../etc/passwd.mp4&inline=1`,
+    );
+    expect(res.status()).toBe(400);
+  });
 });
