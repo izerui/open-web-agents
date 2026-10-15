@@ -138,12 +138,29 @@ function redactUrl(raw: string): string {
   }
 }
 
-const CONTAINS_VAR_REF = /\{\{[A-Za-z_][A-Za-z0-9_]*\}\}/;
+const PURE_VAR_REF = /^\{\{[A-Za-z_][A-Za-z0-9_]*\}\}$/;
 
 /**
- * 克隆专用脱敏:保留 {{变量名}} 引用,脱敏硬编码的凭证。
- * 纯变量引用原样保留;混合内容（含变量引用的字符串）也保留;
- * 纯硬编码值脱敏为 ***。
+ * 克隆专用的值脱敏：只保留纯变量引用（整个值就是 {{VAR}}），
+ * 混合内容（硬编码+变量引用）和纯硬编码都脱敏为 ***。
+ */
+function cloneRedactValue(value: string): string {
+  return PURE_VAR_REF.test(value) ? value : "***";
+}
+
+/**
+ * 克隆专用 URL 脱敏：整个 URL 是纯变量引用时保留，否则脱敏。
+ * 不尝试部分保留 URL 中的变量引用——混合 URL 可能泄露作者凭证。
+ */
+function cloneRedactUrl(url: string): string {
+  if (PURE_VAR_REF.test(url)) return url;
+  return redactUrl(url);
+}
+
+/**
+ * 克隆专用脱敏：保留纯 {{变量名}} 引用，脱敏一切硬编码和混合内容。
+ * 混合值（如 "sk-real-key-{{VAR}}"）不保留——它可能包含作者的真实密钥。
+ * 克隆者需要用自己的变量值重新配置被脱敏的字段。
  */
 export function redactAgentConfigForClone(cfg: AgentConfig): AgentConfig {
   const { escapeHatch: _hatch, ...rest } = cfg;
@@ -154,14 +171,12 @@ export function redactAgentConfigForClone(cfg: AgentConfig): AgentConfig {
       ...(m.env
         ? {
             env: Object.fromEntries(
-              Object.entries(m.env).map(([k, v]) => [k, CONTAINS_VAR_REF.test(v) ? v : "***"]),
+              Object.entries(m.env).map(([k, v]) => [k, cloneRedactValue(v)]),
             ),
           }
         : {}),
-      ...(m.url !== undefined
-        ? { url: CONTAINS_VAR_REF.test(m.url) ? m.url : redactUrl(m.url) }
-        : {}),
-      ...(m.args ? { args: m.args.map((a) => (CONTAINS_VAR_REF.test(a) ? a : "***")) } : {}),
+      ...(m.url !== undefined ? { url: cloneRedactUrl(m.url) } : {}),
+      ...(m.args ? { args: m.args.map((a) => cloneRedactValue(a)) } : {}),
     })),
   };
 }

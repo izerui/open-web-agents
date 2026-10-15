@@ -25,13 +25,18 @@ const sourceAgent = {
     maxTurns: 15,
     skillPackages: [{ name: "demo", description: "d", files: { "SKILL.md": "# Demo" } }],
     mcpServers: [
-      { type: "http" as const, name: "api", url: "https://{{BASE_URL}}/v1?token={{API_KEY}}" },
+      {
+        type: "http" as const,
+        name: "mixed-url",
+        url: "https://{{BASE_URL}}/v1?token={{API_KEY}}",
+      },
+      { type: "http" as const, name: "pure-url", url: "{{BASE_URL}}" },
       {
         type: "stdio" as const,
         name: "tool",
         command: "node",
         args: ["run.js"],
-        env: { KEY: "{{API_KEY}}", HOST: "hardcoded-secret" },
+        env: { KEY: "{{API_KEY}}", MIXED: "prefix-{{API_KEY}}", HOST: "hardcoded-secret" },
       },
     ],
     starters: ["Hello"],
@@ -197,12 +202,22 @@ describe("POST /api/agents/{id}/clone", () => {
       url?: string;
       env?: Record<string, string>;
     }[];
-    const httpMcp = mcpServers.find((m) => m.name === "api");
-    expect(httpMcp?.url).toContain("{{BASE_URL}}");
-    expect(httpMcp?.url).toContain("{{API_KEY}}");
+
+    // Mixed URL redacted — prevents "https://{{HOST}}/mcp?token=real-secret" from leaking
+    const mixedUrl = mcpServers.find((m) => m.name === "mixed-url");
+    expect(mixedUrl?.url).not.toContain("{{API_KEY}}");
+    expect(mixedUrl?.url).not.toContain("token=");
+
+    // Pure var ref URL preserved
+    const pureUrl = mcpServers.find((m) => m.name === "pure-url");
+    expect(pureUrl?.url).toBe("{{BASE_URL}}");
 
     const stdioMcp = mcpServers.find((m) => m.name === "tool");
+    // Pure var ref preserved
     expect(stdioMcp?.env?.KEY).toBe("{{API_KEY}}");
+    // Mixed value (hardcoded + var ref) redacted
+    expect(stdioMcp?.env?.MIXED).toBe("***");
+    // Pure hardcoded redacted
     expect(stdioMcp?.env?.HOST).toBe("***");
 
     expect((config.variables as unknown[])?.length).toBe(2);

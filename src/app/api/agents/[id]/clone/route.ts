@@ -4,15 +4,13 @@ import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { cloneAgentInTransaction } from "@/lib/modules/agent/application/clone-agent";
 import { pickAgentConfig, redactAgentConfigForClone } from "@/lib/modules/agent/domain/config";
 import { isSystemAgent } from "@/lib/modules/agent/domain/system-agent";
-import { validateAgentConfig } from "@/lib/modules/agent/domain/validate-config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { agents, auth, knowledge, releases, audit, env, db, knowledgeWriterFactory } =
-      getContainer();
+    const { agents, auth, knowledge, releases, audit, db, knowledgeWriterFactory } = getContainer();
     const principal = await auth.resolveWeb(req);
     auth.assertCanManageAgents(principal);
     const subject = await auth.subjectOf(principal);
@@ -40,11 +38,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const clonedConfig = redactAgentConfigForClone(published.config);
     const { escapeHatch: _, ...safeConfig } = clonedConfig;
     const picked = pickAgentConfig(safeConfig);
-
-    const issues = validateAgentConfig(picked, { allowStdioMcp: env.allowStdioMcp });
-    if (issues.length) {
-      return Response.json({ error: "源智能体配置校验未通过", issues }, { status: 422 });
-    }
 
     const clonedName = body.name?.trim() || `${published.name}（副本）`;
     const clonedId = randomUUID().replace(/-/g, "").slice(0, 24);
