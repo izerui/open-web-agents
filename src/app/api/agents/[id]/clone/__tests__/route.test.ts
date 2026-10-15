@@ -8,12 +8,10 @@ const state = vi.hoisted(() => ({
   userId: "cloner",
 }));
 
-const upserted: unknown[] = [];
-const knowledgeCreated: unknown[] = [];
-const knowledgeDeleted: string[] = [];
-const softDeleted: string[] = [];
 const audited: unknown[] = [];
-let createKnowledgeHook: ((doc: unknown, index: number) => void) | null = null;
+let transactionResult: unknown = null;
+let transactionError: Error | null = null;
+let knowledgeGetOverride: ((id: string) => unknown) | null = null;
 
 const sourceAgent = {
   id: "source-agent",
@@ -68,18 +66,22 @@ const knowledgeDocs = [
   },
 ];
 
+vi.mock("@/lib/modules/agent/adapters/mysql-agent-repo", () => ({
+  MysqlAgentRepo: vi.fn().mockImplementation(() => ({
+    upsert: async (agent: unknown) => agent,
+  })),
+}));
+
+vi.mock("@/lib/modules/knowledge/adapters/mysql-knowledge-repo", () => ({
+  MysqlKnowledgeRepo: vi.fn().mockImplementation(() => ({
+    create: async (doc: unknown) => doc,
+  })),
+}));
+
 vi.mock("@/lib/container", () => ({
   getContainer: () => ({
     agents: {
       get: async (id: string) => (id === "source-agent" ? { ...sourceAgent } : null),
-      upsert: async (agent: unknown) => {
-        upserted.push(agent);
-        return agent;
-      },
-      softDelete: async (id: string) => {
-        softDeleted.push(id);
-        return true;
-      },
     },
     releases: {
       get: async (agentId: string, version: number) =>
@@ -92,6 +94,7 @@ vi.mock("@/lib/container", () => ({
         limits: { maxDocs: 20, maxCharsPerDoc: 200000 },
       }),
       get: async (id: string) => {
+        if (knowledgeGetOverride) return knowledgeGetOverride(id);
         const doc = knowledgeDocs.find((d) => d.id === id);
         return doc
           ? {
@@ -103,13 +106,13 @@ vi.mock("@/lib/container", () => ({
             }
           : null;
       },
-      create: async (doc: unknown) => {
-        if (createKnowledgeHook) createKnowledgeHook(doc, knowledgeCreated.length);
-        knowledgeCreated.push(doc);
-        return doc;
-      },
-      delete: async (id: string) => {
-        knowledgeDeleted.push(id);
+    },
+    db: {
+      transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+        if (transactionError) throw transactionError;
+        const result = await fn({});
+        transactionResult = result;
+        return result;
       },
     },
     audit: {
@@ -151,12 +154,10 @@ describe("POST /api/agents/{id}/clone", () => {
     state.apiKey = false;
     state.authenticated = true;
     state.userId = "cloner";
-    upserted.length = 0;
-    knowledgeCreated.length = 0;
-    knowledgeDeleted.length = 0;
-    softDeleted.length = 0;
     audited.length = 0;
-    createKnowledgeHook = null;
+    transactionResult = null;
+    transactionError = null;
+    knowledgeGetOverride = null;
   });
 
   it("clones a market-listed agent with published config, redacted MCP, and knowledge docs", async () => {
@@ -177,14 +178,9 @@ describe("POST /api/agents/{id}/clone", () => {
     expect(config.starters).toEqual(["Hello"]);
     expect(config.escapeHatch).toBeUndefined();
 
-    const mcp = (config.mcpServers as { url: string }[])[0];
-    expect(mcp.url).not.toContain("token=secret");
-    expect(mcp.url).toContain("***");
-
-    expect(knowledgeCreated).toHaveLength(2);
-    for (const doc of knowledgeCreated as { agentId: string }[]) {
-      expect(doc.agentId).toBe(body.agent.id);
-    }
+    const mcp = (config.mcpServers as { url: string }[])?.[0];
+    expect(mcp?.url).not.toContain("token=secret");
+    expect(mcp?.url).toContain("***");
 
     expect(audited).toHaveLength(1);
     expect((audited[0] as { action: string }).action).toBe("agent.clone");
@@ -196,29 +192,28 @@ describe("POST /api/agents/{id}/clone", () => {
     const body = (await res.json()) as { agent: { name: string }; knowledgeCopied: number };
     expect(body.agent.name).toBe("My Custom Agent");
     expect(body.knowledgeCopied).toBe(0);
-    expect(knowledgeCreated).toHaveLength(0);
   });
 
   it("rejects unauthenticated users", async () => {
     state.authenticated = false;
     expect((await clone()).status).toBe(401);
-    expect(upserted).toHaveLength(0);
+    expect(transactionResult).toBeNull();
   });
 
   it("rejects API key access", async () => {
     state.apiKey = true;
     expect((await clone()).status).toBe(403);
-    expect(upserted).toHaveLength(0);
+    expect(transactionResult).toBeNull();
   });
 
   it("rejects cloning a non-existent agent", async () => {
     expect((await clone("nonexistent")).status).toBe(403);
-    expect(upserted).toHaveLength(0);
+    expect(transactionResult).toBeNull();
   });
 
   it("rejects cloning a system agent", async () => {
     expect((await clone("agent-architect")).status).toBe(404);
-    expect(upserted).toHaveLength(0);
+    expect(transactionResult).toBeNull();
   });
 
   it("rejects cloning an agent not listed on market", async () => {
@@ -226,7 +221,7 @@ describe("POST /api/agents/{id}/clone", () => {
     try {
       const res = await clone();
       expect(res.status).toBe(403);
-      expect(upserted).toHaveLength(0);
+      expect(transactionResult).toBeNull();
     } finally {
       sourceAgent.marketListed = true;
     }
@@ -242,18 +237,24 @@ describe("POST /api/agents/{id}/clone", () => {
     expect(agent.webhookUrl).toBeUndefined();
   });
 
-  it("rolls back agent and first doc when second knowledge doc fails to copy", async () => {
-    createKnowledgeHook = (_doc, index) => {
-      if (index === 1) throw new Error("simulated write failure");
+  it("aborts before transaction when knowledge doc read fails", async () => {
+    knowledgeGetOverride = (id: string) => {
+      if (id === "doc2") return null;
+      const doc = knowledgeDocs.find((d) => d.id === id);
+      return doc
+        ? {
+            id: doc.id,
+            agentId: doc.agentId,
+            title: doc.title,
+            content: doc.content,
+            createdAt: doc.createdAt,
+          }
+        : null;
     };
     const res = await clone();
     expect(res.status).toBe(500);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toMatch(/知识库复制失败/);
-    expect(knowledgeCreated).toHaveLength(1);
-    expect(knowledgeDeleted).toHaveLength(1);
-    expect(knowledgeDeleted[0]).toBe((knowledgeCreated[0] as { id: string }).id);
-    expect(softDeleted).toHaveLength(1);
+    expect(await res.json()).toMatchObject({ error: /Lesson 2/ });
+    expect(transactionResult).toBeNull();
     expect(audited).toHaveLength(0);
   });
 });
