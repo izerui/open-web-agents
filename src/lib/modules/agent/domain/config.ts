@@ -221,11 +221,32 @@ export function checkUrlTemplate(raw: string): string | null {
 }
 
 /**
- * 编辑自己的智能体时，按字段比较草稿与脱敏 baseline：
- * - 字段与 baseline 相同 → 用原配置恢复（用户/AI 没改）
- * - 字段与 baseline 不同 → 保留修改后的值（明确编辑过）
- * - baseline 没有对应 MCP → 新增的，原样保留
+ * URL 级合并：修改的部分采用，脱敏的部分从原值恢复。
+ * - 与 baseline 完全相同 → 恢复原值
+ * - 主机/路径被修改、查询参数未改（仍含 *** 或与 baseline 相同）→ 取新主机+原查询参数
+ * - 完全不同且不含 *** → 采用修改后的值
  */
+function mergeUrl(
+  draft: string | undefined,
+  base: string | undefined,
+  orig: string | undefined,
+): string | undefined {
+  if (draft === undefined) return orig;
+  if (draft === base) return orig;
+  if (!base || !orig) return draft;
+  if (!draft.includes("***") && !draft.includes("?***")) return draft;
+  try {
+    const draftUrl = new URL(draft.replace(/\?\*\*\*$/, ""));
+    const origUrl = new URL(orig);
+    origUrl.host = draftUrl.host;
+    origUrl.pathname = draftUrl.pathname;
+    origUrl.protocol = draftUrl.protocol;
+    return origUrl.toString();
+  } catch {
+    return orig;
+  }
+}
+
 export function restoreMcpSecrets(
   candidate: AgentConfig,
   original: AgentConfig | undefined,
@@ -242,7 +263,7 @@ export function restoreMcpSecrets(
       if (!orig || !base) return m;
       return {
         ...m,
-        url: m.url === base.url ? (orig.url ?? m.url) : m.url,
+        url: mergeUrl(m.url, base.url, orig.url),
         env: m.env
           ? Object.fromEntries(
               Object.entries(m.env).map(([k, v]) => [

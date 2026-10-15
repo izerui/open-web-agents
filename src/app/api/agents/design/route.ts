@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { getContainer } from "@/lib/container";
 import { agentAccessLevel } from "@/lib/modules/access/domain/principal";
-import { draftOf } from "@/lib/modules/agent/domain/design";
+import { draftOf, mcpBaselineOf } from "@/lib/modules/agent/domain/design";
 import { contentHash, snapshotOf } from "@/lib/modules/agent/domain/release";
 import { DESIGN_EXECUTOR_ID } from "@/lib/modules/agent/domain/system-agent";
 import { workspacePathFor } from "@/lib/modules/session/domain/workspace";
@@ -66,6 +66,7 @@ export async function POST(req: Request) {
         baseHash: target ? contentHash(snapshotOf(target)) : null,
         resourceAgentIds: target ? [target.id] : [],
         draft: draftOf(target ?? undefined),
+        mcpBaseline: mcpBaselineOf(target ?? undefined),
       },
     });
     return Response.json({ sessionId: id }, { status: 201 });

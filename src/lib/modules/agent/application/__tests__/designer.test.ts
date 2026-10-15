@@ -347,6 +347,47 @@ describe("AgentDesigner", () => {
     expect(saved.saved.config.mcpServers?.[0]?.url).toContain("secret");
   });
 
+  it("changing MCP host preserves original auth params and does not leak in preview", async () => {
+    const targetWithMcp: Agent = {
+      ...target,
+      config: {
+        ...target.config,
+        mcpServers: [
+          {
+            name: "api",
+            type: "http",
+            url: "https://old.example.com/mcp?token=real-secret&tenant=school",
+            env: { KEY: "env-secret" },
+          },
+        ],
+      },
+    };
+    const h = await setup({ target: targetWithMcp });
+
+    const state = (await h.sessions.get("design"))?.designState;
+    if (!state?.draft.mcpServers?.[0]) throw new Error("no mcp in draft");
+    // AI changes host, keeps the redacted query params
+    state.draft.mcpServers[0] = {
+      ...state.draft.mcpServers[0],
+      url: "https://new.example.com/mcp?***",
+    };
+    await h.sessions.update("design", { designState: state });
+
+    const view = await h.inspect();
+    // Preview should NOT contain the real secret
+    expect(JSON.stringify(view)).not.toContain("real-secret");
+
+    const saved = await h.designer.apply(owner, "design", view.previewToken);
+    const savedUrl = saved.saved.config.mcpServers?.[0]?.url;
+    // New host applied
+    expect(savedUrl).toContain("new.example.com");
+    // Original auth params restored
+    expect(savedUrl).toContain("token=real-secret");
+    expect(savedUrl).toContain("tenant=school");
+    // Env secret also restored
+    expect(saved.saved.config.mcpServers?.[0]?.env?.KEY).toBe("env-secret");
+  });
+
   it("source content changes invalidate preview even when the draft revision has not changed", async () => {
     const h = await setup();
     await h.edit({ ...validDraft(), mcpRefs: [resourceRef(source.id, "mcp", "search")] }, [
