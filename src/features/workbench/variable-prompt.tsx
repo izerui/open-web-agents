@@ -91,11 +91,11 @@ export function VariablePrompt({
           </Button>
         </div>
       )}
-      {missing.length === 0 && !state.filled && state.variables.some((v) => !v.required) && (
+      {missing.length === 0 && (
         <div className="mx-auto mb-3 flex max-w-2xl items-center gap-2 text-xs text-muted-foreground">
           <KeyRound className="size-3" />
           <button type="button" className="underline" onClick={() => setOpen(true)}>
-            配置可选变量
+            管理变量
           </button>
         </div>
       )}
