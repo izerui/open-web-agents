@@ -38,6 +38,8 @@ import { taskFilesForResult } from "@/lib/modules/artifacts/application/task-fil
 import type { StoragePort } from "@/lib/modules/artifacts/ports";
 import { MysqlAuditRepo } from "@/lib/modules/audit/adapters/mysql-audit-repo";
 import { AuditLog } from "@/lib/modules/audit/application/audit-log";
+import { MysqlBillingRepo } from "@/lib/modules/billing/adapters/mysql-billing-repo";
+import type { BillingRepo } from "@/lib/modules/billing/ports";
 import { MysqlCapabilityRepo } from "@/lib/modules/capabilities/adapters/mysql-capability-repo";
 import type { CapabilityRepo } from "@/lib/modules/capabilities/ports";
 import { MysqlEvalRepo } from "@/lib/modules/eval/adapters/mysql-eval-repo";
@@ -150,6 +152,7 @@ export interface Container {
   };
   designer: AgentDesigner;
   capabilities: CapabilityRepo;
+  billing: BillingRepo;
 }
 
 /** 人工审批的等待上限。到点自动拒绝,避免 worker 被无人值守的审批永久占住。 */
@@ -539,6 +542,7 @@ function build(): Container {
       allowStdioMcp: env.allowStdioMcp,
     }),
     capabilities: new MysqlCapabilityRepo(db),
+    billing: new MysqlBillingRepo(db),
     admission: new RunAdmission({
       sessions,
       checkQuota: async (userId) => {

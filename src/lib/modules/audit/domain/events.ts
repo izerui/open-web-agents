@@ -37,6 +37,7 @@ export const AUDIT_ACTIONS = [
   "webhook.redeliver",
   "eval.run",
   "capability.update",
+  "billing.credit",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

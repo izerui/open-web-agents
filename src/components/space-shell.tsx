@@ -30,6 +30,7 @@ import {
   Terminal,
   User,
   Users,
+  Wallet,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -46,6 +47,7 @@ export const PERSONAL_NAV = [
   { href: "/settings/keys", label: "接入中心", icon: Terminal },
   { href: "/settings/audit", label: "审计日志", icon: ScrollText },
   { href: "/settings/usage", label: "用量与成本", icon: BarChart3 },
+  { href: "/settings/billing", label: "积分账户", icon: Wallet },
   { href: "/settings/credentials", label: "平台算力", icon: Cpu },
   { href: "/settings/account", label: "账号安全", icon: Lock },
 ] as const;
@@ -59,6 +61,7 @@ export const PERSONAL_NAV = [
 export const ADMIN_NAV = [
   { href: "/admin/accounts", label: "账号管理", icon: Users },
   { href: "/admin/capabilities", label: "模型与价目", icon: Cpu },
+  { href: "/admin/billing", label: "积分管理", icon: Wallet },
   { href: "/admin/usage", label: "全平台用量", icon: BarChart3 },
 ] as const;
 

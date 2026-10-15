@@ -3,6 +3,7 @@
 
 import {
   bigint,
+  decimal,
   index,
   int,
   json,
@@ -556,4 +557,49 @@ export const capabilityVersions = mysqlTable(
     createdAt: timestamp("created_at", { fsp: 3 }).notNull(),
   },
   (t) => ({ pk: primaryKey({ columns: [t.capabilityId, t.version] }) }),
+);
+
+/** 积分账户。摘要主键避免数据库排序规则混淆大小写不同的账户标识。 */
+export const billingWallets = mysqlTable("billing_wallets", {
+  accountKey: varchar("account_key", { length: 64 }).primaryKey(),
+  accountId: varchar("account_id", { length: 36 }).notNull(),
+  availableMicroCredits: decimal("available_micro_credits", { precision: 30, scale: 0 })
+    .notNull()
+    .default("0"),
+  reservedMicroCredits: decimal("reserved_micro_credits", { precision: 30, scale: 0 })
+    .notNull()
+    .default("0"),
+});
+
+/** 全局唯一预占;已结算记录保留以处理重复回调。 */
+export const billingReservations = mysqlTable("billing_reservations", {
+  reservationKey: varchar("reservation_key", { length: 64 }).primaryKey(),
+  id: varchar("id", { length: 128 }).notNull(),
+  accountId: varchar("account_id", { length: 36 }).notNull(),
+  amountMicroCredits: decimal("amount_micro_credits", { precision: 30, scale: 0 }).notNull(),
+  state: varchar("state", { length: 16 }).notNull(),
+  chargedMicroCredits: decimal("charged_micro_credits", { precision: 30, scale: 0 }),
+});
+
+/** 资金流水只追加;operation_key 为账户+操作类型+业务引用的摘要。 */
+export const billingLedger = mysqlTable(
+  "billing_ledger",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    accountKey: varchar("account_key", { length: 64 }).notNull(),
+    accountId: varchar("account_id", { length: 36 }).notNull(),
+    operationKey: varchar("operation_key", { length: 64 }).notNull(),
+    kind: varchar("kind", { length: 16 }).notNull(),
+    amountMicroCredits: decimal("amount_micro_credits", { precision: 30, scale: 0 }).notNull(),
+    availableAfter: decimal("available_after", { precision: 30, scale: 0 }).notNull(),
+    reservedAfter: decimal("reserved_after", { precision: 30, scale: 0 }).notNull(),
+    reference: varchar("reference", { length: 128 }).notNull(),
+    actorId: varchar("actor_id", { length: 36 }),
+    reason: varchar("reason", { length: 512 }),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    operation: uniqueIndex("uniq_billing_ledger_operation").on(t.operationKey),
+    byAccount: index("idx_billing_ledger_account").on(t.accountKey, t.createdAt, t.id),
+  }),
 );

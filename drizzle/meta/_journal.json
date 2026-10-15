@@ -274,6 +274,13 @@
       "when": 1791995190007,
       "tag": "0038_capability_catalog",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "5",
+      "when": 1792028683188,
+      "tag": "0039_billing_wallets",
+      "breakpoints": true
     }
   ]
 }
