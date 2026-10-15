@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { createDb } from "@/lib/db/client";
 import { agentVariables } from "@/lib/db/schema";
-import { MysqlVariableRepo } from "@/lib/modules/agent/adapters/mysql-variable-repo";
+import {
+  MysqlVariableRepo,
+  VariableDecryptionFailed,
+  VariableSizeExceeded,
+} from "@/lib/modules/agent/adapters/mysql-variable-repo";
 import { SecretBox } from "@/lib/modules/identity/domain/secret-box";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
@@ -117,6 +121,43 @@ if (!url) {
 
       const final = await repo.get(agentId, userId);
       expect(final).toEqual({ A: "1", C: "3", D: "4" });
+    });
+
+    it("merge with wrong secret key throws and leaves original ciphertext unchanged", async () => {
+      const agentId = `var-test-${randomUUID().slice(0, 16)}`;
+      const userId = `user-${randomUUID().slice(0, 16)}`;
+      pairs.push([agentId, userId]);
+
+      await repo.set(agentId, userId, { SECRET: "important-value", OTHER: "keep" });
+
+      const wrongKeyRepo = new MysqlVariableRepo(
+        db,
+        new SecretBox("wrong-key-completely-different"),
+      );
+      await expect(wrongKeyRepo.merge(agentId, userId, { NEW: "val" })).rejects.toThrow(
+        VariableDecryptionFailed,
+      );
+
+      const intact = await repo.get(agentId, userId);
+      expect(intact.SECRET).toBe("important-value");
+      expect(intact.OTHER).toBe("keep");
+    });
+
+    it("merge exceeding size limit throws and leaves original values unchanged", async () => {
+      const agentId = `var-test-${randomUUID().slice(0, 16)}`;
+      const userId = `user-${randomUUID().slice(0, 16)}`;
+      pairs.push([agentId, userId]);
+
+      await repo.set(agentId, userId, { ORIGINAL: "preserved" });
+
+      const hugeUpdates: Record<string, string> = {};
+      for (let i = 0; i < 200; i++) hugeUpdates[`K${i}`] = "x".repeat(3000);
+
+      await expect(repo.merge(agentId, userId, hugeUpdates)).rejects.toThrow(VariableSizeExceeded);
+
+      const intact = await repo.get(agentId, userId);
+      expect(intact.ORIGINAL).toBe("preserved");
+      expect(intact.K0).toBeUndefined();
     });
   });
 }

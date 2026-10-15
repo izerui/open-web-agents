@@ -1,7 +1,10 @@
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { agentAccessLevel, canInvokeAgent } from "@/lib/modules/access/domain/principal";
-import { VariableSizeExceeded } from "@/lib/modules/agent/adapters/mysql-variable-repo";
+import {
+  VariableDecryptionFailed,
+  VariableSizeExceeded,
+} from "@/lib/modules/agent/adapters/mysql-variable-repo";
 import type { VariableDef } from "@/lib/modules/agent/domain/config";
 import { isSystemAgent } from "@/lib/modules/agent/domain/system-agent";
 
@@ -120,6 +123,9 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   } catch (err) {
     if (err instanceof VariableSizeExceeded) {
       return Response.json({ error: err.message }, { status: 400 });
+    }
+    if (err instanceof VariableDecryptionFailed) {
+      return Response.json({ error: err.message }, { status: 500 });
     }
     const r = authErrorResponse(err);
     if (r) return r;

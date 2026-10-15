@@ -21,6 +21,13 @@ export class VariableSizeExceeded extends Error {
   }
 }
 
+export class VariableDecryptionFailed extends Error {
+  constructor() {
+    super("变量值解密失败，可能主密钥已变更，请联系管理员");
+    this.name = "VariableDecryptionFailed";
+  }
+}
+
 const MAX_TOTAL_SIZE = 500_000;
 
 export class MysqlVariableRepo implements VariableRepo {
@@ -29,13 +36,23 @@ export class MysqlVariableRepo implements VariableRepo {
     private readonly secrets: SecretBox,
   ) {}
 
-  private decrypt(enc: string): Record<string, string> {
+  private decryptSafe(enc: string): Record<string, string> {
     const plain = this.secrets.decrypt(enc);
     if (plain === null) return {};
     try {
       return JSON.parse(plain) as Record<string, string>;
     } catch {
       return {};
+    }
+  }
+
+  private decryptStrict(enc: string): Record<string, string> {
+    const plain = this.secrets.decrypt(enc);
+    if (plain === null) throw new VariableDecryptionFailed();
+    try {
+      return JSON.parse(plain) as Record<string, string>;
+    } catch {
+      throw new VariableDecryptionFailed();
     }
   }
 
@@ -46,7 +63,7 @@ export class MysqlVariableRepo implements VariableRepo {
       .where(and(eq(agentVariables.agentId, agentId), eq(agentVariables.userId, userId)))
       .limit(1);
     if (!row) return {};
-    return this.decrypt(row.valuesEnc);
+    return this.decryptSafe(row.valuesEnc);
   }
 
   async set(agentId: string, userId: string, values: Record<string, string>): Promise<void> {
@@ -70,7 +87,7 @@ export class MysqlVariableRepo implements VariableRepo {
         .where(and(eq(agentVariables.agentId, agentId), eq(agentVariables.userId, userId)))
         .for("update");
 
-      const existing = row ? this.decrypt(row.valuesEnc) : {};
+      const existing = row ? this.decryptStrict(row.valuesEnc) : {};
       const merged = { ...existing };
 
       for (const [key, val] of Object.entries(updates)) {
