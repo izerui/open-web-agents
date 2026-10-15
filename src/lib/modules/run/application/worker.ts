@@ -94,6 +94,8 @@ export interface WorkerHooks {
   decodeOverride?: (enc: string) => RunCommand["override"];
   /** 取消通知:收到就立即中止对应的在途运行,不必等下一次续租心跳。 */
   cancelSignal?: CancelSignal;
+  /** 落结果前增强 cost(加入积分估算快照)。失败不影响结果写入。 */
+  enrichCost?: (cost: unknown) => Promise<unknown>;
 }
 
 export class RunWorker {
@@ -218,10 +220,16 @@ export class RunWorker {
     }
 
     try {
+      let enrichedCost = result.cost as unknown;
+      if (enrichedCost && this.hooks.enrichCost) {
+        try {
+          enrichedCost = await this.hooks.enrichCost(enrichedCost);
+        } catch {}
+      }
       // 已被取消或判为孤儿:本轮结果作废,不写结果、不通知 —— 终态由取消方/回收方负责。
       // 但花费照记:钱已经花出去了
       if (lostLease) {
-        if (result.cost) await this.repo.recordCost?.(claimed.id, result.cost).catch(() => {});
+        if (enrichedCost) await this.repo.recordCost?.(claimed.id, enrichedCost).catch(() => {});
         return true;
       }
 
@@ -236,7 +244,7 @@ export class RunWorker {
           finalText: result.summary,
           structured: result.structured,
           salvaged: result.salvagedFromText === true,
-          cost: result.cost,
+          cost: enrichedCost,
           error: result.error,
         },
         fence,
@@ -244,8 +252,8 @@ export class RunWorker {
       const written = await this.repo.complete(claimed.id, finalState, fence);
       // 没写进去 = 这一刻恰好被取消/回收了(上面带令牌的 saveResult 也同样没写进去),
       // 不归本 worker 通知 —— 但花费要补记
-      if (!written && result.cost) {
-        await this.repo.recordCost?.(claimed.id, result.cost).catch(() => {});
+      if (!written && enrichedCost) {
+        await this.repo.recordCost?.(claimed.id, enrichedCost).catch(() => {});
       }
       if (written) {
         await this.notifyFinalized({

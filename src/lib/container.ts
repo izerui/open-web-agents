@@ -17,10 +17,12 @@ import type { GrantRepo } from "@/lib/modules/access/ports";
 import { createClaudeSdkEngine } from "@/lib/modules/agent-engine/adapters/claude-sdk/default-engine";
 import { JsonlTranscript } from "@/lib/modules/agent-engine/adapters/claude-sdk/jsonl-transcript";
 import type { EngineDeps } from "@/lib/modules/agent-engine/adapters/claude-sdk/runner";
+import type { ModelMetering } from "@/lib/modules/agent-engine/domain/model-usage";
 import type { EnginePort, TranscriptPort } from "@/lib/modules/agent-engine/ports";
 import { readBundle, writeBundle } from "@/lib/modules/agent/adapters/fs-bundle-store";
 import { MysqlAgentRepo } from "@/lib/modules/agent/adapters/mysql-agent-repo";
 import { MysqlAgentVersionRepo } from "@/lib/modules/agent/adapters/mysql-agent-version-repo";
+import type { KnowledgeWriter } from "@/lib/modules/agent/application/clone-agent";
 import { AgentDesigner } from "@/lib/modules/agent/application/designer";
 import { AgentReleases } from "@/lib/modules/agent/application/releases";
 import { seedBuiltin } from "@/lib/modules/agent/application/seed-builtin";
@@ -68,7 +70,6 @@ import { WebhookDispatcher } from "@/lib/modules/integration/application/webhook
 import { resolveRunTarget } from "@/lib/modules/integration/application/webhook-target";
 import { signingSecretsOf } from "@/lib/modules/integration/domain/signing-secrets";
 import { isAddressAllowed } from "@/lib/modules/integration/domain/webhook-policy";
-import type { KnowledgeWriter } from "@/lib/modules/agent/application/clone-agent";
 import { MysqlKnowledgeRepo } from "@/lib/modules/knowledge/adapters/mysql-knowledge-repo";
 import { ChunkCache } from "@/lib/modules/knowledge/application/chunk-cache";
 import { formatContext, retrieve } from "@/lib/modules/knowledge/domain/retrieval";
@@ -92,6 +93,7 @@ import { workspacePathFor } from "@/lib/modules/session/domain/workspace";
 import type { SessionRepo } from "@/lib/modules/session/ports";
 import { MysqlUsageRepo } from "@/lib/modules/usage/adapters/mysql-usage-repo";
 import { QuotaExceeded, assertWithinQuota } from "@/lib/modules/usage/application/quota-guard";
+import { estimateRunCredits } from "@/lib/modules/usage/domain/estimate";
 import { mysqlSeedInRowLock } from "@/lib/seed-in-row-lock";
 
 export interface Container {
@@ -272,6 +274,7 @@ function build(): Container {
   const usage = new MysqlUsageRepo(db);
   const knowledge = new MysqlKnowledgeRepo(db);
   const knowledgeChunks = new ChunkCache(knowledge);
+  const capabilities = new MysqlCapabilityRepo(db);
   const apiKeys = new MysqlApiKeyRepo(db);
   const grants = new MysqlGrantRepo(db);
   const groupRepo = new MysqlGroupRepo(db);
@@ -377,9 +380,17 @@ function build(): Container {
       cancelSignal,
       decodeOverride: (enc) => {
         const plain = secrets.decrypt(enc);
-        // 解不开就失败,绝不悄悄回落到平台凭证 —— 那会让调用方的花费记错账
         if (plain === null) throw new Error("请求级凭证覆盖无法解密(主密钥可能已更换)");
         return JSON.parse(plain) as RunCommand["override"];
+      },
+      enrichCost: async (raw) => {
+        const cost = raw as Record<string, unknown> | null;
+        if (!cost?.metering) return raw;
+        const catalog = await capabilities.list();
+        return {
+          ...cost,
+          creditEstimate: estimateRunCredits(cost.metering as ModelMetering, catalog),
+        };
       },
       // 终态已落库,再发布 result 事件:SSE 看到的结局与数据库一致
       onFinalized: async ({ runId, sessionId, state, result }) => {
@@ -547,7 +558,7 @@ function build(): Container {
       storage,
       allowStdioMcp: env.allowStdioMcp,
     }),
-    capabilities: new MysqlCapabilityRepo(db),
+    capabilities,
     billing: new MysqlBillingRepo(db),
     packages: new MysqlPackageRepo(db),
     admission: new RunAdmission({

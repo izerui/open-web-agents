@@ -2,6 +2,7 @@
 // 与 SQL 解耦 —— 聚合规则能被穷举单测,不必起数据库。
 
 import type { ModelMetering } from "@/lib/modules/agent-engine/domain/model-usage";
+import type { RunCreditEstimate } from "@/lib/modules/usage/domain/estimate";
 
 export interface RunUsageRecord {
   runId: string;
@@ -17,6 +18,8 @@ export interface RunUsageRecord {
   at: number;
   /** SDK 按模型拆分的 token 快照;缺失时为 undefined。 */
   metering?: ModelMetering;
+  /** 结束时按当时价目算的积分估算快照;旧 run 可能没有。 */
+  creditEstimate?: RunCreditEstimate;
 }
 
 export interface UsageTotals {

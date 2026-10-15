@@ -40,17 +40,22 @@ export async function GET(req: Request) {
     capabilities.list(),
   ]);
 
-  const runs = records.map((r) => ({
-    runId: r.runId,
-    agentId: r.agentId,
-    agentName: r.agentName,
-    status: r.status,
-    costMicroUsd: r.costMicroUsd,
-    inputTokens: r.inputTokens,
-    outputTokens: r.outputTokens,
-    at: r.at,
-    estimatedCredits: estimateRunCredits(r.metering, catalog),
-  }));
+  const runs = records.map((r) => {
+    const stored = r.creditEstimate;
+    const estimated = stored ?? estimateRunCredits(r.metering, catalog);
+    return {
+      runId: r.runId,
+      agentId: r.agentId,
+      agentName: r.agentName,
+      status: r.status,
+      costMicroUsd: r.costMicroUsd,
+      inputTokens: r.inputTokens,
+      outputTokens: r.outputTokens,
+      at: r.at,
+      estimatedCredits: estimated,
+      estimateSource: stored ? ("run_snapshot" as const) : ("current_price" as const),
+    };
+  });
 
   return Response.json({
     days,

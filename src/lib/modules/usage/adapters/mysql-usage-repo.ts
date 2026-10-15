@@ -1,7 +1,8 @@
-import type { ModelMetering } from "@/lib/modules/agent-engine/domain/model-usage";
 import type { Db } from "@/lib/db/client";
 import { agents, runs, sessions } from "@/lib/db/schema";
+import type { ModelMetering } from "@/lib/modules/agent-engine/domain/model-usage";
 import { type RunUsageRecord, toMicroUsd } from "@/lib/modules/usage/domain/aggregate";
+import type { RunCreditEstimate } from "@/lib/modules/usage/domain/estimate";
 import { and, desc, eq, gte, isNotNull, sql } from "drizzle-orm";
 
 export interface UsageQuery {
@@ -76,6 +77,7 @@ export class MysqlUsageRepo {
         input?: number;
         output?: number;
         metering?: ModelMetering;
+        creditEstimate?: RunCreditEstimate;
       };
       return {
         runId: r.runId,
@@ -87,7 +89,7 @@ export class MysqlUsageRepo {
         inputTokens: Number(cost.input ?? 0),
         outputTokens: Number(cost.output ?? 0),
         metering: cost.metering,
-        // 未结束的用创建时间,保证一定落在某一天里
+        creditEstimate: cost.creditEstimate,
         at: (r.endedAt ?? r.createdAt).getTime(),
       };
     });
