@@ -146,4 +146,32 @@ describe("estimateRunCredits", () => {
     // cache_write 2000 * 10/1000 = 20
     expect(result.totalMicroCredits).toBe("20");
   });
+
+  it("ignores non-LLM capabilities with the same modelId to avoid cross-kind price collision", () => {
+    const llmCap = cap("claude-sonnet-4-20250514", "10", "20");
+    const imageCap = {
+      ...cap("claude-sonnet-4-20250514", "999", "999"),
+      id: "image-sonnet",
+      kind: "image" as const,
+    };
+    const result = estimateRunCredits(metering([model("claude-sonnet-4-20250514", 5000, 1000)]), [
+      llmCap,
+      imageCap,
+    ]);
+    // Should use LLM price (10/20), not image price (999/999)
+    expect(result.totalMicroCredits).toBe("70");
+    expect(result.models[0]?.unpriced).toBe(false);
+  });
+
+  it("marks model as unpriced when multiple LLM capabilities share the same modelId", () => {
+    const llm1 = { ...cap("claude-sonnet-4-20250514", "10", "20"), id: "llm-cheap" };
+    const llm2 = { ...cap("claude-sonnet-4-20250514", "100", "200"), id: "llm-expensive" };
+    const result = estimateRunCredits(metering([model("claude-sonnet-4-20250514", 5000, 1000)]), [
+      llm1,
+      llm2,
+    ]);
+    expect(result.models[0]?.unpriced).toBe(true);
+    expect(result.models[0]?.microCredits).toBeNull();
+    expect(result.totalMicroCredits).toBe("0");
+  });
 });

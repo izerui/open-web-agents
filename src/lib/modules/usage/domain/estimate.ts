@@ -32,12 +32,21 @@ export function estimateRunCredits(
 ): RunCreditEstimate {
   if (!metering || metering.models.length === 0) return EMPTY;
 
-  const capByModel = new Map(capabilities.filter((c) => c.enabled).map((c) => [c.modelId, c]));
+  const capByModel = new Map<string, CapabilityDefinition | "ambiguous">();
+  for (const c of capabilities) {
+    if (!c.enabled || c.kind !== "llm") continue;
+    if (capByModel.has(c.modelId)) {
+      capByModel.set(c.modelId, "ambiguous");
+    } else {
+      capByModel.set(c.modelId, c);
+    }
+  }
   const models: ModelCreditEstimate[] = [];
   let total = 0n;
 
   for (const m of metering.models) {
-    const cap = capByModel.get(m.modelId);
+    const entry = capByModel.get(m.modelId);
+    const cap = entry && entry !== "ambiguous" ? entry : undefined;
     let microCredits: string | null = null;
     if (cap) {
       const usage: Partial<Record<Meter, string>> = {};
