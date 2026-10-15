@@ -1,6 +1,6 @@
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
-import { agentAccessLevel } from "@/lib/modules/access/domain/principal";
+import { agentAccessLevel, canInvokeAgent } from "@/lib/modules/access/domain/principal";
 import type { VariableDef } from "@/lib/modules/agent/domain/config";
 import { isSystemAgent } from "@/lib/modules/agent/domain/system-agent";
 
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { agents, auth, grants, variables } = getContainer();
+    const { agents, auth, grants, variables, releases } = getContainer();
     const principal = await auth.resolveWeb(req);
     const subject = await auth.subjectOf(principal);
     const { id } = await params;
@@ -18,17 +18,19 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     const agent = await agents.get(id);
     if (!agent) return Response.json({ error: "not found" }, { status: 404 });
 
-    const level = agentAccessLevel(
-      principal,
-      agent,
-      subject,
-      await grants.listForResource("agent", id),
-    );
-    if (level === "none") return Response.json({ error: "no access" }, { status: 403 });
+    const grantList = await grants.listForResource("agent", id);
+    const level = agentAccessLevel(principal, agent, subject, grantList);
+    const canUse = canInvokeAgent(principal, agent, subject, grantList);
+    if (level === "none" && !canUse.allowed) {
+      return Response.json({ error: "no access" }, { status: 403 });
+    }
 
-    const defs: VariableDef[] = agent.config.variables ?? [];
+    const release =
+      agent.publishedVersion != null ? await releases.get(id, agent.publishedVersion) : null;
+    const defs: VariableDef[] =
+      (level !== "none" ? agent.config.variables : release?.config.variables) ?? [];
+
     const raw = await variables.get(id, subject.userId);
-
     const values: Record<string, string> = {};
     for (const def of defs) {
       const val = raw[def.name];
@@ -49,7 +51,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { agents, auth, grants, variables } = getContainer();
+    const { agents, auth, grants, variables, releases } = getContainer();
     const principal = await auth.resolveWeb(req);
     if (principal.type !== "web")
       return Response.json({ error: "API Key 无权设置变量" }, { status: 403 });
@@ -60,20 +62,22 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     const agent = await agents.get(id);
     if (!agent) return Response.json({ error: "not found" }, { status: 404 });
 
-    const level = agentAccessLevel(
-      principal,
-      agent,
-      subject,
-      await grants.listForResource("agent", id),
-    );
-    if (level === "none") return Response.json({ error: "no access" }, { status: 403 });
+    const grantList = await grants.listForResource("agent", id);
+    const level = agentAccessLevel(principal, agent, subject, grantList);
+    const canUse = canInvokeAgent(principal, agent, subject, grantList);
+    if (level === "none" && !canUse.allowed) {
+      return Response.json({ error: "no access" }, { status: 403 });
+    }
 
     const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
     if (!body || typeof body !== "object" || Array.isArray(body)) {
       return Response.json({ error: "请提供变量值对象" }, { status: 400 });
     }
 
-    const defs: VariableDef[] = agent.config.variables ?? [];
+    const release =
+      agent.publishedVersion != null ? await releases.get(id, agent.publishedVersion) : null;
+    const defs: VariableDef[] =
+      (level !== "none" ? agent.config.variables : release?.config.variables) ?? [];
     const defNames = new Set(defs.map((d) => d.name));
 
     const existing = await variables.get(id, subject.userId);

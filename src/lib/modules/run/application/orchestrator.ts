@@ -10,6 +10,7 @@ import {
   MissingRequiredVariables,
   buildSpec,
   checkRequiredVariables,
+  splitVariables,
 } from "@/lib/modules/agent/domain/build-spec";
 import type { AgentConfig } from "@/lib/modules/agent/domain/config";
 import { validateStructured } from "@/lib/modules/agent/domain/validate-output";
@@ -188,6 +189,11 @@ export class RunOrchestrator {
 
     const missing = checkRequiredVariables(config.variables, resolvedVariables);
     if (missing.length > 0) throw new MissingRequiredVariables(missing);
+
+    const { secretEnv } = splitVariables(config.variables, resolvedVariables);
+    if (Object.keys(secretEnv).length > 0) {
+      Object.assign(ctx.env, secretEnv);
+    }
 
     const spec = buildSpec(config, ctx, { model, knowledgeContext, resolvedVariables });
 
