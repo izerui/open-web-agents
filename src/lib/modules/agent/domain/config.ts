@@ -58,6 +58,16 @@ export interface AgentConfig {
   unattendedApproval?: "allow" | "deny";
   /** 开场建议:工作台空会话时展示的几条示例输入(最多 4 条)。 */
   starters?: string[];
+  /** 智能体需要使用者提供的变量(密钥、地址等),值按用户存储,不在配置里。 */
+  variables?: VariableDef[];
+}
+
+export interface VariableDef {
+  name: string;
+  description?: string;
+  required: boolean;
+  /** true = 值加密存储且 GET 时脱敏。 */
+  secret: boolean;
 }
 
 /**
@@ -85,6 +95,7 @@ const AGENT_CONFIG_KEYS: Record<keyof AgentConfig, true> = {
   escapeHatch: true,
   unattendedApproval: true,
   starters: true,
+  variables: true,
 };
 
 /** 只取 AgentConfig 认识的字段。 */

@@ -652,3 +652,18 @@ export const creditOrders = mysqlTable(
     byTime: index("idx_credit_orders_time").on(t.createdAt, t.id),
   }),
 );
+
+/** 智能体变量值:使用者填写的密钥和参数,按用户+智能体加密存储。 */
+export const agentVariables = mysqlTable(
+  "agent_variables",
+  {
+    agentId: varchar("agent_id", { length: 36 }).notNull(),
+    userId: varchar("user_id", { length: 36 }).notNull(),
+    valuesEnc: varchar("values_enc", { length: 4096 }).notNull(),
+    updatedAt: timestamp("updated_at", { fsp: 3 }).notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.agentId, t.userId] }),
+    byUser: index("idx_agent_variables_user").on(t.userId),
+  }),
+);

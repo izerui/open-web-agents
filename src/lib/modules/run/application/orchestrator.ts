@@ -6,7 +6,11 @@ import {
   resolveModelAlias,
 } from "@/lib/modules/agent-engine/domain/resolve-credentials";
 import type { EnginePort, RunResult, TranscriptRange } from "@/lib/modules/agent-engine/ports";
-import { buildSpec } from "@/lib/modules/agent/domain/build-spec";
+import {
+  MissingRequiredVariables,
+  buildSpec,
+  checkRequiredVariables,
+} from "@/lib/modules/agent/domain/build-spec";
 import type { AgentConfig } from "@/lib/modules/agent/domain/config";
 import { validateStructured } from "@/lib/modules/agent/domain/validate-output";
 import type { AgentRepo } from "@/lib/modules/agent/ports";
@@ -71,6 +75,8 @@ export interface OrchestratorDeps {
    * 检索失败不该让整轮运行失败 —— 降级成"没有知识库"继续跑。
    */
   retrieveKnowledge?: (agentId: string, query: string) => Promise<string>;
+  /** 按智能体+计费账号读取变量值,运行前注入配置。 */
+  resolveVariables?: (agentId: string, userId: string) => Promise<Record<string, string>>;
   /**
    * 执行前的额度复核(按会话的计费账号)。
    *
@@ -175,7 +181,15 @@ export class RunOrchestrator {
       ? await this.deps.retrieveKnowledge(session.agentId, cmd.prompt).catch(() => "")
       : "";
 
-    const spec = buildSpec(config, ctx, { model, knowledgeContext });
+    const resolvedVariables =
+      session.billingUserId && this.deps.resolveVariables
+        ? await this.deps.resolveVariables(session.agentId, session.billingUserId).catch(() => ({}))
+        : {};
+
+    const missing = checkRequiredVariables(config.variables, resolvedVariables);
+    if (missing.length > 0) throw new MissingRequiredVariables(missing);
+
+    const spec = buildSpec(config, ctx, { model, knowledgeContext, resolvedVariables });
 
     const topic = topicOf(cmd.sessionId, cmd.runId);
 

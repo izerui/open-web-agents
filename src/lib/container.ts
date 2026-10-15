@@ -22,6 +22,10 @@ import type { EnginePort, TranscriptPort } from "@/lib/modules/agent-engine/port
 import { readBundle, writeBundle } from "@/lib/modules/agent/adapters/fs-bundle-store";
 import { MysqlAgentRepo } from "@/lib/modules/agent/adapters/mysql-agent-repo";
 import { MysqlAgentVersionRepo } from "@/lib/modules/agent/adapters/mysql-agent-version-repo";
+import {
+  MysqlVariableRepo,
+  type VariableRepo,
+} from "@/lib/modules/agent/adapters/mysql-variable-repo";
 import type { KnowledgeWriter } from "@/lib/modules/agent/application/clone-agent";
 import { AgentDesigner } from "@/lib/modules/agent/application/designer";
 import { AgentReleases } from "@/lib/modules/agent/application/releases";
@@ -159,6 +163,7 @@ export interface Container {
   capabilities: CapabilityRepo;
   billing: BillingRepo;
   packages: PackageRepo;
+  variables: VariableRepo;
   knowledgeWriterFactory: (txDb: Db) => KnowledgeWriter;
 }
 
@@ -280,6 +285,7 @@ function build(): Container {
   const groupRepo = new MysqlGroupRepo(db);
   const users = new MysqlUserRepo(db);
   const secrets = new SecretBox(env.secretKey);
+  const variableRepo = new MysqlVariableRepo(db, secrets);
   const authService = new AuthService({
     users,
     sessionSecret: env.sessionSecret,
@@ -349,6 +355,9 @@ function build(): Container {
       const chunks = await knowledgeChunks.chunksOf(agentId);
       if (chunks.length === 0) return "";
       return formatContext(retrieve(query, chunks));
+    },
+    resolveVariables: async (agentId, userId) => {
+      return variableRepo.get(agentId, userId);
     },
     quotaCheck: async (userId) => {
       try {
@@ -561,6 +570,7 @@ function build(): Container {
     capabilities,
     billing: new MysqlBillingRepo(db),
     packages: new MysqlPackageRepo(db),
+    variables: variableRepo,
     admission: new RunAdmission({
       sessions,
       checkQuota: async (userId) => {

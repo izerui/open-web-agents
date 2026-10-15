@@ -214,5 +214,48 @@ export function validateAgentConfig(
     });
   }
 
+  if (cfg.variables !== undefined) {
+    if (!Array.isArray(cfg.variables)) {
+      issues.push({ field: "variables", message: "变量定义须为数组" });
+    } else {
+      const VAR_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+      const seen = new Set<string>();
+      for (const [i, v] of cfg.variables.entries()) {
+        if (!v || typeof v !== "object" || Array.isArray(v)) {
+          issues.push({ field: `variables[${i}]`, message: "变量定义须为对象" });
+          continue;
+        }
+        if (typeof v.name !== "string" || !VAR_NAME.test(v.name)) {
+          issues.push({
+            field: `variables[${i}].name`,
+            message: "变量名须为字母/下划线开头的 1~64 位标识符",
+          });
+        } else if (seen.has(v.name)) {
+          issues.push({ field: `variables[${i}].name`, message: `变量名 ${v.name} 重复` });
+        } else {
+          seen.add(v.name);
+        }
+        if (
+          v.description !== undefined &&
+          (typeof v.description !== "string" || v.description.length > 512)
+        ) {
+          issues.push({
+            field: `variables[${i}].description`,
+            message: "变量说明须为最多 512 字的文本",
+          });
+        }
+        if (typeof v.required !== "boolean") {
+          issues.push({ field: `variables[${i}].required`, message: "required 须为布尔值" });
+        }
+        if (typeof v.secret !== "boolean") {
+          issues.push({ field: `variables[${i}].secret`, message: "secret 须为布尔值" });
+        }
+      }
+      if (cfg.variables.length > 50) {
+        issues.push({ field: "variables", message: "单个智能体最多定义 50 个变量" });
+      }
+    }
+  }
+
   return issues;
 }

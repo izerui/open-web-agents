@@ -1,0 +1,104 @@
+import { getContainer } from "@/lib/container";
+import { authErrorResponse } from "@/lib/modules/access/application/authorize";
+import { agentAccessLevel } from "@/lib/modules/access/domain/principal";
+import type { VariableDef } from "@/lib/modules/agent/domain/config";
+import { isSystemAgent } from "@/lib/modules/agent/domain/system-agent";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const { agents, auth, grants, variables } = getContainer();
+    const principal = await auth.resolveWeb(req);
+    const subject = await auth.subjectOf(principal);
+    const { id } = await params;
+
+    if (isSystemAgent(id)) return Response.json({ error: "not found" }, { status: 404 });
+    const agent = await agents.get(id);
+    if (!agent) return Response.json({ error: "not found" }, { status: 404 });
+
+    const level = agentAccessLevel(
+      principal,
+      agent,
+      subject,
+      await grants.listForResource("agent", id),
+    );
+    if (level === "none") return Response.json({ error: "no access" }, { status: 403 });
+
+    const defs: VariableDef[] = agent.config.variables ?? [];
+    const raw = await variables.get(id, subject.userId);
+
+    const values: Record<string, string> = {};
+    for (const def of defs) {
+      const val = raw[def.name];
+      if (val === undefined) continue;
+      values[def.name] = def.secret ? "***" : val;
+    }
+
+    return Response.json(
+      { variables: defs, values, filled: Object.keys(raw).length > 0 },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  } catch (err) {
+    const r = authErrorResponse(err);
+    if (r) return r;
+    throw err;
+  }
+}
+
+export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const { agents, auth, grants, variables } = getContainer();
+    const principal = await auth.resolveWeb(req);
+    if (principal.type !== "web")
+      return Response.json({ error: "API Key 无权设置变量" }, { status: 403 });
+    const subject = await auth.subjectOf(principal);
+    const { id } = await params;
+
+    if (isSystemAgent(id)) return Response.json({ error: "not found" }, { status: 404 });
+    const agent = await agents.get(id);
+    if (!agent) return Response.json({ error: "not found" }, { status: 404 });
+
+    const level = agentAccessLevel(
+      principal,
+      agent,
+      subject,
+      await grants.listForResource("agent", id),
+    );
+    if (level === "none") return Response.json({ error: "no access" }, { status: 403 });
+
+    const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return Response.json({ error: "请提供变量值对象" }, { status: 400 });
+    }
+
+    const defs: VariableDef[] = agent.config.variables ?? [];
+    const defNames = new Set(defs.map((d) => d.name));
+
+    const existing = await variables.get(id, subject.userId);
+    const merged: Record<string, string> = {};
+    for (const [key, val] of Object.entries(body)) {
+      if (!defNames.has(key)) continue;
+      if (typeof val !== "string") {
+        return Response.json({ error: `变量 ${key} 的值须为字符串` }, { status: 400 });
+      }
+      if (val.length > 4000) {
+        return Response.json({ error: `变量 ${key} 的值不能超过 4000 字符` }, { status: 400 });
+      }
+      const def = defs.find((d) => d.name === key);
+      if (def?.secret && val === "***") {
+        if (existing[key]) merged[key] = existing[key];
+        continue;
+      }
+      if (val.trim()) merged[key] = val;
+    }
+
+    await variables.set(id, subject.userId, merged);
+    return Response.json({ ok: true });
+  } catch (err) {
+    const r = authErrorResponse(err);
+    if (r) return r;
+    throw err;
+  }
+}

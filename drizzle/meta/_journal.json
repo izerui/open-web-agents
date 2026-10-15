@@ -288,6 +288,13 @@
       "when": 1792031775305,
       "tag": "0040_credit_packages",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "5",
+      "when": 1792051444448,
+      "tag": "0041_agent_variables",
+      "breakpoints": true
     }
   ]
 }
