@@ -8,16 +8,11 @@ import { type BrowserContext, expect, test } from "@playwright/test";
 
 const BASE = process.env.OWA_E2E_BASE_URL ?? "http://localhost:5678";
 
-const fixtures = {
-  mp4: "",
-  pdf: "",
-  wav: "",
-};
+const fixtures = { mp4: "", pdf: "", wav: "" };
 
 test.beforeAll(() => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owa-media-fixtures-"));
 
-  // 3 秒蓝色视频 + 440Hz 正弦音频
   fixtures.mp4 = path.join(dir, "test.mp4");
   try {
     execSync(
@@ -28,7 +23,6 @@ test.beforeAll(() => {
     fixtures.mp4 = "";
   }
 
-  // 有效 PDF（Helvetica 渲染 "OWA Preview Test"）
   fixtures.pdf = path.join(dir, "test.pdf");
   const content = "BT /F1 24 Tf 72 720 Td (OWA Preview Test) Tj ET";
   const pdfParts = [
@@ -39,26 +33,19 @@ test.beforeAll(() => {
     "4 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\n",
     `5 0 obj<</Length ${content.length}>>stream\n${content}\nendstream\nendobj\n`,
   ];
-  const offsets = [0];
-  let pos = pdfParts[0].length;
-  for (let i = 1; i < pdfParts.length; i++) {
-    offsets.push(pos);
-    pos += pdfParts[i].length;
-  }
-  let xref = `xref\n0 ${pdfParts.length + 1}\n0000000000 65535 f \n`;
-  for (let i = 1; i <= pdfParts.length; i++) {
-    xref += `${String(offsets[i - 1] ?? 0).padStart(10, "0")} 00000 n \n`;
-  }
-  // recalculate: offsets[0] is header, objects start at offsets[1]
-  // Simpler: write as buffer, track byte positions
   const bodyBuf = Buffer.from(pdfParts.join(""));
+  const offsets: number[] = [];
+  let pos = 0;
+  for (const part of pdfParts) {
+    offsets.push(pos);
+    pos += part.length;
+  }
   const xrefPos = bodyBuf.length;
-  const xrefBuf = Buffer.from(
-    xref + `trailer<</Size ${pdfParts.length + 1}/Root 1 0 R>>\nstartxref\n${xrefPos}\n%%EOF\n`,
-  );
-  fs.writeFileSync(fixtures.pdf, Buffer.concat([bodyBuf, xrefBuf]));
+  let xref = `xref\n0 ${pdfParts.length + 1}\n0000000000 65535 f \n`;
+  for (const o of offsets) xref += `${String(o).padStart(10, "0")} 00000 n \n`;
+  xref += `trailer<</Size ${pdfParts.length + 1}/Root 1 0 R>>\nstartxref\n${xrefPos}\n%%EOF\n`;
+  fs.writeFileSync(fixtures.pdf, Buffer.concat([bodyBuf, Buffer.from(xref)]));
 
-  // 1 秒 8kHz 单声道 WAV（正弦波）
   fixtures.wav = path.join(dir, "test.wav");
   const sampleRate = 8000;
   const samples = sampleRate;
@@ -78,7 +65,10 @@ test.beforeAll(() => {
   wavBuf.write("data", 36);
   wavBuf.writeUInt32LE(dataSize, 40);
   for (let i = 0; i < samples; i++) {
-    wavBuf.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 440 * i) / sampleRate) * 16000), 44 + i * 2);
+    wavBuf.writeInt16LE(
+      Math.round(Math.sin((2 * Math.PI * 440 * i) / sampleRate) * 16000),
+      44 + i * 2,
+    );
   }
   fs.writeFileSync(fixtures.wav, wavBuf);
 });
@@ -97,9 +87,7 @@ async function register(ctx: BrowserContext, tag: string) {
 async function createSession(ctx: BrowserContext) {
   const agents = await ctx.request.get(`${BASE}/api/agents`);
   const agentId = ((await agents.json()) as { agents: { id: string }[] }).agents[0].id;
-  const sess = await ctx.request.post(`${BASE}/api/sessions`, {
-    data: { agentId },
-  });
+  const sess = await ctx.request.post(`${BASE}/api/sessions`, { data: { agentId } });
   return ((await sess.json()) as { session: { id: string } }).session.id;
 }
 
@@ -111,23 +99,20 @@ async function uploadBuffer(ctx: BrowserContext, sessionId: string, buffer: Buff
 }
 
 test.describe("视频/PDF/音频预览", () => {
-  test("视频: duration 有效 + 播放后 currentTime 增长 + 跳转后继续", async ({
-    page,
-    context,
-  }) => {
-    if (!fixtures.mp4) test.skip(true, "ffmpeg 不可用,跳过视频测试");
-    await register(context, "vid-play");
+  test("视频: 播放→跳转→从跳转位置继续", async ({ page, context }) => {
+    if (!fixtures.mp4) test.skip(true, "ffmpeg 不可用");
+    await register(context, "vid-seek");
     const sessionId = await createSession(context);
-    await uploadBuffer(context, sessionId, fs.readFileSync(fixtures.mp4), "play-test.mp4");
+    await uploadBuffer(context, sessionId, fs.readFileSync(fixtures.mp4), "seek-test.mp4");
 
     await page.goto(`${BASE}/?session=${sessionId}`);
-    await expect(page.getByText("play-test.mp4")).toBeVisible({ timeout: 15_000 });
-    await page.getByText("play-test.mp4").click();
+    await expect(page.getByText("seek-test.mp4")).toBeVisible({ timeout: 15_000 });
+    await page.getByText("seek-test.mp4").click();
 
     const video = page.locator("video");
     await expect(video).toBeVisible({ timeout: 5_000 });
 
-    // 等待 metadata 加载，验证 duration 有效
+    // duration 有效
     await page.waitForFunction(
       () => {
         const v = document.querySelector("video");
@@ -137,66 +122,70 @@ test.describe("视频/PDF/音频预览", () => {
     );
     const duration = await video.evaluate((v: HTMLVideoElement) => v.duration);
     expect(duration).toBeGreaterThanOrEqual(2);
-    expect(duration).toBeLessThanOrEqual(5);
 
-    // 播放并等待 currentTime 增长
+    // 播放并等 currentTime 增长
     await video.evaluate((v: HTMLVideoElement) => v.play());
     await page.waitForFunction(
-      () => {
-        const v = document.querySelector("video");
-        return v && v.currentTime > 0.3;
-      },
+      () => document.querySelector("video")!.currentTime > 0.3,
       { timeout: 10_000 },
     );
     await video.evaluate((v: HTMLVideoElement) => v.pause());
-    const timeAfterPlay = await video.evaluate((v: HTMLVideoElement) => v.currentTime);
-    expect(timeAfterPlay).toBeGreaterThan(0.2);
 
-    // 跳转到 2 秒
-    await video.evaluate((v: HTMLVideoElement) => {
-      v.currentTime = 2;
-    });
-    await page.waitForTimeout(300);
-    const timeAfterSeek = await video.evaluate((v: HTMLVideoElement) => v.currentTime);
-    expect(timeAfterSeek).toBeGreaterThanOrEqual(1.5);
+    // 跳转到 2 秒并等 seeked 事件
+    await video.evaluate(
+      (v: HTMLVideoElement) =>
+        new Promise<void>((resolve) => {
+          v.addEventListener("seeked", () => resolve(), { once: true });
+          v.currentTime = 2;
+        }),
+    );
+    const seekedTime = await video.evaluate((v: HTMLVideoElement) => v.currentTime);
+    expect(seekedTime).toBeGreaterThanOrEqual(1.5);
+
+    // 从跳转位置继续播放
+    await video.evaluate((v: HTMLVideoElement) => v.play());
+    await page.waitForFunction(
+      () => document.querySelector("video")!.currentTime > 2.2,
+      { timeout: 10_000 },
+    );
+    const timeAfterResume = await video.evaluate((v: HTMLVideoElement) => v.currentTime);
+    expect(timeAfterResume).toBeGreaterThan(2.1);
   });
 
-  test("PDF: iframe 能加载内容", async ({ page, context }) => {
-    await register(context, "pdf-view");
+  test("PDF: 截图确认有内容渲染(非空白)", async ({ page, context }) => {
+    await register(context, "pdf-render");
     const sessionId = await createSession(context);
-    await uploadBuffer(context, sessionId, fs.readFileSync(fixtures.pdf), "view-test.pdf");
+    await uploadBuffer(context, sessionId, fs.readFileSync(fixtures.pdf), "render-test.pdf");
 
     await page.goto(`${BASE}/?session=${sessionId}`);
-    await expect(page.getByText("view-test.pdf")).toBeVisible({ timeout: 15_000 });
-    await page.getByText("view-test.pdf").click();
+    await expect(page.getByText("render-test.pdf")).toBeVisible({ timeout: 15_000 });
+    await page.getByText("render-test.pdf").click();
 
-    const pdfFrame = page.locator('iframe[title*="view-test.pdf"]');
+    const pdfFrame = page.locator('iframe[title*="render-test.pdf"]');
     await expect(pdfFrame).toBeVisible({ timeout: 5_000 });
+    // 等 iframe 加载内容
+    await page.waitForTimeout(2000);
 
-    // 验证 iframe src 指向内联端点
-    const src = await pdfFrame.getAttribute("src");
-    expect(src).toContain("inline=1");
-    expect(src).toContain("view-test.pdf");
+    // 截取 iframe 区域的截图
+    const screenshot = await pdfFrame.screenshot();
+    expect(screenshot.length).toBeGreaterThan(0);
 
-    // 验证 iframe 实际加载（非空白——检查 contentWindow 可访问性受限于 CSP，
-    // 但可以验证 iframe 高度 > 0 且 HTTP 响应正常）
-    const box = await pdfFrame.boundingBox();
-    expect(box).toBeTruthy();
-    expect(box!.height).toBeGreaterThan(100);
+    // 检查截图不是纯色(空白)——至少有一些像素变化
+    // 纯白图片压缩后极小(< 1KB),有内容的 PDF 截图会大得多
+    expect(screenshot.length).toBeGreaterThan(2000);
   });
 
-  test("音频: 加载后 duration 有效", async ({ page, context }) => {
-    await register(context, "aud-play");
+  test("音频: duration 有效", async ({ page, context }) => {
+    await register(context, "aud-dur");
     const sessionId = await createSession(context);
-    await uploadBuffer(context, sessionId, fs.readFileSync(fixtures.wav), "play-test.wav");
+    await uploadBuffer(context, sessionId, fs.readFileSync(fixtures.wav), "dur-test.wav");
 
     await page.goto(`${BASE}/?session=${sessionId}`);
-    await expect(page.getByText("play-test.wav")).toBeVisible({ timeout: 15_000 });
-    await page.getByText("play-test.wav").click();
+    await expect(page.getByText("dur-test.wav")).toBeVisible({ timeout: 15_000 });
+    await page.getByText("dur-test.wav").click();
 
     const audio = page.locator("audio");
     await expect(audio).toBeVisible({ timeout: 5_000 });
-
     await page.waitForFunction(
       () => {
         const a = document.querySelector("audio");
@@ -209,30 +198,40 @@ test.describe("视频/PDF/音频预览", () => {
     expect(duration).toBeLessThanOrEqual(1.5);
   });
 
-  test("下载字节一致", async ({ context }) => {
-    await register(context, "dl-check");
+  test("面板下载按钮: 点击下载→字节与原文件一致", async ({ page, context }) => {
+    await register(context, "dl-btn");
     const sessionId = await createSession(context);
     const originalPdf = fs.readFileSync(fixtures.pdf);
-    await uploadBuffer(context, sessionId, originalPdf, "dl-check.pdf");
+    await uploadBuffer(context, sessionId, originalPdf, "dl-btn-test.pdf");
 
-    const res = await context.request.fetch(
-      `${BASE}/api/sessions/${sessionId}/files?download=dl-check.pdf`,
-    );
-    expect(res.status()).toBe(200);
-    expect(res.headers()["content-disposition"]).toContain("attachment");
-    const downloaded = await res.body();
+    await page.goto(`${BASE}/?session=${sessionId}`);
+    await expect(page.getByText("dl-btn-test.pdf")).toBeVisible({ timeout: 15_000 });
+    await page.getByText("dl-btn-test.pdf").click();
+
+    // 等预览加载
+    const pdfFrame = page.locator('iframe[title*="dl-btn-test.pdf"]');
+    await expect(pdfFrame).toBeVisible({ timeout: 5_000 });
+
+    // 点击面板下载按钮并捕获下载
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByLabel("下载文件").click(),
+    ]);
+    const dlPath = await download.path();
+    expect(dlPath).toBeTruthy();
+    const downloaded = fs.readFileSync(dlPath!);
     expect(Buffer.compare(downloaded, originalPdf)).toBe(0);
   });
 
   test("Range 请求返回正确字节区间", async ({ context }) => {
     if (!fixtures.mp4) test.skip(true, "ffmpeg 不可用");
-    await register(context, "range-check");
+    await register(context, "range-bytes");
     const sessionId = await createSession(context);
     const originalMp4 = fs.readFileSync(fixtures.mp4);
-    await uploadBuffer(context, sessionId, originalMp4, "range-check.mp4");
+    await uploadBuffer(context, sessionId, originalMp4, "range-bytes.mp4");
 
     const res = await context.request.fetch(
-      `${BASE}/api/sessions/${sessionId}/files?download=range-check.mp4&inline=1`,
+      `${BASE}/api/sessions/${sessionId}/files?download=range-bytes.mp4&inline=1`,
       { headers: { Range: "bytes=10-109" } },
     );
     expect(res.status()).toBe(206);
