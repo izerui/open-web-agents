@@ -123,4 +123,18 @@ describe("知识库编辑", () => {
     );
     expect(after.body.content).toContain("哈希表");
   });
+
+  it("PUT 超长标题返回 400,原标题不变", async () => {
+    const longTitle = "字".repeat(256);
+    const r = await owner.put(`/api/agents/${agentId}/knowledge`, {
+      docId: docAId,
+      title: longTitle,
+    });
+    expect(r.status).toBe(400);
+    const after = await owner.get<{ title: string; content: string }>(
+      `/api/agents/${agentId}/knowledge/${docAId}`,
+    );
+    expect(after.body.title).toBe("哈希表原理");
+    expect(after.body.content).toContain("哈希表");
+  });
 });

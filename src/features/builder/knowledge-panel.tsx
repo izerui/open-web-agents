@@ -251,6 +251,7 @@ export function KnowledgePanel({
           <Input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
+            maxLength={255}
             placeholder="文档标题,如「报销制度」"
           />
           <Textarea
@@ -338,6 +339,7 @@ export function KnowledgePanel({
                   <Input
                     value={editTitle}
                     onChange={(e) => setEditTitle(e.target.value)}
+                    maxLength={255}
                     placeholder="文档标题"
                   />
                   <Textarea
