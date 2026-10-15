@@ -10,7 +10,10 @@ const state = vi.hoisted(() => ({
 
 const upserted: unknown[] = [];
 const knowledgeCreated: unknown[] = [];
+const knowledgeDeleted: string[] = [];
+const softDeleted: string[] = [];
 const audited: unknown[] = [];
+let createKnowledgeHook: ((doc: unknown, index: number) => void) | null = null;
 
 const sourceAgent = {
   id: "source-agent",
@@ -73,6 +76,10 @@ vi.mock("@/lib/container", () => ({
         upserted.push(agent);
         return agent;
       },
+      softDelete: async (id: string) => {
+        softDeleted.push(id);
+        return true;
+      },
     },
     releases: {
       get: async (agentId: string, version: number) =>
@@ -97,8 +104,12 @@ vi.mock("@/lib/container", () => ({
           : null;
       },
       create: async (doc: unknown) => {
+        if (createKnowledgeHook) createKnowledgeHook(doc, knowledgeCreated.length);
         knowledgeCreated.push(doc);
         return doc;
+      },
+      delete: async (id: string) => {
+        knowledgeDeleted.push(id);
       },
     },
     audit: {
@@ -142,7 +153,10 @@ describe("POST /api/agents/{id}/clone", () => {
     state.userId = "cloner";
     upserted.length = 0;
     knowledgeCreated.length = 0;
+    knowledgeDeleted.length = 0;
+    softDeleted.length = 0;
     audited.length = 0;
+    createKnowledgeHook = null;
   });
 
   it("clones a market-listed agent with published config, redacted MCP, and knowledge docs", async () => {
@@ -226,5 +240,20 @@ describe("POST /api/agents/{id}/clone", () => {
     expect(agent.marketListed).toBeUndefined();
     expect(agent.seedHash).toBeUndefined();
     expect(agent.webhookUrl).toBeUndefined();
+  });
+
+  it("rolls back agent and first doc when second knowledge doc fails to copy", async () => {
+    createKnowledgeHook = (_doc, index) => {
+      if (index === 1) throw new Error("simulated write failure");
+    };
+    const res = await clone();
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/知识库复制失败/);
+    expect(knowledgeCreated).toHaveLength(1);
+    expect(knowledgeDeleted).toHaveLength(1);
+    expect(knowledgeDeleted[0]).toBe((knowledgeCreated[0] as { id: string }).id);
+    expect(softDeleted).toHaveLength(1);
+    expect(audited).toHaveLength(0);
   });
 });

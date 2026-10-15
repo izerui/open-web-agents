@@ -65,20 +65,29 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     let knowledgeCopied = 0;
     if (includeKnowledge) {
       const listing = await knowledge.list(id);
-      for (const item of listing.docs) {
-        const doc = await knowledge.get(item.id);
-        if (!doc) continue;
-        try {
+      const createdDocIds: string[] = [];
+      try {
+        for (const item of listing.docs) {
+          const doc = await knowledge.get(item.id);
+          if (!doc) continue;
+          const docId = randomUUID().replace(/-/g, "").slice(0, 24);
           await knowledge.create({
-            id: randomUUID().replace(/-/g, "").slice(0, 24),
+            id: docId,
             agentId: clonedId,
             title: doc.title,
             content: doc.content,
           });
+          createdDocIds.push(docId);
           knowledgeCopied++;
-        } catch {
-          break;
         }
+      } catch {
+        for (const docId of createdDocIds) {
+          try {
+            await knowledge.delete(docId);
+          } catch {}
+        }
+        await agents.softDelete(clonedId, Date.now());
+        return Response.json({ error: "知识库复制失败，克隆已撤销" }, { status: 500 });
       }
     }
 
