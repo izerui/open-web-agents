@@ -7,16 +7,6 @@ import { isSystemAgent } from "@/lib/modules/agent/domain/system-agent";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function mergeVariableDefs(...sources: (VariableDef[] | undefined)[]): VariableDef[] {
-  const byName = new Map<string, VariableDef>();
-  for (const defs of sources) {
-    for (const d of defs ?? []) {
-      if (!byName.has(d.name)) byName.set(d.name, d);
-    }
-  }
-  return [...byName.values()];
-}
-
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { agents, auth, grants, variables, releases } = getContainer();
@@ -35,13 +25,24 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       return Response.json({ error: "no access" }, { status: 403 });
     }
 
-    const release =
-      agent.publishedVersion != null ? await releases.get(id, agent.publishedVersion) : null;
+    const query = new URL(req.url).searchParams;
+    const versionParam = query.get("version");
 
-    const defs: VariableDef[] =
-      level === "write"
-        ? mergeVariableDefs(agent.config.variables, release?.config.variables)
-        : (release?.config.variables ?? agent.config.variables ?? []);
+    let defs: VariableDef[];
+    if (versionParam !== null) {
+      const v = Number(versionParam);
+      if (!Number.isInteger(v) || v < 1) {
+        return Response.json({ error: "version 须为正整数" }, { status: 400 });
+      }
+      const ver = await releases.get(id, v);
+      defs = ver?.config.variables ?? [];
+    } else if (level === "write") {
+      defs = agent.config.variables ?? [];
+    } else {
+      const release =
+        agent.publishedVersion != null ? await releases.get(id, agent.publishedVersion) : null;
+      defs = release?.config.variables ?? agent.config.variables ?? [];
+    }
 
     const raw = await variables.get(id, subject.userId);
     const values: Record<string, string> = {};
@@ -64,7 +65,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { agents, auth, grants, variables, releases } = getContainer();
+    const { agents, auth, grants, variables } = getContainer();
     const principal = await auth.resolveWeb(req);
     if (principal.type !== "web")
       return Response.json({ error: "API Key 无权设置变量" }, { status: 403 });
@@ -87,30 +88,17 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
       return Response.json({ error: "请提供变量值对象" }, { status: 400 });
     }
 
-    const release =
-      agent.publishedVersion != null ? await releases.get(id, agent.publishedVersion) : null;
-    const allDefs = mergeVariableDefs(agent.config.variables, release?.config.variables);
-    const defNames = new Set(allDefs.map((d) => d.name));
-
     const existing = await variables.get(id, subject.userId);
-    const merged: Record<string, string> = {};
-
-    for (const name of defNames) {
-      if (existing[name] !== undefined) merged[name] = existing[name];
-    }
+    const merged = { ...existing };
 
     for (const [key, val] of Object.entries(body)) {
-      if (!defNames.has(key)) continue;
       if (typeof val !== "string") {
         return Response.json({ error: `变量 ${key} 的值须为字符串` }, { status: 400 });
       }
       if (val.length > 4000) {
         return Response.json({ error: `变量 ${key} 的值不能超过 4000 字符` }, { status: 400 });
       }
-      const def = allDefs.find((d) => d.name === key);
-      if (def?.secret && val === "***") {
-        continue;
-      }
+      if (val === "***") continue;
       if (val.trim()) {
         merged[key] = val;
       } else {
