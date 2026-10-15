@@ -621,12 +621,27 @@ export function DesignWorkspace({ initialSessionId }: { initialSessionId?: strin
                               .filter((r) => r.kind === kind)
                               .map((r) => {
                                 const key = kind === "skill" ? "skillRefs" : "mcpRefs";
+                                const inlineNames = new Set(
+                                  kind === "skill"
+                                    ? (draft.skillPackages ?? []).map((s) => s.name)
+                                    : (draft.mcpServers ?? []).map((m) => m.name),
+                                );
+                                const conflict = inlineNames.has(r.name);
                                 return (
-                                  <label key={r.ref} className="flex items-start gap-2 text-sm">
+                                  <label
+                                    key={r.ref}
+                                    className={`flex items-start gap-2 text-sm ${conflict ? "opacity-50" : ""}`}
+                                    title={
+                                      conflict
+                                        ? `与 inline 定义「${r.name}」冲突，请先移除 inline 或不勾选`
+                                        : undefined
+                                    }
+                                  >
                                     <input
                                       type="checkbox"
                                       className="mt-1"
                                       checked={draft[key].includes(r.ref)}
+                                      disabled={conflict && !draft[key].includes(r.ref)}
                                       onChange={(e) =>
                                         setDraft({
                                           ...draft,

@@ -127,6 +127,13 @@ describe("platform design drafts", () => {
     expect(result.config.skillPackages?.map((s) => s.name).sort()).toEqual(["new-skill", "report"]);
   });
 
+  it("rejects same-name inline and ref resources", () => {
+    const draft = draftOf(source);
+    // Add a ref pointing to the same skill name as inline
+    draft.skillRefs = [resourceRef(source.id, "skill", "report")];
+    expect(() => resolveDesign(draft, [source])).toThrow(/同时存在/);
+  });
+
   it.each([
     null,
     [],

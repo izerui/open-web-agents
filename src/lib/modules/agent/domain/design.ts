@@ -182,7 +182,9 @@ export function resolveDesign(draft: DesignDraft, resources: Agent[]): AgentSnap
     refSkillNames.add(s.name);
   }
   for (const s of draft.skillPackages ?? []) {
-    if (!refSkillNames.has(s.name)) resolvedSkills.push(s);
+    if (refSkillNames.has(s.name))
+      throw new Error(`技能「${s.name}」同时存在于 inline 和引用中，请移除引用或删除 inline 定义`);
+    resolvedSkills.push(s);
   }
 
   const refMcpNames = new Set<string>();
@@ -195,7 +197,9 @@ export function resolveDesign(draft: DesignDraft, resources: Agent[]): AgentSnap
     refMcpNames.add(m.name);
   }
   for (const m of draft.mcpServers ?? []) {
-    if (!refMcpNames.has(m.name)) resolvedMcps.push(m);
+    if (refMcpNames.has(m.name))
+      throw new Error(`MCP「${m.name}」同时存在于 inline 和引用中，请移除引用或删除 inline 定义`);
+    resolvedMcps.push(m);
   }
 
   return {
