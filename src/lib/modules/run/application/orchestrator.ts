@@ -184,7 +184,7 @@ export class RunOrchestrator {
 
     const resolvedVariables =
       session.billingUserId && this.deps.resolveVariables
-        ? await this.deps.resolveVariables(session.agentId, session.billingUserId).catch(() => ({}))
+        ? await this.deps.resolveVariables(session.agentId, session.billingUserId)
         : {};
 
     const missing = checkRequiredVariables(config.variables, resolvedVariables);

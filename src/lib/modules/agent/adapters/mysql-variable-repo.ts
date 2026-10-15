@@ -36,16 +36,6 @@ export class MysqlVariableRepo implements VariableRepo {
     private readonly secrets: SecretBox,
   ) {}
 
-  private decryptSafe(enc: string): Record<string, string> {
-    const plain = this.secrets.decrypt(enc);
-    if (plain === null) return {};
-    try {
-      return JSON.parse(plain) as Record<string, string>;
-    } catch {
-      return {};
-    }
-  }
-
   private decryptStrict(enc: string): Record<string, string> {
     const plain = this.secrets.decrypt(enc);
     if (plain === null) throw new VariableDecryptionFailed();
@@ -63,7 +53,7 @@ export class MysqlVariableRepo implements VariableRepo {
       .where(and(eq(agentVariables.agentId, agentId), eq(agentVariables.userId, userId)))
       .limit(1);
     if (!row) return {};
-    return this.decryptSafe(row.valuesEnc);
+    return this.decryptStrict(row.valuesEnc);
   }
 
   async set(agentId: string, userId: string, values: Record<string, string>): Promise<void> {

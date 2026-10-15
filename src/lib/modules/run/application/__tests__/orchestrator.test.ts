@@ -445,4 +445,51 @@ describe("RunOrchestrator:工作目录已被清理", () => {
     expect(ctxCaptures[1]?.env.OWA_VAR_TOKEN).toBeUndefined();
     expect(baseEnv).toEqual({ SHARED: "base" });
   });
+
+  it("variable decryption failure prevents engine execution", async () => {
+    let engineCalled = false;
+    const engine: EnginePort = {
+      async run() {
+        engineCalled = true;
+        return { status: "success", summary: "ok", sessionId: "sdk_x" };
+      },
+    };
+    const sessions = new InMemorySessionRepo();
+    const agents = new InMemoryAgentRepo([
+      {
+        id: "a-dec",
+        ownerId: "u1",
+        name: "D",
+        config: {
+          systemPrompt: "test",
+          model: "sonnet" as const,
+          variables: [{ name: "OPT_KEY", description: "", required: false, secret: true }],
+        },
+      },
+    ]);
+    await sessions.create({
+      id: "s-dec",
+      agentId: "a-dec",
+      workspaceDir: "/ws/sd",
+      billingUserId: "userDec",
+    });
+    const orch = new RunOrchestrator({
+      sessions,
+      agents,
+      engine,
+      bus: new InMemoryBus(),
+      platformCredentials: PLATFORM,
+      resolveVariables: async () => {
+        throw new Error("decryption failed");
+      },
+    });
+
+    await expect(
+      orch.execute(
+        { sessionId: "s-dec", runId: "r-dec", prompt: "go" },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow("decryption failed");
+    expect(engineCalled).toBe(false);
+  });
 });
