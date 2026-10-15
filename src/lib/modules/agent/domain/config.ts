@@ -221,11 +221,10 @@ export function checkUrlTemplate(raw: string): string | null {
 }
 
 /**
- * URL 合并：按 ? 分割为 base+query 两部分独立比较。
+ * URL 合并：base（协议+主机+路径）和 query 参数分别比较。
  * - 与 baseline 完全相同 → 恢复原值
- * - base 部分（协议+主机+路径）被修改 → 取新 base + 原 query
- * - query 部分被修改 → 取原 base + 新 query
- * - 两部分都改了 → 全采用新值
+ * - base 改了 → 取新 base + 合并后 query
+ * - query 改了 → 按参数级合并：原值参数保留，新增追加，明确修改的覆盖
  */
 function mergeUrl(
   draft: string | undefined,
@@ -236,22 +235,53 @@ function mergeUrl(
   if (draft === base) return orig;
   if (!base || !orig) return draft;
 
-  const splitQ = (s: string) => {
+  const splitQ = (s: string): [string, string] => {
     const i = s.indexOf("?");
     return i < 0 ? [s, ""] : [s.slice(0, i), s.slice(i)];
   };
 
-  const [dBase, dQuery] = splitQ(draft) as [string, string];
-  const [bBase, bQuery] = splitQ(base) as [string, string];
-  const [oBase, oQuery] = splitQ(orig) as [string, string];
+  const parseParams = (qs: string): Map<string, string> => {
+    const m = new Map<string, string>();
+    if (!qs || qs === "?") return m;
+    const raw = qs.startsWith("?") ? qs.slice(1) : qs;
+    for (const pair of raw.split("&")) {
+      if (!pair || pair === "***") continue;
+      const eq = pair.indexOf("=");
+      if (eq < 0) m.set(pair, "");
+      else m.set(pair.slice(0, eq), pair.slice(eq + 1));
+    }
+    return m;
+  };
+
+  const buildQuery = (params: Map<string, string>): string => {
+    if (params.size === 0) return "";
+    return `?${[...params].map(([k, v]) => (v ? `${k}=${v}` : k)).join("&")}`;
+  };
+
+  const [dBase, dQuery] = splitQ(draft);
+  const [bBase, bQuery] = splitQ(base);
+  const [oBase, oQuery] = splitQ(orig);
 
   const baseChanged = dBase !== bBase;
   const queryChanged = dQuery !== bQuery;
 
   if (!baseChanged && !queryChanged) return orig;
-  if (baseChanged && !queryChanged) return dBase + oQuery;
-  if (!baseChanged && queryChanged) return oBase + dQuery;
-  return draft;
+
+  const resultBase = baseChanged ? dBase : oBase;
+  if (!queryChanged) return resultBase + oQuery;
+
+  const dParams = parseParams(dQuery);
+  const bParams = parseParams(bQuery);
+  const oParams = parseParams(oQuery);
+
+  const merged = new Map<string, string>();
+  for (const [k, v] of oParams) merged.set(k, v);
+  for (const [k, v] of dParams) {
+    if (!bParams.has(k)) merged.set(k, v);
+    else if (v !== bParams.get(k)) merged.set(k, v);
+  }
+
+  return resultBase + buildQuery(merged);
 }
 
 export function restoreMcpSecrets(

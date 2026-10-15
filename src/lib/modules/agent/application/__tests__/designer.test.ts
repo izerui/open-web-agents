@@ -471,6 +471,37 @@ describe("AgentDesigner", () => {
     expect(saved.saved.config.mcpServers?.[0]?.env?.K).toBe("env-val");
   });
 
+  it("adding a query param preserves hidden auth params", async () => {
+    const targetMcp: Agent = {
+      ...target,
+      config: {
+        ...target.config,
+        mcpServers: [
+          { name: "api", type: "http", url: "https://host.test/mcp?token=secret123&tenant=school" },
+        ],
+      },
+    };
+    const h = await setup({ target: targetMcp });
+
+    const state = (await h.sessions.get("design"))?.designState;
+    if (!state?.draft.mcpServers?.[0]) throw new Error("no mcp");
+    // baseline: "https://host.test/mcp?token={{KEY}}" (tenant removed by clone redact)
+    // AI adds timeout param to the redacted query
+    const baselineUrl = state.draft.mcpServers[0].url;
+    state.draft.mcpServers[0] = {
+      ...state.draft.mcpServers[0],
+      url: `${baselineUrl}&timeout=30`,
+    };
+    await h.sessions.update("design", { designState: state });
+
+    const view = await h.inspect();
+    const saved = await h.designer.apply(owner, "design", view.previewToken);
+    const savedUrl = saved.saved.config.mcpServers?.[0]?.url;
+    expect(savedUrl).toContain("token=secret123");
+    expect(savedUrl).toContain("tenant=school");
+    expect(savedUrl).toContain("timeout=30");
+  });
+
   it("source content changes invalidate preview even when the draft revision has not changed", async () => {
     const h = await setup();
     await h.edit({ ...validDraft(), mcpRefs: [resourceRef(source.id, "mcp", "search")] }, [
