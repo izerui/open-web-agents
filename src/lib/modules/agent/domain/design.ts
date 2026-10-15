@@ -7,13 +7,14 @@ import { redactAgentConfigForClone } from "./config";
 import { stableStringify } from "./release";
 
 export interface DesignState {
-  /** null 表示创建新的智能体;旧会话没有状态,须显式载入当前草稿后才能保存。 */
   baseHash: string | null;
   resourceAgentIds: string[];
   draft: DesignDraft;
   aiRunId?: string;
   importedRunId?: string;
   aiIssue?: string;
+  /** 载入时 MCP 的脱敏快照，apply 时比较草稿与此值判断哪些字段被修改。 */
+  mcpBaseline?: McpDef[];
 }
 
 export interface DesignDraft {
@@ -92,6 +93,11 @@ export function draftOf(agent?: Agent): DesignDraft {
     skillPackages: agent?.config.skillPackages,
     mcpServers: redactedConfig?.mcpServers,
   };
+}
+
+export function mcpBaselineOf(agent?: Agent): McpDef[] | undefined {
+  if (!agent?.config.mcpServers?.length) return undefined;
+  return redactAgentConfigForClone(agent.config).mcpServers;
 }
 
 export function parseDesign(raw: unknown): DesignDraft {

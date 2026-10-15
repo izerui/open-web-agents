@@ -15,6 +15,7 @@ import {
   designResources,
   designSnapshot,
   draftOf,
+  mcpBaselineOf,
   parseDesign,
   resolveDesign,
 } from "../domain/design";
@@ -195,6 +196,7 @@ export class AgentDesigner {
           baseHash: target ? contentHash(snapshotOf(target)) : null,
           resourceAgentIds: target ? [target.id] : [],
           draft: draftOf(target),
+          mcpBaseline: mcpBaselineOf(target),
         };
       } else {
         if (!state) throw new DesignError(409, "design_legacy", "旧设计须先载入当前草稿");
@@ -264,7 +266,7 @@ export class AgentDesigner {
         ownerId: target?.ownerId ?? subject.userId,
         icon: target?.icon,
         config: {
-          ...restoreMcpSecrets(candidate.config, target?.config),
+          ...restoreMcpSecrets(candidate.config, target?.config, state.mcpBaseline),
           escapeHatch: target?.config.escapeHatch,
         },
       });

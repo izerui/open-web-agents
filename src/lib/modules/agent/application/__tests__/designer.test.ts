@@ -6,7 +6,13 @@ import { InMemorySessionRepo } from "@/lib/modules/session/adapters/in-memory-se
 import { describe, expect, it, vi } from "vitest";
 import { InMemoryAgentRepo } from "../../adapters/in-memory-agent-repo";
 import { InMemoryAgentVersionRepo } from "../../adapters/in-memory-agent-version-repo";
-import { DRAFT_FILE, type DesignDraft, draftOf, resourceRef } from "../../domain/design";
+import {
+  DRAFT_FILE,
+  type DesignDraft,
+  draftOf,
+  mcpBaselineOf,
+  resourceRef,
+} from "../../domain/design";
 import { contentHash, snapshotOf } from "../../domain/release";
 import { DESIGN_EXECUTOR_ID } from "../../domain/system-agent";
 import type { Agent } from "../../ports";
@@ -107,6 +113,7 @@ async function setup(opts: { target?: Agent; legacy?: boolean } = {}) {
           baseHash: opts.target ? contentHash(snapshotOf(opts.target)) : null,
           resourceAgentIds: opts.target ? [opts.target.id] : [],
           draft: opts.target ? draftOf(opts.target) : validDraft(),
+          mcpBaseline: opts.target ? mcpBaselineOf(opts.target) : undefined,
         },
   });
   const inspect = async () => {

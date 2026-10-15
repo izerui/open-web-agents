@@ -221,29 +221,37 @@ export function checkUrlTemplate(raw: string): string | null {
 }
 
 /**
- * 编辑自己的智能体时，从原配置恢复被脱敏的 MCP 敏感字段。
- * 草稿中 *** 的值用原配置的对应值替换；非 *** 的值（用户或 AI 明确修改过的）保留。
+ * 编辑自己的智能体时，按字段比较草稿与脱敏 baseline：
+ * - 字段与 baseline 相同 → 用原配置恢复（用户/AI 没改）
+ * - 字段与 baseline 不同 → 保留修改后的值（明确编辑过）
+ * - baseline 没有对应 MCP → 新增的，原样保留
  */
 export function restoreMcpSecrets(
   candidate: AgentConfig,
   original: AgentConfig | undefined,
+  baseline: McpDef[] | undefined,
 ): AgentConfig {
   if (!original?.mcpServers?.length || !candidate.mcpServers?.length) return candidate;
   const origByName = new Map(original.mcpServers.map((m) => [m.name, m]));
+  const baseByName = new Map((baseline ?? []).map((m) => [m.name, m]));
   return {
     ...candidate,
     mcpServers: candidate.mcpServers.map((m) => {
       const orig = origByName.get(m.name);
-      if (!orig) return m;
+      const base = baseByName.get(m.name);
+      if (!orig || !base) return m;
       return {
         ...m,
-        url: m.url === "***" || m.url?.endsWith("?***") ? (orig.url ?? m.url) : m.url,
+        url: m.url === base.url ? (orig.url ?? m.url) : m.url,
         env: m.env
           ? Object.fromEntries(
-              Object.entries(m.env).map(([k, v]) => [k, v === "***" ? (orig.env?.[k] ?? v) : v]),
+              Object.entries(m.env).map(([k, v]) => [
+                k,
+                v === base.env?.[k] ? (orig.env?.[k] ?? v) : v,
+              ]),
             )
           : orig.env,
-        args: m.args?.map((a, i) => (a === "***" ? (orig.args?.[i] ?? a) : a)),
+        args: m.args?.map((a, i) => (a === base.args?.[i] ? (orig.args?.[i] ?? a) : a)),
       };
     }),
   };
