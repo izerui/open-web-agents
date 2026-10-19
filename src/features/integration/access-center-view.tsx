@@ -45,7 +45,7 @@ function expiryText(k: KeyRecord, now: number): { text: string; urgent: boolean 
  * 接入中心:第三方系统接入智能体需要的东西都在这一页。
  *
  * 【为什么合并】以前集成方要跑四个地方:这里签 Key、构建器底部翻 curl、
- * 「模型凭证」页设回调签名密钥,嵌入组件则根本没有界面入口。
+ * 「模型凭证」页设回调签名密钥。
  */
 export function AccessCenterView() {
   const [keys, setKeys] = useState<KeyRecord[]>([]);
@@ -192,7 +192,7 @@ export function AccessCenterView() {
   return (
     <SpaceShell
       title="接入中心"
-      subtitle="把智能体当接口用:签发 Key → 复制调用代码 → 接收回调或嵌入页面"
+      subtitle="把智能体当接口用:签发 Key → 复制调用代码 → 接收回调"
       width="narrow"
     >
       <Card>

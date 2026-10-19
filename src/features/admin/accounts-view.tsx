@@ -351,7 +351,7 @@ export function AccountsView() {
                           : confirm.ask({
                               title: `停用 ${a.email}?`,
                               description:
-                                "其登录立即失效,签发的 API Key 与嵌入令牌也一并停用。之后可以随时恢复。",
+                                "其登录立即失效,签发的 API Key 也一并停用。之后可以随时恢复。",
                               confirmLabel: "停用",
                               destructive: true,
                               onConfirm: async () => {

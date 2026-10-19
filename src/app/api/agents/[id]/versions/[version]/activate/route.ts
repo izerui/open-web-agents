@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * 回滚(或前滚):把发布指针指向这个版本。之后新建的接口调用、嵌入与 API 会话跑它;
+ * 回滚(或前滚):把发布指针指向这个版本。之后新建的接口调用与 API 会话跑它;
  * 已经建好的会话仍按各自锁定的版本跑完。
  */
 export async function POST(

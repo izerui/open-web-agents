@@ -421,7 +421,7 @@ export function buildSdkOptions(
     const d = guardToolUse(toolName, input, guardPolicy);
     if (!d.allow) return { allow: false, reason: d.reason ?? "越界操作" };
 
-    // 【没有审批人时不等人】接口调用、嵌入组件里没有人能点批准(嵌入的访客不是审批人)。
+    // 【没有审批人时不等人】接口调用、评测里没有人能点批准。
     // 照常发审批的后果是白等满 10 分钟、超时自动拒绝。按智能体配置直接放行或拒绝;
     // 路径围栏与工具白名单仍然生效 —— 那两道是结构性安全边界,不依赖人。
     const policy = ctx.approvalPolicy ?? (ctx.unattended ? "allow" : "ask");

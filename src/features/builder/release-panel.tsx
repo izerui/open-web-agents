@@ -93,7 +93,7 @@ interface VersionMeta {
 /**
  * 版本与发布。
  *
- * 草稿随便改;接口调用、嵌入组件和其他用户只跑【已发布】的版本。
+ * 草稿随便改;接口调用和其他用户只跑【已发布】的版本。
  * 改坏了可以把发布指针指回任意旧版本(秒级生效),也可以把旧版本载入草稿接着改。
  */
 export function ReleasePanel({
@@ -187,8 +187,8 @@ export function ReleasePanel({
         </CardTitle>
         <CardDescription>
           {publishedVersion === null
-            ? "还没有发布过:接口调用、嵌入组件和其他用户都直接使用草稿,保存即生效。发布后,草稿的修改只有再次发布才会对他们生效。"
-            : "接口调用、嵌入组件和其他用户使用已发布版本;你在这里继续改的是草稿,试运行用草稿。调用方也可以在请求里用 version 锁定某一版。"}
+            ? "还没有发布过:接口调用和其他用户都直接使用草稿,保存即生效。发布后,草稿的修改只有再次发布才会对他们生效。"
+            : "接口调用和其他用户使用已发布版本;你在这里继续改的是草稿,试运行用草稿。调用方也可以在请求里用 version 锁定某一版。"}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -258,7 +258,7 @@ export function ReleasePanel({
                     onClick={() => {
                       if (
                         !window.confirm(
-                          `把发布版本切换到 v${v.version}？新的接口调用、嵌入与其他用户的新会话会立即改用它;进行中的会话不受影响。`,
+                          `把发布版本切换到 v${v.version}？新的接口调用与其他用户的新会话会立即改用它;进行中的会话不受影响。`,
                         )
                       )
                         return;

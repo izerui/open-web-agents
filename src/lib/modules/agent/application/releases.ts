@@ -4,7 +4,7 @@
 // - agents 表里的那一行永远是【草稿】。构建器、AI 设计师只改草稿。
 // - 发布 = 把草稿整份快照成新版本,并把发布指针指向它。
 // - 回滚 = 把发布指针指回某个旧版本(不新建版本,秒级生效)。
-// - 对外入口(接口调用、嵌入、API Key 会话)默认跑发布指针指向的版本;
+// - 对外入口(接口调用、API Key 会话)默认跑发布指针指向的版本;
 //   从未发布过的智能体跑草稿 —— 发布功能上线前创建的智能体行为不变。
 
 import { contentHash, hasUnpublishedChanges, snapshotOf } from "@/lib/modules/agent/domain/release";

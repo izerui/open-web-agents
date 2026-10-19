@@ -749,7 +749,7 @@ describe("没有审批人时的审批策略", () => {
     expect((await decide("ask")).asked).toEqual(["Bash"]);
   });
 
-  it("deny:不等人,直接拒绝(嵌入组件默认)", async () => {
+  it("deny:不等人,直接拒绝", async () => {
     const r = await decide("deny");
     expect(r.asked).toEqual([]);
     expect(r.decision).toBe("deny");

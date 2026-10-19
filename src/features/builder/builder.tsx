@@ -138,7 +138,7 @@ interface Draft {
   approvalPatternsText: string;
   /** 权限模式;按场景选,不是安全等级 */
   permissionMode: PermissionMode;
-  /** 没有审批人时(接口调用、嵌入组件)命中审批规则怎么办;空 = 按入口默认 */
+  /** 没有审批人时(接口调用)命中审批规则怎么办;空 = 按入口默认 */
   unattendedApproval: "" | "allow" | "deny";
   /** 开场建议,一行一条 */
   startersText: string;
@@ -508,11 +508,11 @@ export function Builder() {
     }
   }
 
-  /** 软删除:接口调用、嵌入、分享随之失效;历史会话与运行记录保留。 */
+  /** 软删除:接口调用、分享随之失效;历史会话与运行记录保留。 */
   async function removeAgent(id: string, name: string) {
     if (
       !window.confirm(
-        `删除「${name}」?\n\n删除后:接口调用、嵌入组件、分享立即失效,绑定它的 API Key 也调不通了;历史会话与运行记录保留。此操作不能在界面上撤销。`,
+        `删除「${name}」?\n\n删除后:接口调用、分享立即失效,绑定它的 API Key 也调不通了;历史会话与运行记录保留。此操作不能在界面上撤销。`,
       )
     )
       return;
@@ -803,7 +803,7 @@ export function Builder() {
           {selectedAgent && canWrite && (
             <Badge
               variant={selectedAgent.hasUnpublishedChanges ? "warning" : "secondary"}
-              title="接口调用、嵌入组件和其他用户使用已发布版本;发布在页面下方「版本与发布」"
+              title="接口调用和其他用户使用已发布版本;发布在页面下方「版本与发布」"
             >
               {selectedAgent.publishedVersion
                 ? `已发布 v${selectedAgent.publishedVersion}${selectedAgent.hasUnpublishedChanges ? " · 草稿有修改" : ""}`
@@ -1281,7 +1281,7 @@ export function Builder() {
 
       <label className="block space-y-1">
         <span className="text-xs text-muted-foreground">
-          没有审批人时(接口调用、嵌入组件)命中下面的审批规则
+          没有审批人时(接口调用)命中下面的审批规则
         </span>
         <Select
           value={draft.unattendedApproval}
@@ -1292,12 +1292,12 @@ export function Builder() {
             })
           }
         >
-          <option value="">按入口默认(接口调用放行,嵌入组件拒绝)</option>
+          <option value="">按入口默认(接口调用放行)</option>
           <option value="deny">一律拒绝(更安全)</option>
           <option value="allow">一律放行</option>
         </Select>
         <span className="block text-xs text-muted-foreground">
-          网页工作台里始终等人审批;接口调用与嵌入组件没有审批人,不会挂着等。
+          网页工作台里始终等人审批;接口调用没有审批人,不会挂着等。
         </span>
       </label>
 

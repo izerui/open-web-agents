@@ -52,8 +52,7 @@ export interface AgentConfig {
   /** 逃生舱:透传给 SDK options 的原始覆盖,最后 spread。 */
   escapeHatch?: Record<string, unknown>;
   /**
-   * 没有审批人时(接口调用、嵌入组件)命中审批规则怎么办。
-   * 不配:接口调用放行(历史行为),嵌入组件拒绝(访客不是审批人)。
+   * 没有审批人时(接口调用、评测)命中审批规则怎么办。不配:放行(历史行为)。
    */
   unattendedApproval?: "allow" | "deny";
   /** 开场建议:工作台空会话时展示的几条示例输入(最多 4 条)。 */

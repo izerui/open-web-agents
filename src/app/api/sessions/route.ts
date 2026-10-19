@@ -22,7 +22,7 @@ export async function GET(req: Request) {
     // view:
     //   (默认)        自己在工作台里的会话 —— 管理员也一样。曾经管理员默认看全部,
     //                 侧栏里混着所有人的会话和一堆标题为 invoke 的接口调用
-    //   integrations  用自己的 key 发起的接口调用 / API / 嵌入会话
+    //   integrations  用自己的 key 发起的接口调用 / API 会话
     //   all           全部(仅管理员,含无归属的历史数据)
     const view = new URL(req.url).searchParams.get("view");
     const filter: SessionListFilter | undefined =

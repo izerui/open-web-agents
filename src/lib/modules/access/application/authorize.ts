@@ -46,7 +46,7 @@ export interface AuthDeps {
 
   /**
    * 账号是否仍可用(存在且未停用)。
-   * API Key 与嵌入令牌都以签发人的身份运行:签发人被停用,它们必须一起失效。
+   * API Key 以签发人的身份运行:签发人被停用,它必须一起失效。
    */
   isUserActive?(userId: string): Promise<boolean>;
 }

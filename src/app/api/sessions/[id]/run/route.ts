@@ -57,7 +57,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   };
 
   /*
-   * 受理:计费账号、Key 调用限流、额度、输入规范化与契约 —— 与分支重跑、嵌入组件同一套规则
+   * 受理:计费账号、Key 调用限流、额度、输入规范化与契约 —— 与分支重跑同一套规则
    * (见 run/application/admission.ts)。额度拦在发起之前才叫"上限";worker 执行前还会再复核。
    */
   let prompt: string;
@@ -108,7 +108,7 @@ interface RunRouteContext {
 
 // ─────────────────────────── 流式模式(SSE) ───────────────────────────
 
-/** stream: true → 逐事件 SSE 推送,Web 页面实时打字机效果。实现与嵌入组件共用。 */
+/** stream: true → 逐事件 SSE 推送,Web 页面实时打字机效果。 */
 function handleStreaming(req: Request, ctx: RunRouteContext) {
   const { id, runId, prompt, enqueue, results, bus } = ctx;
   return streamRun(req, {

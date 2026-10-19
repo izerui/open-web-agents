@@ -56,7 +56,7 @@ export class Client {
     try {
       body = JSON.parse(text);
     } catch {
-      // 非 JSON 响应(如嵌入脚本)保持原文
+      // 非 JSON 响应保持原文
     }
     return { status: res.status, body: body as T, headers: res.headers };
   }

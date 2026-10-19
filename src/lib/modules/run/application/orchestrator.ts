@@ -213,7 +213,7 @@ export class RunOrchestrator {
       return { status: "failed", error: { kind: "aborted", message: "运行在启动前已被中止" } };
     }
 
-    // 运行中途追加消息:只给有人在对话的入口(工作台、API 会话)。接口调用与嵌入组件是一次性输入。
+    // 运行中途追加消息:只给有人在对话的入口(工作台、API 会话)。接口调用是一次性输入。
     // 开不了(通道不可用)就不接受追加,运行照常
     const steer =
       cmd.runId && this.deps.steerChannel && (session.source === "web" || session.source === "api")

@@ -65,7 +65,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const mode: BranchMode =
     body.mode === "continue" ? "continue" : body.mode === "rewind" ? "rewind" : "fresh";
 
-  // 重跑同样花钱、同样要守契约 —— 与对话、嵌入走同一个受理关卡
+  // 重跑同样花钱、同样要守契约 —— 与对话走同一个受理关卡
   let prompt: string;
   try {
     ({ prompt } = await admission.admit({

@@ -23,7 +23,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 }
 
 /**
- * 发布:把当前草稿冻结成新版本,接口调用、嵌入与 API 会话从此跑这一版。
+ * 发布:把当前草稿冻结成新版本,接口调用与 API 会话从此跑这一版。
  * 草稿与已发布完全相同时 409,避免产生内容重复的版本。
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {

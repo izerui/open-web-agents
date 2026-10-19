@@ -79,7 +79,7 @@ export class RunAdmission {
 
   async admit(req: AdmissionRequest): Promise<Admitted> {
     const session = await this.deps.sessions.get(req.sessionId);
-    // 已删除的会话视同不存在(嵌入入口不经 assertSessionAccess,这里再挡一次)
+    // 已删除的会话视同不存在(各入口的会话校验之外再挡一次)
     if (!session || session.status === "deleted") {
       throw new AdmissionRejected(404, "not_found", "session not found");
     }
@@ -129,7 +129,7 @@ export class RunAdmission {
   /**
    * 输入规范化与契约校验。
    * API Key 建的会话(source=api)按会话锁定版本的 inputSchema 校验 —— 与 invoke 同一份契约;
-   * 网页对话与嵌入组件是人在聊天,输入就是自然语言,不套接口契约。
+   * 网页对话是人在聊天,输入就是自然语言,不套接口契约。
    */
   private async normalizeInput(session: Session, req: AdmissionRequest): Promise<string> {
     const schema = session.source === "api" ? await this.deps.inputSchemaOf(session) : undefined;

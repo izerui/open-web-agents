@@ -73,7 +73,7 @@ function formatCost(cost?: RunItem["cost"]): string {
 }
 
 /**
- * 运行记录:我名下的全部运行 —— 工作台里的对话,以及用我的 Key 发起的接口调用和嵌入对话。
+ * 运行记录:我名下的全部运行 —— 工作台里的对话,以及用我的 Key 发起的接口调用和 API 会话。
  *
  * 曾经接口调用的过程与结果只能凭 taskId 逐个去查,工作台里也看不到;
  * 这里是两个入口统一的观察窗口。
@@ -140,7 +140,7 @@ export function RunsView() {
   return (
     <SpaceShell
       title="运行记录"
-      subtitle="工作台对话,以及用你的 Key 发起的接口调用与嵌入对话"
+      subtitle="工作台对话,以及用你的 Key 发起的接口调用与 API 会话"
       actions={
         <Button size="sm" variant="outline" onClick={() => void load()} disabled={loading}>
           <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />

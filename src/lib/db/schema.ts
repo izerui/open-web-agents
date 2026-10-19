@@ -68,7 +68,7 @@ export const agents = mysqlTable(
     /**
      * 当前发布的版本号;NULL = 从未发布,所有入口都用草稿(本行的配置)。
      * 本行的 name/config/schema 始终是【草稿】—— 构建器与设计师只改草稿,
-     * 对外入口(接口调用、嵌入、API 会话)跑的是这里指向的版本快照。
+     * 对外入口(接口调用、API 会话)跑的是这里指向的版本快照。
      */
     publishedVersion: int("published_version"),
     /** 已发布版本的内容摘要,用来判断"草稿有没有未发布的修改",免得每次都去读快照 */
@@ -82,7 +82,7 @@ export const agents = mysqlTable(
     marketListed: int("market_listed").notNull().default(0),
     marketCategory: varchar("market_category", { length: 32 }),
     /**
-     * 软删除时刻(ms);非空即"已删除":列表、调用、嵌入、分享、继续对话都当它不存在。
+     * 软删除时刻(ms);非空即"已删除":列表、调用、分享、继续对话都当它不存在。
      * 行保留 —— 历史会话、运行记录(按 JOIN 显示名称)、审计、版本都还要引用它。
      * id 也因此不能被新智能体复用。
      */

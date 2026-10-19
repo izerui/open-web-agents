@@ -35,7 +35,7 @@ pnpm dev                          # http://localhost:5678
 
 1. `/builder` 建一个智能体,填提示词;想让它能被系统调用就再填 `outputSchema`
 2. `/` 工作台里跟它对话,右侧看它在独立工作目录里生成的文件
-3. 「设置 → 接入中心」(`/settings/keys`)签发 API Key,并按智能体复制 curl / Python / Node / 嵌入代码;或者直接:
+3. 「设置 → 接入中心」(`/settings/keys`)签发 API Key,并按智能体复制 curl / Python / Node 代码;或者直接:
 
 ```bash
 curl -X POST localhost:5678/api/agents/<智能体id>/invoke \
@@ -60,12 +60,11 @@ curl localhost:5678/api/agents/<taskId>/result -H "X-Api-Key: <key>"
 | 入参契约       | 定义了 `inputSchema` 则 `invoke` 的入参必须符合它,否则 400 并指出是哪个字段                                    |
 | 工作空间       | 每会话一个独立目录,文件树 / 预览 / 下载                                                                  |
 | 执行隔离       | OS 内核沙箱(Bash)+ 路径守卫(文件工具),见下文限制                                                          |
-| 人工审批(HITL) | 按工具名或命令模式挂起等人确认,超时自动拒绝;审批服务不可用时按故障拒绝并如实标注,不记为超时。三档裁决:批准一次 / 批准并授权本会话内同类不再询问(可撤销;一条命令命中多个高风险模式时,须每一类都已授权才自动放行)/ 拒绝(可附说明,作为原因交给智能体)。接口调用、嵌入组件没有审批人,按智能体配置直接放行或拒绝 |
+| 人工审批(HITL) | 按工具名或命令模式挂起等人确认,超时自动拒绝;审批服务不可用时按故障拒绝并如实标注,不记为超时。三档裁决:批准一次 / 批准并授权本会话内同类不再询问(可撤销;一条命令命中多个高风险模式时,须每一类都已授权才自动放行)/ 拒绝(可附说明,作为原因交给智能体)。接口调用没有审批人,按智能体配置直接放行或拒绝 |
 | 会话管理       | 重命名 / 归档 / 删除;签发 Key 的人能在"接口调用"视图里看到自己 Key 发起的会话                           |
 | 账号安全       | 注册开关、登录限流、管理员建号与重置密码、自助改密码                                                    |
 | 知识库        | 智能体级文档,运行时按问题检索片段注入提示词(BM25)                                                              |
 | 权限         | 登录 / 平台统一模型凭证 / 对外集成 API Key / 智能体分享 / 用户组                                                        |
-| 可嵌入 widget | 一行 `<script>` 挂到企业页面;**API Key 不下发浏览器**                                                  |
 | 用量监控       | 按智能体 / 按天的花费与 token,队列积压提示                                                                |
 | 队列与扩容      | MySQL 租约队列 + Redis 事件总线 + 可独立扩容的 worker;运行**至多执行一次**                               |
 | 结果回调       | 终态 webhook 走数据库发件箱,失败按退避重试;按所有者的密钥做 HMAC 签名                                      |
@@ -124,7 +123,7 @@ SDK 结果中的 `modelUsage` 随运行结果保存,区分实际模型、普通�
 | 入口 | 跑哪一版 |
 |---|---|
 | 接口调用 `invoke` | 当前发布的版本;请求体可用 `"version": N` 锁定某一版 |
-| 嵌入组件、API Key 建的会话 | 当前发布的版本 |
+| API Key 建的会话 | 当前发布的版本 |
 | 网页工作台 | 能修改该智能体的人(作者)跟随草稿,便于试运行;其他人用已发布版本 |
 | 从未发布过的智能体 | 一律草稿(与发布功能上线前的行为相同) |
 
@@ -169,7 +168,7 @@ lib/modules/
   approval      人工审批
   events        事件总线 / 断线重放
   artifacts     文件与 GC
-  integration   对外集成 / 嵌入令牌
+  integration   对外集成
   usage         用量聚合
 ```
 
@@ -316,7 +315,7 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 | GET             | `/api/sessions?view=integrations`          | cookie                 | 用自己 Key 发起的接口调用会话 |
 | POST/PATCH      | `/api/admin/accounts`                      | cookie(admin)          | 建号、改角色/停用/额度、重置密码 |
 | GET/POST        | `/api/agents`                              | cookie                 | 列出可见智能体 / 创建更新       |
-| DELETE          | `/api/agents/{id}`                         | cookie(所有者 / 管理员) | 软删除:调用、嵌入、分享、绑定的 Key 随之失效;历史会话与运行记录保留,id 不可复用;内置智能体不可删 |
+| DELETE          | `/api/agents/{id}`                         | cookie(所有者 / 管理员) | 软删除:调用、分享、绑定的 Key 随之失效;历史会话与运行记录保留,id 不可复用;内置智能体不可删 |
 | GET/POST/DELETE | `/api/agents/{id}/share`                   | cookie(write)          | 分享给用户 / 组 / 公开      |
 | GET/POST/DELETE | `/api/agents/{id}/knowledge`               | cookie(读 read、写 write) | 知识文档                |
 | GET/POST        | `/api/groups` · `/api/groups/{id}/members` | cookie                 | 用户组与成员              |
@@ -380,7 +379,7 @@ SSE 传输是裸 `data: <AgentEvent JSON>\n\n`。前端用 `fetch + getReader` �
 不传则由服务端生成,此时无法安全重试。
 模型还在干活(之后还会调工具)时,这条会插进当前这一轮;已经在写最终回答时,会在这一轮回答之后
 再答一轮 —— 这一次运行的结局、正文与结构化结果以最后一轮为准,美元取最终累计值,token 按轮累加。
-接口调用(invoke)与嵌入组件是一次性输入,不接受追加。
+接口调用(invoke)是一次性输入,不接受追加。
 
 答复如实反映结局,不会在没确认送达时说成功:
 
@@ -440,8 +439,7 @@ SSE 传输是裸 `data: <AgentEvent JSON>\n\n`。前端用 `fetch + getReader` �
 
 ### 调用限流
 
-用 API Key 发起的**新运行**都要限流 —— `invoke`、用 Key 建的会话里的 `/sessions/{id}/run` 与重跑、
-嵌入组件(访客的运行记在签发令牌的 Key 上)。用同一个 `Idempotency-Key` 重放已受理的任务不计入。两层固定窗口:
+用 API Key 发起的**新运行**都要限流 —— `invoke`、用 Key 建的会话里的 `/sessions/{id}/run` 与重跑。用同一个 `Idempotency-Key` 重放已受理的任务不计入。两层固定窗口:
 
 - 每把 API Key 每分钟 `OWA_INVOKE_RATE_LIMIT_PER_KEY` 次(默认 60)。签发时或在接入中心可单独调低;只有管理员能调高。
 - 每个智能体每分钟 `OWA_INVOKE_RATE_LIMIT_PER_AGENT` 次(默认 600,所有 Key 合计)。
