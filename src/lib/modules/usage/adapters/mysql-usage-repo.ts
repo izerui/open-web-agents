@@ -8,7 +8,7 @@ import { and, desc, eq, gte, isNotNull, sql } from "drizzle-orm";
 export interface UsageQuery {
   /**
    * 只统计该账号计费的会话;不传则统计全部(仅 admin 可用)。
-   * 口径是 sessions.billing_user_id —— 曾经按 owner_id 统计,API Key 与 embed
+   * 口径是 sessions.billing_user_id —— 曾经按 owner_id 统计,API Key
    * 产生的花费(这两类会话没有 owner)不算在任何人头上,额度也就拦不住它们。
    */
   ownerId?: string;

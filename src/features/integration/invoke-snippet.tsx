@@ -13,11 +13,10 @@ const TABS: { key: SnippetLang; label: string }[] = [
   { key: "curl", label: "curl" },
   { key: "python", label: "Python" },
   { key: "node", label: "Node.js" },
-  { key: "embed", label: "嵌入组件" },
 ];
 
 /**
- * 按智能体生成的接入代码:curl / Python / Node / 嵌入组件。
+ * 按智能体生成的接入代码:curl / Python / Node。
  * 示例入参过了该智能体的 inputSchema 校验才说"可直接运行";过不了就明说要按实际填写。
  */
 export function InvokeSnippetTabs({

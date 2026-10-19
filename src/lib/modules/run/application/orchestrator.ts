@@ -112,7 +112,7 @@ export class RunOrchestrator {
     }
 
     // 计费账号:花费记给谁,就用谁的额度、谁自带的凭证。
-    // 曾经只看 ownerId,于是 API Key / embed 会话(没有人用归属)既不受额度约束,
+    // 曾经只看 ownerId,于是 API Key 会话(没有人用归属)既不受额度约束,
     // 也永远用不上签发人自己的 key,一律落到平台默认凭证上。
     const billingUserId = session.billingUserId ?? session.ownerId;
 
@@ -166,14 +166,11 @@ export class RunOrchestrator {
       resumeSessionId,
       ...(resumeSessionAt ? { resumeSessionAt } : {}),
       unattended: session.unattended === true,
-      // 有没有人能审批取决于入口:接口调用没人;嵌入组件里的访客不是审批人
+      // 有没有人能审批取决于入口:接口调用与评测无人值守,按智能体对无人值守的配置走
       approvalPolicy:
-        // 评测与接口调用一样无人值守:按智能体对无人值守的配置走
         session.source === "invoke" || session.source === "eval"
           ? (config.unattendedApproval ?? "allow")
-          : session.source === "embed"
-            ? (config.unattendedApproval ?? "deny")
-            : ("ask" as const),
+          : ("ask" as const),
       credentials,
       env: { ...(this.deps.baseEnv ?? {}) },
     };

@@ -128,11 +128,6 @@ describe("buildSnippets 文本内容", () => {
     expect(s.python).toContain('"ok": False');
     expect(s.python).toContain('print(res["structured"])');
   });
-
-  it("嵌入片段指向同一个智能体,并检查换令牌的响应状态", () => {
-    expect(s.embed).toContain('agentId: "a1"');
-    expect(s.embed).toContain("if (!r.ok)");
-  });
 });
 
 // ── 真正执行生成出来的示例代码 ────────────────────────────────────────────────

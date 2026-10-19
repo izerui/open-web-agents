@@ -95,31 +95,6 @@ export class Authorizer {
   }
 
   /**
-   * 嵌入令牌的调用方。令牌本身只证明"签过名、没过期";这里再核对签发它的 key 仍然存在、
-   * 签发人未被停用、且仍有权运行该智能体。
-   *
-   * 曾经只验签名与过期:Key 被吊销、账号被停用、分享被撤销之后,已签出的令牌在有效期内照常可用。
-   */
-  async resolveEmbed(claims: { keyId: string; agentId: string }): Promise<Principal> {
-    const record = await this.deps.apiKeys.get(claims.keyId);
-    if (!record) throw new Unauthorized("embed token revoked");
-    // Key 过期,由它换出来的嵌入令牌也随之失效
-    if (isKeyExpired(record, Date.now())) throw new Unauthorized("embed token's API key expired");
-    if (this.deps.isUserActive && !(await this.deps.isUserActive(record.ownerId))) {
-      throw new Unauthorized("embed token owner is disabled");
-    }
-    const principal: Principal = {
-      type: "apiKey",
-      keyId: record.id,
-      ownerId: record.ownerId,
-      agentId: record.agentId,
-      rateLimitPerMinute: record.rateLimitPerMinute,
-    };
-    await this.assertCanInvoke(principal, claims.agentId);
-    return principal;
-  }
-
-  /**
    * 解析网页侧主体。
    * 带了 API Key 就按 key 走(便于用 key 直接调网页同款接口);否则读登录 cookie。
    */

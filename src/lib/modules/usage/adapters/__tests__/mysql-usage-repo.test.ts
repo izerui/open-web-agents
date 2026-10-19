@@ -1,6 +1,6 @@
 // 计费口径对真实 MySQL 的测试。未配置 OWA_TEST_DATABASE_URL 时跳过并说明。
 //
-// 守的是这条回归:额度统计曾按 sessions.owner_id 聚合,API Key / embed 建的会话
+// 守的是这条回归:额度统计曾按 sessions.owner_id 聚合,API Key 建的会话
 // 没有 owner,于是它们的花费不计入任何人 —— 签发 key 的账号额度永远拦不住接口调用。
 
 import { createDb } from "@/lib/db/client";

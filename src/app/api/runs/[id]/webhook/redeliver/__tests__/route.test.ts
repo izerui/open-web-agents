@@ -43,13 +43,6 @@ describe("手动重发:来源限制", () => {
     expect(redeliver).not.toHaveBeenCalled();
   });
 
-  it("嵌入组件的运行同样被拒", async () => {
-    source = "embed";
-    redeliver.mockClear();
-    expect((await post()).body.error).toMatch(/只有接口调用与 API 会话/);
-    expect(redeliver).not.toHaveBeenCalled();
-  });
-
   it("接口调用的运行:放回发件箱,202", async () => {
     source = "invoke";
     redeliver.mockClear();

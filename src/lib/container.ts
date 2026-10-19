@@ -2,7 +2,7 @@
 //
 // 这是全工程唯一决定"用哪个实现"的地方 —— 换 DB / 换总线 / 换引擎都只改这里。
 
-import { createHmac, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { type Db, createDb, databaseProbe } from "@/lib/db/client";
@@ -102,11 +102,6 @@ import { mysqlSeedInRowLock } from "@/lib/seed-in-row-lock";
 
 export interface Container {
   env: Env;
-  /**
-   * 嵌入令牌的签名密钥,由 sessionSecret 派生而不是直接复用 —— 登录 cookie 与嵌入令牌
-   * 用同一把密钥签名,任一种格式的解析缺陷都可能让另一种被伪造。
-   */
-  embedSecret: string;
   db: Db;
   /** 健康检查的数据库探测(单一在途,等待上限由路由处理) */
   probeDatabase: () => Promise<void>;
@@ -526,7 +521,6 @@ function build(): Container {
 
   return {
     env,
-    embedSecret: createHmac("sha256", env.sessionSecret).update("owa-embed-token-v1").digest("hex"),
     db,
     probeDatabase,
     sessions,

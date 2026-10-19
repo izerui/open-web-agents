@@ -1,4 +1,4 @@
-// 统一受理关卡的端到端回归:API 会话的输入契约、Key 限流对 API 会话与嵌入组件同样生效。
+// 统一受理关卡的端到端回归:API 会话的输入契约、Key 限流对 API 会话同样生效。
 // e2e 屏蔽了模型调用,受理后的运行会很快以失败收尾 —— 这里只断言"过没过受理"。
 
 import { beforeAll, describe, expect, it } from "vitest";
@@ -83,20 +83,6 @@ describe("统一受理关卡", () => {
     const second = await run();
     expect(second.status).toBe(429);
     expect(second.body).toMatchObject({ code: "rate_limited", scope: "key" });
-  });
-
-  it("Key 限流对嵌入组件同样生效:访客的运行记在签发 Key 上", async () => {
-    const agentId = await mkAgent("adm-embed");
-    const key = await mkKey(agentId, 1);
-    const token =
-      (await anon.post<{ token?: string }>("/api/embed/token", { agentId }, { "X-Api-Key": key }))
-        .body.token ?? "";
-    const run = () =>
-      anon.post<Err>("/api/embed/run", { prompt: "你好" }, { "X-Embed-Token": token });
-    expect((await run()).status).not.toBe(429);
-    const second = await run();
-    expect(second.status).toBe(429);
-    expect(second.body.code).toBe("rate_limited");
   });
 
   it("网页对话不受接口契约约束:同一个声明了 inputSchema 的智能体,自然语言照常受理", async () => {

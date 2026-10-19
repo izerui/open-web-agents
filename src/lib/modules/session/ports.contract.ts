@@ -47,9 +47,6 @@ export function sessionRepoContract(name: string, harness: SessionRepoHarness): 
         (await repo.create({ id: "i", agentId: "a1", workspaceDir: "/w", unattended: true }))
           .source,
       ).toBe("invoke");
-      expect(
-        (await repo.create({ id: "e", agentId: "a1", workspaceDir: "/w", source: "embed" })).source,
-      ).toBe("embed");
     });
 
     it("按计费账号 + 来源过滤:列出用自己 key 发起的接口会话", async () => {
@@ -68,7 +65,7 @@ export function sessionRepoContract(name: string, harness: SessionRepoHarness): 
         billingUserId: "u2",
         unattended: true,
       });
-      const list = await repo.list({ billingUserId: "u1", sources: ["invoke", "api", "embed"] });
+      const list = await repo.list({ billingUserId: "u1", sources: ["invoke", "api"] });
       expect(list.map((s) => s.id)).toEqual(["mine-invoke"]);
     });
 

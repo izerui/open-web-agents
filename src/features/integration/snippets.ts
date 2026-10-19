@@ -137,8 +137,6 @@ export interface Snippets {
   curl: string;
   python: string;
   node: string;
-  /** 嵌入组件:后端换令牌 + 页面放 script */
-  embed: string;
 }
 
 export type SnippetLang = Exclude<keyof Snippets, "sample">;
@@ -293,19 +291,7 @@ try {
 if (res.status !== "success") throw new Error(res.error?.message);
 console.log(res.${resultField});`;
 
-  const embed = `// ① 你的后端:用 API Key 换一枚短时效令牌(Key 永远不要下发到浏览器)
-const r = await fetch(${JSON.stringify(`${origin}/api/embed/token`)}, {
-  method: "POST",
-  headers: { "X-Api-Key": process.env.OWA_API_KEY, "Content-Type": "application/json" },
-  body: JSON.stringify({ agentId: ${JSON.stringify(agentId)} }),
-});
-if (!r.ok) throw new Error(\`换取令牌失败 HTTP \${r.status}: \${await r.text()}\`);
-const { token } = await r.json();
-
-<!-- ② 你的页面:把令牌写进 data-token,右下角会出现对话浮窗 -->
-<script src="${origin}/api/embed/script" data-token="<上一步的 token>"></script>`;
-
-  return { sample, curl, python, node, embed };
+  return { sample, curl, python, node };
 }
 
 /** JSON → Python 字面量(true/false/null 需要换写法)。 */

@@ -119,11 +119,9 @@ describe("POST /api/sessions/{id}/steer", () => {
     expect(state.offered).toEqual([]);
   });
 
-  it("接口调用 / 嵌入组件的会话:409,且不入队", async () => {
-    for (const source of ["invoke", "embed"]) {
-      state.source = source;
-      expect((await post({ runId: "r1", text: "x" })).status).toBe(409);
-    }
+  it("接口调用的会话:409,且不入队", async () => {
+    state.source = "invoke";
+    expect((await post({ runId: "r1", text: "x" })).status).toBe(409);
     expect(state.offered).toEqual([]);
   });
 

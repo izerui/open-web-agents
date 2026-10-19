@@ -3,7 +3,7 @@ import type { ModelAlias } from "@/lib/shared";
 
 /** 会话从哪个入口来。决定审批怎么走、结果是否推 webhook、在哪个列表里展示。 */
 /** eval = 评测里每个用例的运行:无人值守,不推回调,不进工作台的会话列表 */
-export type SessionSource = "web" | "api" | "invoke" | "embed" | "eval" | "design";
+export type SessionSource = "web" | "api" | "invoke" | "eval" | "design";
 
 /** active 正常 / archived 归档(列表默认不显示) / deleted 已删除(视同不存在)。 */
 export type SessionStatus = "active" | "archived" | "deleted";
@@ -18,7 +18,7 @@ export interface Session {
   callerApiKeyId?: string;
   /**
    * 计费归属账号:花费记给谁、额度按谁算、用谁自带的模型凭证。
-   * 与 ownerId 分开 —— API Key / embed 会话没有人用归属,但花费必须有主。
+   * 与 ownerId 分开 —— API Key 会话没有人用归属,但花费必须有主。
    */
   billingUserId?: string;
   workspaceDir: string;
@@ -48,7 +48,7 @@ export interface NewSession {
   title?: string;
   ownerId?: string;
   callerApiKeyId?: string;
-  /** 不传则取 ownerId。API Key / embed 入口必须显式传签发 key 的账号。 */
+  /** 不传则取 ownerId。API Key 入口必须显式传签发 key 的账号。 */
   billingUserId?: string;
   /** 无人值守(接口 invoke)。不传则默认有人。 */
   unattended?: boolean;

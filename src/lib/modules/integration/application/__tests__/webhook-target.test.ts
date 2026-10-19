@@ -83,15 +83,13 @@ describe("resolveRunTarget", () => {
     ).rejects.toThrow(/无法解密/);
   });
 
-  it("网页 / 嵌入会话不推回调,即便有快照", async () => {
-    for (const source of ["web", "embed"]) {
-      expect(
-        await resolveRunTarget(deps({}, source), {
-          sessionId: "s1",
-          callback: { source: "agent", url: A },
-        }),
-      ).toBeNull();
-    }
+  it("网页会话不推回调,即便有快照", async () => {
+    expect(
+      await resolveRunTarget(deps({}, "web"), {
+        sessionId: "s1",
+        callback: { source: "agent", url: A },
+      }),
+    ).toBeNull();
   });
 
   it("会话不存在:不投", async () => {

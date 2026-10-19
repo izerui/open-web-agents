@@ -1,6 +1,6 @@
-// 授权器的凭证状态复查:签发人停用、Key 吊销、分享撤销之后,API Key 与嵌入令牌必须一起失效。
+// 授权器的凭证状态复查:签发人停用、Key 到期之后,API Key 必须立即失效。
 
-import { Authorizer, Forbidden, Unauthorized } from "@/lib/modules/access/application/authorize";
+import { Authorizer, Unauthorized } from "@/lib/modules/access/application/authorize";
 import type { Grant } from "@/lib/modules/access/domain/grants";
 import { InMemoryAgentRepo } from "@/lib/modules/agent/adapters/in-memory-agent-repo";
 import { generateApiKey, hashApiKey } from "@/lib/modules/identity/domain/api-key";
@@ -25,7 +25,6 @@ function setup() {
     sessions: new InMemorySessionRepo(),
     agents: new InMemoryAgentRepo([
       { id: "mine", ownerId: "u1", name: "m", config: { systemPrompt: "p", model: "sonnet" } },
-      { id: "shared", ownerId: "u2", name: "s", config: { systemPrompt: "p", model: "sonnet" } },
     ]),
     grants: {
       listForResource: async () => grants,
@@ -35,7 +34,7 @@ function setup() {
     isUserActive: async (id) => !disabled.has(id),
   });
   const req = () => new Request("http://x", { headers: { "X-Api-Key": plain } });
-  return { auth, keys, disabled, grants, req };
+  return { auth, keys, disabled, req };
 }
 
 describe("Authorizer 凭证状态复查", () => {
@@ -46,49 +45,12 @@ describe("Authorizer 凭证状态复查", () => {
     await expect(auth.requireApiKey(req())).rejects.toBeInstanceOf(Unauthorized);
   });
 
-  it("Key 到期:API Key 与由它换出的嵌入令牌一起失效;还没到期照常可用", async () => {
+  it("Key 到期:API Key 失效;还没到期照常可用", async () => {
     const { auth, keys, req } = setup();
     const k = keys.get("k1") as ApiKeyRecord;
     keys.set("k1", { ...k, expiresAt: Date.now() + 60_000 });
     await expect(auth.requireApiKey(req())).resolves.toMatchObject({ keyId: "k1" });
     keys.set("k1", { ...k, expiresAt: Date.now() - 1 });
     await expect(auth.requireApiKey(req())).rejects.toThrow(/expired/);
-    await expect(auth.resolveEmbed({ keyId: "k1", agentId: "mine" })).rejects.toBeInstanceOf(
-      Unauthorized,
-    );
-  });
-
-  it("嵌入令牌:签发它的 Key 被吊销后失效", async () => {
-    const { auth, keys } = setup();
-    await expect(auth.resolveEmbed({ keyId: "k1", agentId: "mine" })).resolves.toBeTruthy();
-    keys.delete("k1");
-    await expect(auth.resolveEmbed({ keyId: "k1", agentId: "mine" })).rejects.toBeInstanceOf(
-      Unauthorized,
-    );
-  });
-
-  it("嵌入令牌:签发人被停用后失效", async () => {
-    const { auth, disabled } = setup();
-    disabled.add("u1");
-    await expect(auth.resolveEmbed({ keyId: "k1", agentId: "mine" })).rejects.toBeInstanceOf(
-      Unauthorized,
-    );
-  });
-
-  it("嵌入令牌:分享被撤销后失效", async () => {
-    const { auth, grants } = setup();
-    grants.push({
-      id: "g1",
-      resourceType: "agent",
-      resourceId: "shared",
-      principalType: "user",
-      principalId: "u1",
-      permission: "read",
-    } as Grant);
-    await expect(auth.resolveEmbed({ keyId: "k1", agentId: "shared" })).resolves.toBeTruthy();
-    grants.length = 0;
-    await expect(auth.resolveEmbed({ keyId: "k1", agentId: "shared" })).rejects.toBeInstanceOf(
-      Forbidden,
-    );
   });
 });

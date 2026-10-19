@@ -132,8 +132,8 @@ export const sessions = mysqlTable(
      * 计费归属账号:花费记给谁、额度按谁算、用谁自带的模型凭证。
      *
      * 【为什么不复用 ownerId】ownerId 决定"谁能在工作台里看到并操作这个会话";
-     * API Key 与 embed 建的会话没有人用归属,但花费必须落到签发 key 的账号上。
-     * 曾经额度统计按 ownerId 聚合,于是这两类入口的花费不计入任何人的额度。
+     * API Key 建的会话没有人用归属,但花费必须落到签发 key 的账号上。
+     * 曾经额度统计按 ownerId 聚合,于是这类入口的花费不计入任何人的额度。
      */
     billingUserId: varchar("billing_user_id", { length: 36 }),
     workspaceDir: varchar("workspace_dir", { length: 512 }).notNull(),
@@ -143,15 +143,13 @@ export const sessions = mysqlTable(
     /**
      * 无人值守会话(接口 invoke)。
      *
-     * 【为什么不能用 callerApiKeyId 代替】embed 会话也是 API Key 建的,
-     * 但浏览器前坐着真人 —— 拿它当判据会把嵌入式对话误判成无人值守。
+     * 【为什么不能用 callerApiKeyId 代替】API 会话也是 API Key 建的,但调用方可能是交互式的。
      * 这个字段只表达一件事:出事时有没有人能回答。
      */
     unattended: int("unattended").notNull().default(0),
     /**
-     * 会话从哪个入口来:web(工作台)/ api(API Key 建的会话)/ invoke(接口调用)/ embed(嵌入组件)。
+     * 会话从哪个入口来:web(工作台)/ api(API Key 建的会话)/ invoke(接口调用)/ eval / design。
      * 决定审批怎么走(有没有人能批)、结果是否推 webhook、在哪个列表里展示、用量怎么拆分。
-     * 曾经只能靠 unattended / callerApiKeyId / title 拼凑判断,embed 与 API 会话分不开。
      */
     source: varchar("source", { length: 16 }).notNull().default("web"),
     /**

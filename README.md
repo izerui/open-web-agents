@@ -224,7 +224,7 @@ const bus = new RedisBus(env.redisUrl); // 曾是 InMemoryBus
 安全边界字段不能通过它覆盖(保存时拒绝,运行时也强制以平台为准)。
 
 **计费账号**:每个会话有一个计费账号(`sessions.billing_user_id`)—— 网页会话是它的所有者,
-API Key / embed 会话是签发那把 key 的账号。AI 编辑也归发起账号。花费和额度均按该账号计算。
+API Key 会话是签发那把 key 的账号。AI 编辑也归发起账号。花费和额度均按该账号计算。
 额度在入口查一次,worker 执行前再复核一次(两者之间隔着队列)。
 额度是**事前检查**而非预留:并发中的运行可能让实际花费略超上限,超出量以并发运行数为界。
 
@@ -303,8 +303,7 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 
 ## API 速查
 
-鉴权分三种,严格分开:**登录 cookie**(网页)、**`X-Api-Key`**(第三方系统)、
-**`X-Embed-Token`**(浏览器 widget,权限被限死在单个会话)。
+鉴权分两种,严格分开:**登录 cookie**(网页)、**`X-Api-Key`**(第三方系统)。
 
 | 方法              | 路径                                         | 鉴权                     | 说明                  |
 |-----------------|--------------------------------------------|------------------------|---------------------|
@@ -315,7 +314,6 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 | PUT             | `/api/me/password`                         | cookie                 | 修改自己的登录密码          |
 | PATCH/DELETE    | `/api/sessions/{id}`                       | cookie / key           | 重命名、归档 / 删除会话      |
 | GET             | `/api/sessions?view=integrations`          | cookie                 | 用自己 Key 发起的接口调用会话 |
-| POST            | `/api/embed/cancel`                        | **embed token**        | 停止嵌入会话里的运行         |
 | POST/PATCH      | `/api/admin/accounts`                      | cookie(admin)          | 建号、改角色/停用/额度、重置密码 |
 | GET/POST        | `/api/agents`                              | cookie                 | 列出可见智能体 / 创建更新       |
 | DELETE          | `/api/agents/{id}`                         | cookie(所有者 / 管理员) | 软删除:调用、嵌入、分享、绑定的 Key 随之失效;历史会话与运行记录保留,id 不可复用;内置智能体不可删 |
@@ -346,9 +344,6 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 | GET             | `/api/agents/{id}/versions/diff?from=&to=` | cookie / key           | 两个版本(或与 `draft`)的差异:提示词给行级差异,子代理 / MCP / 技能按名字对齐;只读者同样脱敏 |
 | GET/POST/PUT/DELETE | `/api/agents/{id}/evals/cases[/{caseId}]` | cookie(write)      | 评测用例:标准输入 + 规则断言 |
 | GET/POST        | `/api/agents/{id}/evals/runs[/{runId}]`    | cookie(write)          | 发起评测(`{ target: "draft" \| 版本号 }`)/ 最近评测 / 评测详情 |
-| POST            | `/api/embed/token`                         | **key**                | 换短时效嵌入令牌(服务端调)      |
-| POST            | `/api/embed/run`                           | **embed token**        | widget 发起运行         |
-| GET             | `/api/embed/script`                        | —                      | 嵌入脚本                |
 | GET             | `/api/usage`                               | cookie                 | 用量与成本               |
 | GET             | `/api/health`                              | —                      | 就绪 / 存活探针           |
 

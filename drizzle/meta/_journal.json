@@ -316,6 +316,13 @@
       "when": 1792064600000,
       "tag": "0044_knowledge_revision",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "5",
+      "when": 1792397573226,
+      "tag": "0045_embed_sessions_to_api",
+      "breakpoints": true
     }
   ]
 }

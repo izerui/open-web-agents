@@ -1,13 +1,12 @@
-// 在已有会话里"受理一轮新运行"的统一关卡:对话(sessions/run)、分支重跑(branch)、
-// 嵌入组件(embed/run)都走这里。鉴权与权限复查由各入口按自己的凭证完成,之后统一:
+// 在已有会话里"受理一轮新运行"的统一关卡:对话(sessions/run)、分支重跑(branch)都走这里。鉴权与权限复查由各入口按自己的凭证完成,之后统一:
 //
 //   会话存在且未删除 → 计费账号 → API Key 调用限流 → 额度 → 输入规范化与限长
 //   → 输入契约(API Key 建的会话)
 //
 // 【为什么收拢】这几条规则曾经在四个路由里各写一遍,各漏一点:
 // - 用 API Key 在会话里跑,同一个智能体走 invoke 要校验 inputSchema,走 sessions/run 什么都收;
-// - Key 的调用限流只拦 invoke,同一把 Key 经 API 会话、嵌入组件可以无限发起;
-// - 没有计费账号时,run 回落到会话归属或调用方去查额度,branch 与 embed 干脆跳过额度。
+// - Key 的调用限流只拦 invoke,同一把 Key 经 API 会话可以无限发起;
+// - 没有计费账号时,run 回落到会话归属或调用方去查额度,branch 干脆跳过额度。
 // invoke 自己建会话、且必须先做幂等重放,不走这里,但复用同一组限流与额度函数。
 
 import { checkPromptSize } from "@/lib/modules/run/domain/limits";
@@ -34,7 +33,7 @@ export class AdmissionRejected extends BrandedError {
   }
 }
 
-/** 发起这一轮的调用方。web = 登录用户;apiKey = API Key 或嵌入令牌(最终归到签发它的 Key)。 */
+/** 发起这一轮的调用方。web = 登录用户;apiKey = API Key。 */
 export type AdmissionCaller =
   | { type: "web"; userId: string }
   | { type: "apiKey"; keyId: string; ownerId: string; rateLimitPerMinute?: number };

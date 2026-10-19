@@ -41,12 +41,11 @@ class CtxEngine implements EnginePort {
 }
 
 describe("编排 × 追加消息", () => {
-  it("工作台与 API 会话的运行接受追加;接口调用与嵌入组件不接受", async () => {
+  it("工作台与 API 会话的运行接受追加;接口调用不接受", async () => {
     for (const [source, expected] of [
       ["web", true],
       ["api", true],
       ["invoke", false],
-      ["embed", false],
     ] as const) {
       const engine = new CtxEngine();
       const { orch } = await setup(source, engine);

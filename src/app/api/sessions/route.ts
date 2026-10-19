@@ -29,7 +29,7 @@ export async function GET(req: Request) {
       principal.type === "apiKey"
         ? { callerApiKeyId: principal.keyId }
         : view === "integrations"
-          ? { billingUserId: principal.userId, sources: ["invoke", "api", "embed"] }
+          ? { billingUserId: principal.userId, sources: ["invoke", "api"] }
           : view === "all" && principal.role === "admin"
             ? undefined
             : { ownerId: principal.userId, sources: ["web"] };

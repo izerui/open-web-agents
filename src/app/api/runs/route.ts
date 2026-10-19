@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const STATES: RunState[] = ["pending", "running", "success", "failed", "cancelled"];
-const SOURCES: SessionSource[] = ["web", "api", "invoke", "embed", "eval", "design"];
+const SOURCES: SessionSource[] = ["web", "api", "invoke", "eval", "design"];
 
 /** 逗号分隔的枚举值;含未知值返回 null。 */
 function parseList<T extends string>(raw: string | null, allowed: T[]): T[] | undefined | null {
@@ -36,7 +36,7 @@ function parseTime(raw: string | null): number | undefined | null {
  * - API Key:这把 key 发起的运行
  * - 管理员:scope=all 看全平台
  *
- * 查询参数:agentId、status(逗号分隔)、source(web/api/invoke/embed)、since、until、cursor、limit(≤100)
+ * 查询参数:agentId、status(逗号分隔)、source(web/api/invoke)、since、until、cursor、limit(≤100)
  */
 export async function GET(req: Request) {
   const { auth, runQuery } = getContainer();
