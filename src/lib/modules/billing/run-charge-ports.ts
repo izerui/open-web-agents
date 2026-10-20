@@ -12,8 +12,11 @@ export interface RunCharge {
   /** 正式模式下钱包里的各笔冻结;试算为空 */
   holds: HoldSlice[];
   estimatedMicro: string | null;
+  /** 净扣:已扣减去已退还 */
   chargedMicro: string | null;
   owedMicro: string | null;
+  /** 自动退还的多扣累计 */
+  refundedMicro: string | null;
   /**
    * open = 冻结中;settled = 已结清;
    * provisional = 运行已结束,但用量还不能完整计价:跑过却没拿到用量(取消、worker 失联、引擎异常),
@@ -75,6 +78,8 @@ export interface RunChargeStore {
   /** 钱包冻结 / 结算(正式模式);与本事务同进退 */
   reserveWallet(accountId: string, reservationId: string, amount: bigint): Promise<void>;
   settleWallet(accountId: string, reservationId: string, charged: bigint): Promise<void>;
+  /** 退还多扣到可用余额;与本事务同进退,同编号只生效一次 */
+  refundWallet(accountId: string, refundId: string, amount: bigint): Promise<void>;
   insert(charge: RunCharge): Promise<void>;
   /** forUpdate:锁住这一行直到事务结束(结算、追加互斥) */
   get(runId: string, forUpdate?: boolean): Promise<RunCharge | null>;
@@ -100,8 +105,11 @@ export interface RunChargeItem {
   state: ChargeState;
   reservedMicro: string;
   estimatedMicro: string | null;
+  /** 净扣:已扣减去已退还 */
   chargedMicro: string | null;
   owedMicro: string | null;
+  /** 自动退还的多扣累计 */
+  refundedMicro: string | null;
   wouldReject: HoldRejection | null;
   incomplete: boolean;
   createdAt: number;
@@ -121,7 +129,24 @@ export interface TrialStats {
   wouldReject: number;
 }
 
-/** 只读查询:积分页、账号与 Key 的本月用量、试算统计 */
+/**
+ * 暂记(待核对)的原因。按这个优先级归类,一条记录只归一类:
+ * - owed:用量完整,但余额不够,还欠着(充值后清扫自动补扣)
+ * - usage_unknown:运行过,但结算时没有拿到任何用量
+ * - unpriced:有用量,但不能完整计价(认不出模型、缺价目),能算的部分已记
+ */
+export type PendingReason = "owed" | "usage_unknown" | "unpriced";
+export const PENDING_REASONS: readonly PendingReason[] = ["owed", "usage_unknown", "unpriced"];
+
+/** 跨账号的待核对列表里的一条 */
+export interface PendingChargeItem extends RunChargeItem {
+  reason: PendingReason;
+  accountId: string;
+  /** 账号邮箱(账号已删除为 null) */
+  accountEmail: string | null;
+}
+
+/** 只读查询:积分页、账号与 Key 的本月用量、试算统计、待核对列表 */
 export interface RunChargeQuery {
   listByAccount(
     accountId: string,
@@ -136,4 +161,13 @@ export interface RunChargeQuery {
     since: number,
   ): Promise<Map<string, bigint>>;
   trialStats(since: number): Promise<TrialStats>;
+  /** 所有账号的暂记记录(按受理时间倒序),可按原因与计费模式筛选;只读 */
+  listPending(opts: {
+    reason?: PendingReason;
+    mode?: BillingMode;
+    limit: number;
+    cursor?: string;
+  }): Promise<{ items: PendingChargeItem[]; nextCursor?: string }>;
+  /** 各原因的暂记条数(可按计费模式筛选) */
+  pendingCounts(mode?: BillingMode): Promise<Record<PendingReason, number>>;
 }

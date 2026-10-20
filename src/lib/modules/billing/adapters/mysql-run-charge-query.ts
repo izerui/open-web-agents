@@ -1,8 +1,15 @@
 import type { Db } from "@/lib/db/client";
-import { agents, runCharges, runs, sessions } from "@/lib/db/schema";
+import { agents, runCharges, runs, sessions, users } from "@/lib/db/schema";
 import { and, desc, eq, gte, isNotNull, lt, or, sql } from "drizzle-orm";
 import { type BillingMode, type HoldRejection, monthWindowUtc } from "../domain/run-charge";
-import type { RunChargeItem, RunChargeQuery, TrialStats } from "../run-charge-ports";
+import {
+  PENDING_REASONS,
+  type PendingChargeItem,
+  type PendingReason,
+  type RunChargeItem,
+  type RunChargeQuery,
+  type TrialStats,
+} from "../run-charge-ports";
 import { monthUsedSql } from "./mysql-run-charge-store";
 
 /** 与受理时的额度检查同一个口径(见 monthUsedSql) */
@@ -28,6 +35,36 @@ function decodeCursor(raw: string): { createdAt: number; runId: string } {
   if (!m) throw new Error("cursor 无效");
   return { createdAt: Number(m[1]), runId: m[2] as string };
 }
+
+type Row = typeof runCharges.$inferSelect;
+
+function itemOf(c: Row, agentName: string | null): RunChargeItem {
+  return {
+    runId: c.runId,
+    mode: c.mode as BillingMode,
+    state: c.state as RunChargeItem["state"],
+    reservedMicro: c.reservedMicro,
+    estimatedMicro: c.estimatedMicro,
+    chargedMicro: c.chargedMicro,
+    owedMicro: c.owedMicro,
+    refundedMicro: c.refundedMicro ?? null,
+    wouldReject: (c.wouldReject as HoldRejection | null) ?? null,
+    incomplete: c.incomplete === 1,
+    createdAt: c.createdAt.getTime(),
+    settledAt: c.settledAt?.getTime() ?? null,
+    agentName: agentName ?? null,
+    apiKeyId: c.apiKeyId,
+  };
+}
+
+/**
+ * 暂记的原因(见 PendingReason),与结算写入的字段一一对应:
+ * 欠额 > 0 → owed;结算时没有花费(指纹为空)→ usage_unknown;其余 → unpriced
+ */
+const PENDING_REASON_SQL = sql<string>`CASE
+  WHEN COALESCE(${runCharges.owedMicro}, 0) > 0 THEN 'owed'
+  WHEN ${runCharges.settledCostDigest} IS NULL THEN 'usage_unknown'
+  ELSE 'unpriced' END`;
 
 export class MysqlRunChargeQuery implements RunChargeQuery {
   constructor(private readonly db: Db) {}
@@ -57,21 +94,55 @@ export class MysqlRunChargeQuery implements RunChargeQuery {
       )
       .orderBy(desc(runCharges.createdAt), desc(runCharges.runId))
       .limit(opts.limit + 1);
+    const page = rows.slice(0, opts.limit).map(({ c, agentName }) => itemOf(c, agentName));
+    const last = page.at(-1);
+    return {
+      items: page,
+      ...(rows.length > opts.limit && last ? { nextCursor: encodeCursor(last) } : {}),
+    };
+  }
+
+  async listPending(opts: {
+    reason?: PendingReason;
+    mode?: BillingMode;
+    limit: number;
+    cursor?: string;
+  }): Promise<{ items: PendingChargeItem[]; nextCursor?: string }> {
+    const cursor = opts.cursor ? decodeCursor(opts.cursor) : null;
+    const at = cursor ? new Date(cursor.createdAt) : null;
+    const rows = await this.db
+      .select({
+        c: runCharges,
+        agentName: agents.name,
+        email: users.email,
+        reason: PENDING_REASON_SQL,
+      })
+      .from(runCharges)
+      .leftJoin(users, eq(users.id, runCharges.accountId))
+      .leftJoin(runs, eq(runs.id, runCharges.runId))
+      .leftJoin(sessions, eq(sessions.id, runs.sessionId))
+      .leftJoin(agents, eq(agents.id, sessions.agentId))
+      .where(
+        and(
+          eq(runCharges.state, "provisional"),
+          opts.mode ? eq(runCharges.mode, opts.mode) : undefined,
+          opts.reason ? sql`${PENDING_REASON_SQL} = ${opts.reason}` : undefined,
+          at && cursor
+            ? or(
+                lt(runCharges.createdAt, at),
+                and(eq(runCharges.createdAt, at), lt(runCharges.runId, cursor.runId)),
+              )
+            : undefined,
+        ),
+      )
+      .orderBy(desc(runCharges.createdAt), desc(runCharges.runId))
+      .limit(opts.limit + 1);
     const page = rows.slice(0, opts.limit).map(
-      ({ c, agentName }): RunChargeItem => ({
-        runId: c.runId,
-        mode: c.mode as BillingMode,
-        state: c.state as RunChargeItem["state"],
-        reservedMicro: c.reservedMicro,
-        estimatedMicro: c.estimatedMicro,
-        chargedMicro: c.chargedMicro,
-        owedMicro: c.owedMicro,
-        wouldReject: (c.wouldReject as HoldRejection | null) ?? null,
-        incomplete: c.incomplete === 1,
-        createdAt: c.createdAt.getTime(),
-        settledAt: c.settledAt?.getTime() ?? null,
-        agentName: agentName ?? null,
-        apiKeyId: c.apiKeyId,
+      ({ c, agentName, email, reason }): PendingChargeItem => ({
+        ...itemOf(c, agentName),
+        reason: reason as PendingReason,
+        accountId: c.accountId,
+        accountEmail: email ?? null,
       }),
     );
     const last = page.at(-1);
@@ -79,6 +150,20 @@ export class MysqlRunChargeQuery implements RunChargeQuery {
       items: page,
       ...(rows.length > opts.limit && last ? { nextCursor: encodeCursor(last) } : {}),
     };
+  }
+
+  async pendingCounts(mode?: BillingMode): Promise<Record<PendingReason, number>> {
+    const rows = await this.db
+      .select({ reason: PENDING_REASON_SQL, n: sql<number>`COUNT(*)` })
+      .from(runCharges)
+      .where(and(eq(runCharges.state, "provisional"), mode ? eq(runCharges.mode, mode) : undefined))
+      .groupBy(PENDING_REASON_SQL);
+    const out = Object.fromEntries(PENDING_REASONS.map((r) => [r, 0])) as Record<
+      PendingReason,
+      number
+    >;
+    for (const r of rows) out[r.reason as PendingReason] = Number(r.n);
+    return out;
   }
 
   async monthUsageByAccount(mode: BillingMode, since: number): Promise<Map<string, bigint>> {

@@ -572,41 +572,108 @@ describe("补结算以真实已扣为基准(费用先往下、再往上修正)",
   const B = 69_300_000n;
   const D = 115_500_000n;
 
-  it("正式:暂记 92.4 → 修正为 69.3(不倒推、不退款,标多扣待核对)→ 补齐 115.5 只补 23.1 → 重复结算不再扣", async () => {
+  const liveFlow = () => {
     const { world, charging, admit } = setup("live");
     world.credit("u1", 1000n * C);
-    await admit("r1");
     const set = (c: unknown) =>
       world.setRun("r1", { status: "cancelled", cost: c, pricing, startedAt: 1 });
-    const check = (charged: bigint, estimated: bigint, state: string) => {
+    const check = (charged: bigint, refunded: bigint, estimated: bigint, state: string) => {
       expect(world.charge("r1")).toMatchObject({
         chargedMicro: charged.toString(),
+        refundedMicro: refunded ? refunded.toString() : null,
         estimatedMicro: estimated.toString(),
         state,
       });
-      // 记录的实扣 = 钱包真正扣掉的 = 余额减少的
+      // 记录的净扣 = 钱包真正扣掉的净额 = 余额减少的
       expect(world.deducted("u1")).toBe(charged);
       expect(world.balance("u1")).toEqual({ available: 1000n * C - charged, reserved: 0n });
     };
+    return { world, charging, admit, set, check };
+  };
+
+  it("正式:暂记 92.4 → 修正为 69.3 但仍不完整(不退)→ 补齐 115.5 补扣 23.1 → 重复结算不再扣", async () => {
+    const { charging, admit, set, check } = liveFlow();
+    await admit("r1");
 
     set(cost(40000, false));
     expect(await charging.settle("r1", { final: true })).toBe("provisional");
-    check(A, A, "provisional");
+    check(A, 0n, A, "provisional");
 
-    set(cost(30000, true)); // 往下修正
+    set(cost(30000, false)); // 往下修正,但费用仍不完整:不能确认应扣减少,不退
     expect(await charging.sweep()).toBe(1);
-    check(A, B, "provisional"); // 实扣仍是 92.4,多扣 23.1 待核对
-    expect(world.charge("r1")).toMatchObject({ incomplete: true, owedMicro: null });
-    expect(await charging.sweep()).toBe(0); // 没变化不再处理
+    check(A, 0n, B, "provisional");
+    expect(await charging.sweep()).toBe(0);
 
-    set(cost(50000, true)); // 再往上补齐
+    set(cost(50000, true)); // 补齐
     expect(await charging.sweep()).toBe(1);
-    check(D, D, "settled"); // 只补了 115.5 − 92.4 = 23.1,不是 115.5 − 69.3 = 46.2
-    expect(world.charge("r1")?.incomplete).toBe(false);
+    check(D, 0n, D, "settled"); // 从净扣 92.4 补到 115.5
 
     expect(await charging.sweep()).toBe(0);
     expect(await charging.settle("r1", { final: true })).toBe("none");
-    check(D, D, "settled");
+    check(D, 0n, D, "settled");
+  });
+
+  it("正式:已扣非零 → 费用明细缺失 / 取不到锁定价目时不退 → 补齐并确认减少后只退差额", async () => {
+    const { world, charging, admit, set, check } = liveFlow();
+    await admit("r1");
+    set(cost(40000, false));
+    await charging.settle("r1", { final: true });
+    check(A, 0n, A, "provisional");
+
+    // 费用有了、但没有按模型的计量:应扣算出来是 0,不代表应扣减少
+    set({ input: 30000, output: 0, partial: true });
+    await charging.sweep();
+    check(A, 0n, 0n, "provisional");
+    expect(world.charge("r1")?.incomplete).toBe(true);
+
+    // 计量有、但锁定价目取不到
+    const noPrice = setup("live");
+    noPrice.world.credit("u1", 1000n * C);
+    await noPrice.admit("r2");
+    noPrice.world.setRun("r2", {
+      status: "cancelled",
+      cost: cost(40000, false),
+      pricing,
+      startedAt: 1,
+    });
+    await noPrice.charging.settle("r2", { final: true });
+    const missing = new RunCharging({
+      mode: async () => "live",
+      bind: async () => binding,
+      reserveTargetOf: async () => 300n * C,
+      pricedModels: async () => null,
+      transaction: noPrice.world.transaction,
+    });
+    noPrice.world.setRun("r2", {
+      status: "cancelled",
+      cost: cost(30000, true),
+      pricing,
+      startedAt: 1,
+    });
+    await missing.settle("r2", { final: true });
+    expect(noPrice.world.charge("r2")).toMatchObject({
+      chargedMicro: A.toString(),
+      refundedMicro: null,
+      state: "provisional",
+    });
+    expect(noPrice.world.deducted("u1")).toBe(A);
+
+    // 补齐并确认减少:只退差额 23.1,一次
+    set(cost(30000, true));
+    expect(await charging.sweep()).toBe(1);
+    check(B, A - B, B, "settled");
+    expect(await charging.sweep()).toBe(0);
+    expect(await charging.settle("r1", { final: true })).toBe("none");
+    check(B, A - B, B, "settled");
+  });
+
+  it("正式:用量完整的首次结算就少于冻结时,冻结释放即可,不产生退还", async () => {
+    const { world, charging, admit, set } = liveFlow();
+    await admit("r1");
+    set(cost(30000, true));
+    await charging.settle("r1", { final: true });
+    expect(world.charge("r1")).toMatchObject({ chargedMicro: B.toString(), refundedMicro: null });
+    expect(world.deducted("u1")).toBe(B);
   });
 
   it("试算:同样的修正过程只更新预计消耗,钱包一分不动", async () => {

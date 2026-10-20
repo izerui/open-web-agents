@@ -107,7 +107,7 @@ test.describe("积分与计费界面", () => {
     }
   });
 
-  test("积分页:暂记的三种待核对状态(欠款、多扣、用量待补记)显示对应说明", async ({
+  test("积分页:暂记与多扣退还的说明(欠款、未完整计价不退、用量待补记、已退还)", async ({
     page,
     context,
   }) => {
@@ -115,7 +115,7 @@ test.describe("积分与计费界面", () => {
     const rows = [
       // 实际 57.75,只扣到 30,欠 27.75
       { id: randomUUID(), charged: 30_000_000, est: 57_750_000, owed: 27_750_000 },
-      // 已扣 92.4,费用修正为 69.3:多扣 23.1
+      // 已扣 92.4,修正后的费用 69.3 仍不完整:不退,继续暂记
       { id: randomUUID(), charged: 92_400_000, est: 69_300_000, owed: null },
       // 跑过但还没拿到用量
       { id: randomUUID(), charged: 0, est: 0, owed: null },
@@ -134,12 +134,30 @@ test.describe("积分与计费界面", () => {
         page.getByTestId("run-charge").filter({ hasText: rows[i]?.id ?? "" });
       await expect(row(0)).toContainText("余额不足,欠 27.75 积分,充值后自动补扣");
       await expect(row(0).locator("td").nth(4)).toHaveText("30.00");
-      await expect(row(1)).toContainText("多扣 23.10 积分,待核对退还");
+      await expect(row(1)).toContainText("用量待补记,待核对");
+      await expect(row(1)).not.toContainText("退还");
       await expect(row(1).locator("td").nth(3)).toHaveText("69.30");
       await expect(row(1).locator("td").nth(4)).toHaveText("92.40");
       await expect(row(2)).toContainText("用量待补记,待核对");
     } finally {
       for (const r of rows) await sql("DELETE FROM run_charges WHERE run_id = ?", [r.id]);
+    }
+    // 已结算、且自动退还过多扣的:说明退了多少,实际扣除是净额
+    const refunded = randomUUID();
+    await sql(
+      `INSERT INTO run_charges (run_id, account_id, api_key_id, mode, reserved_micro, reservation_ids,
+         estimated_micro, charged_micro, owed_micro, refunded_micro, state, would_reject, incomplete,
+         created_at, settled_at)
+       VALUES (?, ?, NULL, 'live', 0, '[]', 69300000, 69300000, NULL, 23100000, 'settled', NULL, 0, NOW(3), NOW(3))`,
+      [refunded, user.id],
+    );
+    try {
+      await page.reload();
+      const r = page.getByTestId("run-charge").filter({ hasText: refunded });
+      await expect(r).toContainText("已结算(多扣的 23.10 积分已退还)");
+      await expect(r.locator("td").nth(4)).toHaveText("69.30");
+    } finally {
+      await sql("DELETE FROM run_charges WHERE run_id = ?", [refunded]);
     }
   });
 
@@ -290,6 +308,103 @@ test.describe("积分与计费界面", () => {
       expect(Number(a[0]?.n)).toBe(1);
     } finally {
       await drop();
+      if (promoted) await sql("UPDATE users SET role = 'user' WHERE id = ?", [admin.id]);
+    }
+  });
+
+  test("积分管理:跨账号待核对列表 —— 按原因与模式筛选,点账号看流水,只读不改动", async ({
+    page,
+    context,
+    browser,
+  }) => {
+    const admin = await register(context, "pending-admin");
+    const promoted = admin.role !== "admin";
+    if (promoted) await sql("UPDATE users SET role = 'admin' WHERE id = ?", [admin.id]);
+    const other = await browser.newContext();
+    const target = await register(other, "pending-target");
+    await other.close();
+    const [u] = (await sql("SELECT email FROM users WHERE id = ?", [target.id])) as unknown as [
+      { email: string }[],
+    ];
+    const email = u[0]?.email ?? "";
+    // 欠款、无法完整计价(已扣多于能算出的部分,不算多扣)、用量未知(正式);无法完整计价(试算)
+    const seed = [
+      {
+        id: randomUUID(),
+        mode: "live",
+        est: 57_750_000,
+        charged: 30_000_000,
+        owed: 27_750_000,
+        digest: "d",
+      },
+      {
+        id: randomUUID(),
+        mode: "live",
+        est: 69_300_000,
+        charged: 92_400_000,
+        owed: null,
+        digest: "d",
+      },
+      { id: randomUUID(), mode: "live", est: 0, charged: 0, owed: null, digest: null },
+      { id: randomUUID(), mode: "trial", est: 1_000_000, charged: 0, owed: null, digest: "d" },
+    ];
+    for (const r of seed) {
+      await sql(
+        `INSERT INTO run_charges (run_id, account_id, api_key_id, mode, reserved_micro, reservation_ids,
+           estimated_micro, charged_micro, owed_micro, state, would_reject, incomplete, settled_cost_digest,
+           created_at, settled_at)
+         VALUES (?, ?, NULL, ?, 0, '[]', ?, ?, ?, 'provisional', NULL, 1, ?, NOW(3), NOW(3))`,
+        [r.id, target.id, r.mode, r.est, r.charged, r.owed, r.digest],
+      );
+    }
+    const snapshot = async () =>
+      JSON.stringify(
+        (
+          (await sql("SELECT * FROM run_charges WHERE account_id = ? ORDER BY run_id", [
+            target.id,
+          ])) as unknown as [unknown[]]
+        )[0],
+      );
+    const before = await snapshot();
+    try {
+      await page.goto(`${BASE}/admin/billing`);
+      const section = page.getByRole("region", { name: "待核对计费" });
+      const row = (i: number) =>
+        section.getByTestId("pending-charge").filter({ hasText: seed[i]?.id ?? "" });
+      await expect(row(0)).toContainText("欠款");
+      await expect(row(0)).toContainText("欠 27.75");
+      await expect(row(0)).toContainText(email);
+      await expect(row(1)).toContainText("无法完整计价");
+      await expect(row(1)).not.toContainText("多扣");
+      await expect(row(2)).toContainText("用量未知");
+      await expect(row(3)).toContainText("无法完整计价");
+      await expect(row(3)).toContainText("试算");
+
+      // 只读:这一区块没有任何处理按钮
+      for (const name of [/核销/, /退还/, /结清/, /确认/]) {
+        await expect(section.getByRole("button", { name })).toHaveCount(0);
+      }
+
+      // 按原因筛选
+      await section.getByRole("button", { name: /^用量未知/ }).click();
+      await expect(row(2)).toBeVisible();
+      await expect(row(0)).toHaveCount(0);
+      await expect(section.getByRole("button", { name: /^多扣/ })).toHaveCount(0);
+      // 按模式筛选
+      await section.getByRole("button", { name: /^全部/ }).click();
+      await section.getByLabel("计费模式").selectOption("trial");
+      await expect(row(3)).toBeVisible();
+      await expect(row(0)).toHaveCount(0);
+      await section.getByLabel("计费模式").selectOption("");
+
+      // 点账号:切到这个账号的余额与流水
+      await row(0).getByRole("button", { name: email }).click();
+      await expect(page.locator("#billing-account")).toHaveValue(target.id);
+      await expect(page.getByTestId("balance-available")).toBeVisible();
+
+      expect(await snapshot()).toBe(before);
+    } finally {
+      for (const r of seed) await sql("DELETE FROM run_charges WHERE run_id = ?", [r.id]);
       if (promoted) await sql("UPDATE users SET role = 'user' WHERE id = ?", [admin.id]);
     }
   });

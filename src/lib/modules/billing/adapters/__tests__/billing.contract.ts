@@ -36,6 +36,30 @@ export function billingContract(
       expect((await repo.balance(accountId)).availableMicroCredits).toBe("100");
     });
 
+    it("refund adds back to available once per refundId; a different amount conflicts", async () => {
+      const { repo, accountId } = make();
+      await repo.credit(credit(accountId, "100"));
+      const id = randomUUID();
+      const first = await repo.refund({ accountId, refundId: id, amountMicroCredits: "30" });
+      expect(first).toMatchObject({
+        replayed: false,
+        entry: { kind: "refund", amountMicroCredits: "30" },
+      });
+      expect(first.balance.availableMicroCredits).toBe("130");
+      const again = await repo.refund({ accountId, refundId: id, amountMicroCredits: "30" });
+      expect(again.replayed).toBe(true);
+      expect(again.entry.id).toBe(first.entry.id);
+      await expect(
+        repo.refund({ accountId, refundId: id, amountMicroCredits: "31" }),
+      ).rejects.toMatchObject({ status: 409 });
+      expect((await repo.balance(accountId)).availableMicroCredits).toBe("130");
+      // 同一毫秒的两条按流水 id 排序,先后不固定:只核对种类
+      expect((await repo.ledger(accountId)).items.map((e) => e.kind).sort()).toEqual([
+        "credit",
+        "refund",
+      ]);
+    });
+
     it("missing accounts read as zero with no ledger", async () => {
       const { repo, accountId } = make();
       expect(await repo.balance(accountId)).toEqual({

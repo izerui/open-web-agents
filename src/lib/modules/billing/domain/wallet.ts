@@ -5,6 +5,7 @@ import {
   type CreditRequest,
   type LedgerEntry,
   type LedgerQuery,
+  type RefundRequest,
   type Reservation,
   type ReserveRequest,
   type SettleRequest,
@@ -45,6 +46,18 @@ export function validateCredit(input: CreditRequest): void {
   textOf(input.idempotencyKey, "idempotencyKey", 128);
   textOf(input.actorId, "actorId", 36);
   textOf(input.reason, "reason", 512);
+}
+
+export function validateRefund(input: RefundRequest): void {
+  accountOf(input.accountId);
+  textOf(input.refundId, "refundId", 128);
+  amountOf(input.amountMicroCredits, "amountMicroCredits", true);
+}
+
+export function assertRefundReplay(entry: LedgerEntry, input: RefundRequest): void {
+  if (entry.amountMicroCredits !== input.amountMicroCredits) {
+    throw new BillingError(409, "idempotency_conflict", "同一退还编号的金额不一致");
+  }
 }
 
 export function validateReserve(input: ReserveRequest): void {

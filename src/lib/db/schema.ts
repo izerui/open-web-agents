@@ -626,6 +626,8 @@ export const runCharges = mysqlTable(
     chargedMicro: decimal("charged_micro", { precision: 30, scale: 0 }),
     /** 正式模式补扣不成的欠额 */
     owedMicro: decimal("owed_micro", { precision: 30, scale: 0 }),
+    /** 费用往下修正后自动退还的累计额;charged_micro 已是扣除它之后的净额 */
+    refundedMicro: decimal("refunded_micro", { precision: 30, scale: 0 }),
     state: varchar("state", { length: 16 }).notNull(),
     /** 试算下本应拒绝的原因(余额不足 / 账号超额 / Key 超额) */
     wouldReject: varchar("would_reject", { length: 32 }),

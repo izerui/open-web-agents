@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   accountOf,
   assertCreditReplay,
+  assertRefundReplay,
   assertReserveReplay,
   assertSettleReplay,
   billingKey,
@@ -13,6 +14,7 @@ import {
   reserveBalance,
   settleBalance,
   validateCredit,
+  validateRefund,
   validateReserve,
   validateSettle,
 } from "../domain/wallet";
@@ -23,6 +25,7 @@ import {
   type CreditRequest,
   type LedgerEntry,
   type LedgerQuery,
+  type RefundRequest,
   type Reservation,
   type ReserveRequest,
   type SettleRequest,
@@ -96,6 +99,27 @@ export class InMemoryBillingRepo implements BillingRepo {
       this.entryId(),
       this.now(),
       { actorId: input.actorId, reason: input.reason },
+    );
+    this.commit(next, entry);
+    return structuredClone({ balance: next, entry, replayed: false });
+  }
+
+  async refund(input: RefundRequest) {
+    validateRefund(input);
+    const balance = this.wallets.get(input.accountId) ?? emptyWallet(input.accountId);
+    const previous = this.operations.get(billingKey(input.accountId, "refund", input.refundId));
+    if (previous) {
+      assertRefundReplay(previous, input);
+      return structuredClone({ balance, entry: previous, replayed: true });
+    }
+    const next = creditBalance(balance, input.amountMicroCredits);
+    const entry = entryOf(
+      next,
+      "refund",
+      input.amountMicroCredits,
+      input.refundId,
+      this.entryId(),
+      this.now(),
     );
     this.commit(next, entry);
     return structuredClone({ balance: next, entry, replayed: false });

@@ -400,7 +400,7 @@ if (!url) {
       expect(await open()).not.toContain(runId);
     });
 
-    it("费用先往下、再往上修正:实扣、钱包余额、扣款流水三者一致,不多扣", async () => {
+    it("已扣非零 → 明细缺失不退 → 补齐并确认减少后只退差额一次;净扣、钱包、流水(扣款 − 退还)一致", async () => {
       const { enqueue, charging } = setup("live");
       const acct = await fund(1000n);
       const runId = await enqueue(acct);
@@ -423,17 +423,22 @@ if (!url) {
           ],
         },
       });
-      // 流水里的扣款 = 结算(settle)记录的扣款合计
-      const ledgerCharged = async () => {
+      // 流水里的净扣 = 结算(settle)扣款合计 − 退还(refund)合计
+      const ledgerSum = async (kind: string) => {
         const [rows] = (await pool.query(
-          "SELECT COALESCE(SUM(amount_micro_credits), 0) AS s FROM billing_ledger WHERE account_id = ? AND kind = 'settle'",
-          [acct],
+          "SELECT COALESCE(SUM(amount_micro_credits), 0) AS s FROM billing_ledger WHERE account_id = ? AND kind = ?",
+          [acct, kind],
         )) as unknown as [{ s: string }[]];
         return BigInt(String(rows[0]?.s ?? "0").split(".")[0] || "0");
       };
-      const check = async (charged: bigint, state: string) => {
-        expect(await charge(runId)).toMatchObject({ chargedMicro: charged.toString(), state });
-        expect(await ledgerCharged()).toBe(charged);
+      const check = async (charged: bigint, state: string, refunded = 0n) => {
+        expect(await charge(runId)).toMatchObject({
+          chargedMicro: charged.toString(),
+          refundedMicro: refunded ? refunded.toString() : null,
+          state,
+        });
+        expect((await ledgerSum("settle")) - (await ledgerSum("refund"))).toBe(charged);
+        expect(await ledgerSum("refund")).toBe(refunded);
         expect((await wallet.balance(acct)).availableMicroCredits).toBe(
           (1000n * C - charged).toString(),
         );
@@ -452,22 +457,127 @@ if (!url) {
 
       await db
         .update(runs)
-        .set({ cost: cost(30000, true) })
+        .set({ cost: { input: 30000, output: 0, partial: true } }) // 没有按模型的计量
         .where(eq(runs.id, runId));
       await settleUntilStable();
-      await check(92_400_000n, "provisional"); // 往下修正:不倒推,多扣 23.1 待核对
-      expect(await charge(runId)).toMatchObject({ estimatedMicro: "69300000", incomplete: 1 });
+      await check(92_400_000n, "provisional"); // 算不出来不等于应扣减少:不退
+      expect(await charge(runId)).toMatchObject({ estimatedMicro: "0", incomplete: 1 });
 
       await db
         .update(runs)
-        .set({ cost: cost(50000, true) })
+        .set({ cost: cost(30000, true) })
         .where(eq(runs.id, runId));
       await settleUntilStable();
-      await check(115_500_000n, "settled");
+      await check(69_300_000n, "settled", 23_100_000n); // 确认减少:只退差额 23.1
 
       await charging.settle(runId, { final: true });
       await settleUntilStable();
-      await check(115_500_000n, "settled");
+      await check(69_300_000n, "settled", 23_100_000n);
+    });
+
+    it("升级:旧规则留下的多扣暂记 —— 迁移 0051 后清扫重新结算:完整计价的退差额一次,不完整的不退、也不反复进入清扫", async () => {
+      const { enqueue, charging } = setup("live");
+      const acct = await fund(1000n);
+      const meter = (input: number, complete: boolean) => ({
+        input,
+        output: 0,
+        partial: true,
+        metering: {
+          source: "sdk_model_usage",
+          complete,
+          partial: true,
+          models: [
+            {
+              modelId: "up-main",
+              inputTokens: input,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+            },
+          ],
+        },
+      });
+      const open = () =>
+        db.transaction((tx) =>
+          new MysqlRunChargeStore(tx as unknown as Db).openOfFinishedRuns(10_000),
+        );
+      const ledgerSum = async (kind: string) => {
+        const [rows] = (await pool.query(
+          "SELECT COALESCE(SUM(amount_micro_credits), 0) AS s FROM billing_ledger WHERE account_id = ? AND kind = ?",
+          [acct, kind],
+        )) as unknown as [{ s: string }[]];
+        return BigInt(String(rows[0]?.s ?? "0").split(".")[0] || "0");
+      };
+
+      // 造出旧规则停住的样子:先按不完整的 4 万输入扣了 92.4,之后费用改成 3 万输入(69.3),
+      // 旧规则不退款,记录停在暂记,应扣写成 69.3,指纹与当前费用一致
+      const legacy = async (complete: boolean) => {
+        const runId = await enqueue(acct);
+        await finish(runId, "cancelled", meter(40000, false));
+        await charging.settle(runId, { final: true });
+        await db
+          .update(runs)
+          .set({ cost: meter(30000, complete) })
+          .where(eq(runs.id, runId));
+        await pool.query(
+          `UPDATE run_charges rc JOIN runs r ON r.id = rc.run_id
+             SET rc.estimated_micro = 69300000, rc.settled_cost_digest = SHA2(CAST(r.cost AS CHAR), 256)
+           WHERE rc.run_id = ?`,
+          [runId],
+        );
+        return runId;
+      };
+      const full = await legacy(true);
+      const partial = await legacy(false);
+      for (const id of [full, partial]) {
+        expect(await charge(id)).toMatchObject({ state: "provisional", chargedMicro: "92400000" });
+      }
+      // 迁移前:问题能复现 —— 清扫不选,直接结算也提前返回
+      expect(await open()).not.toContain(full);
+      expect(await charging.settle(full, { final: true })).toBe("none");
+
+      // 执行 0051 迁移文件里的语句(原样读取)
+      const fs = await import("node:fs/promises");
+      const migration = await fs.readFile("drizzle/0051_reevaluate_overpaid.sql", "utf8");
+      for (const stmt of migration.split("--> statement-breakpoint")) {
+        const sqlText = stmt
+          .split("\n")
+          .filter((l) => !l.trim().startsWith("--"))
+          .join("\n")
+          .trim();
+        if (sqlText) await pool.query(sqlText);
+      }
+      const selected = await open();
+      expect(selected).toContain(full);
+      expect(selected).toContain(partial);
+
+      for (let i = 0; i < 20 && (await open()).some((id) => id === full || id === partial); i++) {
+        await charging.sweep(500);
+      }
+      // 完整计价的:退差额 23.1,一次
+      expect(await charge(full)).toMatchObject({
+        state: "settled",
+        chargedMicro: "69300000",
+        refundedMicro: "23100000",
+      });
+      // 不完整的:不退,继续暂记;指纹写回,不再进入清扫
+      expect(await charge(partial)).toMatchObject({
+        state: "provisional",
+        chargedMicro: "92400000",
+        refundedMicro: null,
+      });
+      expect(await open()).not.toContain(partial);
+      expect(await open()).not.toContain(full);
+
+      await charging.sweep(500);
+      await charging.settle(full, { final: true });
+      expect(await ledgerSum("refund")).toBe(23_100_000n);
+      expect((await ledgerSum("settle")) - (await ledgerSum("refund"))).toBe(
+        69_300_000n + 92_400_000n,
+      );
+      expect((await wallet.balance(acct)).availableMicroCredits).toBe(
+        (1000n * C - 69_300_000n - 92_400_000n).toString(),
+      );
     });
 
     it("欠款补扣:超过冻结额 → 余额不足留欠 → 充值 → 清扫补扣一次 → 重复执行不再扣(核对钱包、流水、实扣、欠额)", async () => {

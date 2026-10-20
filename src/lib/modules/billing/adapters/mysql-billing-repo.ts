@@ -5,6 +5,7 @@ import { and, desc, eq, lt, or } from "drizzle-orm";
 import {
   accountOf,
   assertCreditReplay,
+  assertRefundReplay,
   assertReserveReplay,
   assertSettleReplay,
   billingKey,
@@ -16,6 +17,7 @@ import {
   reserveBalance,
   settleBalance,
   validateCredit,
+  validateRefund,
   validateReserve,
   validateSettle,
 } from "../domain/wallet";
@@ -26,6 +28,7 @@ import {
   type CreditRequest,
   type LedgerEntry,
   type LedgerQuery,
+  type RefundRequest,
   type Reservation,
   type ReserveRequest,
   type SettleRequest,
@@ -192,6 +195,40 @@ export class MysqlBillingRepo implements BillingRepo {
           this.entryId(),
           this.now(),
           { actorId: input.actorId, reason: input.reason },
+        );
+        await this.append(tx, next, entry);
+        return { balance: next, entry, replayed: false };
+      });
+    } catch (error) {
+      if (duplicate(error)) throw new BillingError(409, "ledger_conflict", "流水标识冲突");
+      throw error;
+    }
+  }
+
+  async refund(input: RefundRequest) {
+    validateRefund(input);
+    try {
+      return await this.inWallet(input.accountId, async (tx, wallet) => {
+        const [prior] = await tx
+          .select()
+          .from(billingLedger)
+          .where(
+            eq(billingLedger.operationKey, billingKey(input.accountId, "refund", input.refundId)),
+          )
+          .limit(1);
+        if (prior) {
+          const entry = ledgerOf(prior);
+          assertRefundReplay(entry, input);
+          return { balance: wallet, entry, replayed: true };
+        }
+        const next = creditBalance(wallet, input.amountMicroCredits);
+        const entry = entryOf(
+          next,
+          "refund",
+          input.amountMicroCredits,
+          input.refundId,
+          this.entryId(),
+          this.now(),
         );
         await this.append(tx, next, entry);
         return { balance: next, entry, replayed: false };

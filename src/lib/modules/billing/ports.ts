@@ -9,8 +9,8 @@ export interface WalletBalance {
 export interface LedgerEntry {
   id: string;
   accountId: string;
-  kind: "credit" | "reserve" | "settle";
-  /** credit=入账额,reserve=冻结额,settle=实际扣除额(0表示全额释放)。 */
+  kind: "credit" | "reserve" | "settle" | "refund";
+  /** credit=入账额,reserve=冻结额,settle=实际扣除额(0表示全额释放),refund=退回可用余额的多扣额。 */
   amountMicroCredits: string;
   availableAfter: string;
   reservedAfter: string;
@@ -34,6 +34,13 @@ export interface CreditRequest {
   idempotencyKey: string;
   actorId: string;
   reason: string;
+}
+
+/** 退还多扣:加回可用余额。同一 refundId 只生效一次 */
+export interface RefundRequest {
+  accountId: string;
+  refundId: string;
+  amountMicroCredits: string;
 }
 
 export interface ReserveRequest {
@@ -80,6 +87,11 @@ export interface BillingRepo {
 
   /** 只读:该账户用这个幂等键入账过的流水;没有返回 null。不改动余额 */
   findCredit(accountId: string, idempotencyKey: string): Promise<LedgerEntry | null>;
+
+  /** 退还多扣(运行结算时自动发生)。同账户同编号同金额重放原流水;金额不同返回 409。 */
+  refund(
+    input: RefundRequest,
+  ): Promise<{ balance: WalletBalance; entry: LedgerEntry; replayed: boolean }>;
 
   /** 同ID同账户同金额重放当前预占状态;不再次冻结资金。 */
   reserve(input: ReserveRequest): Promise<Reservation>;

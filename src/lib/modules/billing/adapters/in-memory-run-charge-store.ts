@@ -10,6 +10,7 @@ import type {
 interface World {
   wallets: Map<string, { available: bigint; reserved: bigint }>;
   reservations: Map<string, { accountId: string; amount: bigint; charged: bigint | null }>;
+  refunds: Map<string, { accountId: string; amount: bigint }>;
   charges: Map<string, RunCharge>;
   runs: Map<string, RunForSettle>;
   accountLimits: Map<string, bigint>;
@@ -21,6 +22,7 @@ function clone(w: World): World {
   return {
     wallets: new Map([...w.wallets].map(([k, v]) => [k, { ...v }])),
     reservations: new Map([...w.reservations].map(([k, v]) => [k, { ...v }])),
+    refunds: new Map([...w.refunds].map(([k, v]) => [k, { ...v }])),
     charges: new Map([...w.charges].map(([k, v]) => [k, structuredClone(v)])),
     runs: new Map([...w.runs].map(([k, v]) => [k, structuredClone(v)])),
     accountLimits: new Map(w.accountLimits),
@@ -34,6 +36,7 @@ export class InMemoryChargeWorld {
   private world: World = {
     wallets: new Map(),
     reservations: new Map(),
+    refunds: new Map(),
     charges: new Map(),
     runs: new Map(),
     accountLimits: new Map(),
@@ -77,11 +80,14 @@ export class InMemoryChargeWorld {
   setRun(runId: string, run: RunForSettle) {
     this.world.runs.set(runId, structuredClone(run));
   }
-  /** 钱包里真正扣掉的总额(各笔冻结结算时的实扣之和) —— 核对记录与钱包是否一致 */
+  /** 钱包里真正扣掉的净额(各笔冻结结算时的实扣之和,减去退还) —— 核对记录与钱包是否一致 */
   deducted(accountId: string) {
     let total = 0n;
     for (const r of this.world.reservations.values()) {
       if (r.accountId === accountId && r.charged !== null) total += r.charged;
+    }
+    for (const r of this.world.refunds.values()) {
+      if (r.accountId === accountId) total -= r.amount;
     }
     return total;
   }
@@ -173,6 +179,17 @@ class Store implements RunChargeStore {
     x.reserved -= r.amount;
     x.available += r.amount - charged;
     r.charged = charged;
+  }
+
+  async refundWallet(accountId: string, refundId: string, amount: bigint) {
+    const prior = this.w.refunds.get(refundId);
+    if (prior) {
+      if (prior.amount !== amount)
+        throw new BillingError(409, "idempotency_conflict", "退还金额不一致");
+      return;
+    }
+    this.wallet(accountId).available += amount;
+    this.w.refunds.set(refundId, { accountId, amount });
   }
 
   async insert(c: RunCharge) {

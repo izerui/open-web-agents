@@ -21,6 +21,7 @@ function chargeOf(r: Row): RunCharge {
     estimatedMicro: r.estimatedMicro,
     chargedMicro: r.chargedMicro,
     owedMicro: r.owedMicro,
+    refundedMicro: r.refundedMicro ?? null,
     state: r.state as RunCharge["state"],
     wouldReject: (r.wouldReject as HoldRejection | null) ?? null,
     incomplete: r.incomplete === 1,
@@ -145,6 +146,10 @@ export class MysqlRunChargeStore implements RunChargeStore {
     await this.wallet.settle({ accountId, reservationId, chargedMicroCredits: charged.toString() });
   }
 
+  async refundWallet(accountId: string, refundId: string, amount: bigint): Promise<void> {
+    await this.wallet.refund({ accountId, refundId, amountMicroCredits: amount.toString() });
+  }
+
   async insert(c: RunCharge): Promise<void> {
     await this.db.insert(runCharges).values({
       runId: c.runId,
@@ -156,6 +161,7 @@ export class MysqlRunChargeStore implements RunChargeStore {
       estimatedMicro: c.estimatedMicro,
       chargedMicro: c.chargedMicro,
       owedMicro: c.owedMicro,
+      refundedMicro: c.refundedMicro,
       state: c.state,
       wouldReject: c.wouldReject,
       incomplete: c.incomplete ? 1 : 0,
@@ -184,6 +190,7 @@ export class MysqlRunChargeStore implements RunChargeStore {
     if (patch.estimatedMicro !== undefined) set.estimatedMicro = patch.estimatedMicro;
     if (patch.chargedMicro !== undefined) set.chargedMicro = patch.chargedMicro;
     if (patch.owedMicro !== undefined) set.owedMicro = patch.owedMicro;
+    if (patch.refundedMicro !== undefined) set.refundedMicro = patch.refundedMicro;
     if (patch.state !== undefined) set.state = patch.state;
     if (patch.wouldReject !== undefined) set.wouldReject = patch.wouldReject;
     if (patch.incomplete !== undefined) set.incomplete = patch.incomplete ? 1 : 0;

@@ -139,6 +139,7 @@ export class RunCharging {
       estimatedMicro: null,
       chargedMicro: null,
       owedMicro: null,
+      refundedMicro: null,
       state: "open",
       wouldReject: mode === "trial" ? decision.rejection : null,
       incomplete: false,
@@ -361,6 +362,7 @@ export class RunCharging {
       // 实扣只按真正成功的扣款累计,绝不由预计费用倒推 —— 预计费用修正(含往下修正)时,
       // 倒推出来的"实扣"与钱包不一致,下一次补扣又以错误的基准算差额,就会多扣用户的钱
       let paid = 0n;
+      let refunded = BigInt(c.refundedMicro ?? "0");
       const charge = async (id: string, amount: bigint) => {
         if (amount <= 0n) return;
         try {
@@ -382,23 +384,34 @@ export class RunCharging {
         }
         await charge(`run:${runId}:over`, plan.over);
       } else {
-        // 暂记之后补结算:冻结早已释放,以真实已扣为基准只补正差额。
-        // 编号带上已扣金额 —— 同一运行可能补好几次,编号相同会被钱包当成重复请求
+        // 暂记之后补结算:冻结早已释放,以真实净扣为基准只补正差额。
+        // 编号用累计扣款总额(净扣 + 已退还,只增不减):同一运行可能补好几次,
+        // 净扣可能退回到以前的数值,用它做编号会撞上旧编号,被钱包当成重复请求而漏扣
         paid = BigInt(c.chargedMicro ?? "0");
-        await charge(`run:${runId}:late:${paid}`, estimated - paid);
+        await charge(`run:${runId}:late:${paid + refunded}`, estimated - paid);
       }
-      // 欠额 = 应扣但没扣成的(余额不足):保持可重试,充值后由清扫补扣。
-      // 多扣 = 已扣超过修正后的应扣(暂不自动退款,停在暂记待核对)
+      // 多扣:净扣超过修正后的应扣 —— 自动退回可用余额,与结算同一事务。
+      // 【只在修正后的费用能完整计价时退】缺计量、取不到锁定价目、认不出模型时,应扣只是
+      // 能算出的那部分(甚至是 0),"算不出来"不等于"确认应扣减少",此时不退,继续暂记。
+      // 编号用退还前的累计退还额(只增不减),同一笔只退一次
+      if (!pending && paid > estimated) {
+        const back = paid - estimated;
+        await store.refundWallet(c.accountId, `run:${runId}:refund:${refunded}`, back);
+        paid -= back;
+        refunded += back;
+      }
+      // 欠额 = 应扣但没扣成的(余额不足):保持可重试,充值后由清扫补扣
       const owed = estimated > paid ? estimated - paid : 0n;
-      const overcharged = paid > estimated ? paid - estimated : 0n;
+      // 净扣仍多于应扣(费用还不能完整计价,未退)同样留在暂记
       const state =
-        pending || owed > 0n || overcharged > 0n ? ("provisional" as const) : ("settled" as const);
+        pending || owed > 0n || paid > estimated ? ("provisional" as const) : ("settled" as const);
       await store.update(runId, {
         estimatedMicro: estimated.toString(),
         chargedMicro: paid.toString(),
         owedMicro: owed > 0n ? owed.toString() : null,
+        refundedMicro: refunded > 0n ? refunded.toString() : null,
         state,
-        incomplete: pending || owed > 0n || overcharged > 0n,
+        incomplete: pending || owed > 0n || paid > estimated,
         settledCostDigest: digest,
         settledAt: this.now(),
       });

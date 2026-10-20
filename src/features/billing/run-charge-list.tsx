@@ -20,14 +20,17 @@ function stateText(c: RunChargeItem): string {
     if (c.owedMicro && c.owedMicro !== "0") {
       return `余额不足,欠 ${creditsAmount(c.owedMicro)} 积分,充值后自动补扣`;
     }
-    const charged = BigInt(c.chargedMicro ?? "0");
-    const estimated = BigInt(c.estimatedMicro ?? "0");
-    // 费用往下修正后,已扣的多于应扣:暂不自动退款,标出来待核对
-    if (charged > estimated) return `多扣 ${creditsAmount(charged - estimated)} 积分,待核对退还`;
-    return "用量待补记,待核对";
+    const refunded =
+      c.refundedMicro && c.refundedMicro !== "0"
+        ? `;多扣的 ${creditsAmount(c.refundedMicro)} 积分已退还`
+        : "";
+    return `用量待补记,待核对${refunded}`;
   }
   if (c.owedMicro && c.owedMicro !== "0") return "余额不足补扣,待核对";
   if (c.incomplete) return "用量不完整,待核对";
+  if (c.refundedMicro && c.refundedMicro !== "0") {
+    return `已结算(多扣的 ${creditsAmount(c.refundedMicro)} 积分已退还)`;
+  }
   return "已结算";
 }
 

@@ -27,6 +27,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { BatchCreditForm } from "./batch-credit-form";
 import { BillingModeCard } from "./billing-mode-card";
+import { PendingCharges } from "./pending-charges";
 import { RunChargeList } from "./run-charge-list";
 
 type Statement = {
@@ -42,7 +43,7 @@ type Statement = {
   };
 };
 type Account = { id: string; email: string; disabled?: boolean };
-const KIND = { credit: "人工入账", reserve: "冻结", settle: "结算" } as const;
+const KIND = { credit: "人工入账", reserve: "冻结", settle: "结算", refund: "多扣退还" } as const;
 
 export function BillingView({ admin = false }: { admin?: boolean }) {
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -169,6 +170,17 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
     <SpaceShell area={admin ? "admin" : "personal"} title={admin ? "积分管理" : "积分账户"}>
       {admin && <BillingModeCard onChanged={() => load()} />}
       {admin && <BatchCreditForm onDone={() => load()} />}
+      {admin && (
+        <PendingCharges
+          onSelectAccount={(id) => {
+            requestSeq.current++;
+            setStatement(null);
+            setAccountId(id);
+            setReceipt("");
+            creditAttempt.current = null;
+          }}
+        />
+      )}
       {statement?.mode === "trial" && (
         <div
           data-testid="trial-banner"
@@ -351,7 +363,7 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
                           : KIND[entry.kind]}
                       </td>
                       <td className="whitespace-nowrap px-2 py-3 font-mono">
-                        {entry.kind === "credit"
+                        {entry.kind === "credit" || entry.kind === "refund"
                           ? "+"
                           : entry.kind === "settle" && entry.amountMicroCredits !== "0"
                             ? "-"

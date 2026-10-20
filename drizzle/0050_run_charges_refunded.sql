@@ -1,0 +1,1 @@
+ALTER TABLE `run_charges` ADD `refunded_micro` decimal(30,0);
