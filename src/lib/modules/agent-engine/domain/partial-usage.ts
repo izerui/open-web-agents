@@ -45,8 +45,13 @@ const FIELDS: [Field, keyof RawUsage][] = [
   ["cacheWrite", "cache_creation_input_tokens"],
 ];
 
-/** 把一份计数并进消息:读得出的取最大(同一条消息的累计值),读不出的记下 */
+/**
+ * 把一份计数并进消息:读得出的取最大(同一条消息的累计值),读不出的记下。
+ * 这一份没带这个字段(undefined / null)= 没有新信息:不新增异常,也不撤销已有异常 ——
+ * 只有明确收到合法数值(包括 0)才算"后来读出来了"
+ */
 function absorb(into: MessageUsage, field: Field, raw: unknown): void {
+  if (raw === undefined || raw === null) return;
   const c = readTokenCount(raw);
   if (c === "missing") {
     into.bad.add(field);

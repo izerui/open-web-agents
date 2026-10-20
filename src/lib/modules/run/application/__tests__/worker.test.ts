@@ -1203,6 +1203,46 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
         });
       });
 
+      for (const [label, later, expected] of [
+        [
+          "同一条消息先报非法输出、后来那份省略输出 → 中断:省略不是新信息,缺失仍在,已知输入照扣、保持暂记",
+          { input_tokens: 10000 },
+          "provisional",
+        ],
+        [
+          "对照:后来那份明确给出合法输出(0)才解除缺失,照常结清",
+          { input_tokens: 10000, output_tokens: 0 },
+          "settled",
+        ],
+      ] as const) {
+        it(label, async () => {
+          const msg = (usage: Record<string, unknown>) => ({
+            type: "assistant",
+            message: { id: "m1", model: "up-main", content: [{ type: "text", text: "x" }], usage },
+          });
+          const { world, settleAgain, sweepAgain } = await scenario(0, {
+            makeEngine: (cancel) =>
+              sdk(() =>
+                (async function* () {
+                  yield { type: "system", subtype: "init", session_id: "s" };
+                  yield msg({ input_tokens: 10000, output_tokens: -1 });
+                  yield msg(later);
+                  await cancel();
+                  throw new Error("aborted by user");
+                })(),
+              ),
+          });
+          expect(world.charge("r1")).toMatchObject({
+            state: expected,
+            incomplete: expected === "provisional",
+            chargedMicro: SECOND.toString(),
+          });
+          expect(await settleAgain()).toBe("none");
+          expect(await sweepAgain()).toBe(0);
+          expect(world.balance("u1")).toEqual({ available: 1000n * C - SECOND, reserved: 0n });
+        });
+      }
+
       it("取消路径:按消息累计时 output_tokens 读不出 → 已知输入照扣,保持暂记;重复结算不多扣", async () => {
         const { world, settleAgain, sweepAgain } = await scenario(0, {
           makeEngine: (cancel) =>

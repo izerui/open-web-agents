@@ -609,6 +609,7 @@ describe("ClaudeSdkEngine 部分计量(按模型)", () => {
         yield msg("m1", { input_tokens: 10000, output_tokens: "lots" });
         yield msg("m1", { input_tokens: 10000, output_tokens: 50 }); // 同一条消息:读出来了
         yield msg("m2", { input_tokens: 5000, output_tokens: -1 }); // 一直读不出
+        yield msg("m2", { input_tokens: 5000 }); // 省略输出:没有新信息,不撤销缺失
         throw new Error("aborted by user");
       })();
     const r = await engine(q).run(spec(), ctx, () => {}, signal());
