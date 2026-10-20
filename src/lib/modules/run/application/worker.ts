@@ -6,7 +6,12 @@
 import type { RunResult } from "@/lib/modules/agent-engine/ports";
 import type { AgentConfig } from "@/lib/modules/agent/domain/config";
 import { nextRunState } from "@/lib/modules/run/domain/state-machine";
-import { type CancelSignal, type RunRepo, WORKER_LOST } from "@/lib/modules/run/ports";
+import {
+  type CancelSignal,
+  type CostOutbox,
+  type RunRepo,
+  WORKER_LOST,
+} from "@/lib/modules/run/ports";
 import type { RunState } from "@/lib/shared";
 import type { PinnedPricing } from "@/lib/shared";
 import { EngineRunFailed, type RunCommand, type RunOrchestrator } from "./orchestrator";
@@ -113,6 +118,11 @@ export interface WorkerHooks {
   sweepCharges?: () => Promise<unknown>;
   /** 取消通知:收到就立即中止对应的在途运行,不必等下一次续租心跳。 */
   cancelSignal?: CancelSignal;
+  /**
+   * 费用恢复记录:拿到最终费用后、写任何数据库之前先写它;确认费用落库后才删。
+   * 不给则只有进程内重试 —— 写库途中进程被杀,已经拿到的费用会丢。
+   */
+  costOutbox?: CostOutbox;
   /** 落结果前增强 cost(加入积分估算快照)。失败不影响结果写入。 */
   enrichCost?: (cost: unknown) => Promise<unknown>;
 }
@@ -249,9 +259,12 @@ export class RunWorker {
     } catch (err) {
       // 引擎启动之后抛错:可能已经调用过模型,用量不得而知 —— 计费只能暂记,不能当成零用量结清。
       // 启动之前的失败(读载荷、解密覆盖、解析模型、缺变量……)确认没有调用模型
-      usageUnknown = err instanceof EngineRunFailed;
+      // 引擎启动之后的错误会带上已交回的费用(见 EngineRunFailed):照常记账,不按零用量结清
+      const engineCost = err instanceof EngineRunFailed ? err.cost : undefined;
+      usageUnknown = err instanceof EngineRunFailed && !engineCost;
       result = {
         status: "failed",
+        ...(engineCost ? { cost: engineCost } : {}),
         error: {
           kind: "worker_error",
           message: err instanceof Error ? err.message : String(err),
@@ -260,10 +273,25 @@ export class RunWorker {
     }
 
     try {
+      // 拿到费用立刻落恢复记录,早于任何可能卡住的调用(增强要查价目版本、写库) ——
+      // 之后数据库一直不返回、进程被杀,重启后都能按它补写(见 flushPendingCosts)。确认落库后才删。
+      // 原始费用已带按模型的计量与锁定价目引用,结算只用这些,足够恢复
+      const saveRecovery = async (cost: unknown) => {
+        if (!cost || !this.hooks.costOutbox) return;
+        await this.hooks.costOutbox.save(claimed.id, cost).catch((err) => {
+          console.warn(
+            `[owa][worker] 费用恢复记录写入失败(run=${claimed.id}),只能依赖进程内重试:`,
+            err instanceof Error ? err.message : err,
+          );
+        });
+      };
       let enrichedCost = result.cost as unknown;
+      await saveRecovery(enrichedCost);
       if (enrichedCost && this.hooks.enrichCost) {
         try {
           enrichedCost = await this.hooks.enrichCost(enrichedCost);
+          // 增强完成:原子覆盖成增强后的版本(带积分估算,补写后展示也完整)
+          await saveRecovery(enrichedCost);
         } catch {}
       }
       // 已被取消或判为孤儿:本轮结果作废,不写结果、不通知 —— 终态由取消方/回收方负责。
@@ -286,7 +314,8 @@ export class RunWorker {
             finalText: result.summary,
             structured: result.structured,
             salvaged: result.salvagedFromText === true,
-            cost: enrichedCost,
+            // 没有费用就不带这个字段:库里可能已经有恢复补写进去的费用,不能用"没有"把它覆盖掉
+            ...(enrichedCost ? { cost: enrichedCost } : {}),
             error: result.error,
           },
           fence,
@@ -328,6 +357,8 @@ export class RunWorker {
       await this.hooks.settleCharge?.(runId, { final: false }).catch(() => {});
       return;
     }
+    // 费用已确认在库里:恢复记录可以删了(删失败无妨,补写是幂等的)
+    if (cost) await this.hooks.costOutbox?.remove(runId).catch(() => {});
     const final = !!cost || !usageUnknown;
     await this.hooks.settleCharge?.(runId, { final }).catch(() => {});
   }
@@ -353,16 +384,27 @@ export class RunWorker {
     return false;
   }
 
-  /** 重试写入之前没写成的花费;写成的立即最终结算。回收循环与排空时调用 */
+  /**
+   * 补写没确认落库的费用:本进程内重试中的,加上恢复记录里的(包括上一个进程留下的)。
+   * 写成后先删恢复记录,再最终结算。都是幂等的:费用只在库里为空时写入,结算重复调用不重复扣。
+   * 回收循环里调用(worker 启动后第一轮就会跑),排空时再调一次。
+   */
   async flushPendingCosts(): Promise<number> {
+    const pending = new Map(this.pendingCosts);
+    const recovered = await this.hooks.costOutbox?.list().catch((err) => {
+      console.warn("[owa][worker] 读取费用恢复记录失败:", err instanceof Error ? err.message : err);
+      return [];
+    });
+    for (const r of recovered ?? []) if (!pending.has(r.runId)) pending.set(r.runId, r.cost);
     let done = 0;
-    for (const [runId, cost] of [...this.pendingCosts]) {
+    for (const [runId, cost] of pending) {
       try {
         await this.repo.recordCost?.(runId, cost);
       } catch {
         continue;
       }
       this.pendingCosts.delete(runId);
+      await this.hooks.costOutbox?.remove(runId).catch(() => {});
       done++;
       await this.hooks.settleCharge?.(runId, { final: true }).catch(() => {});
     }

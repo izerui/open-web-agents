@@ -98,6 +98,7 @@ import { ModelAdmin } from "@/lib/modules/model-gateway/application/model-admin"
 import { ModelResolver } from "@/lib/modules/model-gateway/application/model-resolver";
 import type { ModelAliasRepo, ProviderRepo } from "@/lib/modules/model-gateway/ports";
 import type { ModelGatewayPort } from "@/lib/modules/model-gateway/ports";
+import { FsCostOutbox } from "@/lib/modules/run/adapters/fs-cost-outbox";
 import { MysqlRunQuery } from "@/lib/modules/run/adapters/mysql-run-query";
 import { MysqlRunRepo } from "@/lib/modules/run/adapters/mysql-run-repo";
 import { RedisCancelSignal } from "@/lib/modules/run/adapters/redis-cancel-signal";
@@ -417,6 +418,8 @@ function build(): Container {
 
   // 运行中途追加消息:web 进程受理、worker 交给模型,经 Redis 交接(见 run/ports.ts 的 SteerChannel)
   const steerChannel = new RedisSteerChannel(env.redisUrl);
+  // 拿到费用先落本机恢复记录,确认写进库才删;重启后补写(见 fs-cost-outbox.ts)
+  const costOutbox = new FsCostOutbox(path.join(env.dataDir, "cost-outbox"));
   const orchestrator = new RunOrchestrator({
     steerChannel,
     sessions,
@@ -446,6 +449,7 @@ function build(): Container {
       return variableRepo.get(agentId, userId);
     },
     chargeProgress: (runId, tokens) => runCharging.progress(runId, tokens),
+    saveCostRecovery: (runId, cost) => costOutbox.save(runId, cost),
   });
 
   // 同进程内起 worker。拆成独立进程时,web 侧用 OWA_EMBEDDED_WORKER=0 关掉,
@@ -472,6 +476,7 @@ function build(): Container {
         return JSON.parse(plain) as RunCommand["override"];
       },
       // 终态落库后立即结算;取消、回收孤儿等不经 worker 的结束路径由清扫补上
+      costOutbox,
       // final 由 worker 判断:只有花费确认落库(或本轮确实没有花费)才是最终结算
       settleCharge: (runId, opts) => runCharging.settle(runId, opts),
       sweepCharges: () => runCharging.sweep(),

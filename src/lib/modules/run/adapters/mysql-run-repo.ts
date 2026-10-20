@@ -573,7 +573,8 @@ export class MysqlRunRepo implements RunRepo {
     if ("finalText" in data) patch.finalText = data.finalText ?? null;
     if ("structured" in data) patch.structuredResult = data.structured ?? null;
     if ("salvaged" in data) patch.structuredSalvaged = data.salvaged ? 1 : 0;
-    if ("cost" in data) patch.cost = data.cost ?? null;
+    // 费用只增不清:undefined 不当成"清空"(恢复补写进来的费用不能被异常收尾抹掉)
+    if (data.cost !== undefined) patch.cost = data.cost;
     if ("error" in data) patch.errorInfo = data.error ?? null;
     if (Object.keys(patch).length === 0) return;
 

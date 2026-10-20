@@ -136,6 +136,20 @@ export interface RunStats {
  * 工具还会继续执行最多 15 秒、继续花钱、继续产生副作用。
  * 通知是"尽力而为"(pub/sub 最多一次),丢了仍由心跳兜底 —— 正确性不依赖它,只是更快。
  */
+/**
+ * 已经拿到、还没确认写进数据库的最终费用的恢复记录(先写它,再写库,确认落库后才删)。
+ * worker 在写库途中被杀、数据库一直不返回、或进程重启,重启后据此补写 —— 已经拿到的费用不会丢。
+ * 补写本身是幂等的(花费只在库里为空时写入),重复补写不会重复扣费。
+ */
+export interface CostOutbox {
+  /** 原子写入:要么是完整的一份,要么没有 */
+  save(runId: string, cost: unknown): Promise<void>;
+  /** 删掉;不存在也算成功 */
+  remove(runId: string): Promise<void>;
+  /** 所有待补写的;损坏的跳过(并报告) */
+  list(): Promise<{ runId: string; cost: unknown }[]>;
+}
+
 export interface CancelSignal {
   publish(runId: string): Promise<void>;
   /** 订阅取消通知;返回取消订阅函数。 */

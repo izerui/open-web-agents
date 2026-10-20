@@ -4,7 +4,11 @@ import type { EnginePort, RunResult } from "@/lib/modules/agent-engine/ports";
 import { InMemoryAgentRepo } from "@/lib/modules/agent/adapters/in-memory-agent-repo";
 import { InMemoryBus } from "@/lib/modules/events/adapters/in-memory-bus";
 import { platformModels } from "@/lib/modules/model-gateway/application/__tests__/platform-models";
-import { RunOrchestrator, topicOf } from "@/lib/modules/run/application/orchestrator";
+import {
+  EngineRunFailed,
+  RunOrchestrator,
+  topicOf,
+} from "@/lib/modules/run/application/orchestrator";
 import { InMemorySessionRepo } from "@/lib/modules/session/adapters/in-memory-session-repo";
 import type { AgentEvent, AgentSpec, RunContext } from "@/lib/shared";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -412,5 +416,88 @@ describe("运行中计费", () => {
       new AbortController().signal,
     );
     expect(r.status).toBe("success");
+  });
+});
+
+describe("费用恢复记录", () => {
+  it("引擎一交回费用就保存(带锁定价目引用),早于运行中计费检查等待的收尾", async () => {
+    const sessions = new InMemorySessionRepo();
+    const agents = new InMemoryAgentRepo([
+      { id: "a1", ownerId: "u1", name: "a", config: { systemPrompt: "p", model: "sonnet" } },
+    ]);
+    await sessions.create({ id: "s1", agentId: "a1", workspaceDir: "/ws/s1", ownerId: "u1" });
+    const saved: { runId: string; cost: unknown }[] = [];
+    const engine: EnginePort = {
+      async run(_s, _c, onEvent) {
+        onEvent({ kind: "usage", messageId: "m1", input: 10, output: 1 });
+        return { status: "success", summary: "ok", cost: { input: 10, output: 1 } };
+      },
+    };
+    const orch = new RunOrchestrator({
+      sessions,
+      agents,
+      engine,
+      bus: new InMemoryBus(),
+      resolveModels: platformModels(PLATFORM),
+      // 运行中计费检查一直不返回(数据库卡住)
+      chargeProgress: () => new Promise(() => {}),
+      saveCostRecovery: async (runId, cost) => {
+        saved.push({ runId, cost });
+      },
+    });
+    void orch.execute({ sessionId: "s1", prompt: "hi", runId: "r1" }, new AbortController().signal);
+    for (let i = 0; i < 100 && saved.length === 0; i++) await new Promise((r) => setTimeout(r, 5));
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({
+      runId: "r1",
+      cost: { input: 10, output: 1, pricing: { providerId: "platform-default" } },
+    });
+  });
+
+  it("引擎交回费用之后收尾出错:抛 EngineRunFailed,带着已交回的费用", async () => {
+    const sessions = new InMemorySessionRepo();
+    const agents = new InMemoryAgentRepo([
+      { id: "a1", ownerId: "u1", name: "a", config: { systemPrompt: "p", model: "sonnet" } },
+    ]);
+    await sessions.create({ id: "s1", agentId: "a1", workspaceDir: "/ws/s1", ownerId: "u1" });
+    const orch = new RunOrchestrator({
+      sessions,
+      agents,
+      engine: new FakeEngine([], {
+        status: "success",
+        summary: "ok",
+        sessionId: "sdk_1",
+        cost: { input: 10, output: 1 },
+      }),
+      bus: new InMemoryBus(),
+      resolveModels: platformModels(PLATFORM),
+      // 收尾时同步抛出(绕过了它后面的 .catch)
+      recordRunSession: () => {
+        throw new Error("boom");
+      },
+    });
+    const err = await orch
+      .execute({ sessionId: "s1", prompt: "hi", runId: "r1" }, new AbortController().signal)
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(EngineRunFailed);
+    expect((err as EngineRunFailed).cost).toMatchObject({
+      input: 10,
+      output: 1,
+      pricing: { providerId: "platform-default" },
+    });
+  });
+
+  it("引擎启动前出错:不是 EngineRunFailed(确认没有调用模型)", async () => {
+    const orch = new RunOrchestrator({
+      sessions: new InMemorySessionRepo(),
+      agents: new InMemoryAgentRepo([]),
+      engine: new FakeEngine(),
+      bus: new InMemoryBus(),
+      resolveModels: platformModels(PLATFORM),
+    });
+    const err = await orch
+      .execute({ sessionId: "missing", prompt: "hi", runId: "r1" }, new AbortController().signal)
+      .catch((e) => e);
+    expect(err).not.toBeInstanceOf(EngineRunFailed);
   });
 });

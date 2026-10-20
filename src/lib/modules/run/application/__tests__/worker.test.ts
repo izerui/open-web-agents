@@ -1,5 +1,8 @@
 // Worker 测试:用内存 repo + 假引擎,时钟由测试控制,确定性地断言租约与崩溃恢复。
 
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import {
   ClaudeSdkEngine,
   type QueryFn,
@@ -12,10 +15,11 @@ import type { BillingMode } from "@/lib/modules/billing/domain/run-charge";
 import type { Capability } from "@/lib/modules/capabilities/domain/catalog";
 import { InMemoryBus } from "@/lib/modules/events/adapters/in-memory-bus";
 import { platformModels } from "@/lib/modules/model-gateway/application/__tests__/platform-models";
+import { FsCostOutbox, InMemoryCostOutbox } from "@/lib/modules/run/adapters/fs-cost-outbox";
 import { InMemoryRunRepo } from "@/lib/modules/run/adapters/in-memory-run-repo";
-import { RunOrchestrator } from "@/lib/modules/run/application/orchestrator";
+import { EngineRunFailed, RunOrchestrator } from "@/lib/modules/run/application/orchestrator";
 import { type RunFinalized, RunWorker } from "@/lib/modules/run/application/worker";
-import type { SteerChannel } from "@/lib/modules/run/ports";
+import type { CostOutbox, SteerChannel } from "@/lib/modules/run/ports";
 import { InMemorySessionRepo } from "@/lib/modules/session/adapters/in-memory-session-repo";
 import type { AgentEvent, AgentSpec, RunContext, RunPricing } from "@/lib/shared";
 import { describe, expect, it, vi } from "vitest";
@@ -1010,5 +1014,330 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
         expect(world.balance("u1").available).toBe(1000n * C - (mode === "live" ? total : 0n));
       });
     }
+  });
+});
+
+describe("RunWorker 费用恢复记录:先落恢复记录再写库,重启后补写", () => {
+  const C = 1_000_000n;
+  const priced: Capability = {
+    id: "m-main",
+    name: "主力",
+    kind: "llm",
+    modelId: "up-main",
+    enabled: true,
+    acceptsImages: false,
+    providerId: "p",
+    rates: [
+      { meter: "input_token", units: "1000000", microCredits: "2310000000" },
+      { meter: "output_token", units: "1000000", microCredits: "11550000000" },
+    ],
+    version: 3,
+    updatedAt: 0,
+  };
+  const pricing: RunPricing = {
+    providerId: "p",
+    models: [{ capabilityId: "m-main", modelId: "up-main", version: 3 }],
+    binding: {
+      mainRef: "m-main",
+      main: "m-main",
+      subagents: {},
+      slots: { fable: null, opus: null, sonnet: null, haiku: null },
+    },
+  };
+  // 2 万输入 + 1 千输出 = 57.75 积分
+  const DUE = 57_750_000n;
+  const spent: RunResult = {
+    status: "success",
+    summary: "完成",
+    cost: {
+      input: 20000,
+      output: 1000,
+      metering: {
+        source: "sdk_model_usage",
+        complete: true,
+        models: [
+          {
+            modelId: "up-main",
+            inputTokens: 20000,
+            outputTokens: 1000,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+          },
+        ],
+      },
+    },
+  };
+  const never = () => new Promise<never>(() => {});
+
+  /** 一套"数据库 + 账本 + 本机恢复记录";可以起多个 worker 实例(模拟进程重启) */
+  async function world(
+    make: () => CostOutbox = () => new InMemoryCostOutbox(),
+    /** 换掉编排(模拟编排在落了恢复记录之后卡住或出错) */
+    orchestratorOf?: (outbox: CostOutbox) => RunOrchestrator,
+  ) {
+    const ledger = new InMemoryChargeWorld();
+    ledger.credit("u1", 1000n * C);
+    const charging = new RunCharging({
+      mode: async () => "live",
+      bind: async () => ({ pricing, main: { capabilityId: "m-main" } }) as never,
+      reserveTargetOf: async () => 300n * C,
+      pricedModels: async () => [priced],
+      transaction: ledger.transaction,
+    });
+    const outbox = make();
+    const built = await setup(new FakeEngine(spent));
+    const repo = built.repo;
+    const orchestrator = orchestratorOf?.(outbox) ?? built.orchestrator;
+    /** 恢复记录里有没有这次运行 */
+    const hasFile = async () => (await outbox.list()).some((x) => x.runId === "r1");
+    // 计费看到的运行 = 库里的:费用以 saveResult / recordCost 实际写进去的为准
+    const sync = async () => {
+      const r = await repo.get("r1");
+      ledger.setRun("r1", {
+        status: r?.state ?? "pending",
+        cost: repo.savedResults.get("r1")?.cost ?? repo.recordedCosts.get("r1") ?? null,
+        pricing,
+        startedAt: 1,
+      });
+    };
+    /** 一个 worker 进程。faults 只作用于这个实例(模拟这个进程里卡住的调用) */
+    const worker = (
+      now: number,
+      faults: {
+        saveResult?: () => Promise<void>;
+        recordCost?: () => Promise<void>;
+        removeOutbox?: () => Promise<void>;
+        enrichCost?: (cost: unknown) => Promise<unknown>;
+      } = {},
+    ) => {
+      const r = new Proxy(repo, {
+        get(target, prop, receiver) {
+          if (prop === "saveResult" && faults.saveResult) return faults.saveResult;
+          if (prop === "recordCost" && faults.recordCost) return faults.recordCost;
+          const v = Reflect.get(target, prop, receiver);
+          return typeof v === "function" ? v.bind(target) : v;
+        },
+      });
+      const box = faults.removeOutbox
+        ? {
+            save: outbox.save.bind(outbox),
+            list: outbox.list.bind(outbox),
+            remove: faults.removeOutbox,
+          }
+        : outbox;
+      return new RunWorker(
+        r,
+        orchestrator,
+        { leaseMs: 1000, heartbeatMs: 10_000, now: () => now, costRetries: 2, costRetryMs: 1 },
+        {
+          costOutbox: box,
+          ...(faults.enrichCost ? { enrichCost: faults.enrichCost } : {}),
+          settleCharge: async (id, opts) => {
+            await sync();
+            return charging.settle(id, opts);
+          },
+          sweepCharges: async () => {
+            await sync();
+            return charging.sweep();
+          },
+        },
+      );
+    };
+    await ledger.transaction(async (store) => {
+      await charging.admit(store, { runId: "r1", accountId: "u1", apiKeyId: null, main: "m-main" });
+    });
+    await repo.createWithPrompt("r1", "s1", "go");
+    const until = async (ok: () => boolean) => {
+      for (let i = 0; i < 200 && !ok(); i++) await new Promise((r) => setTimeout(r, 5));
+      expect(ok()).toBe(true);
+    };
+    const charged = () => ledger.charge("r1");
+    return { ledger, outbox, worker, until, charged, hasFile };
+  }
+
+  it("写库明确失败 → 进程重启:按恢复记录补写完整费用,最终扣款一次", async () => {
+    const w = await world();
+    const fail = async () => {
+      throw new Error("db down");
+    };
+    await w
+      .worker(1000, { saveResult: fail, recordCost: fail })
+      .tick()
+      .catch(() => {});
+    expect((w.outbox as InMemoryCostOutbox).files.has("r1")).toBe(true);
+
+    // 重启后的新进程(租约已过期):回收 → 补写 → 清扫结算
+    const restarted = w.worker(10_000);
+    await restarted.reclaim();
+    expect((w.outbox as InMemoryCostOutbox).files.has("r1")).toBe(false);
+    expect(w.charged()).toMatchObject({ state: "settled", chargedMicro: DUE.toString() });
+    await restarted.reclaim();
+    expect(w.ledger.deducted("u1")).toBe(DUE);
+    expect(w.ledger.balance("u1")).toEqual({ available: 1000n * C - DUE, reserved: 0n });
+  });
+
+  it("写库还没返回时进程退出:恢复记录已在,重启后补回完整费用(不是更早的部分用量)", async () => {
+    const w = await world();
+    let release!: () => void;
+    const stuck = new Promise<void>((_, reject) => {
+      release = () => reject(new Error("process gone"));
+    });
+    // 数据库一直不返回:第一个进程卡在写结果上
+    const first = w
+      .worker(1000, { saveResult: () => stuck })
+      .tick()
+      .catch(() => {});
+    await w.until(() => (w.outbox as InMemoryCostOutbox).files.has("r1"));
+    expect(w.charged()?.state).toBe("open");
+
+    const restarted = w.worker(10_000);
+    await restarted.reclaim();
+    expect((w.outbox as InMemoryCostOutbox).files.has("r1")).toBe(false);
+    expect(w.charged()).toMatchObject({
+      state: "settled",
+      incomplete: false,
+      estimatedMicro: DUE.toString(),
+      chargedMicro: DUE.toString(),
+    });
+    expect(w.ledger.balance("u1")).toEqual({ available: 1000n * C - DUE, reserved: 0n });
+
+    release(); // 让卡住的调用收尾,不留悬挂的定时器
+    await first;
+    expect(w.ledger.deducted("u1")).toBe(DUE);
+  });
+
+  it("数据库已写成功、删恢复记录前退出:重启后重放不重复扣款", async () => {
+    const w = await world();
+    // 第一个进程:费用已写进库,卡在删除恢复记录上(之后的结算没机会做)
+    const first = w.worker(1000, { removeOutbox: never }).tick();
+    await w.until(() => (w.outbox as InMemoryCostOutbox).files.has("r1"));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(w.charged()?.state).toBe("open");
+
+    const restarted = w.worker(10_000);
+    await restarted.reclaim();
+    await restarted.reclaim();
+    expect((w.outbox as InMemoryCostOutbox).files.has("r1")).toBe(false);
+    expect(w.charged()).toMatchObject({ state: "settled", chargedMicro: DUE.toString() });
+    expect(w.ledger.deducted("u1")).toBe(DUE);
+    expect(w.ledger.balance("u1")).toEqual({ available: 1000n * C - DUE, reserved: 0n });
+    void first;
+  });
+
+  it("同一场景用真实的本机文件恢复记录:写库失败 → 新进程从同一目录补写,文件删掉,扣款一次", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "owa-outbox-worker-"));
+    try {
+      const w = await world(() => new FsCostOutbox(path.join(dir, "cost-outbox")));
+      const fail = async () => {
+        throw new Error("db down");
+      };
+      await w
+        .worker(1000, { saveResult: fail, recordCost: fail })
+        .tick()
+        .catch(() => {});
+      expect(await w.hasFile()).toBe(true);
+      await w.worker(10_000).reclaim();
+      expect(await w.hasFile()).toBe(false);
+      expect(w.charged()).toMatchObject({ state: "settled", chargedMicro: DUE.toString() });
+      expect(w.ledger.deducted("u1")).toBe(DUE);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("引擎返回非零费用 → 增强费用(查价目版本)一直不返回、进程退出 → 重启补回完整费用,只扣一次", async () => {
+    const w = await world();
+    let release!: () => void;
+    const stuck = new Promise<never>((_, reject) => {
+      release = () => reject(new Error("process gone"));
+    });
+    const first = w
+      .worker(1000, { enrichCost: () => stuck })
+      .tick()
+      .catch(() => {});
+    // 增强还卡着:恢复记录里已经是原始费用(带计量与锁定价目引用)
+    await w.until(() => (w.outbox as InMemoryCostOutbox).files.has("r1"));
+    expect((w.outbox as InMemoryCostOutbox).files.get("r1")).toMatchObject({
+      input: 20000,
+      output: 1000,
+      metering: { complete: true },
+    });
+    expect(w.charged()?.state).toBe("open");
+
+    const restarted = w.worker(10_000);
+    await restarted.reclaim();
+    await restarted.reclaim();
+    expect((w.outbox as InMemoryCostOutbox).files.has("r1")).toBe(false);
+    expect(w.charged()).toMatchObject({
+      state: "settled",
+      incomplete: false,
+      estimatedMicro: DUE.toString(),
+      chargedMicro: DUE.toString(),
+    });
+    expect(w.ledger.deducted("u1")).toBe(DUE);
+
+    release();
+    await first;
+    expect(w.ledger.deducted("u1")).toBe(DUE);
+    expect(w.ledger.balance("u1")).toEqual({ available: 1000n * C - DUE, reserved: 0n });
+  });
+
+  it("增强完成后恢复记录被原子覆盖成增强版本", async () => {
+    const w = await world();
+    let seen: unknown;
+    const enrich = async (cost: unknown) => {
+      seen = structuredClone((w.outbox as InMemoryCostOutbox).files.get("r1"));
+      return { ...(cost as object), creditEstimate: { totalMicroCredits: DUE.toString() } };
+    };
+    // 删除卡住,好看到覆盖后的内容
+    void w.worker(1000, { enrichCost: enrich, removeOutbox: never }).tick();
+    await w.until(() => {
+      const f = (w.outbox as InMemoryCostOutbox).files.get("r1") as
+        | { creditEstimate?: unknown }
+        | undefined;
+      return !!f?.creditEstimate;
+    });
+    expect(seen).toMatchObject({ input: 20000 });
+    expect((seen as { creditEstimate?: unknown }).creditEstimate).toBeUndefined();
+  });
+
+  const withPricing = { ...(spent.cost as object), pricing };
+  const savingThen = (after: () => Promise<never>) => (outbox: CostOutbox) =>
+    ({
+      execute: async (cmd: { runId?: string }) => {
+        await outbox.save(cmd.runId ?? "", withPricing);
+        return after();
+      },
+    }) as unknown as RunOrchestrator;
+
+  it("编排已落恢复记录、之后卡住(等待计费检查或记会话锚点时数据库不返回)、进程退出 → 重启补回完整费用,扣一次", async () => {
+    const w = await world(undefined, savingThen(never));
+    void w.worker(1000).tick();
+    await w.until(() => (w.outbox as InMemoryCostOutbox).files.has("r1"));
+    const restarted = w.worker(10_000);
+    await restarted.reclaim();
+    await restarted.reclaim();
+    expect(w.charged()).toMatchObject({
+      state: "settled",
+      incomplete: false,
+      chargedMicro: DUE.toString(),
+    });
+    expect(w.ledger.deducted("u1")).toBe(DUE);
+  });
+
+  it("编排已落恢复记录、之后出错:带着费用收尾,按完整费用结算一次", async () => {
+    const w = await world(
+      undefined,
+      // 真实编排在引擎交回之后出错时,会把错误连同已交回的费用一起抛出(EngineRunFailed)
+      savingThen(async () => {
+        throw new EngineRunFailed(new Error("orchestrator crashed"), withPricing as never);
+      }),
+    );
+    await w.worker(1000).tick();
+    expect(w.charged()).toMatchObject({ state: "settled", chargedMicro: DUE.toString() });
+    await w.worker(1000).reclaim();
+    expect(w.charged()).toMatchObject({ state: "settled", chargedMicro: DUE.toString() });
+    await w.worker(1000).reclaim();
+    expect(w.ledger.deducted("u1")).toBe(DUE);
   });
 });

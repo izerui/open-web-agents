@@ -56,6 +56,11 @@ export interface OrchestratorDeps {
    * 编排在这一步之后中止引擎。不给则不做运行中计费检查。
    */
   chargeProgress?: (runId: string, tokens: UsageTokens) => Promise<"continue" | "stop">;
+  /**
+   * 引擎一交回费用就落恢复记录(见 run/ports.ts 的 CostOutbox),早于之后任何可能卡住的数据库调用
+   * (运行中计费检查的收尾、记录会话锚点)。失败只报告,不影响运行;worker 之后还会再存一次。
+   */
+  saveCostRecovery?: (runId: string, cost: NonNullable<RunResult["cost"]>) => Promise<void>;
   /** 传给 agent 子进程的基础环境。 */
   baseEnv?: Record<string, string>;
   /**
@@ -93,12 +98,17 @@ export interface OrchestratorDeps {
 }
 
 /**
- * 引擎已经启动、却没有正常返回结果(抛错)。此时模型可能已经被调用、花了钱,但用量不得而知 ——
- * 计费不能把它当成"没有用量"结清,只能暂记待核对。引擎启动前的失败不用它,那些确认没有调用模型。
+ * 引擎已经启动之后出的错:引擎本身抛错,或引擎交回结果后收尾时出错。模型已经被调用过 ——
+ * 带着费用的照常记账;没有费用的用量不得而知,计费只能暂记,不能当成零用量结清。
+ * 引擎启动前的失败不用它,那些确认没有调用模型。
  */
 export class EngineRunFailed extends BrandedError {
   static readonly brand = Symbol.for("owa.error.EngineRunFailed");
-  constructor(readonly cause: unknown) {
+  constructor(
+    readonly cause: unknown,
+    /** 引擎已经交回的费用(引擎返回之后、收尾时才出错的情况);没有为空 */
+    readonly cost?: RunResult["cost"],
+  ) {
     super(cause instanceof Error ? cause.message : String(cause));
     this.name = "EngineRunFailed";
   }
@@ -288,101 +298,126 @@ export class RunOrchestrator {
         ? await ChannelSteerInbox.open(this.deps.steerChannel, cmd.runId)
         : null;
 
-    let result: RunResult;
+    // 引擎一旦启动,之后出的任何错都带上"已调用引擎"与(若已交回)费用 ——
+    // worker 据此判断:有费用照常记账,没有费用按"用量未知"暂记,不会当成零用量结清
+    let engineCost: RunResult["cost"] | undefined;
     try {
+      let result: RunResult;
       try {
-        result = await this.deps.engine.run(
-          spec,
-          steer ? { ...ctx, steer } : ctx,
-          publish,
-          engineAbort.signal,
-        );
-      } catch (err) {
-        throw new EngineRunFailed(err);
-      }
-      await chargeChain;
-      if (stoppedForCredits) {
-        result = {
-          ...result,
-          status: "failed",
-          structured: undefined,
-          error: { kind: "insufficient_credits", message: "积分不足,已停止" },
-        };
-      }
-    } finally {
-      signal.removeEventListener("abort", onOuterAbort);
-      // 引擎正常会自己收尾;它中途抛出时这里兜底:还没交出去的追加消息记为未送达。
-      // 【收尾出错不能往外抛】引擎此时可能已经交回了结果与花费,从 finally 里抛出会把它们整个丢掉,
-      // 一次真实花过钱的运行就变成"没有用量"。追加消息的结局记不上,代价小得多
-      if (steer) {
         try {
-          for (const m of await steer.abandon()) {
-            publish({ kind: "steer", id: m.id, text: m.text, outcome: "dropped" });
+          result = await this.deps.engine.run(
+            spec,
+            steer ? { ...ctx, steer } : ctx,
+            publish,
+            engineAbort.signal,
+          );
+        } catch (err) {
+          throw new EngineRunFailed(err);
+        }
+        // 带上锁定的价目引用(结算按它计价)后立刻落恢复记录 —— 下面的等待都可能碰数据库
+        if (result.cost) {
+          const cost = { ...result.cost, pricing: binding.pricing };
+          result = { ...result, cost };
+          engineCost = cost;
+          if (cmd.runId && this.deps.saveCostRecovery) {
+            await this.deps.saveCostRecovery(cmd.runId, cost).catch((err) => {
+              console.warn(
+                `[owa] 费用恢复记录写入失败(run=${cmd.runId}),由 worker 再试:`,
+                err instanceof Error ? err.message : err,
+              );
+            });
           }
+        }
+        await chargeChain;
+        if (stoppedForCredits) {
+          result = {
+            ...result,
+            status: "failed",
+            structured: undefined,
+            error: { kind: "insufficient_credits", message: "积分不足,已停止" },
+          };
+        }
+      } finally {
+        signal.removeEventListener("abort", onOuterAbort);
+        // 引擎正常会自己收尾;它中途抛出时这里兜底:还没交出去的追加消息记为未送达。
+        // 【收尾出错不能往外抛】引擎此时可能已经交回了结果与花费,从 finally 里抛出会把它们整个丢掉,
+        // 一次真实花过钱的运行就变成"没有用量"。追加消息的结局记不上,代价小得多
+        if (steer) {
+          try {
+            for (const m of await steer.abandon()) {
+              publish({ kind: "steer", id: m.id, text: m.text, outcome: "dropped" });
+            }
+          } catch (err) {
+            console.warn(
+              `[owa] 运行收尾时处理追加消息失败(run=${cmd.runId}),结果照常保留:`,
+              err instanceof Error ? err.message : err,
+            );
+          }
+        }
+        // 最后一段攒着的文本必须冲出去,否则回答会少个尾巴
+        try {
+          coalescer.flush();
+        } catch {
+          // 事件投递是辅助能力,不影响结果
+        }
+      }
+
+      // 记下本次运行所属提供者与价目版本:积分按当时的价格算,不受之后调价影响
+      // (引擎返回时已带上;收尾时改写过结果的,这里再确保一次)
+      if (result.cost && !result.cost.pricing) {
+        result = { ...result, cost: { ...result.cost, pricing: binding.pricing } };
+      }
+
+      if (result.sessionId) {
+        // 会话的"当前位置"跟着最新一次运行走。
+        //
+        // 【这里绝不能裸 await】—— 引擎已经跑完、钱已经花了,结果就在局部变量里。
+        // 这一条 UPDATE 撞上瞬时 DB 错误就会让 execute 在发布 result 事件之前抛出:
+        // SSE 客户端永久挂起、webhook 不触发、worker 把这次成功记成 worker_error,
+        // 而真实结果不可恢复。记不住锚点只影响下一轮 resume,代价小得多。
+        try {
+          await this.deps.sessions.setSdkSessionId(cmd.sessionId, result.sessionId);
         } catch (err) {
           console.warn(
-            `[owa] 运行收尾时处理追加消息失败(run=${cmd.runId}),结果照常保留:`,
+            `[owa] 记录会话锚点失败(session=${cmd.sessionId}),下一轮将从零开始:`,
             err instanceof Error ? err.message : err,
           );
         }
+        // 同时记到本次运行上 —— 将来要从这一轮分叉时需要它
+        if (cmd.runId) {
+          await this.deps
+            .recordRunSession?.(cmd.runId, result.sessionId, result.transcriptRange)
+            .catch(() => {});
+        }
       }
-      // 最后一段攒着的文本必须冲出去,否则回答会少个尾巴
-      try {
-        coalescer.flush();
-      } catch {
-        // 事件投递是辅助能力,不影响结果
+
+      // 接口契约守门:声明了 outputSchema 就必须真的符合它,否则调用方会拿到"半对"的结果
+      if (result.status === "success" && spec.outputSchema) {
+        const verdict = validateStructured(spec.outputSchema, result.structured);
+        if (!verdict.ok) {
+          result = {
+            ...result,
+            status: "failed",
+            // 【必须置空】—— 展开 result 会把不合格的 structured 一起带过来,
+            // 于是 /result 接口同时返回 status:"failed" 与一份 structured。
+            // 按 ports.ts 对该字段的契约("仅当产出结构化输出时存在")去判
+            // `structured != null` 的调用方,会消费平台已经判定为非法的数据。
+            structured: undefined,
+            error: {
+              kind: "schema_mismatch",
+              message: `结构化结果不符 outputSchema: ${verdict.errors?.join("; ")}`,
+            },
+          };
+        }
       }
+
+      // 【这里不发布 result 事件,也不触发 webhook】—— 终态以数据库为准:
+      // worker 把终态写进库之后才通知(见 worker.ts 的 onFinalized)。
+      // 曾经在这里发,早于落库,且分不清本轮是不是已被取消或失租。
+      return result;
+    } catch (err) {
+      if (err instanceof EngineRunFailed) throw err;
+      throw new EngineRunFailed(err, engineCost);
     }
-
-    // 记下本次运行所属提供者与价目版本:积分按当时的价格算,不受之后调价影响
-    if (result.cost) result = { ...result, cost: { ...result.cost, pricing: binding.pricing } };
-
-    if (result.sessionId) {
-      // 会话的"当前位置"跟着最新一次运行走。
-      //
-      // 【这里绝不能裸 await】—— 引擎已经跑完、钱已经花了,结果就在局部变量里。
-      // 这一条 UPDATE 撞上瞬时 DB 错误就会让 execute 在发布 result 事件之前抛出:
-      // SSE 客户端永久挂起、webhook 不触发、worker 把这次成功记成 worker_error,
-      // 而真实结果不可恢复。记不住锚点只影响下一轮 resume,代价小得多。
-      try {
-        await this.deps.sessions.setSdkSessionId(cmd.sessionId, result.sessionId);
-      } catch (err) {
-        console.warn(
-          `[owa] 记录会话锚点失败(session=${cmd.sessionId}),下一轮将从零开始:`,
-          err instanceof Error ? err.message : err,
-        );
-      }
-      // 同时记到本次运行上 —— 将来要从这一轮分叉时需要它
-      if (cmd.runId) {
-        await this.deps
-          .recordRunSession?.(cmd.runId, result.sessionId, result.transcriptRange)
-          .catch(() => {});
-      }
-    }
-
-    // 接口契约守门:声明了 outputSchema 就必须真的符合它,否则调用方会拿到"半对"的结果
-    if (result.status === "success" && spec.outputSchema) {
-      const verdict = validateStructured(spec.outputSchema, result.structured);
-      if (!verdict.ok) {
-        result = {
-          ...result,
-          status: "failed",
-          // 【必须置空】—— 展开 result 会把不合格的 structured 一起带过来,
-          // 于是 /result 接口同时返回 status:"failed" 与一份 structured。
-          // 按 ports.ts 对该字段的契约("仅当产出结构化输出时存在")去判
-          // `structured != null` 的调用方,会消费平台已经判定为非法的数据。
-          structured: undefined,
-          error: {
-            kind: "schema_mismatch",
-            message: `结构化结果不符 outputSchema: ${verdict.errors?.join("; ")}`,
-          },
-        };
-      }
-    }
-
-    // 【这里不发布 result 事件,也不触发 webhook】—— 终态以数据库为准:
-    // worker 把终态写进库之后才通知(见 worker.ts 的 onFinalized)。
-    // 曾经在这里发,早于落库,且分不清本轮是不是已被取消或失租。
-    return result;
   }
 }
