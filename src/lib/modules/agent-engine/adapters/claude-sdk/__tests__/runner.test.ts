@@ -4,6 +4,7 @@ import {
   ClaudeSdkEngine,
   type QueryFn,
   combineResults,
+  floorMissingFields,
 } from "@/lib/modules/agent-engine/adapters/claude-sdk/runner";
 import type { RunResult } from "@/lib/modules/agent-engine/ports";
 import type { AgentEvent, AgentSpec, RunContext } from "@/lib/shared";
@@ -968,5 +969,66 @@ describe("combineResults:多条 result 的计量", () => {
       cacheReadTokens: 30,
       cacheWriteTokens: 0,
     });
+  });
+});
+
+describe("floorMissingFields", () => {
+  const meter = (
+    models: {
+      id: string;
+      input: number;
+      output: number;
+      missing?: ("outputTokens" | "inputTokens")[];
+    }[],
+    extra: Record<string, unknown> = {},
+  ) => ({
+    source: "sdk_model_usage" as const,
+    complete: false,
+    models: models.map((m) => ({
+      modelId: m.id,
+      inputTokens: m.input,
+      outputTokens: m.output,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      ...(m.missing ? { missingFields: m.missing } : {}),
+    })),
+    ...extra,
+  });
+  const result = (metering: ReturnType<typeof meter>): RunResult => ({
+    status: "failed",
+    cost: { input: 0, output: 0, metering },
+  });
+
+  it("只给身份明确、标为读不出的字段补下界;读得出的字段与未归属部分不动;缺失标记保留", () => {
+    const r = floorMissingFields(
+      result(
+        meter([{ id: "up-main", input: 10000, output: 0, missing: ["outputTokens"] }], {
+          unattributed: {
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+          },
+          unattributedMissing: ["outputTokens"],
+          missing: 2,
+        }),
+      ),
+      meter([{ id: "up-main", input: 3000, output: 200 }]),
+      meter([{ id: "up-main", input: 50000, output: 800 }]),
+    );
+    expect(r.cost?.metering?.models[0]).toMatchObject({
+      inputTokens: 10000, // 读得出:以 result 为准,不被观察值抬高
+      outputTokens: 1000, // 读不出:此前 200 + 观察到的 800
+      missingFields: ["outputTokens"],
+    });
+    expect(r.cost?.metering?.unattributed?.outputTokens).toBe(0);
+    expect(r.cost?.metering?.missing).toBe(2);
+  });
+
+  it("没有读不出的字段:原样返回", () => {
+    const r = result(meter([{ id: "up-main", input: 1, output: 1 }]));
+    expect(floorMissingFields(r, undefined, meter([{ id: "up-main", input: 9, output: 9 }]))).toBe(
+      r,
+    );
   });
 });

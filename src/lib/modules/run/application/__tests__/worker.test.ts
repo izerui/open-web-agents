@@ -1506,6 +1506,78 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
         }
       });
 
+      describe("result 里身份明确的模型部分字段读不出:用已观察的同模型用量保住已知下界", () => {
+        const resultWith = (modelUsage: Record<string, unknown>, subtype = "success") => ({
+          type: "result",
+          subtype,
+          result: "好的",
+          total_cost_usd: 0.02,
+          modelUsage,
+        });
+        const firstOnly = (modelUsage: Record<string, unknown>) =>
+          scenario(0, {
+            engine: sdk(() =>
+              (async function* () {
+                yield { type: "system", subtype: "init", session_id: "s" };
+                yield assistant("m1", 10000, 1000); // assistant 已明确报 1 万输入、1000 输出
+                yield resultWith(modelUsage);
+              })(),
+            ),
+            cancel: false,
+          });
+        // 1 万输入 23.1 + 1000 输出 11.55 = 34.65
+        const FIRST = 34_650_000n;
+
+        it("assistant 完整用量 → 第一条 result 输出读不出:输入与已知输出都收费,保持暂记;重复结算、清扫不多扣", async () => {
+          const { world, settleAgain, sweepAgain } = await firstOnly({
+            "up-main": usage(10000, "unreadable"),
+          });
+          expect(world.charge("r1")).toMatchObject({
+            state: "provisional",
+            incomplete: true,
+            estimatedMicro: FIRST.toString(),
+            chargedMicro: FIRST.toString(),
+          });
+          expect(await settleAgain()).toBe("none");
+          expect(await sweepAgain()).toBe(0);
+          expect(world.balance("u1")).toEqual({ available: 1000n * C - FIRST, reserved: 0n });
+        });
+
+        it("对照:第一条 result 完整 → 以它为准,不与观察到的用量重复累计", async () => {
+          const { world } = await firstOnly({ "up-main": usage(10000, 1000) });
+          expect(world.charge("r1")).toMatchObject({
+            state: "settled",
+            incomplete: false,
+            chargedMicro: FIRST.toString(),
+          });
+        });
+
+        it("追加轮:result₁ 完整 → 观察到增量 → result₂ 输出读不出:下界 = 此前累计 + 增量,不只取较大值", async () => {
+          const { world, settleAgain } = await scenario(0, {
+            engine: sdk(() =>
+              (async function* () {
+                yield { type: "system", subtype: "init", session_id: "s" };
+                yield assistant("m1", 10000, 1000);
+                yield resultWith({ "up-main": usage(10000, 1000) });
+                yield assistant("m2", 10000, 500); // 追加轮增量:1 万输入、500 输出
+                yield resultWith(
+                  { "up-main": usage(20000, "unreadable") },
+                  "error_during_execution",
+                );
+              })(),
+            ),
+            cancel: false,
+          });
+          // 2 万输入 46.2 + 输出下界 1000 + 500 = 1500 → 17.325,合计 63.525
+          expect(world.charge("r1")).toMatchObject({
+            state: "provisional",
+            chargedMicro: "63525000",
+          });
+          expect(await settleAgain()).toBe("none");
+          expect(world.balance("u1")).toEqual({ available: 1000n * C - 63_525_000n, reserved: 0n });
+        });
+      });
+
       it("部分归属已修正、仍有另一项未归属且缺字段:那 1000 输出只收一次,保持暂记;重复结算、清扫不多扣", async () => {
         const { world, settleAgain, sweepAgain } = await scenario(0, {
           engine: sdk(() =>

@@ -106,6 +106,38 @@ function combinedMetering(rs: RunResult[]): { metering?: ModelMetering } {
   };
 }
 
+/**
+ * result 里身份明确的模型有读不出的字段(missingFields)时,用已知下界保住已确认的用量:
+ * 下界 = 此前各条 result 合并出的同模型累计值 + 自上一条 result 以来按消息观察到的同模型增量
+ * (消息计量每到一条 result 就清空,两者不重叠)。读不出的字段取 max(result 里读得出的部分, 下界),
+ * 继续标为读不出;读得出的字段仍以 result 为准;未归属部分对不上身份,不跨身份补值。
+ */
+export function floorMissingFields(
+  r: RunResult,
+  before: ModelMetering | undefined,
+  observed: ModelMetering | undefined,
+): RunResult {
+  const metering = r.cost?.metering;
+  if (!r.cost || !metering?.models.some((m) => m.missingFields?.length)) return r;
+  const find = (list: ModelMetering["models"] | undefined, m: ModelMetering["models"][number]) =>
+    list?.find(
+      (u) =>
+        u.modelId === m.modelId ||
+        (m.reportedModelId !== undefined && u.modelId === m.reportedModelId),
+    );
+  const models = metering.models.map((m) => {
+    if (!m.missingFields?.length) return m;
+    const prior = find(before?.models, m);
+    const seen = find(observed?.models, m);
+    const out = { ...m };
+    for (const f of m.missingFields) {
+      out[f] = Math.max(m[f], (prior?.[f] ?? 0) + (seen?.[f] ?? 0));
+    }
+    return out;
+  });
+  return { ...r, cost: { ...r.cost, metering: { ...metering, models } } };
+}
+
 export interface EngineDeps {
   /** agent 子进程共享 HOME(工具缓存跨会话复用)。 */
   sharedHome: string;
@@ -268,6 +300,12 @@ export class ClaudeSdkEngine implements EnginePort {
               };
             }
           }
+          // 身份明确的模型有读不出的字段:清空消息计量前用已知下界保住(此前合并值 + 观察到的增量)
+          r = floorMissingFields(
+            r,
+            combineResults(results)?.cost?.metering,
+            unsettled.cost()?.metering,
+          );
           results.push(r);
           // 到此为止的用量都已记进结果
           unsettled.settled();
