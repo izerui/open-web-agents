@@ -1348,6 +1348,64 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
       });
     });
 
+    describe("result 的 modelUsage 没有可用计数、usage 有(没有先前的消息用量可兜底)", () => {
+      const counts = (input: number, extra: Record<string, unknown> = {}) => ({
+        inputTokens: input,
+        outputTokens: 0,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 0,
+        ...extra,
+      });
+      const onlyResult = (modelUsage: Record<string, unknown>, input: number) =>
+        scenario(0, {
+          engine: sdk(() =>
+            (async function* () {
+              yield { type: "system", subtype: "init", session_id: "s" };
+              yield {
+                type: "result",
+                subtype: "success",
+                result: "好的",
+                total_cost_usd: 0.01,
+                usage: { input_tokens: input, output_tokens: 0 },
+                modelUsage,
+              };
+            })(),
+          ),
+          cancel: false,
+        });
+
+      it("modelUsage 全零、usage 报 1 万输入:按主模型价收费一次;重复结算、清扫不多扣", async () => {
+        const { world, settleAgain, sweepAgain } = await onlyResult(
+          { "up-main": counts(0) },
+          10000,
+        );
+        expect(world.charge("r1")).toMatchObject({
+          state: "settled",
+          estimatedMicro: SECOND.toString(),
+          chargedMicro: SECOND.toString(),
+        });
+        expect(await settleAgain()).toBe("none");
+        expect(await sweepAgain()).toBe(0);
+        expect(world.balance("u1")).toEqual({ available: 1000n * C - SECOND, reserved: 0n });
+      });
+
+      it("modelUsage 全零且有读不出的计数、usage 报 1 万输入:照收,带着计量缺失保持暂记", async () => {
+        const { world } = await onlyResult({ "up-main": counts(0, { outputTokens: -1 }) }, 10000);
+        expect(world.charge("r1")).toMatchObject({
+          state: "provisional",
+          chargedMicro: SECOND.toString(),
+        });
+      });
+
+      it("对照:modelUsage 有效非零时以它为准,不叠加 usage", async () => {
+        const { world } = await onlyResult({ "up-main": counts(10000) }, 30000);
+        expect(world.charge("r1")).toMatchObject({
+          state: "settled",
+          chargedMicro: SECOND.toString(),
+        });
+      });
+    });
+
     describe("计数明确给出却读不出", () => {
       const resultOnly = (usage: Record<string, unknown>) =>
         scenario(0, {

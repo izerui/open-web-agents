@@ -78,8 +78,9 @@ function meteringOf(m: Record<string, unknown>): { metering?: ModelMetering } {
   };
   if (m.modelUsage !== undefined) {
     const metering = extractModelUsage(m.modelUsage);
-    // modelUsage 里一点能用的计数都没有(空的,或各项都读不出):退回用 result.usage 的四项
-    if (metering.models.length === 0 && !metering.unattributed && (any || missing > 0)) {
+    // modelUsage 里没有可用的非零计数(空的、全是 0、各项都读不出):退回用 result.usage 的四项,
+    // modelUsage 记下的计量缺失一并保留;有可用非零计数时以 modelUsage 为准,不叠加 usage
+    if (!hasMeteringBasis(metering) && (any || missing > 0)) {
       return { metering: fromUsage(metering) };
     }
     return { metering };

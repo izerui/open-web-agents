@@ -153,6 +153,30 @@ describe("extractRunResult", () => {
       }
     });
 
+    it("modelUsage 只有全零明细:退回 usage 的四项,modelUsage 的缺失一并保留", () => {
+      const m = res({
+        modelUsage: {
+          "up-main": {
+            inputTokens: 0,
+            outputTokens: -1,
+            cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 0,
+          },
+        },
+      });
+      expect(m).toMatchObject({
+        complete: false,
+        unattributed: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 10000,
+          cacheWriteTokens: 300,
+        },
+        missing: 1,
+        fromResultUsage: true,
+      });
+    });
+
     it("一点用量都没有:不造计量", () => {
       expect(
         extractRunResult(
