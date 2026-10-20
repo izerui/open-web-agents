@@ -839,7 +839,7 @@ if (!url) {
         const query = new MysqlRunChargeQuery(db);
         const shown = async () =>
           scope === "account"
-            ? (await query.monthUsageByAccount(since)).get(acct)
+            ? (await query.monthUsageByAccount(since, acct)).get(acct)
             : (await query.monthUsageByKey(acct, since)).get(keyId ?? "");
         const code = scope === "account" ? "account_limit_exceeded" : "key_limit_exceeded";
 

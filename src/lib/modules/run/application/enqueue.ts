@@ -7,7 +7,7 @@
 import type { AgentReleases } from "@/lib/modules/agent/application/releases";
 import type { AgentConfig } from "@/lib/modules/agent/domain/config";
 import type { AgentRepo } from "@/lib/modules/agent/ports";
-import type { AdmitRequest } from "@/lib/modules/billing/application/run-charging";
+import { type AdmitRequest, ChargeRejected } from "@/lib/modules/billing/application/run-charging";
 import { checkPromptSize } from "@/lib/modules/run/domain/limits";
 import {
   DuplicateIdempotencyKey,
@@ -152,7 +152,9 @@ export class RunEnqueuer {
 
     // 花费记在会话的计费账号上;API Key 发起的会话同时计入那把 Key 的月度额度
     const accountId = session.billingUserId ?? session.ownerId;
-    if (!this.deps.charged || !accountId) return this.deps.runs.create(newRun(null));
+    if (!this.deps.charged) return this.deps.runs.create(newRun(null));
+    // 没有可记账的账号就不受理 —— 否则这类会话里的运行全都不扣费
+    if (!accountId) throw new ChargeRejected("billing_account_missing");
     return this.deps.charged(async ({ runs, lockAccount, admit }) => {
       // 同键并发:两个请求都过了入口的重放查询。后到的在账户锁上等先到的提交,
       // 拿到锁后先重查幂等键 —— 否则它会先撞上"额度只够一次"被拒(402),

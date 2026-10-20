@@ -24,7 +24,7 @@ interface Account {
   disabled: boolean;
   createdAt: number;
   agentCount: number;
-  /** 本月已用(微积分;口径同当前计费模式) */
+  /** 本月已用(微积分;实扣 + 欠额 + 在途冻结) */
   monthUsedMicroCredits: string;
   monthlyLimitMicroCredits: string | null;
   /** 升级遗留的美元上限(微美元),待按积分重新设置 */
@@ -261,7 +261,7 @@ export function AccountsView() {
                   {a.legacyLimitMicroUsd !== null && (
                     <span data-testid="legacy-limit" className="font-medium text-warning">
                       旧上限 ${(a.legacyLimitMicroUsd / 1_000_000).toFixed(2)}{" "}
-                      待按积分重新设置(或留空保存为不限);设置前正式扣费下不能发起运行
+                      待按积分重新设置(或留空保存为不限);设置前不能发起运行
                     </span>
                   )}
                 </div>

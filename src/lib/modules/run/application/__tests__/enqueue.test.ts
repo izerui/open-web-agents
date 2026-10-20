@@ -52,6 +52,33 @@ describe("RunEnqueuer", () => {
     expect(d?.agentVersion).toBeUndefined();
   });
 
+  it("开了计费、会话没有可记账的账号(历史无归属会话):拒绝受理,不免费运行", async () => {
+    const { runs, sessions, agents, versions } = await setup();
+    const charged = { calls: 0 };
+    const enqueuer = new RunEnqueuer({
+      runs,
+      sessions,
+      agents,
+      releases: new AgentReleases(agents, versions),
+      charged: async () => {
+        charged.calls++;
+        throw new Error("不该走到计费事务");
+      },
+    });
+    await expect(
+      enqueuer.enqueue({ runId: "r-free", sessionId: "s1", prompt: "hi" }),
+    ).rejects.toMatchObject({ code: "billing_account_missing" });
+    expect(await runs.getPayload("r-free")).toBeNull();
+    expect(charged.calls).toBe(0);
+
+    // 有计费账号的会话照常走计费事务
+    await sessions.create({ id: "owned", agentId: "a1", workspaceDir: "/w", ownerId: "u1" });
+    await expect(
+      enqueuer.enqueue({ runId: "r-owned", sessionId: "owned", prompt: "hi" }),
+    ).rejects.toThrow("不该走到计费事务");
+    expect(charged.calls).toBe(1);
+  });
+
   it("会话锁定的版本不存在:按目标缺失拒绝,而不是悄悄改跑草稿", async () => {
     const { sessions, enqueuer } = await setup();
     await sessions.create({ id: "ghost", agentId: "a1", workspaceDir: "/w", agentVersion: 9 });

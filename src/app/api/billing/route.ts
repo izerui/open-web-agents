@@ -26,7 +26,7 @@ export async function GET(req: Request) {
     const [balance, ledger, used] = await Promise.all([
       billing.balance(account.id),
       billing.ledger(account.id, { limit, cursor: query.get("cursor") ?? undefined }),
-      runCharges.monthUsageByAccount(since),
+      runCharges.monthUsageByAccount(since, account.id),
     ]);
     return Response.json(
       {

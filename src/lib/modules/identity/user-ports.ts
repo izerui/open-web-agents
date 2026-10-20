@@ -20,7 +20,7 @@ export interface User {
   monthlyLimitMicroCredits?: string;
   /**
    * 升级前配置的美元月度上限(微美元),只在还没按积分重新设置时存在。
-   * 不擅自换算成积分:正式扣费模式下这类账号不受理运行,直到管理员按积分设置上限或明确设为不限。
+   * 不擅自换算成积分:这类账号不受理运行,直到管理员按积分设置上限或明确设为不限。
    */
   legacyMonthlyLimitMicroUsd?: number;
   createdAt: number;

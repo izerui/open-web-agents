@@ -198,7 +198,7 @@ export function ModelDialog({ providerId, kind, model, onClose, onSaved }: Props
                 onChange={(e) => setReserve(e.target.value)}
               />
               <span className="text-xs text-muted-foreground">
-                正式扣费时,每次运行发起先冻结这么多,用到八成自动追加;结束按实际用量扣除。
+                每次运行发起先冻结这么多,用到八成自动追加;结束按实际用量扣除。
               </span>
             </label>
           )}

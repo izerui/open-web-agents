@@ -13,7 +13,7 @@ const dayMs = (d: string) => Date.parse(`${d}T00:00:00Z`);
 
 /**
  * 对账报表(只读):?from=YYYY-MM-DD&to=YYYY-MM-DD(含两端,最多 31 天)
- * 按提供者、日期汇总用量、成本估算(元)、预计消耗与实际扣除;缺失数据按类别只计条数。
+ * 按提供者、日期汇总用量、成本估算(元)、应扣与实际扣除;缺失数据按类别只计条数。
  */
 export async function GET(req: Request) {
   try {

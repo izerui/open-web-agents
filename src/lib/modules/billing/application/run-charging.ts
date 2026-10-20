@@ -190,14 +190,14 @@ export class RunCharging {
     return this.deps.transaction(async (store) => {
       const c = await store.get(runId, true);
       if (!c || c.state !== "open") return true;
+      // 旧数据(已下线的试算)不再追加,照常放行
+      if (c.mode === "trial") return true;
       const run = await store.runForSettle(runId);
       const mainId = run?.pricing?.binding?.main;
       const target = mainId
         ? ((await this.deps.reserveTargetOf(mainId)) ?? DEFAULT_RESERVE_MICRO)
         : DEFAULT_RESERVE_MICRO;
       const wallet = await store.lockAccount(c.accountId);
-      // 旧数据(已下线的试算)不再追加,照常放行
-      if (c.mode === "trial") return true;
       const decision = await this.decide(store, {
         accountId: c.accountId,
         apiKeyId: c.apiKeyId,

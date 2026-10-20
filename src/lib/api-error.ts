@@ -14,7 +14,7 @@ export type ApiErrorCode =
   | "invalid_request"
   | "input_invalid"
   | "prompt_too_large"
-  /** 积分可用余额不足(正式计费模式) */
+  /** 积分可用余额不足 */
   | "insufficient_balance"
   /** 账号本月积分上限已用完 */
   | "account_limit_exceeded"
@@ -22,6 +22,8 @@ export type ApiErrorCode =
   | "key_limit_exceeded"
   /** 账号的旧美元月度上限待管理员按积分重新设置 */
   | "account_limit_pending"
+  /** 历史会话没有可记账的账号 */
+  | "billing_account_missing"
   | "rate_limited"
   | "idempotency_key_invalid"
   | "idempotency_conflict"

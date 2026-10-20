@@ -103,7 +103,7 @@ export interface RunChargeStore {
 /** 在一个事务里使用计费存储 */
 export type ChargeTransaction = <T>(fn: (store: RunChargeStore) => Promise<T>) => Promise<T>;
 
-/** 积分页里的一次运行:冻结、预计消耗与实际扣除 */
+/** 积分页里的一次运行:冻结、应扣与实际扣除 */
 export interface RunChargeItem {
   runId: string;
   state: ChargeState;
@@ -151,7 +151,8 @@ export interface RunChargeQuery {
     opts: { limit: number; cursor?: string },
   ): Promise<{ items: RunChargeItem[]; nextCursor?: string }>;
   /** 本月各账号用量(口径同受理时的额度检查) */
-  monthUsageByAccount(since: number): Promise<Map<string, bigint>>;
+  /** 传 accountId 只算这一个账号(用户积分页),不传算全部(账号管理) */
+  monthUsageByAccount(since: number, accountId?: string): Promise<Map<string, bigint>>;
   /** 本月某账号下各 Key 的用量 */
   monthUsageByKey(accountId: string, since: number): Promise<Map<string, bigint>>;
   /** 所有账号的暂记记录(按受理时间倒序),可按原因筛选;只读 */

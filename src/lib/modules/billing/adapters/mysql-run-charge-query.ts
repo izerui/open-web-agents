@@ -213,11 +213,11 @@ export class MysqlRunChargeQuery implements RunChargeQuery {
     return out;
   }
 
-  async monthUsageByAccount(since: number): Promise<Map<string, bigint>> {
+  async monthUsageByAccount(since: number, accountId?: string): Promise<Map<string, bigint>> {
     const rows = await this.db
       .select({ id: runCharges.accountId, used: usedOf() })
       .from(runCharges)
-      .where(inMonth(since))
+      .where(and(inMonth(since), accountId ? eq(runCharges.accountId, accountId) : undefined))
       .groupBy(runCharges.accountId);
     return new Map(rows.map((r) => [r.id, big(r.used)]));
   }

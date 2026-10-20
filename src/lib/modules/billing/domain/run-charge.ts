@@ -8,7 +8,9 @@ export type HoldRejection =
   | "account_limit_exceeded"
   | "key_limit_exceeded"
   /** 账号配置过旧的美元月度上限,还没按积分重新设置(升级遗留,待管理员处理) */
-  | "account_limit_pending";
+  | "account_limit_pending"
+  /** 会话没有可记账的账号(早期单用户时期留下的无归属会话):不能免费运行 */
+  | "billing_account_missing";
 
 /** 可用余额低于它就不再受理(20 积分) */
 export const MIN_BALANCE_MICRO = 20_000_000n;
@@ -86,6 +88,7 @@ export const REJECTION_MESSAGE: Record<HoldRejection, string> = {
   account_limit_exceeded: "已达到账号本月积分上限",
   key_limit_exceeded: "已达到这把 API Key 本月积分上限",
   account_limit_pending: "账号的月度上限需要管理员按积分重新设置,设置前不能发起运行",
+  billing_account_missing: "这个历史会话没有可记账的账号,请新建会话后再运行",
 };
 
 export interface HoldSlice {

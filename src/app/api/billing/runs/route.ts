@@ -4,7 +4,7 @@ import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** 账号的运行计费明细:每次运行受理时的模式、冻结、预计消耗与实际扣除。管理员可查任意账号。 */
+/** 账号的运行计费明细:每次运行的冻结、应扣与实际扣除。管理员可查任意账号。 */
 export async function GET(req: Request) {
   try {
     const { auth, users, runCharges } = getContainer();
