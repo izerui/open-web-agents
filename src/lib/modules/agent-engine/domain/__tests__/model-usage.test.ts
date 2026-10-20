@@ -125,14 +125,7 @@ describe("SDK model metering", () => {
         cacheWriteTokens: 40,
         missingFields: ["outputTokens"],
       },
-      // 新快照里没出现的模型:保留此前的值
-      {
-        modelId: "sub",
-        inputTokens: 5,
-        outputTokens: 20,
-        cacheReadTokens: 300,
-        cacheWriteTokens: 40,
-      },
+      // 新快照没提到、也没有缺失的旧模型(sub):不沿用数量 —— 可能已含在新明细里
     ]);
     expect(m.missing).toBe(1);
     expect(m.complete).toBe(false);
@@ -147,14 +140,16 @@ describe("SDK model metering", () => {
     expect(fixed.missing).toBeUndefined();
   });
 
-  it("合并累计快照:新快照没提到的模型连同缺失标记一起沿用;后来明确补齐才解除", () => {
+  it("合并累计快照:新快照没提到的模型不沿用数量,缺失标记照样沿用;后来明确补齐才解除", () => {
     const prev = extractModelUsage({
       "up-main": tokens(10000),
       "up-sub": { ...tokens(5000), outputTokens: "x" },
     });
     const onlyMain = mergeCumulative(prev, extractModelUsage({ "up-main": tokens(20000) }));
+    // 数量不沿用(可能已含在新明细里),读不出的标记照样沿用
     expect(onlyMain.models.find((m) => m.modelId === "up-sub")).toMatchObject({
-      inputTokens: 5000,
+      inputTokens: 0,
+      outputTokens: 0,
       missingFields: ["outputTokens"],
     });
     expect(onlyMain.missing).toBe(1);
@@ -181,6 +176,17 @@ describe("SDK model metering", () => {
       extractModelUsage({ "up-main": tokens(2) }),
     );
     expect(anonymous.missing).toBe(1);
+  });
+
+  it("合并累计快照:新快照没提到未归属部分(身份已修正)时不沿用旧数量,不重复计", () => {
+    const long = "x".repeat(201);
+    const m = mergeCumulative(
+      extractModelUsage({ [long]: tokens(10000) }),
+      extractModelUsage({ "up-main": tokens(20000) }),
+    );
+    expect(m.unattributed).toBeUndefined();
+    expect(m.models.map((u) => [u.modelId, u.inputTokens])).toEqual([["up-main", 20000]]);
+    expect(m.complete).toBe(true);
   });
 
   it("合并累计快照:未归属用量同样按字段合并", () => {

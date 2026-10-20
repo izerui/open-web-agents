@@ -1456,6 +1456,56 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
         expect(world.balance("u1")).toEqual({ available: 1000n * C - DUE, reserved: 0n });
       });
 
+      describe("身份在后续累计明细里被修正:旧数量不再另加", () => {
+        const corrected = (firstModelUsage: Record<string, unknown>) =>
+          scenario(0, {
+            engine: sdk(() =>
+              (async function* () {
+                yield { type: "system", subtype: "init", session_id: "s" };
+                yield {
+                  type: "result",
+                  subtype: "success",
+                  result: "第一轮",
+                  total_cost_usd: 0.02,
+                  usage: { input_tokens: 10000, output_tokens: 0 },
+                  modelUsage: firstModelUsage,
+                };
+                yield assistant("m2", 10000, 0); // 追加轮
+                yield {
+                  type: "result",
+                  subtype: "success",
+                  result: "第二轮",
+                  total_cost_usd: 0.04,
+                  usage: { input_tokens: 10000, output_tokens: 0 },
+                  modelUsage: { "up-main": usage(20000, 0) }, // 完整累计:已含第一轮
+                };
+              })(),
+            ),
+            cancel: false,
+          });
+
+        for (const [label, first] of [
+          ["非法模型名 1 万(未归属)", { ["x".repeat(201)]: usage(10000, 0) }],
+          ["旧模型名 1 万", { "renamed-model": usage(10000, 0) }],
+        ] as const) {
+          it(`${label} → 修正身份后的完整累计 2 万:只收 2 万,结清;重复结算、清扫不多扣`, async () => {
+            const { world, settleAgain, sweepAgain } = await corrected(first);
+            expect(world.charge("r1")).toMatchObject({
+              state: "settled",
+              incomplete: false,
+              estimatedMicro: "46200000",
+              chargedMicro: "46200000",
+            });
+            expect(await settleAgain()).toBe("none");
+            expect(await sweepAgain()).toBe(0);
+            expect(world.balance("u1")).toEqual({
+              available: 1000n * C - 46_200_000n,
+              reserved: 0n,
+            });
+          });
+        }
+      });
+
       describe("新快照没提到的模型:缺失标记一并沿用", () => {
         const twoRounds = (second: Record<string, unknown>) =>
           scenario(0, {
@@ -1486,19 +1536,19 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
             cancel: false,
           });
 
-        it("子模型输出缺失 → 后续快照只含主模型:子模型的已知输入照扣,仍保持暂记;重复结算、清扫不多扣", async () => {
+        it("子模型输出缺失 → 后续快照只含主模型:按后续累计明细收费(子模型旧数量可能已含在内,不另加),仍保持暂记;重复结算、清扫不多扣", async () => {
           const { world, settleAgain, sweepAgain } = await twoRounds({
             "up-main": usage(20000, 0),
           });
-          // 主模型 2 万 + 子模型 1 万输入(子模型认不出,按主模型价)= 3 万输入 = 69.3
+          // 主模型累计 2 万输入 = 46.2;子模型的缺失标记沿用,保持暂记
           expect(world.charge("r1")).toMatchObject({
             state: "provisional",
             incomplete: true,
-            chargedMicro: "69300000",
+            chargedMicro: "46200000",
           });
           expect(await settleAgain()).toBe("none");
           expect(await sweepAgain()).toBe(0);
-          expect(world.balance("u1")).toEqual({ available: 1000n * C - 69_300_000n, reserved: 0n });
+          expect(world.balance("u1")).toEqual({ available: 1000n * C - 46_200_000n, reserved: 0n });
         });
 
         it("对照:后续快照明确补齐子模型输出 → 结清", async () => {

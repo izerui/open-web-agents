@@ -200,12 +200,19 @@ export function extractModelUsage(raw: unknown): ModelMetering {
 }
 
 /**
- * 按字段合并两份累计快照(modelUsage 是整个 query 的累计值,不能相加):
- * - 新快照里读得出的字段:采用新值;
- * - 新快照里读不出的字段:保留此前已确认的值(累计值只增不减,取两者较大),继续标为读不出;
- * - 新快照里没出现的模型 / 未归属用量:保留此前的值,连同它们读不出的标记 ——"没再提到"不等于"已经补齐";
- * - 此前认不出身份、整项读不出的(无法被后来的快照明确补齐)同样沿用其缺失。
- * 计量缺失的项数 = 新快照自己的 + 沿用下来的;只有后来的快照明确给出了对应字段的合法值才算解除。
+ * 按字段合并两份累计快照(modelUsage 是整个 query 的累计值,不能相加)。收费数量与缺失状态分开处理:
+ *
+ * 数量 —— 只取新快照(它覆盖到此为止的全部):
+ * - 同一身份(同一模型 / 未归属部分)读得出的字段:采用新值;
+ * - 同一身份读不出的字段:保留此前已确认的值(累计值只增不减,取两者较大,不相加);
+ * - 新快照没提到的模型 / 未归属用量:不沿用旧数量 —— 后来的明细可能已把它归到别的模型
+ *   (例如修正了模型名),再加上旧数量就重复收费。
+ *
+ * 缺失状态 —— "没再提到"不等于"已经补齐":
+ * - 新快照没提到、此前有读不出字段的模型 / 未归属部分:数量清零,读不出的标记照样沿用;
+ * - 此前认不出身份、整项读不出的(无法被后来的快照明确补齐)同样沿用其缺失;
+ * - 只有后来的快照对同一身份明确给出对应字段的合法值才解除。
+ * 计量缺失的项数 = 新快照自己的 + 沿用下来的。
  */
 export function mergeCumulative(prev: ModelMetering, next: ModelMetering): ModelMetering {
   const pick = (
@@ -223,22 +230,24 @@ export function mergeCumulative(prev: ModelMetering, next: ModelMetering): Model
     prevById.delete(m.modelId);
     return { ...m, ...merged };
   });
-  // 新快照没提到的模型:沿用此前的值与读不出的标记
+  // 新快照没提到的模型:不沿用数量(可能已含在新明细里);有读不出字段的,留一条数量为 0 的记录承载缺失标记
   let carried = 0;
   for (const m of prevById.values()) {
-    models.push({ ...m });
-    carried += m.missingFields?.length ?? 0;
+    if (!m.missingFields?.length) continue;
+    models.push({ ...m, ...ZERO, missingFields: m.missingFields });
+    carried += m.missingFields.length;
   }
 
   const prevUna = unattributedOf(prev);
   const nextUna = unattributedOf(next);
   const nextMentionsUna = nextUna !== null || (next.unattributedMissing?.length ?? 0) > 0;
+  // 未归属部分新快照没提到:不沿用旧数量(可能已归到新明细的某个模型)
   const unattributed = nextUna
     ? pick(prevUna ?? undefined, nextUna, next.unattributedMissing)
     : next.unattributedMissing?.length
       ? pick(prevUna ?? undefined, ZERO, next.unattributedMissing)
-      : (prevUna ?? undefined);
-  // 未归属部分新快照没提到:沿用此前读不出的标记
+      : undefined;
+  // 未归属部分新快照没提到:读不出的标记照样沿用
   const unattributedMissing = nextMentionsUna ? next.unattributedMissing : prev.unattributedMissing;
   if (!nextMentionsUna) carried += prev.unattributedMissing?.length ?? 0;
 
