@@ -48,6 +48,19 @@ function readResultUsage(usage: unknown): { tokens: TokenBreakdown; missing: num
   return { tokens, missing };
 }
 
+/**
+ * 这条 result 有没有计量依据:带了 modelUsage,或 usage 给出了非零计数,或 usage 有读不出的计数
+ * (已记为计量缺失)。没有 usage、或 usage 全是 0 都不算 —— error result 常带全 0 的 usage,
+ * 它不能证明"没有用量",调用方不能拿它覆盖之前按消息观察到的非零用量。
+ */
+export function hasMeteringBasis(resultMsg: unknown): boolean {
+  const m = (resultMsg && typeof resultMsg === "object" ? resultMsg : {}) as Record<
+    string,
+    unknown
+  >;
+  return m.modelUsage !== undefined || meteringOf(m).metering !== undefined;
+}
+
 function meteringOf(m: Record<string, unknown>): { metering?: ModelMetering } {
   const { tokens, missing } = readResultUsage(m.usage);
   const any =

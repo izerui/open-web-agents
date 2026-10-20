@@ -3,9 +3,13 @@
 // 可测性设计:类本身依赖【注入的 queryFn】,不 import SDK —— 单测喂录制的消息序列即可回放,
 // 不碰网络、不装模型。真实 SDK 的绑定在 default-engine.ts 的工厂里(唯一 import SDK 的地方)。
 
-import { extractRunResult } from "@/lib/modules/agent-engine/domain/extract-result";
+import {
+  extractRunResult,
+  hasMeteringBasis,
+} from "@/lib/modules/agent-engine/domain/extract-result";
 import {
   type ModelMetering,
+  addModels,
   addUnattributed,
   missingOf,
   unattributedOf,
@@ -60,8 +64,9 @@ export function combineResults(rs: RunResult[]): RunResult | undefined {
 
 /**
  * modelUsage 是累计快照:最后一条从 modelUsage 读出用量的 result 已覆盖它之前的全部,沿用它而不累加
- * (真实 SDK 探针见 scripts/sdk-probe/model-metering.mjs)。它之后的 result 只有自己的 usage
- * (fromResultUsage),只算本条,未归属用量与计量缺失逐条相加;一条这样的都没有就全部相加。
+ * (真实 SDK 探针见 scripts/sdk-probe/model-metering.mjs)。它之后的 result 只有自己这一条的用量
+ * (fromResultUsage:取自它的 usage,或它没带计量时按消息观察到的),按模型的明细、未归属用量与
+ * 计量缺失逐条相加;一条累计快照都没有就全部相加。
  */
 function combinedMetering(rs: RunResult[]): { metering?: ModelMetering } {
   let k = -1;
@@ -78,19 +83,21 @@ function combinedMetering(rs: RunResult[]): { metering?: ModelMetering } {
   const base = k >= 0 ? rs[k]?.cost?.metering : undefined;
   // 最后一条就是 modelUsage 的累计快照:原样沿用(与之前一致)
   if (base && k === rs.length - 1) return { metering: base };
+  let models = base?.models ?? [];
   let unattributed = unattributedOf(base) ?? undefined;
   let missing = missingOf(base);
   for (const r of rs.slice(k + 1)) {
+    models = addModels(models, r.cost?.metering?.models ?? []);
     unattributed = addUnattributed(unattributed, unattributedOf(r.cost?.metering));
     missing += missingOf(r.cost?.metering);
   }
   // 都没有明细也没有用量:保留最后一条原有的计量(展开 last.cost 时已带上)
-  if (!base && !unattributed && missing === 0) return {};
+  if (models.length === 0 && !unattributed && missing === 0) return {};
   return {
     metering: {
       source: "sdk_model_usage",
       complete: false,
-      models: base?.models ?? [],
+      models,
       ...(unattributed ? { unattributed } : {}),
       ...(missing > 0 ? { missing } : {}),
     },
@@ -234,8 +241,27 @@ export class ClaudeSdkEngine implements EnginePort {
         if (m?.type === "system" && m.subtype === "init") {
           sessionId = m.session_id ?? sessionId;
         } else if (m?.type === "result") {
-          results.push(extractRunResult(msg, { hasSchema }));
-          // result 的 modelUsage 是累计快照:到此为止的用量都已结算
+          let r = extractRunResult(msg, { hasSchema });
+          // 结果没带任何计量依据(没有 usage 也没有 modelUsage,常见于 error result):它的 0 不代表
+          // 没花钱。清空之前按消息观察到的用量前,把它们记进这条结果(只算这一条、不完整);
+          // 带了计量的照旧由 result 覆盖(modelUsage 是累计快照),不重复计
+          if (!hasMeteringBasis(msg)) {
+            const observed = unsettled.cost();
+            if (observed?.metering) {
+              r = {
+                ...r,
+                cost: {
+                  ...(r.cost ?? {}),
+                  input: observed.input,
+                  output: observed.output,
+                  partial: true,
+                  metering: { ...observed.metering, complete: false, fromResultUsage: true },
+                },
+              };
+            }
+          }
+          results.push(r);
+          // 到此为止的用量都已记进结果
           unsettled.settled();
           // 不再受理新的追加;已受理的照样交给模型(可能因此再答一轮、再来一条 result)
           if (steer) void steer.close();

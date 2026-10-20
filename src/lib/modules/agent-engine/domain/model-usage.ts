@@ -30,8 +30,8 @@ export interface ModelMetering {
    */
   missing?: number;
   /**
-   * 未归属用量取自这一条 result 自己的 usage(只算这一条),不是 modelUsage 的累计快照。
-   * 一轮里合并多条 result 时据此决定逐条相加还是沿用最后一份。
+   * 这份计量只算这一条 result 自己的用量(取自它的 usage,或它没带计量时此前按消息观察到的用量),
+   * 不是 modelUsage 的累计快照。一轮里合并多条 result 时据此决定逐条相加还是沿用最后一份。
    */
   fromResultUsage?: boolean;
 }
@@ -66,6 +66,27 @@ export function unattributedOf(m: Pick<ModelMetering, "unattributed"> | null | u
     cacheWriteTokens: nonNeg(u.cacheWriteTokens),
   };
   return t.inputTokens || t.outputTokens || t.cacheReadTokens || t.cacheWriteTokens ? t : null;
+}
+
+/** 两份按模型的明细按模型相加(不改动入参) */
+export function addModels(a: ModelTokenUsage[], b: ModelTokenUsage[]): ModelTokenUsage[] {
+  const out = new Map<string, ModelTokenUsage>();
+  for (const m of [...a, ...b]) {
+    const cur = out.get(m.modelId);
+    out.set(
+      m.modelId,
+      cur
+        ? {
+            ...cur,
+            inputTokens: cur.inputTokens + m.inputTokens,
+            outputTokens: cur.outputTokens + m.outputTokens,
+            cacheReadTokens: cur.cacheReadTokens + m.cacheReadTokens,
+            cacheWriteTokens: cur.cacheWriteTokens + m.cacheWriteTokens,
+          }
+        : { ...m },
+    );
+  }
+  return [...out.values()];
 }
 
 /** 两份未归属用量相加;都没有返回 undefined */

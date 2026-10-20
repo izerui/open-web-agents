@@ -630,6 +630,84 @@ describe("ClaudeSdkEngine 部分计量(按模型)", () => {
     });
   });
 
+  it("result 没带计量:之前按消息观察到的用量记进这条结果;多条这样的 result 按模型逐条相加;之后的累计快照仍覆盖、不重复", async () => {
+    const bare = { type: "result", subtype: "error_during_execution", result: "出错" };
+    const twoBare: QueryFn = () =>
+      (async function* () {
+        yield assistant("m1", "up-main", 10000, 0);
+        yield bare;
+        yield assistant("m2", "up-main", 5000, 0);
+        yield bare;
+      })();
+    const r = await engine(twoBare).run(spec(), ctx, () => {}, signal());
+    expect(r.cost?.metering).toMatchObject({
+      complete: false,
+      models: [{ modelId: "up-main", inputTokens: 15000, outputTokens: 0 }],
+    });
+
+    const thenSnapshot: QueryFn = () =>
+      (async function* () {
+        yield assistant("m1", "up-main", 20000, 1000);
+        yield bare;
+        yield assistant("m2", "up-main", 10000, 0);
+        // 累计快照:已含前面两段,沿用它而不再相加
+        yield {
+          ...result1,
+          usage: { input_tokens: 30000, output_tokens: 1000 },
+          modelUsage: {
+            "up-main": {
+              inputTokens: 30000,
+              outputTokens: 1000,
+              cacheReadInputTokens: 0,
+              cacheCreationInputTokens: 0,
+            },
+          },
+        };
+      })();
+    const r2 = await engine(thenSnapshot).run(spec(), ctx, () => {}, signal());
+    expect(r2.cost?.metering).toMatchObject({
+      complete: true,
+      models: [{ modelId: "up-main", inputTokens: 30000, outputTokens: 1000 }],
+    });
+  });
+
+  it("result 的 usage 全是 0 不算计量依据:按消息观察到的非零用量不被它抹掉", async () => {
+    const q: QueryFn = () =>
+      (async function* () {
+        yield assistant("m1", "up-main", 10000, 0);
+        yield {
+          type: "result",
+          subtype: "error_during_execution",
+          result: "出错",
+          usage: { input_tokens: 0, output_tokens: 0 },
+        };
+      })();
+    const r = await engine(q).run(spec(), ctx, () => {}, signal());
+    expect(r.cost?.metering).toMatchObject({
+      complete: false,
+      models: [{ modelId: "up-main", inputTokens: 10000 }],
+    });
+  });
+
+  it("result 带了非零 usage(没有 modelUsage):以它为准,不再叠加按消息观察到的", async () => {
+    const q: QueryFn = () =>
+      (async function* () {
+        yield assistant("m1", "up-main", 10000, 0);
+        yield {
+          type: "result",
+          subtype: "success",
+          result: "ok",
+          usage: { input_tokens: 10000, output_tokens: 0 },
+        };
+      })();
+    const r = await engine(q).run(spec(), ctx, () => {}, signal());
+    expect(r.cost?.metering).toMatchObject({
+      models: [],
+      unattributed: { inputTokens: 10000, outputTokens: 0 },
+      fromResultUsage: true,
+    });
+  });
+
   it("只收到流式事件(完整消息还没到)就中断:message_start / message_delta 也计入", async () => {
     const q: QueryFn = () =>
       (async function* () {
