@@ -2,7 +2,46 @@
 
 import type { RunResult } from "@/lib/modules/agent-engine/ports";
 import { extractJsonObject } from "./extract-json";
-import { extractModelUsage } from "./model-usage";
+import { type ModelMetering, type TokenBreakdown, extractModelUsage } from "./model-usage";
+
+const n = (v: unknown) => (typeof v === "number" && Number.isSafeInteger(v) && v > 0 ? v : 0);
+
+/**
+ * 计量:有 modelUsage 按模型给出;没有按模型的明细时,把 result.usage 里明确给出的四项
+ * (输入、输出、缓存读、缓存写)记为未归属用量,结算按主模型价计 —— 收到 result 后之前按消息
+ * 累计的用量会清空,这里不留下缓存两项,观察到的缓存用量就整段丢了。
+ */
+function meteringOf(m: Record<string, unknown>): { metering?: ModelMetering } {
+  const raw = (m.usage ?? {}) as Record<string, unknown>;
+  const breakdown: TokenBreakdown = {
+    inputTokens: n(raw.input_tokens),
+    outputTokens: n(raw.output_tokens),
+    cacheReadTokens: n(raw.cache_read_input_tokens),
+    cacheWriteTokens: n(raw.cache_creation_input_tokens),
+  };
+  const any =
+    breakdown.inputTokens ||
+    breakdown.outputTokens ||
+    breakdown.cacheReadTokens ||
+    breakdown.cacheWriteTokens;
+  if (m.modelUsage !== undefined) {
+    const metering = extractModelUsage(m.modelUsage);
+    return {
+      metering:
+        metering.models.length === 0 && any ? { ...metering, unattributed: breakdown } : metering,
+    };
+  }
+  return any
+    ? {
+        metering: {
+          source: "sdk_model_usage",
+          complete: false,
+          models: [],
+          unattributed: breakdown,
+        },
+      }
+    : {};
+}
 
 /**
  * 从 SDK `result` 消息提取 RunResult。
@@ -25,7 +64,7 @@ export function extractRunResult(resultMsg: unknown, opts: { hasSchema: boolean 
     usd: typeof m.total_cost_usd === "number" ? m.total_cost_usd : 0,
     input: usage.input_tokens ?? 0,
     output: usage.output_tokens ?? 0,
-    ...(m.modelUsage !== undefined ? { metering: extractModelUsage(m.modelUsage) } : {}),
+    ...meteringOf(m),
   };
   const summary = typeof m.result === "string" ? m.result : undefined;
 

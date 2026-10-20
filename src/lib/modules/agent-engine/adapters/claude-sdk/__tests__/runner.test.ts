@@ -3,7 +3,9 @@
 import {
   ClaudeSdkEngine,
   type QueryFn,
+  combineResults,
 } from "@/lib/modules/agent-engine/adapters/claude-sdk/runner";
+import type { RunResult } from "@/lib/modules/agent-engine/ports";
 import type { AgentEvent, AgentSpec, RunContext } from "@/lib/shared";
 import { describe, expect, it, vi } from "vitest";
 
@@ -79,7 +81,17 @@ describe("ClaudeSdkEngine 回放", () => {
     expect(r.status).toBe("success");
     expect(r.structured).toEqual({ videoId: "v1" });
     expect(r.sessionId).toBe("sdk_sess_42");
-    expect(r.cost).toEqual({ usd: 0.01, input: 20, output: 8 });
+    expect(r.cost).toEqual({
+      usd: 0.01,
+      input: 20,
+      output: 8,
+      metering: {
+        source: "sdk_model_usage",
+        complete: false,
+        models: [],
+        unattributed: { inputTokens: 20, outputTokens: 8, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      },
+    });
   });
 
   it("记下本轮主线消息的首尾 uuid:子代理的、没有 uuid 的不算", async () => {
@@ -232,7 +244,22 @@ describe("ClaudeSdkEngine 回放", () => {
 
     expect(r.status).toBe("failed");
     expect(r.error?.kind).toBe("error_max_turns"); // 不是 engine_error
-    expect(r.cost).toEqual({ usd: 0.42, input: 900, output: 120 }); // 钱不能丢
+    expect(r.cost).toEqual({
+      usd: 0.42,
+      input: 900,
+      output: 120,
+      metering: {
+        source: "sdk_model_usage",
+        complete: false,
+        models: [],
+        unattributed: {
+          inputTokens: 900,
+          outputTokens: 120,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      },
+    }); // 钱不能丢
     expect(r.sessionId).toBe("s1");
   });
 
@@ -716,5 +743,81 @@ describe("ClaudeSdkEngine 运行中的累计费用快照", () => {
       new AbortController().signal,
     );
     expect(r.status).toBe("success");
+  });
+});
+
+describe("combineResults:多条 result 的计量", () => {
+  const withModels = (input: number): RunResult => ({
+    status: "success",
+    cost: {
+      input,
+      output: 0,
+      metering: {
+        source: "sdk_model_usage",
+        complete: true,
+        models: [
+          {
+            modelId: "up-main",
+            inputTokens: input,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+          },
+        ],
+      },
+    },
+  });
+  const noModels = (cacheRead: number): RunResult => ({
+    status: "success",
+    cost: {
+      input: 0,
+      output: 0,
+      metering: {
+        source: "sdk_model_usage",
+        complete: false,
+        models: [],
+        unattributed: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: cacheRead,
+          cacheWriteTokens: 0,
+        },
+      },
+    },
+  });
+
+  it("最后一条带明细:它是累计快照,原样沿用,前面的不重复累计", () => {
+    const last = withModels(300);
+    expect(combineResults([withModels(100), noModels(50), last])?.cost?.metering).toBe(
+      last.cost?.metering,
+    );
+  });
+
+  it("带明细的之后还有没明细的:沿用那份明细,之后各条的未归属用量逐条相加", () => {
+    expect(
+      combineResults([noModels(7), withModels(100), noModels(50), noModels(20)])?.cost?.metering,
+    ).toEqual({
+      source: "sdk_model_usage",
+      complete: false,
+      models: [
+        {
+          modelId: "up-main",
+          inputTokens: 100,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      ],
+      unattributed: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 70, cacheWriteTokens: 0 },
+    });
+  });
+
+  it("都没有明细:未归属用量全部相加", () => {
+    expect(combineResults([noModels(10), noModels(20)])?.cost?.metering?.unattributed).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 30,
+      cacheWriteTokens: 0,
+    });
   });
 });

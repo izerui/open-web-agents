@@ -612,6 +612,7 @@ describe("RunWorker 墙钟超时", () => {
 
 describe("RunWorker 花费写库失败(故障注入)", () => {
   const C = 1_000_000n;
+  // 缓存读 231 积分/百万(输入的一成),缓存写 2887.5 积分/百万
   const priced: Capability = {
     id: "m-main",
     name: "主力",
@@ -623,6 +624,8 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
     rates: [
       { meter: "input_token", units: "1000000", microCredits: "2310000000" },
       { meter: "output_token", units: "1000000", microCredits: "11550000000" },
+      { meter: "cache_read_token", units: "1000000", microCredits: "231000000" },
+      { meter: "cache_write_token", units: "1000000", microCredits: "2887500000" },
     ],
     version: 3,
     updatedAt: 0,
@@ -1026,6 +1029,66 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
       expect(await sweepAgain()).toBe(0);
       expect(world.charge("r1")?.chargedMicro).toBe(due.toString());
       expect(world.balance("u1")).toEqual({ available: 1000n * C - due, reserved: 0n });
+    });
+
+    describe("正常结束:收到缓存用量 → result", () => {
+      const cached = (id: string) => ({
+        type: "assistant",
+        message: {
+          id,
+          model: "up-main",
+          content: [{ type: "text", text: "x" }],
+          usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 10000 },
+        },
+      });
+      const result = (modelUsage?: Record<string, unknown>) => ({
+        type: "result",
+        subtype: "success",
+        result: "好的",
+        total_cost_usd: 0.01,
+        usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 10000 },
+        ...(modelUsage ? { modelUsage } : {}),
+      });
+      // 1 万缓存读 × 231 积分/百万 = 2.31 积分(按普通输入价会是 23.1)
+      const CACHE_DUE = 2_310_000n;
+
+      for (const [label, modelUsage] of [
+        ["result 没有 modelUsage:缓存记为未归属,按主模型的缓存价收费", undefined],
+        [
+          "对照:result 有完整 modelUsage:按明细收费,之前按消息累计的不重复计",
+          {
+            "up-main": {
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadInputTokens: 10000,
+              cacheCreationInputTokens: 0,
+            },
+          },
+        ],
+      ] as const) {
+        it(`${label};重复结算、清扫不多扣`, async () => {
+          const q: QueryFn = () =>
+            (async function* () {
+              yield { type: "system", subtype: "init", session_id: "s" };
+              yield cached("m1");
+              yield result(modelUsage);
+            })();
+          const { world, repo, settleAgain, sweepAgain } = await scenario(0, {
+            engine: sdk(q),
+            cancel: false,
+          });
+          expect((await repo.get("r1"))?.state).toBe("success");
+          expect(world.charge("r1")).toMatchObject({
+            state: "settled",
+            incomplete: false,
+            estimatedMicro: CACHE_DUE.toString(),
+            chargedMicro: CACHE_DUE.toString(),
+          });
+          expect(await settleAgain()).toBe("none");
+          expect(await sweepAgain()).toBe(0);
+          expect(world.balance("u1")).toEqual({ available: 1000n * C - CACHE_DUE, reserved: 0n });
+        });
+      }
     });
 
     it("result₁ → 追加轮 usage₂ → 抛错 → 第二轮计入、第一轮不重复", async () => {

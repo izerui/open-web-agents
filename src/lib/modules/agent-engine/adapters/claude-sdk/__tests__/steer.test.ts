@@ -128,7 +128,22 @@ describe("追加消息 × 关闭输入", () => {
     // 结局是第二轮的,不是停在第一条成功结果上
     expect(r).toMatchObject({ status: "success", summary: "回应追加的回答" });
     // 美元取最后的累计值,token 按轮累加
-    expect(r.cost).toEqual({ usd: 0.03, input: 220, output: 30 });
+    expect(r.cost).toEqual({
+      usd: 0.03,
+      input: 220,
+      output: 30,
+      metering: {
+        source: "sdk_model_usage",
+        complete: false,
+        models: [],
+        unattributed: {
+          inputTokens: 220,
+          outputTokens: 30,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      },
+    });
     // 关闭之后再来的,不再受理
     expect(await channel.offer("r1", { id: "m2", text: "晚了" })).toBe("rejected");
   });
@@ -210,7 +225,22 @@ describe("多条 result 的结局与计费", () => {
     expect(r.status).toBe("failed");
     expect(r.summary).toBe("第二轮出错了");
     expect(r.error).toMatchObject({ kind: "error_during_execution", message: "第二轮出错了" });
-    expect(r.cost).toEqual({ usd: 0.05, input: 180, output: 15 });
+    expect(r.cost).toEqual({
+      usd: 0.05,
+      input: 180,
+      output: 15,
+      metering: {
+        source: "sdk_model_usage",
+        complete: false,
+        models: [],
+        unattributed: {
+          inputTokens: 180,
+          outputTokens: 15,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      },
+    });
   });
 
   it("第一轮失败、第二轮成功:以最后一条为准", async () => {
@@ -229,7 +259,22 @@ describe("多条 result 的结局与计费", () => {
       new AbortController().signal,
     );
     expect(r).toMatchObject({ status: "success", summary: "第一轮回答" });
-    expect(r.cost).toEqual({ usd: 0.01, input: 100, output: 10 });
+    expect(r.cost).toEqual({
+      usd: 0.01,
+      input: 100,
+      output: 10,
+      metering: {
+        source: "sdk_model_usage",
+        complete: false,
+        models: [],
+        unattributed: {
+          inputTokens: 100,
+          outputTokens: 10,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      },
+    });
   });
 });
 

@@ -2,6 +2,72 @@ import { extractRunResult } from "@/lib/modules/agent-engine/domain/extract-resu
 import { describe, expect, it } from "vitest";
 
 describe("extractRunResult", () => {
+  describe("计量:result 的四项 usage", () => {
+    const res = (extra: Record<string, unknown>) =>
+      extractRunResult(
+        {
+          type: "result",
+          subtype: "success",
+          result: "ok",
+          usage: {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_input_tokens: 10000,
+            cache_creation_input_tokens: 300,
+          },
+          ...extra,
+        },
+        { hasSchema: false },
+      ).cost?.metering;
+
+    it("没有 modelUsage:缓存读、缓存写也保留,记为未归属用量", () => {
+      expect(res({})).toEqual({
+        source: "sdk_model_usage",
+        complete: false,
+        models: [],
+        unattributed: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 10000,
+          cacheWriteTokens: 300,
+        },
+      });
+    });
+
+    it("modelUsage 给不出任何模型明细:同样记为未归属用量", () => {
+      expect(res({ modelUsage: {} })?.unattributed).toEqual({
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 10000,
+        cacheWriteTokens: 300,
+      });
+    });
+
+    it("有按模型的明细:只用明细,不再另记未归属(不重复)", () => {
+      const m = res({
+        modelUsage: {
+          "up-main": {
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheReadInputTokens: 10000,
+            cacheCreationInputTokens: 300,
+          },
+        },
+      });
+      expect(m?.unattributed).toBeUndefined();
+      expect(m?.models).toHaveLength(1);
+    });
+
+    it("一点用量都没有:不造计量", () => {
+      expect(
+        extractRunResult(
+          { type: "result", subtype: "success", result: "ok", usage: {} },
+          { hasSchema: false },
+        ).cost?.metering,
+      ).toBeUndefined();
+    });
+  });
+
   it("success + structured_output → 成功并取值", () => {
     const r = extractRunResult(
       {
@@ -17,7 +83,22 @@ describe("extractRunResult", () => {
     expect(r.status).toBe("success");
     expect(r.structured).toEqual({ videoId: "v1" });
     expect(r.summary).toBe("done");
-    expect(r.cost).toEqual({ usd: 0.02, input: 100, output: 50 });
+    expect(r.cost).toEqual({
+      usd: 0.02,
+      input: 100,
+      output: 50,
+      metering: {
+        source: "sdk_model_usage",
+        complete: false,
+        models: [],
+        unattributed: {
+          inputTokens: 100,
+          outputTokens: 50,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      },
+    });
   });
 
   // 真实样本(开发环境 2026-10-12):上游网关 503,SDK 照样给 subtype:"success",

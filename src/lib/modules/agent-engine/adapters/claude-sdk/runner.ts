@@ -5,6 +5,11 @@
 
 import { extractRunResult } from "@/lib/modules/agent-engine/domain/extract-result";
 import {
+  type ModelMetering,
+  addUnattributed,
+  unattributedOf,
+} from "@/lib/modules/agent-engine/domain/model-usage";
+import {
   createSubagentLabeler,
   normalizeSdkMessage,
   normalizeStreamEvent,
@@ -47,7 +52,36 @@ export function combineResults(rs: RunResult[]): RunResult | undefined {
       ...(last.cost ?? {}),
       input,
       output,
-      // modelUsage 是累计快照,沿用最后一份而不累加;真实 SDK 探针见 scripts/sdk-probe/model-metering.mjs。
+      ...combinedMetering(rs),
+    },
+  };
+}
+
+/**
+ * modelUsage 是累计快照:最后一条带按模型明细的 result 已覆盖它之前的全部,沿用它而不累加
+ * (真实 SDK 探针见 scripts/sdk-probe/model-metering.mjs)。它之后的 result 没有明细,
+ * 各自的 usage 只算本条,未归属用量逐条相加;一条带明细的都没有就全部相加。
+ */
+function combinedMetering(rs: RunResult[]): { metering?: ModelMetering } {
+  let k = -1;
+  rs.forEach((r, i) => {
+    if ((r.cost?.metering?.models.length ?? 0) > 0) k = i;
+  });
+  const base = k >= 0 ? rs[k]?.cost?.metering : undefined;
+  // 最后一条就带明细:原样沿用(与之前一致)
+  if (base && k === rs.length - 1) return { metering: base };
+  let unattributed = unattributedOf(base) ?? undefined;
+  for (const r of rs.slice(k + 1)) {
+    unattributed = addUnattributed(unattributed, unattributedOf(r.cost?.metering));
+  }
+  // 都没有明细也没有用量:保留最后一条原有的计量(展开 last.cost 时已带上)
+  if (!base && !unattributed) return {};
+  return {
+    metering: {
+      source: "sdk_model_usage",
+      complete: false,
+      models: base?.models ?? [],
+      ...(unattributed ? { unattributed } : {}),
     },
   };
 }
