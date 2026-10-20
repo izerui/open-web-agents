@@ -58,7 +58,7 @@ export interface OrchestratorDeps {
   /** 按智能体配置解析本次运行的提供者、真实模型与凭证(凭证只在这里解密)。 */
   resolveModels: (req: ResolveRequest & { pinned?: PinnedPricing | null }) => Promise<ResolvedRun>;
   /**
-   * 运行中每次模型请求返回后报告累计 token;返回 "stop" 表示积分不够继续(正式模式),
+   * 运行中每次模型请求返回后报告累计 token;返回 "stop" 表示积分不够继续,
    * 编排在这一步之后中止引擎。不给则不做运行中计费检查。
    */
   chargeProgress?: (runId: string, tokens: UsageTokens) => Promise<"continue" | "stop">;

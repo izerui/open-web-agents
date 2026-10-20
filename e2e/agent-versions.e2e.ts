@@ -388,28 +388,9 @@ describe("幂等重放先于额度:首次受理 → 额度耗尽 → 原键重�
     expect(retry.body.replayed).toBe(true);
     expect(retry.body.taskId).toBe(first.body.taskId);
 
-    // 新键是新请求:上限已满。试算模式(默认)不拦截,只记本应拒绝;正式模式会是 402
+    // 新键是新请求:上限已满,拒绝受理
     const fresh = await call(`quota-new-${id}`);
-    const conn2 = await mysql.createConnection(dbUrl as string);
-    try {
-      const [[mode]] = (await conn2.execute(
-        "SELECT v FROM platform_state WHERE k = 'billing_mode'",
-      )) as unknown as [{ v: string }[]];
-      if (mode?.v === "live") {
-        expect(fresh.status).toBe(402);
-        expect(fresh.body.code).toBe("account_limit_exceeded");
-      } else {
-        expect(fresh.status).toBe(202);
-        const [rows] = await conn2.execute(
-          "SELECT would_reject FROM run_charges WHERE run_id = ?",
-          [fresh.body.taskId],
-        );
-        expect((rows as { would_reject: string | null }[])[0]?.would_reject).toBe(
-          "account_limit_exceeded",
-        );
-      }
-    } finally {
-      await conn2.end();
-    }
+    expect(fresh.status).toBe(402);
+    expect(fresh.body.code).toBe("account_limit_exceeded");
   });
 });

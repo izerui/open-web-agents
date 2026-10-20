@@ -23,7 +23,6 @@ const audited = async () => (await auditRepo.list({ limit: 200 })).items;
 vi.mock("@/lib/container", () => ({
   getContainer: () => ({
     billing,
-    billingMode: { get: async () => "trial" },
     runCharges: { monthUsageByAccount: async () => new Map() },
     audit: { record: (e: Parameters<AuditLog["record"]>[0]) => audit().record(e) },
     users: {
@@ -79,7 +78,6 @@ describe("billing HTTP permissions and idempotency", () => {
     expect(await response.json()).toMatchObject({
       balance: { accountId: "alice", availableMicroCredits: "0", reservedMicroCredits: "0" },
       items: [],
-      automaticCharging: false,
       paymentsConnected: false,
     });
     expect((await credit()).status).toBe(403);

@@ -46,7 +46,6 @@ import { taskFilesForResult } from "@/lib/modules/artifacts/application/task-fil
 import type { StoragePort } from "@/lib/modules/artifacts/ports";
 import { MysqlAuditRepo } from "@/lib/modules/audit/adapters/mysql-audit-repo";
 import { AuditLog } from "@/lib/modules/audit/application/audit-log";
-import { MysqlBillingModeStore } from "@/lib/modules/billing/adapters/billing-mode-store";
 import { MysqlBillingRepo } from "@/lib/modules/billing/adapters/mysql-billing-repo";
 import { MysqlPackageRepo } from "@/lib/modules/billing/adapters/mysql-package-repo";
 import { MysqlRunChargeQuery } from "@/lib/modules/billing/adapters/mysql-run-charge-query";
@@ -55,7 +54,7 @@ import { seedDefaultPackages } from "@/lib/modules/billing/application/default-p
 import { RunCharging } from "@/lib/modules/billing/application/run-charging";
 import type { PackageRepo } from "@/lib/modules/billing/package-ports";
 import type { BillingRepo } from "@/lib/modules/billing/ports";
-import type { BillingModeStore, RunChargeQuery } from "@/lib/modules/billing/run-charge-ports";
+import type { RunChargeQuery } from "@/lib/modules/billing/run-charge-ports";
 import { MysqlCapabilityRepo } from "@/lib/modules/capabilities/adapters/mysql-capability-repo";
 import { PricedModels } from "@/lib/modules/capabilities/application/priced-models";
 import type { CapabilityRepo } from "@/lib/modules/capabilities/ports";
@@ -190,7 +189,6 @@ export interface Container {
   /** 等环境变量收编为"平台默认"提供者完成;失败时下次调用重试。读模型配置前先 await。 */
   ensureModels: () => Promise<void>;
   billing: BillingRepo;
-  billingMode: BillingModeStore;
   runCharging: RunCharging;
   runCharges: RunChargeQuery;
   packages: PackageRepo;
@@ -356,10 +354,8 @@ function build(): Container {
     aliases: modelAliases,
     decrypt: (stored) => secrets.decrypt(stored),
   });
-  // 运行计费:受理冻结、运行中追加、结束结算(模式与价目在受理时锁定,见 run-charging.ts)
-  const billingMode = new MysqlBillingModeStore(db);
+  // 运行计费:受理冻结、运行中追加、结束结算(价目在受理时锁定,见 run-charging.ts)
   const runCharging = new RunCharging({
-    mode: () => billingMode.get(),
     bind: (req) => modelResolver.bind(req),
     reserveTargetOf: async (id) => {
       const c = await capabilities.get(id);
@@ -679,7 +675,6 @@ function build(): Container {
     modelCatalogView,
     ensureModels,
     billing: new MysqlBillingRepo(db),
-    billingMode,
     runCharging,
     runCharges: new MysqlRunChargeQuery(db),
     packages,

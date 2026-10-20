@@ -7,10 +7,11 @@ export interface RunCharge {
   runId: string;
   accountId: string;
   apiKeyId: string | null;
+  /** 恒为 live;trial 只出现在已下线的试算留下的旧记录里 */
   mode: BillingMode;
-  /** 累计冻结(正式 = 钱包里各笔冻结之和;试算 = 只记在这里) */
+  /** 累计冻结(钱包里各笔冻结之和) */
   reservedMicro: string;
-  /** 正式模式下钱包里的各笔冻结;试算为空 */
+  /** 钱包里的各笔冻结 */
   holds: HoldSlice[];
   estimatedMicro: string | null;
   /** 净扣:已扣减去已退还 */
@@ -25,6 +26,7 @@ export interface RunCharge {
    * 花费之后变了(补记、补齐明细)再补结算差额,能完整计价时转 settled。
    */
   state: ChargeState;
+  /** 旧数据字段,新记录恒为 null */
   wouldReject: HoldRejection | null;
   incomplete: boolean;
   /** 上次结算时运行花费的指纹:暂记的记录花费变了(补记、补齐明细)才需要再结算 */
@@ -61,7 +63,7 @@ export interface RunForSettle {
 export interface AccountLimit {
   /** null = 不限 */
   limit: bigint | null;
-  /** 配置过旧的美元上限、还没按积分重新设置:正式模式下不受理 */
+  /** 配置过旧的美元上限、还没按积分重新设置:不受理 */
   pending: boolean;
 }
 
@@ -73,21 +75,18 @@ export interface RunChargeStore {
   /** 锁账户钱包行(没有就建)并返回余额 */
   lockAccount(accountId: string): Promise<WalletBalance>;
   /**
-   * 某个自然月 [since, until) 内受理的运行按某计费模式的占用(按受理月份归属,见 monthWindowUtc):
-   * 冻结中按冻结额(含跨月追加);正式结算过的按实扣 + 已确认欠额;试算按预计消耗
+   * 某个自然月 [since, until) 内受理的运行的占用(按受理月份归属,见 monthWindowUtc):
+   * 冻结中按冻结额(含跨月追加);结算过的按实扣 + 已确认欠额
    */
   monthUsage(filter: {
     accountId?: string;
     apiKeyId?: string;
-    mode: BillingMode;
     since: number;
     until: number;
   }): Promise<bigint>;
-  /** 账号在途的试算冻结(试算的"可用余额"要扣掉它) */
-  openTrialReserved(accountId: string): Promise<bigint>;
   accountLimit(accountId: string): Promise<AccountLimit>;
   keyLimit(apiKeyId: string): Promise<bigint | null>;
-  /** 钱包冻结 / 结算(正式模式);与本事务同进退 */
+  /** 钱包冻结 / 结算;与本事务同进退 */
   reserveWallet(accountId: string, reservationId: string, amount: bigint): Promise<void>;
   settleWallet(accountId: string, reservationId: string, charged: bigint): Promise<void>;
   /** 退还多扣到可用余额;与本事务同进退,同编号只生效一次 */
@@ -104,16 +103,9 @@ export interface RunChargeStore {
 /** 在一个事务里使用计费存储 */
 export type ChargeTransaction = <T>(fn: (store: RunChargeStore) => Promise<T>) => Promise<T>;
 
-/** 全局计费模式;只决定新受理的运行 */
-export interface BillingModeStore {
-  get(): Promise<BillingMode>;
-  set(mode: BillingMode): Promise<void>;
-}
-
-/** 积分页里的一次运行:受理时的模式、冻结、预计消耗与实际扣除 */
+/** 积分页里的一次运行:冻结、预计消耗与实际扣除 */
 export interface RunChargeItem {
   runId: string;
-  mode: BillingMode;
   state: ChargeState;
   reservedMicro: string;
   estimatedMicro: string | null;
@@ -122,23 +114,12 @@ export interface RunChargeItem {
   owedMicro: string | null;
   /** 自动退还的多扣累计 */
   refundedMicro: string | null;
-  wouldReject: HoldRejection | null;
   incomplete: boolean;
   createdAt: number;
   settledAt: number | null;
   /** 运行所属智能体名称(已删除为 null) */
   agentName: string | null;
   apiKeyId: string | null;
-}
-
-export interface TrialStats {
-  /** 统计起点(本月,UTC) */
-  since: number;
-  runs: number;
-  /** 已结算试算运行的预计消耗合计 */
-  estimatedMicro: string;
-  /** 本应拒绝的次数 */
-  wouldReject: number;
 }
 
 /**
@@ -163,25 +144,19 @@ export interface ReconRawRow extends Omit<ReconRow, "models"> {
   pricing: RunPricing | null;
 }
 
-/** 只读查询:积分页、账号与 Key 的本月用量、试算统计、待核对列表 */
+/** 只读查询:积分页、账号与 Key 的本月用量、待核对列表、对账 */
 export interface RunChargeQuery {
   listByAccount(
     accountId: string,
     opts: { limit: number; cursor?: string },
   ): Promise<{ items: RunChargeItem[]; nextCursor?: string }>;
   /** 本月各账号用量(口径同受理时的额度检查) */
-  monthUsageByAccount(mode: BillingMode, since: number): Promise<Map<string, bigint>>;
+  monthUsageByAccount(since: number): Promise<Map<string, bigint>>;
   /** 本月某账号下各 Key 的用量 */
-  monthUsageByKey(
-    accountId: string,
-    mode: BillingMode,
-    since: number,
-  ): Promise<Map<string, bigint>>;
-  trialStats(since: number): Promise<TrialStats>;
-  /** 所有账号的暂记记录(按受理时间倒序),可按原因与计费模式筛选;只读 */
+  monthUsageByKey(accountId: string, since: number): Promise<Map<string, bigint>>;
+  /** 所有账号的暂记记录(按受理时间倒序),可按原因筛选;只读 */
   listPending(opts: {
     reason?: PendingReason;
-    mode?: BillingMode;
     limit: number;
     cursor?: string;
   }): Promise<{ items: PendingChargeItem[]; nextCursor?: string }>;
@@ -192,9 +167,8 @@ export interface RunChargeQuery {
   reconciliationRows(opts: {
     from: string;
     to: string;
-    mode?: BillingMode;
     limit: number;
   }): Promise<{ rows: ReconRawRow[]; truncated: boolean }>;
-  /** 各原因的暂记条数(可按计费模式筛选) */
-  pendingCounts(mode?: BillingMode): Promise<Record<PendingReason, number>>;
+  /** 各原因的暂记条数 */
+  pendingCounts(): Promise<Record<PendingReason, number>>;
 }

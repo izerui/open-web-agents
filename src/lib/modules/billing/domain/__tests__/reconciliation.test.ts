@@ -50,7 +50,7 @@ const row = (over: Partial<ReconRow>): ReconRow => ({
   ...over,
 });
 
-describe("试算对账", () => {
+describe("对账", () => {
   it("按数据来源归类,缺失数据不当成已核实的零", () => {
     expect(categorize(row({ cost: metering([{ id: "up-main", input: 1, output: 1 }]) }))).toBe(
       "complete",

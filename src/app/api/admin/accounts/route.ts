@@ -14,25 +14,23 @@ export const dynamic = "force-dynamic";
  * 判断不了任何事 —— 谁在真正使用、谁在烧钱,才是决定要不要调额度/停用的依据。
  */
 export async function GET(req: Request) {
-  const { users, agents, auth, billingMode, runCharges } = getContainer();
+  const { users, agents, auth, runCharges } = getContainer();
   try {
     const principal = await auth.resolveWeb(req);
     auth.assertCanAdministerPlatform(principal);
 
     const since = monthStartUtc(Date.now());
-    // 本月用量按当前计费模式的口径(与受理时检查月度上限一致):试算看预计消耗,正式看实际扣除
-    const mode = await billingMode.get();
+    // 本月用量口径与受理时检查月度上限一致(实扣 + 欠额 + 在途冻结)
     // 几个查询互不依赖,并行拿;各自都是一次性批量,没有 N+1
     // 智能体数量用聚合查询 —— 曾经数的是"全库最新 200 条",智能体一多就数错
     const [list, usedMap, agentCount] = await Promise.all([
       users.listAll(),
-      runCharges.monthUsageByAccount(mode, since),
+      runCharges.monthUsageByAccount(since),
       agents.countByOwner(),
     ]);
 
     return Response.json({
       monthStart: since,
-      billingMode: mode,
       accounts: list.map((u) => ({
         id: u.id,
         email: u.email,

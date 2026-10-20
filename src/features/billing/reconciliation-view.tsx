@@ -5,7 +5,6 @@ import { Input } from "@/components/ui/input";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { creditsAmount } from "@/lib/modules/billing/domain/credits-display";
 import type { ReconCategory, ReconLine } from "@/lib/modules/billing/domain/reconciliation";
-import type { BillingMode } from "@/lib/modules/billing/domain/run-charge";
 import { formatYuan } from "@/lib/modules/capabilities/domain/pricing";
 import { Download, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -51,7 +50,7 @@ function toCsv(lines: Line[]): string {
     "缓存写token",
     "无法计价token",
     "成本估算(元)",
-    "预计消耗(积分)",
+    "应扣(积分)",
     "实际扣除(积分)",
   ];
   const rows = lines.map((l) => {
@@ -77,11 +76,10 @@ function toCsv(lines: Line[]): string {
     .join("\n");
 }
 
-/** 管理员:试算对账(只读)。按提供者、日期汇总,供与上游账单核对 */
+/** 管理员:对账(只读)。按提供者、日期汇总,供与上游账单核对 */
 export function ReconciliationView() {
   const [to, setTo] = useState(() => ymd(new Date()));
   const [from, setFrom] = useState(() => ymd(new Date(Date.now() - 6 * 86_400_000)));
-  const [mode, setMode] = useState<BillingMode | "">("");
   const [lines, setLines] = useState<Line[] | null>(null);
   const [truncated, setTruncated] = useState(false);
   const [error, setError] = useState("");
@@ -91,7 +89,6 @@ export function ReconciliationView() {
     setLoading(true);
     setError("");
     const params = new URLSearchParams({ from, to });
-    if (mode) params.set("mode", mode);
     try {
       const r = await fetchJson<{ lines: Line[]; truncated: boolean }>(
         `/api/admin/billing-reconciliation?${params}`,
@@ -103,7 +100,7 @@ export function ReconciliationView() {
     } finally {
       setLoading(false);
     }
-  }, [from, to, mode]);
+  }, [from, to]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -119,9 +116,9 @@ export function ReconciliationView() {
   }
 
   return (
-    <section className="mb-6 space-y-3 border-b pb-5" aria-label="试算对账">
+    <section className="mb-6 space-y-3 border-b pb-5" aria-label="对账">
       <div className="flex flex-wrap items-end gap-2">
-        <h2 className="mr-auto text-sm font-semibold">试算对账</h2>
+        <h2 className="mr-auto text-sm font-semibold">对账</h2>
         <label className="space-y-1 text-xs">
           <span>从</span>
           <Input
@@ -135,16 +132,6 @@ export function ReconciliationView() {
           <span>到</span>
           <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-8" />
         </label>
-        <select
-          aria-label="对账计费模式"
-          className="h-8 rounded-md border border-input bg-transparent px-2 text-xs"
-          value={mode}
-          onChange={(e) => setMode(e.target.value as BillingMode | "")}
-        >
-          <option value="">全部模式</option>
-          <option value="trial">试算</option>
-          <option value="live">正式</option>
-        </select>
         <Button
           variant="ghost"
           size="icon"
@@ -174,7 +161,7 @@ export function ReconciliationView() {
       {lines && lines.length > 0 && (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs" data-testid="reconciliation">
-            <caption className="sr-only">试算对账</caption>
+            <caption className="sr-only">对账</caption>
             <thead>
               <tr className="border-b text-muted-foreground">
                 {[
@@ -184,7 +171,7 @@ export function ReconciliationView() {
                   "输入 / 输出 token",
                   "缓存读 / 写 token",
                   "成本估算(元)",
-                  "预计消耗",
+                  "应扣",
                   "实际扣除",
                   "未完整的数据",
                 ].map((t) => (

@@ -1,4 +1,4 @@
-// 运行计费的 MySQL 行为:冻结与运行记录同事务、幂等键并发、Key 月度上限并发、模式快照与清扫。
+// 运行计费的 MySQL 行为:冻结与运行记录同事务、幂等键并发、Key 月度上限并发与清扫。
 import { randomUUID } from "node:crypto";
 import { type Db, createDb } from "@/lib/db/client";
 import { runCharges, runs, users } from "@/lib/db/schema";
@@ -14,7 +14,6 @@ import type { RunPricing } from "@/lib/shared";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { type ChargeRejected, RunCharging } from "../../application/run-charging";
-import type { BillingMode } from "../../domain/run-charge";
 import { MysqlBillingRepo } from "../mysql-billing-repo";
 import { MysqlRunChargeQuery } from "../mysql-run-charge-query";
 import { MysqlRunChargeStore, SWEEP_GRACE_MS } from "../mysql-run-charge-store";
@@ -77,10 +76,8 @@ if (!url) {
   };
   const EXPECTED = 57_750_000n;
 
-  function setup(mode: BillingMode, reserve = 300n * C, now?: () => number) {
-    const state = { mode };
+  function setup(reserve = 300n * C, now?: () => number) {
     const charging = new RunCharging({
-      mode: async () => state.mode,
       bind: async () => binding,
       reserveTargetOf: async () => reserve,
       pricedModels: async () => [model],
@@ -119,7 +116,7 @@ if (!url) {
         return runId;
       });
     };
-    return { state, charging, enqueue };
+    return { charging, enqueue };
   }
 
   const wallet = new MysqlBillingRepo(db);
@@ -187,7 +184,7 @@ if (!url) {
 
   describe("MySQL 运行计费", () => {
     it("冻结、run_charges 与运行记录同事务:运行插入失败全部回滚", async () => {
-      const { enqueue } = setup("live");
+      const { enqueue } = setup();
       const acct = await fund(1000n);
       const runId = randomUUID();
       await expect(enqueue(acct, { runId, failAfterAdmit: true })).rejects.toThrow(/失败/);
@@ -200,7 +197,7 @@ if (!url) {
     });
 
     it("同一幂等键并发两次:只有一个运行、一份冻结", async () => {
-      const { enqueue } = setup("live");
+      const { enqueue } = setup();
       const acct = await fund(1000n);
       const key = `idem-${randomUUID()}`;
       const out = await Promise.allSettled([
@@ -214,7 +211,7 @@ if (!url) {
     });
 
     it("同一 Key 并发两次,月度上限只够一次:只有一次受理", async () => {
-      const { enqueue } = setup("live");
+      const { enqueue } = setup();
       const acct = await fund(10_000n);
       const keys = new MysqlApiKeyRepo(db);
       const keyId = randomUUID().slice(0, 24);
@@ -229,14 +226,13 @@ if (!url) {
       expect((failed.reason as ChargeRejected).code).toBe("key_limit_exceeded");
       const used = await new MysqlRunChargeQuery(db).monthUsageByKey(
         acct,
-        "live",
         Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1),
       );
       expect(used.get(keyId)).toBe(300n * C);
     });
 
-    it("正式:余额不足拒绝;够则冻结,结束按实际扣、其余退回", async () => {
-      const { enqueue, charging } = setup("live");
+    it("余额不足拒绝;够则冻结,结束按实际扣、其余退回", async () => {
+      const { enqueue, charging } = setup();
       const poor = await fund(10n);
       await expect(enqueue(poor)).rejects.toMatchObject({ code: "insufficient_balance" });
       const acct = await fund(1000n);
@@ -255,54 +251,52 @@ if (!url) {
       });
     });
 
-    it("试算:余额为 0 也受理并记本应拒绝;非零售价运行结束余额不变、实扣 0", async () => {
-      const { enqueue, charging } = setup("trial");
-      const broke = await fund(0n);
-      const r0 = await enqueue(broke);
-      expect(await charge(r0)).toMatchObject({ wouldReject: "insufficient_balance" });
+    it("旧数据:已下线的试算留下的未结清记录 —— 结束后实扣 0、钱包不动、不占月度额度", async () => {
+      const { charging } = setup();
       const acct = await fund(1000n);
-      const runId = await enqueue(acct);
+      const runId = randomUUID();
+      await new MysqlRunRepo(db).create({
+        id: runId,
+        sessionId: "s-billing",
+        prompt: "hi",
+        pricing,
+      });
+      await new MysqlRunChargeStore(db).insert({
+        runId,
+        accountId: acct,
+        apiKeyId: null,
+        mode: "trial",
+        reservedMicro: "0",
+        holds: [],
+        estimatedMicro: null,
+        chargedMicro: null,
+        owedMicro: null,
+        refundedMicro: null,
+        state: "open",
+        wouldReject: null,
+        incomplete: false,
+        settledCostDigest: null,
+        finalWaitSettled: false,
+        createdAt: Date.now(),
+        settledAt: null,
+      });
       await finish(runId);
-      await charging.settle(runId);
+      expect(await charging.settle(runId)).toBe("settled");
+      expect(await charge(runId)).toMatchObject({
+        chargedMicro: "0",
+        estimatedMicro: EXPECTED.toString(),
+        state: "settled",
+      });
       expect(await wallet.balance(acct)).toMatchObject({
         availableMicroCredits: (1000n * C).toString(),
         reservedMicroCredits: "0",
       });
-      expect(await charge(runId)).toMatchObject({
-        chargedMicro: "0",
-        estimatedMicro: EXPECTED.toString(),
-      });
-    });
-
-    it("模式按受理时快照:试算受理后切正式仍扣 0;正式受理后切试算仍照扣(含清扫补结算)", async () => {
-      const t = setup("trial");
-      const a = await fund(1000n);
-      const trialRun = await t.enqueue(a);
-      t.state.mode = "live";
-      await finish(trialRun);
-      await t.charging.settle(trialRun);
-      expect((await charge(trialRun))?.chargedMicro).toBe("0");
-      expect((await wallet.balance(a)).availableMicroCredits).toBe((1000n * C).toString());
-
-      const l = setup("live");
-      const b = await fund(1000n);
-      const liveRun = await l.enqueue(b);
-      l.state.mode = "trial";
-      // 不经 worker(如取消接口直接改状态后才补记花费):清扫补结算
-      await finish(liveRun, "cancelled");
-      let swept = 0;
-      for (let i = 0; i < 20 && (await charge(liveRun))?.state !== "settled"; i++) {
-        swept += await l.charging.sweep(200);
-      }
-      expect(swept).toBeGreaterThan(0);
-      expect((await charge(liveRun))?.chargedMicro).toBe(EXPECTED.toString());
-      expect((await wallet.balance(b)).availableMicroCredits).toBe(
-        (1000n * C - EXPECTED).toString(),
-      );
+      const since = Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1);
+      expect((await new MysqlRunChargeQuery(db).monthUsageByAccount(since)).get(acct)).toBe(0n);
     });
 
     it("清扫:已结束但没写花费的运行,宽限期内不处理;从没开始执行的过了宽限期按 0 结清", async () => {
-      const { enqueue, charging } = setup("live");
+      const { enqueue, charging } = setup();
       const acct = await fund(1000n);
       const runId = await enqueue(acct);
       await finish(runId, "cancelled", null, 0, false);
@@ -323,48 +317,46 @@ if (!url) {
       });
     });
 
-    for (const mode of ["live", "trial"] as const) {
-      it(`${mode}:取消 → 过宽限期清扫(暂记、标不完整)→ worker 补记非零花费 → 补齐且不重复`, async () => {
-        const { enqueue, charging } = setup(mode);
-        const acct = await fund(1000n);
-        const runId = await enqueue(acct);
-        // 跑过(已认领)、被取消,花费还没补记,且已过宽限期
-        await finish(runId, "cancelled", null, SWEEP_GRACE_MS + 1000);
-        for (let i = 0; i < 20 && (await charge(runId))?.state === "open"; i++) {
-          await charging.sweep(200);
-        }
-        expect(await charge(runId)).toMatchObject({
-          state: "provisional",
-          incomplete: 1,
-          chargedMicro: "0",
-        });
-        expect(await wallet.balance(acct)).toMatchObject({
-          availableMicroCredits: (1000n * C).toString(),
-          reservedMicroCredits: "0",
-        });
-
-        // worker 收尾:补记真实花费,随后结算(final)
-        await db.update(runs).set({ cost: COST }).where(eq(runs.id, runId));
-        expect(await charging.settle(runId, { final: true })).toBe("settled");
-        const charged = mode === "live" ? EXPECTED : 0n;
-        expect(await charge(runId)).toMatchObject({
-          state: "settled",
-          incomplete: 0,
-          estimatedMicro: EXPECTED.toString(),
-          chargedMicro: charged.toString(),
-        });
-        // 重复结算、再清扫都不再扣
-        expect(await charging.settle(runId, { final: true })).toBe("none");
+    it("取消 → 过宽限期清扫(暂记、标不完整)→ worker 补记非零花费 → 补齐且不重复", async () => {
+      const { enqueue, charging } = setup();
+      const acct = await fund(1000n);
+      const runId = await enqueue(acct);
+      // 跑过(已认领)、被取消,花费还没补记,且已过宽限期
+      await finish(runId, "cancelled", null, SWEEP_GRACE_MS + 1000);
+      for (let i = 0; i < 20 && (await charge(runId))?.state === "open"; i++) {
         await charging.sweep(200);
-        expect(await wallet.balance(acct)).toMatchObject({
-          availableMicroCredits: (1000n * C - charged).toString(),
-          reservedMicroCredits: "0",
-        });
+      }
+      expect(await charge(runId)).toMatchObject({
+        state: "provisional",
+        incomplete: 1,
+        chargedMicro: "0",
       });
-    }
+      expect(await wallet.balance(acct)).toMatchObject({
+        availableMicroCredits: (1000n * C).toString(),
+        reservedMicroCredits: "0",
+      });
+
+      // worker 收尾:补记真实花费,随后结算(final)
+      await db.update(runs).set({ cost: COST }).where(eq(runs.id, runId));
+      expect(await charging.settle(runId, { final: true })).toBe("settled");
+      const charged = EXPECTED;
+      expect(await charge(runId)).toMatchObject({
+        state: "settled",
+        incomplete: 0,
+        estimatedMicro: EXPECTED.toString(),
+        chargedMicro: charged.toString(),
+      });
+      // 重复结算、再清扫都不再扣
+      expect(await charging.settle(runId, { final: true })).toBe("none");
+      await charging.sweep(200);
+      expect(await wallet.balance(acct)).toMatchObject({
+        availableMicroCredits: (1000n * C - charged).toString(),
+        reservedMicroCredits: "0",
+      });
+    });
 
     it("暂记(期限内的快照)且没变化的不会被清扫反复捞出;快照更新或最终费用到了才再结算(指纹在库里比)", async () => {
-      const { enqueue, charging } = setup("live");
+      const { enqueue, charging } = setup();
       const acct = await fund(1000n);
       const runId = await enqueue(acct);
       const partial = (input: number, complete: boolean) => ({
@@ -421,7 +413,7 @@ if (!url) {
     });
 
     it("快照暂记 92.4 → 最终费用只有总 token(无明细)按主模型价算出 69.3 → 只退差额一次;净扣、钱包、流水(扣款 − 退还)一致", async () => {
-      const { enqueue, charging } = setup("live");
+      const { enqueue, charging } = setup();
       const acct = await fund(1000n);
       const runId = await enqueue(acct);
       const cost = (input: number, complete: boolean) => ({
@@ -487,7 +479,7 @@ if (!url) {
     });
 
     it("升级:旧规则留下的多扣暂记 —— 迁移 0051 后清扫按现行规则重新结算一次:各退差额一次,不再进入清扫", async () => {
-      const { enqueue, charging } = setup("live");
+      const { enqueue, charging } = setup();
       const acct = await fund(1000n);
       const meter = (input: number, complete: boolean) => ({
         input,
@@ -591,7 +583,7 @@ if (!url) {
     });
 
     it("worker 中途挂掉:按运行中的用量快照结算(暂记、不完整)→ 最终费用补写后只补差额;有最终费用后不再写快照", async () => {
-      const { enqueue, charging } = setup("live");
+      const { enqueue, charging } = setup();
       const acct = await fund(1000n);
       const runId = await enqueue(acct);
       const repo = new MysqlRunRepo(db);
@@ -650,47 +642,43 @@ if (!url) {
       );
     });
 
-    for (const mode of ["live", "trial"] as const) {
-      it(`${mode}:完整费用先作为快照暂记 → 原样补进最终费用 → 清扫转已结清,不重复扣`, async () => {
-        const { enqueue, charging } = setup(mode);
-        const acct = await fund(1000n);
-        const runId = await enqueue(acct);
-        const repo = new MysqlRunRepo(db);
-        await repo.saveUsageSnapshot(runId, COST); // 与最终费用一模一样
-        await finish(runId, "failed", null, SWEEP_GRACE_MS + 1000);
-        const open = () =>
-          db.transaction((tx) =>
-            new MysqlRunChargeStore(tx as unknown as Db).openOfFinishedRuns(10_000),
-          );
-        for (let i = 0; i < 20 && (await charge(runId))?.state === "open"; i++)
-          await charging.sweep(500);
-        const due = mode === "live" ? EXPECTED : 0n;
-        expect(await charge(runId)).toMatchObject({
-          state: "provisional",
-          incomplete: 1,
-          chargedMicro: due.toString(),
-        });
-        expect(await open()).not.toContain(runId);
-
-        await repo.recordCost(runId, COST);
-        expect(await open()).toContain(runId);
-        for (let i = 0; i < 20 && (await charge(runId))?.state !== "settled"; i++)
-          await charging.sweep(500);
-        expect(await charge(runId)).toMatchObject({
-          state: "settled",
-          incomplete: 0,
-          estimatedMicro: EXPECTED.toString(),
-          chargedMicro: due.toString(),
-        });
-        expect(await open()).not.toContain(runId);
-        expect((await wallet.balance(acct)).availableMicroCredits).toBe(
-          (1000n * C - due).toString(),
+    it("完整费用先作为快照暂记 → 原样补进最终费用 → 清扫转已结清,不重复扣", async () => {
+      const { enqueue, charging } = setup();
+      const acct = await fund(1000n);
+      const runId = await enqueue(acct);
+      const repo = new MysqlRunRepo(db);
+      await repo.saveUsageSnapshot(runId, COST); // 与最终费用一模一样
+      await finish(runId, "failed", null, SWEEP_GRACE_MS + 1000);
+      const open = () =>
+        db.transaction((tx) =>
+          new MysqlRunChargeStore(tx as unknown as Db).openOfFinishedRuns(10_000),
         );
+      for (let i = 0; i < 20 && (await charge(runId))?.state === "open"; i++)
+        await charging.sweep(500);
+      const due = EXPECTED;
+      expect(await charge(runId)).toMatchObject({
+        state: "provisional",
+        incomplete: 1,
+        chargedMicro: due.toString(),
       });
-    }
+      expect(await open()).not.toContain(runId);
+
+      await repo.recordCost(runId, COST);
+      expect(await open()).toContain(runId);
+      for (let i = 0; i < 20 && (await charge(runId))?.state !== "settled"; i++)
+        await charging.sweep(500);
+      expect(await charge(runId)).toMatchObject({
+        state: "settled",
+        incomplete: 0,
+        estimatedMicro: EXPECTED.toString(),
+        chargedMicro: due.toString(),
+      });
+      expect(await open()).not.toContain(runId);
+      expect((await wallet.balance(acct)).availableMicroCredits).toBe((1000n * C - due).toString());
+    });
 
     it("等最终费用 24 小时:期限内按快照暂记;过期按快照结清且只处理一次(认不出的模型按主模型价)", async () => {
-      const { enqueue, charging } = setup("live");
+      const { enqueue, charging } = setup();
       const acct = await fund(1000n);
       const repo = new MysqlRunRepo(db);
       const H = 3600_000;
@@ -765,7 +753,7 @@ if (!url) {
     });
 
     it("欠款补扣:超过冻结额 → 余额不足留欠 → 充值 → 清扫补扣一次 → 重复执行不再扣(核对钱包、流水、实扣、欠额)", async () => {
-      const { enqueue, charging } = setup("live", 30n * C);
+      const { enqueue, charging } = setup(30n * C);
       const acct = await fund(50n);
       const runId = await enqueue(acct);
       const ledgerCharged = async () => {
@@ -827,7 +815,7 @@ if (!url) {
 
     for (const scope of ["account", "key"] as const) {
       it(`月度上限计入欠额(${scope === "account" ? "账号" : "Key"}):超限留欠 → 再发起被拒;充值补扣后已用不变`, async () => {
-        const { charging } = setup("live", 30n * C);
+        const { charging } = setup(30n * C);
         const acct = await fund(50n);
         const limit = (50n * C).toString();
         let keyId: string | undefined;
@@ -851,8 +839,8 @@ if (!url) {
         const query = new MysqlRunChargeQuery(db);
         const shown = async () =>
           scope === "account"
-            ? (await query.monthUsageByAccount("live", since)).get(acct)
-            : (await query.monthUsageByKey(acct, "live", since)).get(keyId ?? "");
+            ? (await query.monthUsageByAccount(since)).get(acct)
+            : (await query.monthUsageByKey(acct, since)).get(keyId ?? "");
         const code = scope === "account" ? "account_limit_exceeded" : "key_limit_exceeded";
 
         const first = await go();
@@ -887,7 +875,7 @@ if (!url) {
         const JAN = Date.UTC(2026, 0, 31, 23, 30);
         const FEB = Date.UTC(2026, 1, 1, 0, 30);
         const clock = { t: JAN };
-        const { charging } = setup("live", 30n * C, () => clock.t);
+        const { charging } = setup(30n * C, () => clock.t);
         const acct = await fund(1000n);
         let keyId: string | undefined;
         if (scope === "account") {
@@ -908,8 +896,8 @@ if (!url) {
         const shown = async (at: number) => {
           const since = Date.UTC(new Date(at).getUTCFullYear(), new Date(at).getUTCMonth(), 1);
           return scope === "account"
-            ? ((await query.monthUsageByAccount("live", since)).get(acct) ?? 0n)
-            : ((await query.monthUsageByKey(acct, "live", since)).get(keyId ?? "") ?? 0n);
+            ? ((await query.monthUsageByAccount(since)).get(acct) ?? 0n)
+            : ((await query.monthUsageByKey(acct, since)).get(keyId ?? "") ?? 0n);
         };
         const enqueuer = enqueuerFor(charging, acct, keyId);
 
@@ -931,7 +919,7 @@ if (!url) {
     }
 
     it("同一幂等键并发两次、余额只够冻结一次:后到的拿到原任务(重复键),而不是 402", async () => {
-      const { charging } = setup("live", 50n * C);
+      const { charging } = setup(50n * C);
       const acct = await fund(60n); // 冻 50 后只剩 10,低于 20 的门槛
       const enqueuer = enqueuerFor(charging, acct);
       const key = `idem-once-${randomUUID()}`;
@@ -950,7 +938,7 @@ if (!url) {
     });
 
     it("同一幂等键并发两次、Key 月度上限只够一次:同样拿到原任务", async () => {
-      const { charging } = setup("live", 50n * C);
+      const { charging } = setup(50n * C);
       const acct = await fund(10_000n);
       const keys = new MysqlApiKeyRepo(db);
       const keyId = randomUUID().slice(0, 24);
@@ -971,7 +959,7 @@ if (!url) {
       expect(failed.reason).toBeInstanceOf(DuplicateIdempotencyKey);
     });
 
-    it("升级遗留:配置过美元上限、未按积分设置的账号 —— 正式拒绝、试算放行;管理员设置后按新上限", async () => {
+    it("升级遗留:配置过美元上限、未按积分设置的账号 —— 拒绝受理;管理员设置后按新上限", async () => {
       const userRepo = new MysqlUserRepo(db);
       const acct = await fund(1000n);
       // 模拟升级前就存在的账号:只有旧美元上限,新积分上限列为 NULL(0047 迁移后的样子)
@@ -984,17 +972,15 @@ if (!url) {
       } as never);
       expect((await userRepo.get(acct))?.legacyMonthlyLimitMicroUsd).toBe(5_000_000);
 
-      await expect(setup("live").enqueue(acct)).rejects.toMatchObject({
+      await expect(setup().enqueue(acct)).rejects.toMatchObject({
         code: "account_limit_pending",
       });
-      const trialRun = await setup("trial").enqueue(acct);
-      expect(await charge(trialRun)).toMatchObject({ wouldReject: "account_limit_pending" });
 
       await userRepo.adminUpdate(acct, { monthlyLimitMicroCredits: (500n * C).toString() });
       const after = await userRepo.get(acct);
       expect(after?.legacyMonthlyLimitMicroUsd).toBeUndefined();
       expect(after?.monthlyLimitMicroCredits).toBe((500n * C).toString());
-      await expect(setup("live").enqueue(acct)).resolves.toBeTruthy();
+      await expect(setup().enqueue(acct)).resolves.toBeTruthy();
 
       // 明确设为不限,同样算处理完毕
       const other = await fund(1000n);
@@ -1007,7 +993,7 @@ if (!url) {
       } as never);
       await userRepo.adminUpdate(other, { monthlyLimitMicroCredits: null });
       expect((await userRepo.get(other))?.legacyMonthlyLimitMicroUsd).toBeUndefined();
-      await expect(setup("live").enqueue(other)).resolves.toBeTruthy();
+      await expect(setup().enqueue(other)).resolves.toBeTruthy();
     });
   });
 }

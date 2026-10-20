@@ -19,14 +19,12 @@ import {
   creditsBalance,
   creditsExact,
 } from "@/lib/modules/billing/domain/credits-display";
-import type { BillingMode } from "@/lib/modules/billing/domain/run-charge";
 import type { LedgerEntry, WalletBalance } from "@/lib/modules/billing/ports";
 import { formatCredits, parseCredits } from "@/lib/modules/capabilities/domain/catalog";
 import { ArrowDownToLine, RefreshCw, Wallet } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { BatchCreditForm } from "./batch-credit-form";
-import { BillingModeCard } from "./billing-mode-card";
 import { PendingCharges } from "./pending-charges";
 import { ReconciliationView } from "./reconciliation-view";
 import { RunChargeList } from "./run-charge-list";
@@ -35,7 +33,6 @@ type Statement = {
   balance: WalletBalance;
   items: LedgerEntry[];
   nextCursor?: string;
-  mode?: BillingMode;
   month?: {
     since: number;
     usedMicroCredits: string;
@@ -87,7 +84,6 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
         if (seq !== requestSeq.current) return;
         setStatement((previous) => ({
           ...result,
-          mode: result.mode ?? previous?.mode,
           month: result.month ?? previous?.month,
           items:
             cursor && previous?.balance.accountId === result.balance.accountId
@@ -169,7 +165,6 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
   const selected = accounts.find((account) => account.id === accountId);
   return (
     <SpaceShell area={admin ? "admin" : "personal"} title={admin ? "积分管理" : "积分账户"}>
-      {admin && <BillingModeCard onChanged={() => load()} />}
       {admin && <ReconciliationView />}
       {admin && <BatchCreditForm onDone={() => load()} />}
       {admin && (
@@ -183,15 +178,7 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
           }}
         />
       )}
-      {statement?.mode === "trial" && (
-        <div
-          data-testid="trial-banner"
-          className="mb-5 border-b pb-4 text-sm text-muted-foreground"
-        >
-          试算中:运行照常进行,下面显示的是按售价计算的预计消耗,不扣积分。
-        </div>
-      )}
-      {statement?.mode === "live" && (
+      {statement && (
         <div className="mb-5 border-b pb-4 text-sm text-muted-foreground">
           每次运行发起时先冻结积分,结束后按实际用量扣除,多余的退回可用余额。
         </div>
@@ -264,12 +251,11 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
           </div>
           {statement.month && (
             <p className="col-span-2 text-xs text-muted-foreground">
-              本月{statement.mode === "trial" ? "预计消耗" : "已用"}{" "}
-              {creditsAmount(statement.month.usedMicroCredits)} 积分
+              本月已用 {creditsAmount(statement.month.usedMicroCredits)} 积分
               {statement.month.limitMicroCredits !== null &&
                 ` / 月度上限 ${creditsAmount(statement.month.limitMicroCredits)} 积分`}
               {statement.month.limitPending &&
-                " · 原月度上限待管理员按积分重新设置,设置前正式扣费下不能发起运行"}
+                " · 原月度上限待管理员按积分重新设置,设置前不能发起运行"}
             </p>
           )}
         </dl>

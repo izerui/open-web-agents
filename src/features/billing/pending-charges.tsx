@@ -3,7 +3,6 @@
 import { Button } from "@/components/ui/button";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { creditsAmount, creditsExact } from "@/lib/modules/billing/domain/credits-display";
-import type { BillingMode } from "@/lib/modules/billing/domain/run-charge";
 import type { PendingChargeItem, PendingReason } from "@/lib/modules/billing/run-charge-ports";
 import { RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -29,7 +28,6 @@ function gap(c: PendingChargeItem): string {
  */
 export function PendingCharges({ onSelectAccount }: { onSelectAccount?: (id: string) => void }) {
   const [reason, setReason] = useState<PendingReason | "">("");
-  const [mode, setMode] = useState<BillingMode | "">("");
   const [items, setItems] = useState<PendingChargeItem[]>([]);
   const [counts, setCounts] = useState<Counts | null>(null);
   const [next, setNext] = useState<string | undefined>();
@@ -43,7 +41,6 @@ export function PendingCharges({ onSelectAccount }: { onSelectAccount?: (id: str
       setLoading(true);
       const params = new URLSearchParams({ limit: "50" });
       if (reason) params.set("reason", reason);
-      if (mode) params.set("mode", mode);
       if (cursor) params.set("cursor", cursor);
       try {
         const r = await fetchJson<{
@@ -62,7 +59,7 @@ export function PendingCharges({ onSelectAccount }: { onSelectAccount?: (id: str
         if (mine === seq.current) setLoading(false);
       }
     },
-    [reason, mode],
+    [reason],
   );
   useEffect(() => {
     setItems([]);
@@ -74,16 +71,6 @@ export function PendingCharges({ onSelectAccount }: { onSelectAccount?: (id: str
     <section className="mb-6 space-y-3 border-b pb-5" aria-label="待核对计费">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-sm font-semibold">待核对(所有账号)</h2>
-        <select
-          aria-label="计费模式"
-          className="h-8 rounded-md border border-input bg-transparent px-2 text-xs"
-          value={mode}
-          onChange={(e) => setMode(e.target.value as BillingMode | "")}
-        >
-          <option value="">全部模式</option>
-          <option value="live">正式</option>
-          <option value="trial">试算</option>
-        </select>
         <Button
           variant="ghost"
           size="icon"
@@ -123,13 +110,11 @@ export function PendingCharges({ onSelectAccount }: { onSelectAccount?: (id: str
             <caption className="sr-only">待核对计费记录</caption>
             <thead>
               <tr className="border-b text-muted-foreground">
-                {["时间", "账号", "智能体", "模式", "原因", "预计消耗", "实际扣除", "差额"].map(
-                  (t) => (
-                    <th scope="col" key={t} className="px-2 py-2">
-                      {t}
-                    </th>
-                  ),
-                )}
+                {["时间", "账号", "智能体", "原因", "应扣", "实际扣除", "差额"].map((t) => (
+                  <th scope="col" key={t} className="px-2 py-2">
+                    {t}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -155,9 +140,6 @@ export function PendingCharges({ onSelectAccount }: { onSelectAccount?: (id: str
                   <td className="min-w-28 break-words px-2 py-2">
                     {c.agentName ?? "已删除的智能体"}
                     <p className="mt-1 break-all text-muted-foreground">{c.runId}</p>
-                  </td>
-                  <td className="whitespace-nowrap px-2 py-2">
-                    {c.mode === "trial" ? "试算" : "正式"}
                   </td>
                   <td className="whitespace-nowrap px-2 py-2" title={REASON[c.reason].hint}>
                     {REASON[c.reason].label}

@@ -1,4 +1,4 @@
-import { type BillingMode, FINAL_COST_WAIT_MS } from "../domain/run-charge";
+import { FINAL_COST_WAIT_MS } from "../domain/run-charge";
 import { BillingError, type WalletBalance } from "../ports";
 import type {
   ChargeTransaction,
@@ -123,31 +123,17 @@ class Store implements RunChargeStore {
   async monthUsage(f: {
     accountId?: string;
     apiKeyId?: string;
-    mode: BillingMode;
     since: number;
     until: number;
   }) {
     let total = 0n;
     for (const c of this.w.charges.values()) {
-      if (c.mode !== f.mode || c.createdAt < f.since || c.createdAt >= f.until) continue;
+      if (c.createdAt < f.since || c.createdAt >= f.until) continue;
       if (f.accountId && c.accountId !== f.accountId) continue;
       if (f.apiKeyId && c.apiKeyId !== f.apiKeyId) continue;
-      // 口径同 monthUsedSql:正式 = 实扣 + 已确认欠额;试算 = 预计;冻结中 = 冻结额
-      const settled =
-        f.mode === "live"
-          ? BigInt(c.chargedMicro ?? "0") + BigInt(c.owedMicro ?? "0")
-          : BigInt(c.estimatedMicro ?? "0");
+      // 口径同 monthUsedSql:结算过 = 实扣 + 已确认欠额;冻结中 = 冻结额
+      const settled = BigInt(c.chargedMicro ?? "0") + BigInt(c.owedMicro ?? "0");
       total += c.state === "open" ? BigInt(c.reservedMicro) : settled;
-    }
-    return total;
-  }
-
-  async openTrialReserved(accountId: string) {
-    let total = 0n;
-    for (const c of this.w.charges.values()) {
-      if (c.accountId === accountId && c.mode === "trial" && c.state === "open") {
-        total += BigInt(c.reservedMicro);
-      }
     }
     return total;
   }

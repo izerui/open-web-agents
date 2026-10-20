@@ -40,7 +40,6 @@ interface Account {
  */
 export function AccountsView() {
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [mode, setMode] = useState<"trial" | "live">("trial");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -56,11 +55,8 @@ export function AccountsView() {
 
   const load = useCallback(async () => {
     try {
-      const d = await fetchJson<{ accounts?: Account[]; billingMode?: "trial" | "live" }>(
-        "/api/admin/accounts",
-      );
+      const d = await fetchJson<{ accounts?: Account[] }>("/api/admin/accounts");
       setAccounts(d.accounts ?? []);
-      setMode(d.billingMode ?? "trial");
       setError(null);
     } catch (e) {
       setError(errorText(e));
@@ -154,7 +150,7 @@ export function AccountsView() {
     <SpaceShell
       area="admin"
       title="账号管理"
-      subtitle={`${accounts.length} 个账号 · ${activeCount} 个启用中 · 本月${mode === "trial" ? "预计消耗" : "消耗"} ${creditsAmount(totalUsed)} 积分`}
+      subtitle={`${accounts.length} 个账号 · ${activeCount} 个启用中 · 本月消耗 ${creditsAmount(totalUsed)} 积分`}
     >
       {confirm.dialog}
       <OneTimeSecretDialog
@@ -257,8 +253,7 @@ export function AccountsView() {
                   <span>注册于 {new Date(a.createdAt).toLocaleDateString()}</span>
                   <span>{a.agentCount} 个智能体</span>
                   <span className={cn(over && "font-medium text-warning")}>
-                    本月{mode === "trial" ? "预计" : ""} {creditsAmount(a.monthUsedMicroCredits)}{" "}
-                    积分
+                    本月 {creditsAmount(a.monthUsedMicroCredits)} 积分
                     {a.monthlyLimitMicroCredits !== null &&
                       ` / 上限 ${creditsAmount(a.monthlyLimitMicroCredits)}`}
                     {over && " —— 已达上限"}

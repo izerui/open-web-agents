@@ -40,21 +40,19 @@ async function currentUser(req: Request): Promise<{ userId: string; isAdmin: boo
 
 /** 列出本账户的 key(只回元信息,永不回明文)。 */
 export async function GET(req: Request) {
-  const { apiKeys, env, billingMode, runCharges } = getContainer();
+  const { apiKeys, env, runCharges } = getContainer();
   try {
     const ownerId = await currentUserId(req);
-    const mode = await billingMode.get();
     const [keys, used] = await Promise.all([
       apiKeys.list(ownerId),
-      runCharges.monthUsageByKey(ownerId, mode, monthStartUtc(Date.now())),
+      runCharges.monthUsageByKey(ownerId, monthStartUtc(Date.now())),
     ]);
     return Response.json({
-      // 本月用量口径同受理时的月度上限检查(试算 = 预计消耗,正式 = 实际扣除,均含在途冻结)
+      // 本月用量口径同受理时的月度上限检查(实际扣除 + 欠额 + 在途冻结)
       keys: keys.map((k) => ({
         ...k,
         monthUsedMicroCredits: (used.get(k.id) ?? 0n).toString(),
       })),
-      billingMode: mode,
       // 平台默认的调用限流(0 = 不限),界面据此显示每把 Key 的实际上限
       rateLimits: {
         perKeyPerMinute: env.invokeRateLimitPerKey,

@@ -192,11 +192,6 @@ describe("平台账号管理", () => {
 });
 
 describe("月度积分上限对运行路径的拦截", () => {
-  type Mode = "trial" | "live";
-  const setMode = (mode: Mode) =>
-    (admin as Client).put("/api/admin/billing-mode", { mode }).then((r) => {
-      expect(r.status).toBe(200);
-    });
   const newSession = async (tag: string) => {
     const u = await newUser(tag);
     const uid = (await u.get<MeRes>("/api/auth")).body.user?.id ?? "";
@@ -218,38 +213,21 @@ describe("月度积分上限对运行路径的拦截", () => {
     if (!(await serverUp())) throw new Error("e2e 需要一个跑着的服务。");
   });
 
-  it("试算模式:上限为 0 也不拦截(只记本应拒绝)", async (ctx) => {
+  it("上限为 0 时 402 account_limit_exceeded;取消上限后不再因上限被拒", async (ctx) => {
     if (!admin) ctx.skip();
-    await setMode("trial");
-    try {
-      const { u, uid, sid } = await newSession("limit-trial");
-      expect((await limit(uid, "0")).status).toBe(200);
-      expect((await run(u, sid)).status).not.toBe(402);
-    } finally {
-      await setMode("trial"); // 以试算为基线,见 run-charging.e2e.ts
-    }
-  });
+    /*
+     * 【为什么用 0】0 不依赖"这个账号已经用了多少" —— 全新账号用量是 0,
+     * 任何正数上限都拦不住它,这条测试就会变成恒过的空断言。
+     */
+    const { u, uid, sid } = await newSession("limit-live");
+    expect((await limit(uid, "0")).status).toBe(200);
+    const blocked = await run(u, sid);
+    expect(blocked.status).toBe(402);
+    expect(blocked.body.code).toBe("account_limit_exceeded");
 
-  it("正式模式:上限为 0 时 402 account_limit_exceeded;取消上限后不再因上限被拒", async (ctx) => {
-    if (!admin) ctx.skip();
-    await setMode("live");
-    try {
-      /*
-       * 【为什么用 0】0 不依赖"这个账号已经用了多少" —— 全新账号用量是 0,
-       * 任何正数上限都拦不住它,这条测试就会变成恒过的空断言。
-       */
-      const { u, uid, sid } = await newSession("limit-live");
-      expect((await limit(uid, "0")).status).toBe(200);
-      const blocked = await run(u, sid);
-      expect(blocked.status).toBe(402);
-      expect(blocked.body.code).toBe("account_limit_exceeded");
-
-      expect((await limit(uid, null)).status).toBe(200);
-      // 取消上限后不再是上限拒绝(新账号没有积分,正式模式下会是余额不足)
-      const after = await run(u, sid);
-      expect(after.body.code).not.toBe("account_limit_exceeded");
-    } finally {
-      await setMode("trial"); // 以试算为基线,见 run-charging.e2e.ts
-    }
+    expect((await limit(uid, null)).status).toBe(200);
+    // 取消上限后不再是上限拒绝
+    const after = await run(u, sid);
+    expect(after.body.code).not.toBe("account_limit_exceeded");
   });
 });

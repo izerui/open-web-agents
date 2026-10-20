@@ -68,7 +68,6 @@ export function AccessCenterView() {
   const [issued, setIssued] = useState<{ id: string; plaintext: string } | null>(null);
   const [busy, setBusy] = useState<"issue" | string | null>(null);
   const [keysLoaded, setKeysLoaded] = useState(false);
-  const [trial, setTrial] = useState(true);
   const [docAgentId, setDocAgentId] = useState("");
   const agentName = useMemo(() => new Map(agents.map((a) => [a.id, a.name])), [agents]);
   const docAgent = agents.find((a) => a.id === docAgentId) ?? agents[0];
@@ -87,7 +86,6 @@ export function AccessCenterView() {
       fetchJson<{
         keys?: KeyRecord[];
         rateLimits?: PlatformRateLimits;
-        billingMode?: "trial" | "live";
       }>("/api/keys"),
       fetchJson<{ agents?: AgentSummary[] }>("/api/agents"),
     ]);
@@ -95,7 +93,6 @@ export function AccessCenterView() {
     if (k.status === "fulfilled") {
       setKeys(k.value.keys ?? []);
       if (k.value.rateLimits) setLimits(k.value.rateLimits);
-      setTrial(k.value.billingMode !== "live");
     } else toast.error(`API Key 列表加载失败:${errorText(k.reason)}`);
     setKeysLoaded(true);
 
@@ -319,7 +316,6 @@ export function AccessCenterView() {
                   keyId={k.id}
                   limitMicro={k.monthlyLimitMicroCredits}
                   usedMicro={k.monthUsedMicroCredits ?? "0"}
-                  trial={trial}
                   onSaved={reload}
                 />
                 <span className="text-muted-foreground">

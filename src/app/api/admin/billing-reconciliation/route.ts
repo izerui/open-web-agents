@@ -4,7 +4,6 @@ import {
   RECON_MAX_DAYS,
   reconciliationReport,
 } from "@/lib/modules/billing/application/reconciliation";
-import { BILLING_MODES, type BillingMode } from "@/lib/modules/billing/domain/run-charge";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,7 +12,7 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const dayMs = (d: string) => Date.parse(`${d}T00:00:00Z`);
 
 /**
- * 试算对账报表(只读):?from=YYYY-MM-DD&to=YYYY-MM-DD(含两端,最多 31 天)&mode=trial|live
+ * 对账报表(只读):?from=YYYY-MM-DD&to=YYYY-MM-DD(含两端,最多 31 天)
  * 按提供者、日期汇总用量、成本估算(元)、预计消耗与实际扣除;缺失数据按类别只计条数。
  */
 export async function GET(req: Request) {
@@ -34,14 +33,10 @@ export async function GET(req: Request) {
         { status: 400 },
       );
     }
-    const mode = q.get("mode") || undefined;
-    if (mode && !(BILLING_MODES as readonly string[]).includes(mode)) {
-      return Response.json({ error: "mode 须为 trial 或 live" }, { status: 400 });
-    }
     const [report, list] = await Promise.all([
       reconciliationReport(
         { query: runCharges, pricedModels: (p) => pricedModels.forRun(p) },
-        { from, to, mode: mode as BillingMode | undefined },
+        { from, to },
       ),
       providers.list(),
     ]);

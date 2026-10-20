@@ -379,6 +379,13 @@
       "when": 1792497094955,
       "tag": "0053_run_charges_final_wait",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "5",
+      "when": 1792500000000,
+      "tag": "0054_remove_trial_mode",
+      "breakpoints": true
     }
   ]
 }

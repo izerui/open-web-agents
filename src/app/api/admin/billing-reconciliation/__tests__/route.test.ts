@@ -57,7 +57,6 @@ describe("GET /api/admin/billing-reconciliation", () => {
       "?from=2026-10-1&to=2026-10-20",
       "?from=2026-10-20&to=2026-10-01",
       "?from=2026-09-01&to=2026-10-20",
-      "?from=2026-10-01&to=2026-10-20&mode=x",
     ]) {
       expect((await get(q)).status, q).toBe(400);
     }
@@ -65,11 +64,9 @@ describe("GET /api/admin/billing-reconciliation", () => {
   });
 
   it("返回带提供者名称的汇总;缺失数据按类别计条数", async () => {
-    const r = await get("?from=2026-10-14&to=2026-10-20&mode=trial");
+    const r = await get("?from=2026-10-14&to=2026-10-20");
     expect(r.status).toBe(200);
-    expect(state.calls).toEqual([
-      { from: "2026-10-14", to: "2026-10-20", mode: "trial", limit: 50000 },
-    ]);
+    expect(state.calls).toEqual([{ from: "2026-10-14", to: "2026-10-20", limit: 50000 }]);
     const body = (await r.json()) as {
       lines: { providerName: string; counts: { no_usage_zero: number }; costMicro: string }[];
     };

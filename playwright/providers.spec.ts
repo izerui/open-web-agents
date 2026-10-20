@@ -50,11 +50,19 @@ async function asAdmin(ctx: BrowserContext): Promise<() => Promise<void>> {
   });
   expect(res.ok()).toBeTruthy();
   const { user } = (await res.json()) as { user: { id: string; role: string } };
-  if (user.role === "admin") return async () => {};
   const { createConnection } = await import("mysql2/promise");
-  const db = await createConnection(DB as string);
-  await db.execute("UPDATE users SET role = 'admin' WHERE id = ?", [user.id]);
-  await db.end();
+  if (user.role !== "admin") {
+    const db = await createConnection(DB as string);
+    await db.execute("UPDATE users SET role = 'admin' WHERE id = ?", [user.id]);
+    await db.end();
+  }
+  // 运行一律正式计费:给测试账号入账,发消息才过得了余额检查
+  const credited = await ctx.request.post(`${BASE}/api/billing/credits`, {
+    data: { accountId: user.id, credits: "1000", reason: "Playwright 测试账号入账" },
+    headers: { "Idempotency-Key": `pw-fund-${user.id}` },
+  });
+  expect(credited.ok()).toBeTruthy();
+  if (user.role === "admin") return async () => {};
   return async () => {
     const d = await createConnection(DB as string);
     await d.execute("UPDATE users SET role = 'user' WHERE id = ?", [user.id]);

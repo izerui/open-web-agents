@@ -17,13 +17,11 @@ export function KeyMonthlyLimit({
   keyId,
   limitMicro,
   usedMicro,
-  trial,
   onSaved,
 }: {
   keyId: string;
   limitMicro?: string;
   usedMicro: string;
-  trial: boolean;
   onSaved: () => unknown;
 }) {
   const [editing, setEditing] = useState(false);
@@ -48,7 +46,7 @@ export function KeyMonthlyLimit({
     }
   }
 
-  const used = `本月${trial ? "预计" : ""} ${creditsAmount(usedMicro)}`;
+  const used = `本月 ${creditsAmount(usedMicro)}`;
   if (!editing) {
     return (
       <button

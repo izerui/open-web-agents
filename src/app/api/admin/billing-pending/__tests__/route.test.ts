@@ -36,9 +36,9 @@ describe("GET /api/admin/billing-pending", () => {
   });
 
   it("筛选参数原样传给查询,返回列表与各原因条数", async () => {
-    const r = await get("?reason=owed&mode=live&limit=20&cursor=1_x");
+    const r = await get("?reason=owed&limit=20&cursor=1_x");
     expect(r.status).toBe(200);
-    expect(state.calls).toEqual([{ reason: "owed", mode: "live", limit: 20, cursor: "1_x" }]);
+    expect(state.calls).toEqual([{ reason: "owed", limit: 20, cursor: "1_x" }]);
     expect(await r.json()).toEqual({
       items: [],
       counts: { owed: 1, usage_unknown: 2, unpriced: 3 },
@@ -46,7 +46,7 @@ describe("GET /api/admin/billing-pending", () => {
   });
 
   it("参数不合法:400", async () => {
-    for (const q of ["?reason=nope", "?mode=x", "?limit=0", "?limit=101"]) {
+    for (const q of ["?reason=nope", "?limit=0", "?limit=101"]) {
       expect((await get(q)).status, q).toBe(400);
     }
   });

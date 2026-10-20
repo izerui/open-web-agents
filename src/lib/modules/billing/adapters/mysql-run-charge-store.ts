@@ -43,18 +43,13 @@ export const SWEEP_GRACE_MS = 2 * 60_000;
 
 /**
  * 月度占用(受理时的额度检查与各处展示共用这一个口径):
- * 冻结中的按冻结额;正式模式结算过的按"实扣 + 已确认欠额" —— 欠额是已经确认花掉、只是还没扣到的,
+ * 冻结中的按冻结额;结算过的按"实扣 + 已确认欠额" —— 欠额是已经确认花掉、只是还没扣到的,
  * 不算进去的话,已知超限的账号与 Key 还能继续发起;充值补扣只是欠额转成实扣,合计不变。
- * 试算按预计消耗。
  */
-export function monthUsedSql(mode: BillingMode) {
-  const settled =
-    mode === "live"
-      ? sql`COALESCE(${runCharges.chargedMicro}, 0) + COALESCE(${runCharges.owedMicro}, 0)`
-      : sql`COALESCE(${runCharges.estimatedMicro}, 0)`;
+export function monthUsedSql() {
   return sql<
     string | null
-  >`SUM(CASE WHEN ${runCharges.state} = 'open' THEN ${runCharges.reservedMicro} ELSE ${settled} END)`;
+  >`SUM(CASE WHEN ${runCharges.state} = 'open' THEN ${runCharges.reservedMicro} ELSE COALESCE(${runCharges.chargedMicro}, 0) + COALESCE(${runCharges.owedMicro}, 0) END)`;
 }
 
 /**
@@ -104,16 +99,14 @@ export class MysqlRunChargeStore implements RunChargeStore {
   async monthUsage(filter: {
     accountId?: string;
     apiKeyId?: string;
-    mode: BillingMode;
     since: number;
     until: number;
   }): Promise<bigint> {
     const [row] = await this.db
-      .select({ used: monthUsedSql(filter.mode) })
+      .select({ used: monthUsedSql() })
       .from(runCharges)
       .where(
         and(
-          eq(runCharges.mode, filter.mode),
           gte(runCharges.createdAt, new Date(filter.since)),
           lt(runCharges.createdAt, new Date(filter.until)),
           filter.accountId ? eq(runCharges.accountId, filter.accountId) : undefined,
@@ -121,20 +114,6 @@ export class MysqlRunChargeStore implements RunChargeStore {
         ),
       );
     return BigInt(String(row?.used ?? "0").split(".")[0] || "0");
-  }
-
-  async openTrialReserved(accountId: string): Promise<bigint> {
-    const [row] = await this.db
-      .select({ v: sql<string | null>`SUM(${runCharges.reservedMicro})` })
-      .from(runCharges)
-      .where(
-        and(
-          eq(runCharges.accountId, accountId),
-          eq(runCharges.mode, "trial"),
-          eq(runCharges.state, "open"),
-        ),
-      );
-    return BigInt(String(row?.v ?? "0").split(".")[0] || "0");
   }
 
   async accountLimit(accountId: string): Promise<AccountLimit> {

@@ -1,9 +1,6 @@
 // 运行计费:受理时冻结、运行中追加、结束时结算、清扫补结算。
-//
-// 计费模式在受理时锁进 run_charges.mode,之后只读它 —— 全局设置只决定新受理的运行。
-// 试算(trial):余额与额度照常算,不够只记"本应拒绝"并放行;冻结只记在 run_charges,
-// 钱包不动;结束全额释放,实际扣除恒为 0,另记预计消耗。
-// 正式(live):不够就拒绝;冻结落在钱包里;结束按锁定价目与实际用量扣除。
+// 余额或月度上限不够就拒绝;冻结落在钱包里;结束按锁定价目与实际用量扣除,多退少补。
+// (run_charges.mode 为 "trial" 的只可能是旧数据:已下线的试算,结算时实扣 0。)
 import type { ModelMetering } from "@/lib/modules/agent-engine/domain/model-usage";
 import type { Capability } from "@/lib/modules/capabilities/domain/catalog";
 import type { RunModelBinding } from "@/lib/modules/model-gateway/domain/resolve-run-models";
@@ -24,7 +21,7 @@ import { priceForSettlement } from "../domain/settle-pricing";
 import { BillingError } from "../ports";
 import type { ChargeTransaction, RunChargeStore } from "../run-charge-ports";
 
-/** 正式模式下余额或额度不足,拒绝受理。路由翻成 402。 */
+/** 余额或额度不足,拒绝受理。路由翻成 402。 */
 export class ChargeRejected extends BrandedError {
   static readonly brand = Symbol.for("owa.error.ChargeRejected");
   constructor(readonly code: HoldRejection) {
@@ -42,7 +39,6 @@ export interface AdmitRequest {
 }
 
 export interface RunChargingDeps {
-  mode: () => Promise<BillingMode>;
   bind: (req: {
     main: ModelRef;
     override?: ModelRef;
@@ -91,7 +87,6 @@ export class RunCharging {
    * 模型此刻不可用不在这里拒绝 —— 运行照常创建,执行时如实失败(与之前的行为一致),冻结为 0。
    */
   async admit(store: RunChargeStore, req: AdmitRequest): Promise<PinnedPricing> {
-    const mode = await this.deps.mode();
     let binding: RunModelBinding | null = null;
     let unavailable: ModelUnavailable | null = null;
     try {
@@ -106,7 +101,6 @@ export class RunCharging {
     const wallet = await store.lockAccount(req.accountId);
     const decision: HoldDecision = binding
       ? await this.decide(store, {
-          mode,
           accountId: req.accountId,
           apiKeyId: req.apiKeyId,
           target,
@@ -117,31 +111,28 @@ export class RunCharging {
         })
       : { amount: 0n, rejection: null };
 
-    if (decision.rejection && mode === "live") throw new ChargeRejected(decision.rejection);
+    if (decision.rejection) throw new ChargeRejected(decision.rejection);
 
     const holds: { id: string; amount: string }[] = [];
-    let reserved = decision.amount;
-    if (mode === "live" && decision.amount > 0n) {
+    if (decision.amount > 0n) {
       const id = `run:${req.runId}:0`;
       await store.reserveWallet(req.accountId, id, decision.amount);
       holds.push({ id, amount: decision.amount.toString() });
     }
-    // 试算本应拒绝:按完整目标额记在试算账上,统计"若是正式会怎样"
-    if (mode === "trial" && decision.rejection) reserved = target;
 
     await store.insert({
       runId: req.runId,
       accountId: req.accountId,
       apiKeyId: req.apiKeyId,
-      mode,
-      reservedMicro: reserved.toString(),
+      mode: "live",
+      reservedMicro: decision.amount.toString(),
       holds,
       estimatedMicro: null,
       chargedMicro: null,
       owedMicro: null,
       refundedMicro: null,
       state: "open",
-      wouldReject: mode === "trial" ? decision.rejection : null,
+      wouldReject: null,
       incomplete: false,
       settledCostDigest: null,
       finalWaitSettled: false,
@@ -162,7 +153,6 @@ export class RunCharging {
   private async decide(
     store: RunChargeStore,
     q: {
-      mode: BillingMode;
       accountId: string;
       apiKeyId: string | null;
       target: bigint;
@@ -178,26 +168,24 @@ export class RunCharging {
     if (account.pending) return { amount: 0n, rejection: "account_limit_pending" };
     const accountRemaining = remaining(
       account.limit,
-      await store.monthUsage({ accountId: q.accountId, mode: q.mode, since, until }),
+      await store.monthUsage({ accountId: q.accountId, since, until }),
     );
     const keyRemaining = q.apiKeyId
       ? remaining(
           await store.keyLimit(q.apiKeyId),
-          await store.monthUsage({ apiKeyId: q.apiKeyId, mode: q.mode, since, until }),
+          await store.monthUsage({ apiKeyId: q.apiKeyId, since, until }),
         )
       : null;
-    const available =
-      q.mode === "trial" ? q.available - (await store.openTrialReserved(q.accountId)) : q.available;
     return decideHold({
       target: q.target,
-      available,
+      available: q.available,
       accountRemaining,
       keyRemaining,
       topUp: q.topUp,
     });
   }
 
-  /** 运行中追加一份冻结。试算永远放行(只记本应拒绝);正式不够返回 false。 */
+  /** 运行中追加一份冻结;余额或上限不够返回 false。 */
   async topUp(runId: string): Promise<boolean> {
     return this.deps.transaction(async (store) => {
       const c = await store.get(runId, true);
@@ -208,8 +196,9 @@ export class RunCharging {
         ? ((await this.deps.reserveTargetOf(mainId)) ?? DEFAULT_RESERVE_MICRO)
         : DEFAULT_RESERVE_MICRO;
       const wallet = await store.lockAccount(c.accountId);
+      // 旧数据(已下线的试算)不再追加,照常放行
+      if (c.mode === "trial") return true;
       const decision = await this.decide(store, {
-        mode: c.mode,
         accountId: c.accountId,
         apiKeyId: c.apiKeyId,
         target,
@@ -218,15 +207,6 @@ export class RunCharging {
         // 追加:记在受理那个月(这条记录归属的月份),按那个月的额度检查 —— 跨月运行也一样
         at: c.createdAt,
       });
-      if (c.mode === "trial") {
-        const add = decision.rejection ? target : decision.amount;
-        await store.update(runId, {
-          reservedMicro: (BigInt(c.reservedMicro) + add).toString(),
-          ...(decision.rejection && !c.wouldReject ? { wouldReject: decision.rejection } : {}),
-        });
-        this.bump(runId, add);
-        return true;
-      }
       if (decision.rejection || decision.amount === 0n) return false;
       const id = `run:${runId}:${c.holds.length}`;
       await store.reserveWallet(c.accountId, id, decision.amount);
@@ -246,7 +226,7 @@ export class RunCharging {
 
   /**
    * 运行中每次模型请求返回后调用(token 为本运行累计)。用量事件不带模型,按本次运行各模型里
-   * 最贵的单价估上界,保证不少冻。接近已冻结额就追加;正式模式追加失败且已超出 → "stop"。
+   * 最贵的单价估上界,保证不少冻。接近已冻结额就追加;追加失败且已超出 → "stop"。
    */
   async progress(runId: string, tokens: UsageTokens): Promise<"continue" | "stop"> {
     let l = this.live.get(runId);
@@ -295,8 +275,8 @@ export class RunCharging {
   }
 
   /**
-   * 结算(幂等)。按 run_charges 锁定的模式与运行锁定的价目版本:
-   * 试算全额释放、实际扣 0;正式按实际扣除,超出冻结的另行补扣,补不上记欠额。
+   * 结算(幂等)。按运行锁定的价目版本与实际用量扣除,多的冻结释放,
+   * 超出冻结的另行补扣,补不上记欠额。
    *
    * final:调用方确认用量已定(worker 写完结果、补记完花费之后调用)。清扫不是 final ——
    * 它看到"跑过却没有花费"时分不清是"没调用模型"还是"用量还没补记"(取消后 worker
@@ -354,6 +334,7 @@ export class RunCharging {
       const pending = usageUnknown || unresolved || snapshotWaiting;
       const nextState = pending ? ("provisional" as const) : ("settled" as const);
 
+      // 旧数据(已下线的试算):只记预计消耗,实扣 0
       if (c.mode === "trial") {
         await store.update(runId, {
           estimatedMicro: estimated.toString(),

@@ -3,7 +3,6 @@ import type { RunModelBinding } from "@/lib/modules/model-gateway/domain/resolve
 import { type RunPricing, isUnavailableAtAdmission } from "@/lib/shared";
 import { describe, expect, it } from "vitest";
 import { InMemoryChargeWorld } from "../../adapters/in-memory-run-charge-store";
-import type { BillingMode } from "../../domain/run-charge";
 import { monthWindowUtc } from "../../domain/run-charge";
 import { ChargeRejected, RunCharging } from "../run-charging";
 
@@ -36,11 +35,9 @@ const pricing: RunPricing = {
 };
 const binding = { pricing, main: { capabilityId: "m-main" } } as unknown as RunModelBinding;
 
-function setup(mode: BillingMode = "trial", reserve = 300n * C, now?: () => number) {
+function setup(reserve = 300n * C, now?: () => number) {
   const world = new InMemoryChargeWorld();
-  const state = { mode };
   const charging = new RunCharging({
-    mode: async () => state.mode,
     bind: async () => binding,
     reserveTargetOf: async () => reserve,
     pricedModels: async () => [model],
@@ -87,86 +84,57 @@ function setup(mode: BillingMode = "trial", reserve = 300n * C, now?: () => numb
         },
       },
     });
-  return { world, state, charging, admit, finish };
+  return { world, charging, admit, finish };
 }
 
 const EXPECTED = 57_750_000n.toString();
 
-describe("试算模式:不拦截、不扣款", () => {
-  it("余额为 0 也受理,只记本应拒绝;结束后余额不变、实际扣 0、记预计消耗", async () => {
-    const { world, charging, admit, finish } = setup("trial");
-    const p = await admit("r1");
-    expect(p).toBe(pricing);
-    expect(world.charge("r1")).toMatchObject({
-      mode: "trial",
-      wouldReject: "insufficient_balance",
-      reservedMicro: (300n * C).toString(),
-      holds: [],
-      state: "open",
-    });
-    finish("r1");
-    expect(await charging.settle("r1")).toBe("settled");
-    expect(world.charge("r1")).toMatchObject({
+describe("旧数据:已下线的试算留下的记录", () => {
+  it("结束后只记应扣、实扣 0,钱包不动;运行中不再追加冻结;不占月度额度", async () => {
+    const { world, charging, finish } = setup(30n * C);
+    world.credit("u1", 1000n * C);
+    await world.transaction((s) =>
+      s.insert({
+        runId: "old",
+        accountId: "u1",
+        apiKeyId: null,
+        mode: "trial",
+        reservedMicro: "0",
+        holds: [],
+        estimatedMicro: null,
+        chargedMicro: null,
+        owedMicro: null,
+        refundedMicro: null,
+        state: "open",
+        wouldReject: null,
+        incomplete: false,
+        settledCostDigest: null,
+        finalWaitSettled: false,
+        createdAt: Date.now(),
+        settledAt: null,
+      }),
+    );
+    world.setRun("old", { status: "running", cost: null, pricing, startedAt: 1 });
+    expect(await charging.topUp("old")).toBe(true);
+    expect(world.balance("u1")).toEqual({ available: 1000n * C, reserved: 0n });
+    finish("old");
+    expect(await charging.settle("old")).toBe("settled");
+    expect(world.charge("old")).toMatchObject({
       estimatedMicro: EXPECTED,
       chargedMicro: "0",
       state: "settled",
     });
-    expect(world.balance("u1")).toEqual({ available: 0n, reserved: 0n });
-  });
-
-  it("有余额:非零售价运行结束,钱包一分不动", async () => {
-    const { world, charging, admit, finish } = setup("trial");
-    world.credit("u1", 1000n * C);
-    await admit("r1");
-    expect(world.charge("r1")?.wouldReject).toBeNull();
     expect(world.balance("u1")).toEqual({ available: 1000n * C, reserved: 0n });
-    for (const status of ["success"]) finish("r1", status);
-    await charging.settle("r1");
-    expect(world.balance("u1")).toEqual({ available: 1000n * C, reserved: 0n });
-    expect(world.charge("r1")?.chargedMicro).toBe("0");
-  });
-
-  it("中途停止、失败、未开始就取消:都只记预计消耗,实际扣 0", async () => {
-    const { world, charging, admit, finish } = setup("trial");
-    world.credit("u1", 1000n * C);
-    for (const [id, status] of [
-      ["a", "cancelled"],
-      ["b", "failed"],
-    ] as const) {
-      await admit(id);
-      finish(id, status);
-      await charging.settle(id);
-      expect(world.charge(id)).toMatchObject({ chargedMicro: "0", estimatedMicro: EXPECTED });
-    }
-    await admit("c");
-    world.setRun("c", { status: "cancelled", cost: null, pricing, startedAt: null });
-    await charging.settle("c");
-    expect(world.charge("c")).toMatchObject({
-      chargedMicro: "0",
-      estimatedMicro: "0",
-      incomplete: false,
-    });
-    expect(world.balance("u1").available).toBe(1000n * C);
-  });
-
-  it("试算在途冻结计入试算可用余额:第二次超出余额记本应拒绝,但仍放行", async () => {
-    const { world, admit } = setup("trial", 300n * C);
-    world.credit("u1", 400n * C);
-    await admit("r1");
-    await admit("r2");
-    expect(world.charge("r1")?.wouldReject).toBeNull();
-    expect(world.charge("r2")).toMatchObject({
-      wouldReject: null,
-      reservedMicro: (100n * C).toString(),
-    });
-    await admit("r3");
-    expect(world.charge("r3")?.wouldReject).toBe("insufficient_balance");
+    const used = await world.transaction((s) =>
+      s.monthUsage({ accountId: "u1", ...monthWindowUtc(Date.now()) }),
+    );
+    expect(used).toBe(0n);
   });
 });
 
-describe("正式模式", () => {
+describe("受理与结算", () => {
   it("余额不足:拒绝,且整个事务回滚(不留 run_charges)", async () => {
-    const { world, admit } = setup("live");
+    const { world, admit } = setup();
     world.credit("u1", 10n * C);
     await expect(admit("r1")).rejects.toBeInstanceOf(ChargeRejected);
     expect(world.charge("r1")).toBeNull();
@@ -174,7 +142,7 @@ describe("正式模式", () => {
   });
 
   it("冻结 min(目标, 可用);结束按实际扣除、其余释放", async () => {
-    const { world, charging, admit, finish } = setup("live");
+    const { world, charging, admit, finish } = setup();
     world.credit("u1", 1000n * C);
     await admit("r1");
     expect(world.balance("u1")).toEqual({ available: 700n * C, reserved: 300n * C });
@@ -185,14 +153,14 @@ describe("正式模式", () => {
   });
 
   it("实际超出冻结:超出部分补扣;余额不够补扣记欠额并标待核对", async () => {
-    const { world, charging, admit, finish } = setup("live", 50n * C);
+    const { world, charging, admit, finish } = setup(50n * C);
     world.credit("u1", 1000n * C);
     await admit("r1");
     finish("r1");
     await charging.settle("r1");
     expect(world.balance("u1").available).toBe(1000n * C - 57_750_000n);
 
-    const t = setup("live", 50n * C);
+    const t = setup(50n * C);
     t.world.credit("u1", 52n * C);
     await t.admit("r1");
     t.finish("r1");
@@ -205,7 +173,7 @@ describe("正式模式", () => {
   });
 
   it("同一 Key 并发两次运行,月度额度只够一次:只有一次成功", async () => {
-    const { world, admit } = setup("live", 300n * C);
+    const { world, admit } = setup(300n * C);
     world.credit("u1", 10_000n * C);
     world.setKeyLimit("k1", 300n * C);
     const out = await Promise.allSettled([
@@ -219,7 +187,7 @@ describe("正式模式", () => {
   });
 
   it("账号月度上限包含在途冻结;同账号不同 Key 共用余额", async () => {
-    const { world, admit } = setup("live", 300n * C);
+    const { world, admit } = setup(300n * C);
     world.credit("u1", 500n * C);
     world.setAccountLimit("u1", 10_000n * C);
     await admit("r1", { apiKeyId: "k1" });
@@ -231,39 +199,9 @@ describe("正式模式", () => {
   });
 });
 
-describe("计费模式按受理时的快照", () => {
-  it("试算受理 → 切正式 → 结束 / 清扫补结算:实际扣 0", async () => {
-    const { world, state, charging, admit, finish } = setup("trial");
-    world.credit("u1", 1000n * C);
-    await admit("r1");
-    await admit("r2");
-    state.mode = "live";
-    finish("r1");
-    await charging.settle("r1");
-    finish("r2", "cancelled");
-    expect(await charging.sweep()).toBe(1);
-    for (const id of ["r1", "r2"]) expect(world.charge(id)?.chargedMicro).toBe("0");
-    expect(world.balance("u1")).toEqual({ available: 1000n * C, reserved: 0n });
-  });
-
-  it("正式受理 → 切试算 → 结束 / 清扫补结算:照常扣费,不免单", async () => {
-    const { world, state, charging, admit, finish } = setup("live");
-    world.credit("u1", 1000n * C);
-    await admit("r1");
-    await admit("r2");
-    state.mode = "trial";
-    finish("r1");
-    await charging.settle("r1");
-    finish("r2", "cancelled");
-    await charging.sweep();
-    for (const id of ["r1", "r2"]) expect(world.charge(id)?.chargedMicro).toBe(EXPECTED);
-    expect(world.balance("u1")).toEqual({ available: 1000n * C - 2n * 57_750_000n, reserved: 0n });
-  });
-});
-
 describe("运行中追加与停止", () => {
-  it("正式:接近冻结额自动追加;追加不成且已超出 → stop", async () => {
-    const { world, charging, admit } = setup("live", 30n * C);
+  it("接近冻结额自动追加;追加不成且已超出 → stop", async () => {
+    const { world, charging, admit } = setup(30n * C);
     world.credit("u1", 70n * C);
     await admit("r1");
     // 1.1 万输入 = 25.41 积分 ≥ 30 的八成(24) → 追加一份 30
@@ -281,22 +219,11 @@ describe("运行中追加与停止", () => {
       await charging.progress("r1", { input: 40_000, output: 0, cacheRead: 0, cacheWrite: 0 }),
     ).toBe("stop");
   });
-
-  it("试算:追加永远放行,只记本应拒绝", async () => {
-    const { world, charging, admit } = setup("trial", 30n * C);
-    world.credit("u1", 30n * C);
-    await admit("r1");
-    expect(
-      await charging.progress("r1", { input: 40_000, output: 0, cacheRead: 0, cacheWrite: 0 }),
-    ).toBe("continue");
-    expect(world.charge("r1")?.wouldReject).toBe("insufficient_balance");
-    expect(world.balance("u1")).toEqual({ available: 30n * C, reserved: 0n });
-  });
 });
 
 describe("幂等与清扫", () => {
   it("运行未结束不结算;重复结算只生效一次", async () => {
-    const { world, charging, admit, finish } = setup("live");
+    const { world, charging, admit, finish } = setup();
     world.credit("u1", 1000n * C);
     await admit("r1");
     expect(await charging.settle("r1")).toBe("pending");
@@ -312,7 +239,6 @@ describe("幂等与清扫", () => {
       "@/lib/modules/model-gateway/domain/resolve-run-models"
     );
     const charging = new RunCharging({
-      mode: async () => "live",
       bind: async () => {
         throw new ModelUnavailable("model_disabled", "停用");
       },
@@ -333,8 +259,8 @@ describe("取消后迟到的用量", () => {
   const cancelledNoCost = (world: InMemoryChargeWorld, id: string) =>
     world.setRun(id, { status: "cancelled", cost: null, pricing, startedAt: 1 });
 
-  it("正式:清扫时没有用量 → 暂记、释放冻结、标不完整;worker 补记后补扣一次,重复结算不再扣", async () => {
-    const { world, charging, admit, finish } = setup("live");
+  it("清扫时没有用量 → 暂记、释放冻结、标不完整;worker 补记后补扣一次,重复结算不再扣", async () => {
+    const { world, charging, admit, finish } = setup();
     world.credit("u1", 1000n * C);
     await admit("r1");
     cancelledNoCost(world, "r1");
@@ -364,7 +290,7 @@ describe("取消后迟到的用量", () => {
   });
 
   it("worker 那次结算没成功:清扫看到暂记且用量已补记,同样补齐", async () => {
-    const { world, charging, admit, finish } = setup("live");
+    const { world, charging, admit, finish } = setup();
     world.credit("u1", 1000n * C);
     await admit("r1");
     cancelledNoCost(world, "r1");
@@ -375,26 +301,8 @@ describe("取消后迟到的用量", () => {
     expect(world.balance("u1").available).toBe(1000n * C - 57_750_000n);
   });
 
-  it("试算:暂记后补上预计消耗,实扣仍为 0", async () => {
-    const { world, charging, admit, finish } = setup("trial");
-    world.credit("u1", 1000n * C);
-    await admit("r1");
-    cancelledNoCost(world, "r1");
-    await charging.sweep();
-    expect(world.charge("r1")).toMatchObject({ state: "provisional", estimatedMicro: "0" });
-    finish("r1", "cancelled");
-    await charging.settle("r1", { final: true });
-    expect(world.charge("r1")).toMatchObject({
-      state: "settled",
-      estimatedMicro: EXPECTED,
-      chargedMicro: "0",
-      incomplete: false,
-    });
-    expect(world.balance("u1")).toEqual({ available: 1000n * C, reserved: 0n });
-  });
-
   it("补扣时余额不够:记欠额、标待核对,实扣 + 欠额 = 应扣", async () => {
-    const { world, charging, admit, finish } = setup("live", 30n * C);
+    const { world, charging, admit, finish } = setup(30n * C);
     world.credit("u1", 30n * C);
     await admit("r1");
     cancelledNoCost(world, "r1");
@@ -411,7 +319,7 @@ describe("取消后迟到的用量", () => {
   });
 
   it("从没开始执行就取消:确认没调用模型,直接按 0 结清,不标不完整", async () => {
-    const { world, charging, admit } = setup("live");
+    const { world, charging, admit } = setup();
     world.credit("u1", 1000n * C);
     await admit("r1");
     world.setRun("r1", { status: "cancelled", cost: null, pricing, startedAt: null });
@@ -420,7 +328,7 @@ describe("取消后迟到的用量", () => {
   });
 
   it("worker 确认用量已定且没有花费:直接结清,不留暂记", async () => {
-    const { world, charging, admit } = setup("live");
+    const { world, charging, admit } = setup();
     world.credit("u1", 1000n * C);
     await admit("r1");
     world.setRun("r1", { status: "failed", cost: null, pricing, startedAt: 1 });
@@ -430,24 +338,16 @@ describe("取消后迟到的用量", () => {
 });
 
 describe("升级遗留的美元上限", () => {
-  it("正式:旧上限未按积分重新设置时拒绝(account_limit_pending),不当成不限", async () => {
-    const { world, admit } = setup("live");
+  it("旧上限未按积分重新设置时拒绝(account_limit_pending),不当成不限", async () => {
+    const { world, admit } = setup();
     world.credit("u1", 1000n * C);
     world.setLegacyPending("u1");
     await expect(admit("r1")).rejects.toMatchObject({ code: "account_limit_pending" });
     expect(world.balance("u1")).toEqual({ available: 1000n * C, reserved: 0n });
   });
 
-  it("试算:照常放行,只记本应拒绝", async () => {
-    const { world, admit } = setup("trial");
-    world.credit("u1", 1000n * C);
-    world.setLegacyPending("u1");
-    await admit("r1");
-    expect(world.charge("r1")?.wouldReject).toBe("account_limit_pending");
-  });
-
   it("管理员按积分设置了上限之后按新上限执行", async () => {
-    const { world, admit } = setup("live");
+    const { world, admit } = setup();
     world.credit("u1", 1000n * C);
     world.setLegacyPending("u1");
     world.setAccountLimit("u1", 500n * C);
@@ -473,35 +373,33 @@ describe("认不出模型或缺价目的部分:按本次运行主模型售价计
     },
   });
 
-  for (const mode of ["live", "trial"] as const) {
-    it(`${mode}:认得出的按自己的价,认不出的按主模型价,结清不留暂记`, async () => {
-      const { world, charging, admit } = setup(mode);
-      world.credit("u1", 1000n * C);
-      await admit("r1");
-      // 1 万输入(主模型自己)+ 1 万输入(上游回报的模型名对不上)
-      world.setRun("r1", {
-        status: "failed",
-        cost: usage([
-          ["up-main", 10000],
-          ["claude-x-20250929", 10000],
-        ]),
-        pricing,
-        startedAt: 1,
-      });
-      expect(await charging.settle("r1", { final: true })).toBe("settled");
-      const due = mode === "live" ? 46_200_000n : 0n;
-      expect(world.charge("r1")).toMatchObject({
-        state: "settled",
-        incomplete: false,
-        estimatedMicro: "46200000",
-        chargedMicro: due.toString(),
-      });
-      expect(world.deducted("u1")).toBe(due);
+  it("认得出的按自己的价,认不出的按主模型价,结清不留暂记", async () => {
+    const { world, charging, admit } = setup();
+    world.credit("u1", 1000n * C);
+    await admit("r1");
+    // 1 万输入(主模型自己)+ 1 万输入(上游回报的模型名对不上)
+    world.setRun("r1", {
+      status: "failed",
+      cost: usage([
+        ["up-main", 10000],
+        ["claude-x-20250929", 10000],
+      ]),
+      pricing,
+      startedAt: 1,
     });
-  }
+    expect(await charging.settle("r1", { final: true })).toBe("settled");
+    const due = 46_200_000n;
+    expect(world.charge("r1")).toMatchObject({
+      state: "settled",
+      incomplete: false,
+      estimatedMicro: "46200000",
+      chargedMicro: due.toString(),
+    });
+    expect(world.deducted("u1")).toBe(due);
+  });
 
   it("没有按模型的明细:用总 token 数按主模型价计", async () => {
-    const { world, charging, admit } = setup("live");
+    const { world, charging, admit } = setup();
     world.credit("u1", 1000n * C);
     await admit("r1");
     world.setRun("r1", {
@@ -515,7 +413,7 @@ describe("认不出模型或缺价目的部分:按本次运行主模型售价计
   });
 
   it("计量不完整(有条目解析不了)也按能解析的部分结清", async () => {
-    const { world, charging, admit } = setup("live");
+    const { world, charging, admit } = setup();
     world.credit("u1", 1000n * C);
     await admit("r1");
     world.setRun("r1", {
@@ -532,7 +430,6 @@ describe("认不出模型或缺价目的部分:按本次运行主模型售价计
     const world = new InMemoryChargeWorld();
     world.credit("u1", 1000n * C);
     const charging = new RunCharging({
-      mode: async () => "live",
       bind: async () => binding,
       reserveTargetOf: async () => 300n * C,
       pricedModels: async () => null,
@@ -552,7 +449,7 @@ describe("认不出模型或缺价目的部分:按本次运行主模型售价计
   });
 
   it("同一运行补扣多次(快照 1 万 → 快照 2 万 → 最终 3 万):每次编号不同,不漏扣", async () => {
-    const { world, charging, admit } = setup("live");
+    const { world, charging, admit } = setup();
     world.credit("u1", 1000n * C);
     await admit("r1");
     const snap = (n: number, seq: number) => ({ ...usage([["up-main", n]]), seq });
@@ -622,7 +519,7 @@ describe("补结算以真实已扣为基准(费用先往下、再往上修正)",
   const D = 115_500_000n;
 
   const liveFlow = () => {
-    const { world, charging, admit } = setup("live");
+    const { world, charging, admit } = setup();
     world.credit("u1", 1000n * C);
     // 还不是最终费用的一步(complete=false)走期限内的快照:暂记,费用之后还会变
     const set = (c: unknown) => world.setRun("r1", asRun(c));
@@ -640,7 +537,7 @@ describe("补结算以真实已扣为基准(费用先往下、再往上修正)",
     return { world, charging, admit, set, check };
   };
 
-  it("正式:暂记 92.4 → 修正为 69.3 但仍不完整(不退)→ 补齐 115.5 补扣 23.1 → 重复结算不再扣", async () => {
+  it("暂记 92.4 → 修正为 69.3 但仍不完整(不退)→ 补齐 115.5 补扣 23.1 → 重复结算不再扣", async () => {
     const { charging, admit, set, check } = liveFlow();
     await admit("r1");
 
@@ -662,7 +559,7 @@ describe("补结算以真实已扣为基准(费用先往下、再往上修正)",
     check(D, 0n, D, "settled");
   });
 
-  it("正式:已扣非零 → 取不到锁定价目时不退;最终费用只有总 token(无明细)时按主模型价算出减少,只退差额一次", async () => {
+  it("已扣非零 → 取不到锁定价目时不退;最终费用只有总 token(无明细)时按主模型价算出减少,只退差额一次", async () => {
     const { charging, admit, set, check } = liveFlow();
     await admit("r1");
     set(cost(40000, false)); // 快照暂记 92.4
@@ -670,7 +567,7 @@ describe("补结算以真实已扣为基准(费用先往下、再往上修正)",
     check(A, 0n, A, "provisional");
 
     // 另一个运行:锁定价目取不到 —— 算不出不等于应扣减少,不退
-    const noPrice = setup("live");
+    const noPrice = setup();
     noPrice.world.credit("u1", 1000n * C);
     await noPrice.admit("r2");
     noPrice.world.setRun("r2", {
@@ -681,7 +578,6 @@ describe("补结算以真实已扣为基准(费用先往下、再往上修正)",
     });
     await noPrice.charging.settle("r2", { final: true });
     const missing = new RunCharging({
-      mode: async () => "live",
       bind: async () => binding,
       reserveTargetOf: async () => 300n * C,
       pricedModels: async () => null,
@@ -709,7 +605,7 @@ describe("补结算以真实已扣为基准(费用先往下、再往上修正)",
     check(B, A - B, B, "settled");
   });
 
-  it("正式:用量完整的首次结算就少于冻结时,冻结释放即可,不产生退还", async () => {
+  it("用量完整的首次结算就少于冻结时,冻结释放即可,不产生退还", async () => {
     const { world, charging, admit, set } = liveFlow();
     await admit("r1");
     set(cost(30000, true));
@@ -717,33 +613,12 @@ describe("补结算以真实已扣为基准(费用先往下、再往上修正)",
     expect(world.charge("r1")).toMatchObject({ chargedMicro: B.toString(), refundedMicro: null });
     expect(world.deducted("u1")).toBe(B);
   });
-
-  it("试算:同样的修正过程只更新预计消耗,钱包一分不动", async () => {
-    const { world, charging, admit } = setup("trial");
-    world.credit("u1", 1000n * C);
-    await admit("r1");
-    // 中间一步仍不完整(保持暂记);完整之后才结清
-    for (const [c, est] of [
-      [cost(40000, false), A],
-      [cost(30000, false), B],
-      [cost(50000, true), D],
-    ] as const) {
-      world.setRun("r1", asRun(c));
-      await charging.settle("r1", { final: true });
-      expect(world.charge("r1")).toMatchObject({
-        estimatedMicro: est.toString(),
-        chargedMicro: "0",
-      });
-    }
-    expect(world.deducted("u1")).toBe(0n);
-    expect(world.balance("u1")).toEqual({ available: 1000n * C, reserved: 0n });
-  });
 });
 
 describe("欠款补扣", () => {
   it("实际费用超过冻结额 → 余额不足留下欠额 → 充值 → 补结算只补一次 → 重复执行不再扣", async () => {
     // 单次冻结 30,余额 50:实际 57.75,冻结扣 30,超出的 27.75 余额只剩 20 补不上
-    const { world, charging, admit, finish } = setup("live", 30n * C);
+    const { world, charging, admit, finish } = setup(30n * C);
     world.credit("u1", 50n * C);
     await admit("r1");
     finish("r1");
@@ -787,7 +662,7 @@ describe("月度上限计入已确认的欠额", () => {
   for (const scope of ["account", "key"] as const) {
     it(`${scope === "account" ? "账号" : "Key"}:实际超限并留欠 → 再次发起被拒;充值补扣后月度已用不变、仍被拒`, async () => {
       // 上限 50;单次冻结 30;余额 50。实际 57.75:冻结扣 30,欠 27.75,钱包剩 20
-      const { world, charging, admit, finish } = setup("live", 30n * C);
+      const { world, charging, admit, finish } = setup(30n * C);
       world.credit("u1", 50n * C);
       if (scope === "account") world.setAccountLimit("u1", 50n * C);
       else world.setKeyLimit("k1", 50n * C);
@@ -795,9 +670,7 @@ describe("月度上限计入已确认的欠额", () => {
       const used = () =>
         world.transaction((s) =>
           s.monthUsage(
-            scope === "account"
-              ? { accountId: "u1", mode: "live", ...window }
-              : { apiKeyId: "k1", mode: "live", ...window },
+            scope === "account" ? { accountId: "u1", ...window } : { apiKeyId: "k1", ...window },
           ),
         );
       const code = scope === "account" ? "account_limit_exceeded" : "key_limit_exceeded";
@@ -828,7 +701,7 @@ describe("跨月运行:月度占用按受理月份归属", () => {
   for (const scope of ["account", "key"] as const) {
     it(`${scope === "account" ? "账号" : "Key"}:月底受理 → 推进到下月 → 连续追加冻结,追加记在受理月份且受它的上限约束`, async () => {
       const clock = { t: JAN_31 };
-      const { world, charging, admit } = setup("live", 30n * C, () => clock.t);
+      const { world, charging, admit } = setup(30n * C, () => clock.t);
       world.credit("u1", 1000n * C); // 余额充足,只有月度上限能拦
       if (scope === "account") world.setAccountLimit("u1", 50n * C);
       else world.setKeyLimit("k1", 50n * C);
@@ -837,7 +710,6 @@ describe("跨月运行:月度占用按受理月份归属", () => {
         world.transaction((s) =>
           s.monthUsage({
             ...(scope === "account" ? { accountId: "u1" } : { apiKeyId: "k1" }),
-            mode: "live",
             ...monthWindowUtc(at),
           }),
         );
@@ -885,44 +757,42 @@ describe("没有最终费用时按运行中的用量快照结算", () => {
     },
   };
 
-  for (const mode of ["live", "trial"] as const) {
-    it(`${mode}:worker 中途挂掉(没有最终费用)→ 按快照计价、保留暂记 → 最终费用补写后只补差额`, async () => {
-      const { world, charging, admit, finish } = setup(mode);
-      world.credit("u1", 1000n * C);
-      await admit("r1");
-      world.setRun("r1", {
-        status: "failed",
-        cost: null,
-        usageSnapshot: snapshot,
-        pricing,
-        startedAt: 1,
-      });
-      expect(await charging.sweep()).toBe(1);
-      const first = mode === "live" ? 23_100_000n : 0n;
-      expect(world.charge("r1")).toMatchObject({
-        state: "provisional",
-        incomplete: true,
-        estimatedMicro: "23100000",
-        chargedMicro: first.toString(),
-      });
-      expect(await charging.sweep()).toBe(0); // 快照没变:不再处理
-
-      // 恢复记录补写了最终费用
-      finish("r1", "failed");
-      expect(await charging.sweep()).toBe(1);
-      expect(world.charge("r1")).toMatchObject({
-        state: "settled",
-        incomplete: false,
-        estimatedMicro: EXPECTED,
-        chargedMicro: (mode === "live" ? 57_750_000n : 0n).toString(),
-      });
-      expect(world.deducted("u1")).toBe(mode === "live" ? 57_750_000n : 0n);
-      expect(await charging.sweep()).toBe(0);
+  it("worker 中途挂掉(没有最终费用)→ 按快照计价、保留暂记 → 最终费用补写后只补差额", async () => {
+    const { world, charging, admit, finish } = setup();
+    world.credit("u1", 1000n * C);
+    await admit("r1");
+    world.setRun("r1", {
+      status: "failed",
+      cost: null,
+      usageSnapshot: snapshot,
+      pricing,
+      startedAt: 1,
     });
-  }
+    expect(await charging.sweep()).toBe(1);
+    const first = 23_100_000n;
+    expect(world.charge("r1")).toMatchObject({
+      state: "provisional",
+      incomplete: true,
+      estimatedMicro: "23100000",
+      chargedMicro: first.toString(),
+    });
+    expect(await charging.sweep()).toBe(0); // 快照没变:不再处理
+
+    // 恢复记录补写了最终费用
+    finish("r1", "failed");
+    expect(await charging.sweep()).toBe(1);
+    expect(world.charge("r1")).toMatchObject({
+      state: "settled",
+      incomplete: false,
+      estimatedMicro: EXPECTED,
+      chargedMicro: 57_750_000n.toString(),
+    });
+    expect(world.deducted("u1")).toBe(57_750_000n);
+    expect(await charging.sweep()).toBe(0);
+  });
 
   it("有最终费用时不看快照", async () => {
-    const { world, charging, admit } = setup("live");
+    const { world, charging, admit } = setup();
     world.credit("u1", 1000n * C);
     await admit("r1");
     world.setRun("r1", {
@@ -960,48 +830,46 @@ describe("快照与最终费用内容完全相同", () => {
       ],
     },
   };
-  for (const mode of ["live", "trial"] as const) {
-    for (const via of ["清扫", "直接最终结算"] as const) {
-      it(`${mode}:完整费用先作为快照暂记 → 原样补进最终费用 → ${via}转已结清,不重复扣`, async () => {
-        const { world, charging, admit } = setup(mode);
-        world.credit("u1", 1000n * C);
-        await admit("r1");
-        world.setRun("r1", {
-          status: "failed",
-          cost: null,
-          usageSnapshot: full,
-          pricing,
-          startedAt: 1,
-        });
-        await charging.sweep();
-        const due = mode === "live" ? 57_750_000n : 0n;
-        expect(world.charge("r1")).toMatchObject({
-          state: "provisional",
-          incomplete: true,
-          estimatedMicro: EXPECTED,
-          chargedMicro: due.toString(),
-        });
-
-        world.setRun("r1", {
-          status: "failed",
-          cost: structuredClone(full),
-          usageSnapshot: full,
-          pricing,
-          startedAt: 1,
-        });
-        if (via === "清扫") expect(await charging.sweep()).toBe(1);
-        else expect(await charging.settle("r1", { final: true })).toBe("settled");
-        expect(world.charge("r1")).toMatchObject({
-          state: "settled",
-          incomplete: false,
-          estimatedMicro: EXPECTED,
-          chargedMicro: due.toString(),
-        });
-        expect(world.deducted("u1")).toBe(due);
-        expect(world.balance("u1")).toEqual({ available: 1000n * C - due, reserved: 0n });
-        expect(await charging.sweep()).toBe(0);
+  for (const via of ["清扫", "直接最终结算"] as const) {
+    it(`完整费用先作为快照暂记 → 原样补进最终费用 → ${via}转已结清,不重复扣`, async () => {
+      const { world, charging, admit } = setup();
+      world.credit("u1", 1000n * C);
+      await admit("r1");
+      world.setRun("r1", {
+        status: "failed",
+        cost: null,
+        usageSnapshot: full,
+        pricing,
+        startedAt: 1,
       });
-    }
+      await charging.sweep();
+      const due = 57_750_000n;
+      expect(world.charge("r1")).toMatchObject({
+        state: "provisional",
+        incomplete: true,
+        estimatedMicro: EXPECTED,
+        chargedMicro: due.toString(),
+      });
+
+      world.setRun("r1", {
+        status: "failed",
+        cost: structuredClone(full),
+        usageSnapshot: full,
+        pricing,
+        startedAt: 1,
+      });
+      if (via === "清扫") expect(await charging.sweep()).toBe(1);
+      else expect(await charging.settle("r1", { final: true })).toBe("settled");
+      expect(world.charge("r1")).toMatchObject({
+        state: "settled",
+        incomplete: false,
+        estimatedMicro: EXPECTED,
+        chargedMicro: due.toString(),
+      });
+      expect(world.deducted("u1")).toBe(due);
+      expect(world.balance("u1")).toEqual({ available: 1000n * C - due, reserved: 0n });
+      expect(await charging.sweep()).toBe(0);
+    });
   }
 });
 
@@ -1034,54 +902,52 @@ describe("worker 中途挂掉:等最终费用 24 小时", () => {
       ],
     },
   };
-  for (const mode of ["live", "trial"] as const) {
-    it(`${mode}:有快照 —— 期限内暂记;过了 24 小时仍没有最终费用就按快照结清,之后不再处理`, async () => {
-      const { world, charging, admit } = setup(mode);
-      world.credit("u1", 1000n * C);
-      await admit("r1");
-      const ended = (agoMs: number) =>
-        world.setRun("r1", {
-          status: "failed",
-          cost: null,
-          usageSnapshot: snapshot,
-          pricing,
-          startedAt: 1,
-          endedAt: Date.now() - agoMs,
-        });
-      const due = mode === "live" ? 23_100_000n : 0n;
-      ended(1 * H);
-      await charging.sweep();
-      expect(world.charge("r1")).toMatchObject({ state: "provisional", incomplete: true });
-      expect(await charging.sweep()).toBe(0);
-
-      await elapse(world, 24 * H);
-      expect(await charging.sweep()).toBe(1);
-      expect(world.charge("r1")).toMatchObject({
-        state: "settled",
-        incomplete: false,
-        estimatedMicro: "23100000",
-        chargedMicro: due.toString(),
-      });
-      expect(await charging.sweep()).toBe(0);
-      expect(world.deducted("u1")).toBe(due);
-
-      // 期限过后才补到的最终费用:已结清,不再改(也不重复扣)
+  it("有快照 —— 期限内暂记;过了 24 小时仍没有最终费用就按快照结清,之后不再处理", async () => {
+    const { world, charging, admit } = setup();
+    world.credit("u1", 1000n * C);
+    await admit("r1");
+    const ended = (agoMs: number) =>
       world.setRun("r1", {
         status: "failed",
-        cost: { ...snapshot, input: 20000 },
+        cost: null,
         usageSnapshot: snapshot,
         pricing,
         startedAt: 1,
-        endedAt: Date.now() - 26 * H,
+        endedAt: Date.now() - agoMs,
       });
-      await charging.sweep();
-      expect(world.charge("r1")?.state).toBe("settled");
-      expect(world.deducted("u1")).toBe(due);
+    const due = 23_100_000n;
+    ended(1 * H);
+    await charging.sweep();
+    expect(world.charge("r1")).toMatchObject({ state: "provisional", incomplete: true });
+    expect(await charging.sweep()).toBe(0);
+
+    await elapse(world, 24 * H);
+    expect(await charging.sweep()).toBe(1);
+    expect(world.charge("r1")).toMatchObject({
+      state: "settled",
+      incomplete: false,
+      estimatedMicro: "23100000",
+      chargedMicro: due.toString(),
     });
-  }
+    expect(await charging.sweep()).toBe(0);
+    expect(world.deducted("u1")).toBe(due);
+
+    // 期限过后才补到的最终费用:已结清,不再改(也不重复扣)
+    world.setRun("r1", {
+      status: "failed",
+      cost: { ...snapshot, input: 20000 },
+      usageSnapshot: snapshot,
+      pricing,
+      startedAt: 1,
+      endedAt: Date.now() - 26 * H,
+    });
+    await charging.sweep();
+    expect(world.charge("r1")?.state).toBe("settled");
+    expect(world.deducted("u1")).toBe(due);
+  });
 
   it("没有快照也没有费用(第一次收到用量前就挂了)—— 期限内暂记,过期按 0 结清", async () => {
-    const { world, charging, admit } = setup("live");
+    const { world, charging, admit } = setup();
     world.credit("u1", 1000n * C);
     await admit("r1");
     const ended = (agoMs: number) =>

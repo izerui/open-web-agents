@@ -1,7 +1,7 @@
 // 运行计费的纯规则:冻结额怎么定、什么时候算"不够"、结束时怎么拆分扣款。全程 bigint 微积分。
 
+/** 计费记录上的模式标记:新记录恒为 live;trial 只出现在已下线的试算留下的旧记录里 */
 export type BillingMode = "trial" | "live";
-export const BILLING_MODES: readonly BillingMode[] = ["trial", "live"];
 
 export type HoldRejection =
   | "insufficient_balance"
@@ -18,7 +18,7 @@ export const DEFAULT_RESERVE_MICRO = 300_000_000n;
 export interface HoldInput {
   /** 想冻结的额度(模型的单次冻结额) */
   target: bigint;
-  /** 可用余额(正式 = 钱包可用;试算 = 钱包可用 − 在途试算冻结) */
+  /** 钱包可用余额 */
   available: bigint;
   /** 账号本月剩余(上限 − 已用 − 在途);null = 不限 */
   accountRemaining: bigint | null;

@@ -1,6 +1,6 @@
 // 积分页与 Key 月度上限的界面验收:
-//   用户积分页显示「可用 / 冻结中」、试算说明、运行消耗(预计 vs 实际、本应拒绝)
-//   接入中心给 Key 设月度积分上限;管理员积分管理页显示计费模式与切换确认
+//   用户积分页显示「可用 / 冻结中」、计费说明、运行消耗(应扣 vs 实际扣除)
+//   接入中心给 Key 设月度积分上限;管理员积分管理页没有计费模式(计费恒为正式)
 // 需要专用测试库(OWA_E2E_DATABASE_URL,库名含 test):写入运行计费记录、临时设管理员。
 
 import { randomUUID } from "node:crypto";
@@ -31,22 +31,17 @@ async function sql(query: string, params: unknown[]) {
   }
 }
 
-async function billingMode(ctx: BrowserContext): Promise<"trial" | "live"> {
-  const res = await ctx.request.get(`${BASE}/api/billing`);
-  return ((await res.json()) as { mode: "trial" | "live" }).mode;
-}
-
 test.describe("积分与计费界面", () => {
   test.skip(!DB || !/test/i.test(new URL(DB).pathname), "需要专用测试库");
 
-  test("积分页:可用 / 冻结中、试算说明、运行消耗明细", async ({ page, context }) => {
+  test("积分页:可用 / 冻结中、计费说明、运行消耗明细", async ({ page, context }) => {
     const user = await register(context, "billing");
     const runId = randomUUID();
-    // 一次试算运行:预计 57.75 积分、实扣 0、本应拒绝(余额不足)
+    // 一次已结算的运行:应扣 57.75 积分、实扣 57.75
     await sql(
       `INSERT INTO run_charges (run_id, account_id, api_key_id, mode, reserved_micro, reservation_ids,
          estimated_micro, charged_micro, owed_micro, state, would_reject, incomplete, created_at, settled_at)
-       VALUES (?, ?, NULL, 'trial', 300000000, '[]', 57750000, 0, NULL, 'settled', 'insufficient_balance', 0, NOW(3), NOW(3))`,
+       VALUES (?, ?, NULL, 'live', 300000000, '[]', 57750000, 57750000, NULL, 'settled', NULL, 0, NOW(3), NOW(3))`,
       [runId, user.id],
     );
     try {
@@ -55,14 +50,13 @@ test.describe("积分与计费界面", () => {
       await expect(page.getByText("冻结中", { exact: true })).toBeVisible();
       await expect(page.getByTestId("balance-available")).toHaveText("0.00");
       await expect(page.getByTestId("balance-reserved")).toHaveText("0");
-      if ((await billingMode(context)) === "trial") {
-        await expect(page.getByTestId("trial-banner")).toContainText("不扣积分");
-      }
+      await expect(page.getByText("结束后按实际用量扣除")).toBeVisible();
       const row = page.getByTestId("run-charge").filter({ hasText: runId });
-      await expect(row).toContainText("试算");
-      await expect(row).toContainText("57.75");
-      await expect(row).toContainText("本应拒绝:余额不足");
-      await expect(row.locator("td").nth(4)).toHaveText("0");
+      await expect(row.locator("td").nth(2)).toHaveText("57.75");
+      await expect(row.locator("td").nth(3)).toHaveText("57.75");
+      await expect(row).toContainText("已结算");
+      // 没有试算的概念
+      await expect(page.getByText(/试算|预计消耗|本应拒绝/)).toHaveCount(0);
       // 用户界面不出现内部微积分数
       await expect(page.getByText("57750000")).toHaveCount(0);
     } finally {
@@ -86,22 +80,19 @@ test.describe("积分与计费界面", () => {
     await expect(page.getByRole("button", { name: /不单独限额/ })).toBeVisible();
   });
 
-  test("管理员积分管理:显示计费模式,切换前要确认", async ({ page, context }) => {
+  test("管理员积分管理:没有计费模式与试算", async ({ page, context }) => {
     const user = await register(context, "billing-admin");
     const promoted = user.role !== "admin";
     if (promoted) await sql("UPDATE users SET role = 'admin' WHERE id = ?", [user.id]);
     try {
       await page.goto(`${BASE}/admin/billing`);
-      const mode = page.getByTestId("billing-mode");
-      await expect(mode).toHaveText(/试算|正式扣费/);
-      const current = (await mode.textContent()) ?? "";
-      const next = current.includes("试算") ? "正式扣费" : "试算";
-      await page.getByRole("button", { name: `切换为${next}` }).click();
-      await expect(page.getByRole("dialog")).toContainText(
-        "已受理(排队中、运行中)的运行仍按受理时的模式结算",
-      );
-      await page.getByRole("button", { name: "取消" }).click();
-      await expect(mode).toHaveText(current);
+      await expect(page.getByRole("region", { name: "对账", exact: true })).toBeVisible();
+      await expect(page.getByTestId("billing-mode")).toHaveCount(0);
+      await expect(page.getByText(/试算|计费模式|正式扣费/)).toHaveCount(0);
+      const api = await context.request.put(`${BASE}/api/admin/billing-mode`, {
+        data: { mode: "trial" },
+      });
+      expect(api.ok()).toBeFalsy();
     } finally {
       if (promoted) await sql("UPDATE users SET role = 'user' WHERE id = ?", [user.id]);
     }
@@ -133,11 +124,11 @@ test.describe("积分与计费界面", () => {
       const row = (i: number) =>
         page.getByTestId("run-charge").filter({ hasText: rows[i]?.id ?? "" });
       await expect(row(0)).toContainText("余额不足,欠 27.75 积分,充值后自动补扣");
-      await expect(row(0).locator("td").nth(4)).toHaveText("30.00");
+      await expect(row(0).locator("td").nth(3)).toHaveText("30.00");
       await expect(row(1)).toContainText("用量待补记,待核对");
       await expect(row(1)).not.toContainText("退还");
-      await expect(row(1).locator("td").nth(3)).toHaveText("69.30");
-      await expect(row(1).locator("td").nth(4)).toHaveText("92.40");
+      await expect(row(1).locator("td").nth(2)).toHaveText("69.30");
+      await expect(row(1).locator("td").nth(3)).toHaveText("92.40");
       await expect(row(2)).toContainText("用量待补记,待核对");
     } finally {
       for (const r of rows) await sql("DELETE FROM run_charges WHERE run_id = ?", [r.id]);
@@ -155,7 +146,7 @@ test.describe("积分与计费界面", () => {
       await page.reload();
       const r = page.getByTestId("run-charge").filter({ hasText: refunded });
       await expect(r).toContainText("已结算(多扣的 23.10 积分已退还)");
-      await expect(r.locator("td").nth(4)).toHaveText("69.30");
+      await expect(r.locator("td").nth(3)).toHaveText("69.30");
     } finally {
       await sql("DELETE FROM run_charges WHERE run_id = ?", [refunded]);
     }
@@ -312,7 +303,7 @@ test.describe("积分与计费界面", () => {
     }
   });
 
-  test("积分管理:跨账号待核对列表 —— 按原因与模式筛选,点账号看流水,只读不改动", async ({
+  test("积分管理:跨账号待核对列表 —— 按原因筛选,点账号看流水,只读不改动", async ({
     page,
     context,
     browser,
@@ -327,7 +318,7 @@ test.describe("积分与计费界面", () => {
       { email: string }[],
     ];
     const email = u[0]?.email ?? "";
-    // 欠款、无法完整计价(已扣多于能算出的部分,不算多扣)、用量未知(正式);无法完整计价(试算)
+    // 欠款、无法完整计价(已扣多于能算出的部分,不算多扣)、用量未知、无法完整计价(还没扣)
     const seed = [
       {
         id: randomUUID(),
@@ -346,7 +337,7 @@ test.describe("积分与计费界面", () => {
         digest: "d",
       },
       { id: randomUUID(), mode: "live", est: 0, charged: 0, owed: null, digest: null },
-      { id: randomUUID(), mode: "trial", est: 1_000_000, charged: 0, owed: null, digest: "d" },
+      { id: randomUUID(), mode: "live", est: 1_000_000, charged: 0, owed: null, digest: "d" },
     ];
     for (const r of seed) {
       await sql(
@@ -378,7 +369,7 @@ test.describe("积分与计费界面", () => {
       await expect(row(1)).not.toContainText("多扣");
       await expect(row(2)).toContainText("用量未知");
       await expect(row(3)).toContainText("无法完整计价");
-      await expect(row(3)).toContainText("试算");
+      await expect(section.getByLabel("计费模式")).toHaveCount(0);
 
       // 只读:这一区块没有任何处理按钮
       for (const name of [/核销/, /退还/, /结清/, /确认/]) {
@@ -390,12 +381,7 @@ test.describe("积分与计费界面", () => {
       await expect(row(2)).toBeVisible();
       await expect(row(0)).toHaveCount(0);
       await expect(section.getByRole("button", { name: /^多扣/ })).toHaveCount(0);
-      // 按模式筛选
       await section.getByRole("button", { name: /^全部/ }).click();
-      await section.getByLabel("计费模式").selectOption("trial");
-      await expect(row(3)).toBeVisible();
-      await expect(row(0)).toHaveCount(0);
-      await section.getByLabel("计费模式").selectOption("");
 
       // 点账号:切到这个账号的余额与流水
       await row(0).getByRole("button", { name: email }).click();
@@ -409,7 +395,7 @@ test.describe("积分与计费界面", () => {
     }
   });
 
-  test("积分管理:试算对账 —— 按提供者汇总成本估算,缺失数据单独列出,可导出 CSV", async ({
+  test("积分管理:对账 —— 按提供者汇总成本估算,缺失数据单独列出,可导出 CSV", async ({
     page,
     context,
   }) => {
@@ -485,13 +471,20 @@ test.describe("积分与计费界面", () => {
         await sql(
           `INSERT INTO run_charges (run_id, account_id, api_key_id, mode, reserved_micro, reservation_ids,
              estimated_micro, charged_micro, owed_micro, state, would_reject, incomplete, created_at, settled_at)
-           VALUES (?, ?, NULL, 'trial', 0, '[]', ?, 0, NULL, ?, NULL, ?, NOW(3), NOW(3))`,
-          [id, admin.id, withCost ? 23_100_000 : 0, state, state === "provisional" ? 1 : 0],
+           VALUES (?, ?, NULL, 'live', 0, '[]', ?, ?, NULL, ?, NULL, ?, NOW(3), NOW(3))`,
+          [
+            id,
+            admin.id,
+            withCost ? 23_100_000 : 0,
+            withCost ? 23_100_000 : 0,
+            state,
+            state === "provisional" ? 1 : 0,
+          ],
         );
       }
 
       await page.goto(`${BASE}/admin/billing`);
-      const section = page.getByRole("region", { name: "试算对账" });
+      const section = page.getByRole("region", { name: "对账", exact: true });
       const line = section.getByTestId("recon-line").filter({ hasText: providerName });
       await expect(line).toContainText("3");
       await expect(line).toContainText("完整 1");

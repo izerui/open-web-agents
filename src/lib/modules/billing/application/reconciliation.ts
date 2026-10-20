@@ -1,8 +1,7 @@
-// 试算对账报表:取原始数据,按运行锁定的价目版本(含成本价)汇总。只读。
+// 对账报表:取原始数据,按运行锁定的价目版本(含成本价)汇总。只读。
 import type { Capability } from "@/lib/modules/capabilities/domain/catalog";
 import type { RunPricing } from "@/lib/shared";
 import { type ReconLine, buildReconciliation } from "../domain/reconciliation";
-import type { BillingMode } from "../domain/run-charge";
 import type { RunChargeQuery } from "../run-charge-ports";
 
 /** 一次最多汇总的天数与运行数 */
@@ -14,7 +13,7 @@ export async function reconciliationReport(
     query: Pick<RunChargeQuery, "reconciliationRows">;
     pricedModels: (pricing: RunPricing) => Promise<Capability[] | null>;
   },
-  opts: { from: string; to: string; mode?: BillingMode },
+  opts: { from: string; to: string },
 ): Promise<{ lines: ReconLine[]; truncated: boolean }> {
   const { rows, truncated } = await deps.query.reconciliationRows({
     ...opts,

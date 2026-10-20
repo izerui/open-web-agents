@@ -11,7 +11,6 @@ import type { EnginePort, RunResult } from "@/lib/modules/agent-engine/ports";
 import { InMemoryAgentRepo } from "@/lib/modules/agent/adapters/in-memory-agent-repo";
 import { InMemoryChargeWorld } from "@/lib/modules/billing/adapters/in-memory-run-charge-store";
 import { RunCharging } from "@/lib/modules/billing/application/run-charging";
-import type { BillingMode } from "@/lib/modules/billing/domain/run-charge";
 import type { Capability } from "@/lib/modules/capabilities/domain/catalog";
 import { InMemoryBus } from "@/lib/modules/events/adapters/in-memory-bus";
 import { platformModels } from "@/lib/modules/model-gateway/application/__tests__/platform-models";
@@ -663,7 +662,6 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
   };
 
   async function scenario(
-    mode: BillingMode,
     failures: number,
     opts: {
       engine?: EnginePort;
@@ -677,7 +675,6 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
     const world = new InMemoryChargeWorld();
     world.credit("u1", 1000n * C);
     const charging = new RunCharging({
-      mode: async () => mode,
       bind: async () => ({ pricing, main: { capabilityId: "m-main" } }) as never,
       reserveTargetOf: async () => 300n * C,
       pricedModels: async () => [priced],
@@ -746,53 +743,51 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
     return { world, worker, repo, settleCalls };
   }
 
-  for (const mode of ["live", "trial"] as const) {
-    const charged = mode === "live" ? DUE : 0n;
+  const charged = DUE;
 
-    it(`${mode}:第一次写失败、立即重试成功 → 直接最终结算,只记一次`, async () => {
-      const { world, worker, settleCalls } = await scenario(mode, 1);
-      expect(settleCalls).toEqual([true]);
-      expect(world.charge("r1")).toMatchObject({
-        state: "settled",
-        incomplete: false,
-        estimatedMicro: DUE.toString(),
-        chargedMicro: charged.toString(),
-      });
-      await worker.reclaim();
-      expect(world.balance("u1")).toEqual({ available: 1000n * C - charged, reserved: 0n });
+  it("第一次写失败、立即重试成功 → 直接最终结算,只记一次", async () => {
+    const { world, worker, settleCalls } = await scenario(1);
+    expect(settleCalls).toEqual([true]);
+    expect(world.charge("r1")).toMatchObject({
+      state: "settled",
+      incomplete: false,
+      estimatedMicro: DUE.toString(),
+      chargedMicro: charged.toString(),
     });
+    await worker.reclaim();
+    expect(world.balance("u1")).toEqual({ available: 1000n * C - charged, reserved: 0n });
+  });
 
-    it(`${mode}:立即重试也失败 → 中间不按 0 结清(暂记、不完整);回收循环重试写成后补齐,只记一次`, async () => {
-      const { world, worker, repo, settleCalls } = await scenario(mode, 2);
-      expect(repo.recordedCosts.has("r1")).toBe(false);
-      expect(worker.health().pendingCosts).toBe(1);
-      expect(settleCalls).toEqual([false]);
-      expect(world.charge("r1")).toMatchObject({
-        state: "provisional",
-        incomplete: true,
-        chargedMicro: "0",
-      });
-      // 冻结已释放,但没有被当成"没有用量"结清
-      expect(world.balance("u1")).toEqual({ available: 1000n * C, reserved: 0n });
-
-      await worker.reclaim(); // 回收循环:重试写入成功 → 最终结算
-      expect(worker.health().pendingCosts).toBe(0);
-      expect(repo.recordedCosts.get("r1")).toBeTruthy();
-      expect(world.charge("r1")).toMatchObject({
-        state: "settled",
-        incomplete: false,
-        estimatedMicro: DUE.toString(),
-        chargedMicro: charged.toString(),
-      });
-      expect(world.balance("u1")).toEqual({ available: 1000n * C - charged, reserved: 0n });
-
-      // 再回收、再清扫都不重复扣
-      await worker.reclaim();
-      await worker.reclaim();
-      expect(world.balance("u1")).toEqual({ available: 1000n * C - charged, reserved: 0n });
-      expect(world.charge("r1")?.chargedMicro).toBe(charged.toString());
+  it("立即重试也失败 → 中间不按 0 结清(暂记、不完整);回收循环重试写成后补齐,只记一次", async () => {
+    const { world, worker, repo, settleCalls } = await scenario(2);
+    expect(repo.recordedCosts.has("r1")).toBe(false);
+    expect(worker.health().pendingCosts).toBe(1);
+    expect(settleCalls).toEqual([false]);
+    expect(world.charge("r1")).toMatchObject({
+      state: "provisional",
+      incomplete: true,
+      chargedMicro: "0",
     });
-  }
+    // 冻结已释放,但没有被当成"没有用量"结清
+    expect(world.balance("u1")).toEqual({ available: 1000n * C, reserved: 0n });
+
+    await worker.reclaim(); // 回收循环:重试写入成功 → 最终结算
+    expect(worker.health().pendingCosts).toBe(0);
+    expect(repo.recordedCosts.get("r1")).toBeTruthy();
+    expect(world.charge("r1")).toMatchObject({
+      state: "settled",
+      incomplete: false,
+      estimatedMicro: DUE.toString(),
+      chargedMicro: charged.toString(),
+    });
+    expect(world.balance("u1")).toEqual({ available: 1000n * C - charged, reserved: 0n });
+
+    // 再回收、再清扫都不重复扣
+    await worker.reclaim();
+    await worker.reclaim();
+    expect(world.balance("u1")).toEqual({ available: 1000n * C - charged, reserved: 0n });
+    expect(world.charge("r1")?.chargedMicro).toBe(charged.toString());
+  });
 
   it("引擎已返回非零花费、追加消息收尾抛错:结果与花费保住,按实际最终结算", async () => {
     // 追加消息通道:收尾时取消订阅抛错(Redis 断开之类)
@@ -808,7 +803,7 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
       },
     };
     const engine = new FakeEngine({ ...spent, status: "success", summary: "完成" });
-    const { world, repo, settleCalls } = await scenario("live", 0, {
+    const { world, repo, settleCalls } = await scenario(0, {
       engine,
       steerChannel,
     });
@@ -824,28 +819,26 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
     expect(world.balance("u1")).toEqual({ available: 1000n * C - DUE, reserved: 0n });
   });
 
-  for (const mode of ["live", "trial"] as const) {
-    it(`${mode}:引擎抛错、一条用量都没收到 → 按规则自动按 0 结清,冻结全部退回`, async () => {
-      const engine: EnginePort = {
-        run: async () => {
-          throw new Error("sdk crashed after calling the model");
-        },
-      };
-      const { world, repo, settleCalls } = await scenario(mode, 0, { engine });
-      expect((await repo.get("r1"))?.state).toBe("failed");
-      expect(settleCalls).toEqual([true]);
-      expect(world.charge("r1")).toMatchObject({
-        state: "settled",
-        incomplete: false,
-        chargedMicro: "0",
-      });
-      expect(world.balance("u1")).toEqual({ available: 1000n * C, reserved: 0n });
+  it("引擎抛错、一条用量都没收到 → 按规则自动按 0 结清,冻结全部退回", async () => {
+    const engine: EnginePort = {
+      run: async () => {
+        throw new Error("sdk crashed after calling the model");
+      },
+    };
+    const { world, repo, settleCalls } = await scenario(0, { engine });
+    expect((await repo.get("r1"))?.state).toBe("failed");
+    expect(settleCalls).toEqual([true]);
+    expect(world.charge("r1")).toMatchObject({
+      state: "settled",
+      incomplete: false,
+      chargedMicro: "0",
     });
-  }
+    expect(world.balance("u1")).toEqual({ available: 1000n * C, reserved: 0n });
+  });
 
   it("引擎启动前就失败(会话不存在):确认没有调用模型,按 0 最终结清", async () => {
     const engine = new FakeEngine(spent);
-    const { world, settleCalls } = await scenario("live", 0, { engine, sessionId: "missing" });
+    const { world, settleCalls } = await scenario(0, { engine, sessionId: "missing" });
     expect(engine.seenPrompts).toEqual([]);
     expect(settleCalls).toEqual([true]);
     expect(world.charge("r1")).toMatchObject({
@@ -864,37 +857,35 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
         allowStdioMcp: false,
       });
 
-    for (const mode of ["live", "trial"] as const) {
-      it(`${mode}:SDK query 抛错、没收到用量 → 自动按 0 结清`, async () => {
-        const q: QueryFn = () =>
-          (async function* () {
-            yield { type: "system", subtype: "init", session_id: "s" };
-            throw new Error("socket hang up");
-          })();
-        const { world, settleCalls } = await scenario(mode, 0, { engine: sdk(q) });
-        expect(settleCalls).toEqual([true]);
-        expect(world.charge("r1")).toMatchObject({
-          state: "settled",
-          incomplete: false,
-          chargedMicro: "0",
-        });
-        expect(world.balance("u1")).toEqual({ available: 1000n * C, reserved: 0n });
+    it("SDK query 抛错、没收到用量 → 自动按 0 结清", async () => {
+      const q: QueryFn = () =>
+        (async function* () {
+          yield { type: "system", subtype: "init", session_id: "s" };
+          throw new Error("socket hang up");
+        })();
+      const { world, settleCalls } = await scenario(0, { engine: sdk(q) });
+      expect(settleCalls).toEqual([true]);
+      expect(world.charge("r1")).toMatchObject({
+        state: "settled",
+        incomplete: false,
+        chargedMicro: "0",
       });
+      expect(world.balance("u1")).toEqual({ available: 1000n * C, reserved: 0n });
+    });
 
-      it(`${mode}:SDK 流结束没有 result、没有用量 → 自动按 0 结清`, async () => {
-        const q: QueryFn = () =>
-          (async function* () {
-            yield { type: "system", subtype: "init", session_id: "s" };
-          })();
-        const { world, settleCalls } = await scenario(mode, 0, { engine: sdk(q) });
-        expect(settleCalls).toEqual([true]);
-        expect(world.charge("r1")).toMatchObject({
-          state: "settled",
-          incomplete: false,
-          chargedMicro: "0",
-        });
+    it("SDK 流结束没有 result、没有用量 → 自动按 0 结清", async () => {
+      const q: QueryFn = () =>
+        (async function* () {
+          yield { type: "system", subtype: "init", session_id: "s" };
+        })();
+      const { world, settleCalls } = await scenario(0, { engine: sdk(q) });
+      expect(settleCalls).toEqual([true]);
+      expect(world.charge("r1")).toMatchObject({
+        state: "settled",
+        incomplete: false,
+        chargedMicro: "0",
       });
-    }
+    });
 
     it("SDK 已给出非零费用 result、追加消息收尾抛错 → 按实际费用最终结算", async () => {
       const steerChannel: SteerChannel = {
@@ -927,7 +918,7 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
             },
           };
         })();
-      const { world, repo, settleCalls } = await scenario("live", 0, {
+      const { world, repo, settleCalls } = await scenario(0, {
         engine: sdk(q),
         steerChannel,
       });
@@ -964,68 +955,66 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
     // 1 万输入 = 23.1 积分
     const SECOND = 23_100_000n;
 
-    for (const mode of ["live", "trial"] as const) {
-      it(`${mode}:已收到非零 usage → 取消且没有 result → 按锁定价目结算(正式实扣 / 试算预计)`, async () => {
-        const { world, repo, settleCalls } = await scenario(mode, 0, {
-          makeEngine: (cancel) =>
-            sdk(() =>
-              (async function* () {
-                yield { type: "system", subtype: "init", session_id: "s" };
-                yield assistant("m1", 20000, 1000);
-                await cancel();
-                throw new Error("aborted by user");
-              })(),
-            ),
-        });
-        expect((await repo.get("r1"))?.state).toBe("cancelled");
-        expect(settleCalls).toEqual([true]);
-        expect(world.charge("r1")).toMatchObject({
-          state: "settled",
-          incomplete: false,
-          estimatedMicro: DUE.toString(),
-          chargedMicro: (mode === "live" ? DUE : 0n).toString(),
-        });
-        expect(world.balance("u1")).toEqual({
-          available: 1000n * C - (mode === "live" ? DUE : 0n),
-          reserved: 0n,
-        });
+    it("已收到非零 usage → 取消且没有 result → 按锁定价目结算", async () => {
+      const { world, repo, settleCalls } = await scenario(0, {
+        makeEngine: (cancel) =>
+          sdk(() =>
+            (async function* () {
+              yield { type: "system", subtype: "init", session_id: "s" };
+              yield assistant("m1", 20000, 1000);
+              await cancel();
+              throw new Error("aborted by user");
+            })(),
+          ),
       });
+      expect((await repo.get("r1"))?.state).toBe("cancelled");
+      expect(settleCalls).toEqual([true]);
+      expect(world.charge("r1")).toMatchObject({
+        state: "settled",
+        incomplete: false,
+        estimatedMicro: DUE.toString(),
+        chargedMicro: DUE.toString(),
+      });
+      expect(world.balance("u1")).toEqual({
+        available: 1000n * C - DUE,
+        reserved: 0n,
+      });
+    });
 
-      it(`${mode}:result₁ → 追加轮 usage₂ → 抛错 → 第二轮计入、第一轮不重复`, async () => {
-        const q: QueryFn = () =>
-          (async function* () {
-            yield { type: "system", subtype: "init", session_id: "s" };
-            yield assistant("m1", 20000, 1000);
-            yield {
-              type: "result",
-              subtype: "success",
-              result: "第一轮",
-              total_cost_usd: 0.2,
-              usage: { input_tokens: 20000, output_tokens: 1000 },
-              modelUsage: {
-                "up-main": {
-                  inputTokens: 20000,
-                  outputTokens: 1000,
-                  cacheReadInputTokens: 0,
-                  cacheCreationInputTokens: 0,
-                },
+    it("result₁ → 追加轮 usage₂ → 抛错 → 第二轮计入、第一轮不重复", async () => {
+      const q: QueryFn = () =>
+        (async function* () {
+          yield { type: "system", subtype: "init", session_id: "s" };
+          yield assistant("m1", 20000, 1000);
+          yield {
+            type: "result",
+            subtype: "success",
+            result: "第一轮",
+            total_cost_usd: 0.2,
+            usage: { input_tokens: 20000, output_tokens: 1000 },
+            modelUsage: {
+              "up-main": {
+                inputTokens: 20000,
+                outputTokens: 1000,
+                cacheReadInputTokens: 0,
+                cacheCreationInputTokens: 0,
               },
-            };
-            yield assistant("m2", 10000, 0);
-            throw new Error("socket hang up");
-          })();
-        const { world, repo } = await scenario(mode, 0, { engine: sdk(q), cancel: false });
-        expect((await repo.get("r1"))?.state).toBe("failed");
-        const total = DUE + SECOND;
-        expect(world.charge("r1")).toMatchObject({
-          state: "settled",
-          incomplete: false,
-          estimatedMicro: total.toString(),
-          chargedMicro: (mode === "live" ? total : 0n).toString(),
-        });
-        expect(world.balance("u1").available).toBe(1000n * C - (mode === "live" ? total : 0n));
+            },
+          };
+          yield assistant("m2", 10000, 0);
+          throw new Error("socket hang up");
+        })();
+      const { world, repo } = await scenario(0, { engine: sdk(q), cancel: false });
+      expect((await repo.get("r1"))?.state).toBe("failed");
+      const total = DUE + SECOND;
+      expect(world.charge("r1")).toMatchObject({
+        state: "settled",
+        incomplete: false,
+        estimatedMicro: total.toString(),
+        chargedMicro: total.toString(),
       });
-    }
+      expect(world.balance("u1").available).toBe(1000n * C - total);
+    });
   });
 });
 
@@ -1090,7 +1079,6 @@ describe("RunWorker 费用恢复记录:先落恢复记录再写库,重启后补�
     const ledger = new InMemoryChargeWorld();
     ledger.credit("u1", 1000n * C);
     const charging = new RunCharging({
-      mode: async () => "live",
       bind: async () => ({ pricing, main: { capabilityId: "m-main" } }) as never,
       reserveTargetOf: async () => 300n * C,
       pricedModels: async () => [priced],
@@ -1382,7 +1370,6 @@ describe("worker 中途挂掉:真实 runner + 编排写下的用量快照用于�
     const ledger = new InMemoryChargeWorld();
     ledger.credit("u1", 1000n * C);
     const charging = new RunCharging({
-      mode: async () => "live",
       bind: async () => ({ pricing, main: { capabilityId: "m-main" } }) as never,
       reserveTargetOf: async () => 300n * C,
       pricedModels: async () => [priced],
@@ -1518,11 +1505,10 @@ describe("引擎报过非零用量后抛错(没有最终费用):按观察到的�
     },
   };
 
-  async function scene(mode: BillingMode) {
+  async function scene() {
     const ledger = new InMemoryChargeWorld();
     ledger.credit("u1", 1000n * C);
     const charging = new RunCharging({
-      mode: async () => mode,
       bind: async () => ({ pricing, main: { capabilityId: "m-main" } }) as never,
       reserveTargetOf: async () => 300n * C,
       pricedModels: async () => [priced],
@@ -1607,7 +1593,7 @@ describe("引擎报过非零用量后抛错(没有最终费用):按观察到的�
     const elapse = async (ms: number) => {
       clock.endedAt -= ms;
     };
-    const due = mode === "live" ? 23_100_000n : 0n;
+    const due = 23_100_000n;
     return {
       ledger,
       charging,
@@ -1623,65 +1609,62 @@ describe("引擎报过非零用量后抛错(没有最终费用):按观察到的�
     };
   }
 
-  for (const mode of ["live", "trial"] as const) {
-    it(`${mode}:编排的快照写入慢(worker 收尾后才放开)→ 不先按零结清;按快照暂记,24 小时后按快照结清`, async () => {
-      const s = await scene(mode);
-      s.orchGate.blocked = true;
-      await s.worker(1000).tick();
-      expect(s.settleCalls).toEqual([false]);
-      expect(s.ledger.charge("r1")?.state).not.toBe("settled");
-      s.release();
-      await new Promise((r) => setTimeout(r, 5));
-      await s.worker(1000).reclaim();
-      expect(s.ledger.charge("r1")).toMatchObject({
-        state: "provisional",
-        incomplete: true,
-        estimatedMicro: "23100000",
-        chargedMicro: s.due.toString(),
-      });
-      await s.elapse(24 * H);
-      await s.worker(1000).reclaim();
-      expect(s.ledger.charge("r1")).toMatchObject({
-        state: "settled",
-        incomplete: false,
-        estimatedMicro: "23100000",
-        chargedMicro: s.due.toString(),
-      });
-      expect(s.ledger.deducted("u1")).toBe(s.due);
+  it("编排的快照写入慢(worker 收尾后才放开)→ 不先按零结清;按快照暂记,24 小时后按快照结清", async () => {
+    const s = await scene();
+    s.orchGate.blocked = true;
+    await s.worker(1000).tick();
+    expect(s.settleCalls).toEqual([false]);
+    expect(s.ledger.charge("r1")?.state).not.toBe("settled");
+    s.release();
+    await new Promise((r) => setTimeout(r, 5));
+    await s.worker(1000).reclaim();
+    expect(s.ledger.charge("r1")).toMatchObject({
+      state: "provisional",
+      incomplete: true,
+      estimatedMicro: "23100000",
+      chargedMicro: s.due.toString(),
     });
-
-    it(`${mode}:快照首次写库失败(编排与 worker 都没写成)→ 引擎退出 → 数据库恢复后补写 → 按快照处理,不等 24 小时免掉`, async () => {
-      const s = await scene(mode);
-      s.db.down = true;
-      await s.worker(1000).tick();
-      expect(s.settleCalls).toEqual([false]);
-      expect(s.dbSnapshots.has("r1")).toBe(false);
-      expect(s.snapshotOutbox.files.get("r1")).toMatchObject({ input: 10000 });
-      expect(s.ledger.charge("r1")?.state).not.toBe("settled");
-
-      s.db.down = false;
-      await s.worker(1000).reclaim(); // 补写快照恢复记录 → 清扫按快照暂记
-      expect(s.snapshotOutbox.files.has("r1")).toBe(false);
-      expect(s.ledger.charge("r1")).toMatchObject({
-        state: "provisional",
-        estimatedMicro: "23100000",
-        chargedMicro: s.due.toString(),
-      });
-      await s.elapse(24 * H);
-      await s.worker(1000).reclaim();
-      expect(s.ledger.charge("r1")).toMatchObject({
-        state: "settled",
-        chargedMicro: s.due.toString(),
-      });
-      expect(s.ledger.deducted("u1")).toBe(s.due);
+    await s.elapse(24 * H);
+    await s.worker(1000).reclaim();
+    expect(s.ledger.charge("r1")).toMatchObject({
+      state: "settled",
+      incomplete: false,
+      estimatedMicro: "23100000",
+      chargedMicro: s.due.toString(),
     });
-  }
+    expect(s.ledger.deducted("u1")).toBe(s.due);
+  });
+
+  it("快照首次写库失败(编排与 worker 都没写成)→ 引擎退出 → 数据库恢复后补写 → 按快照处理,不等 24 小时免掉", async () => {
+    const s = await scene();
+    s.db.down = true;
+    await s.worker(1000).tick();
+    expect(s.settleCalls).toEqual([false]);
+    expect(s.dbSnapshots.has("r1")).toBe(false);
+    expect(s.snapshotOutbox.files.get("r1")).toMatchObject({ input: 10000 });
+    expect(s.ledger.charge("r1")?.state).not.toBe("settled");
+
+    s.db.down = false;
+    await s.worker(1000).reclaim(); // 补写快照恢复记录 → 清扫按快照暂记
+    expect(s.snapshotOutbox.files.has("r1")).toBe(false);
+    expect(s.ledger.charge("r1")).toMatchObject({
+      state: "provisional",
+      estimatedMicro: "23100000",
+      chargedMicro: s.due.toString(),
+    });
+    await s.elapse(24 * H);
+    await s.worker(1000).reclaim();
+    expect(s.ledger.charge("r1")).toMatchObject({
+      state: "settled",
+      chargedMicro: s.due.toString(),
+    });
+    expect(s.ledger.deducted("u1")).toBe(s.due);
+  });
 
   it("一条用量都没观察到就抛错:仍按规则直接按 0 结清", async () => {
     const ledger = new InMemoryChargeWorld();
     ledger.credit("u1", 1000n * C);
     const charging = new RunCharging({
-      mode: async () => "live",
       bind: async () => ({ pricing, main: { capabilityId: "m-main" } }) as never,
       reserveTargetOf: async () => 300n * C,
       pricedModels: async () => [priced],

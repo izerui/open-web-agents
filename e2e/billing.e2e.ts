@@ -19,9 +19,9 @@ describe.skipIf(!databaseUrl)("account credit ledger", () => {
   }
   beforeAll(async () => {
     if (!(await serverUp())) throw new Error("server unavailable");
-    admin = await newUser("billing-admin");
-    customer = await newUser("billing-customer");
-    other = await newUser("billing-other");
+    admin = await newUser("billing-admin", { credits: 0n });
+    customer = await newUser("billing-customer", { credits: 0n });
+    other = await newUser("billing-other", { credits: 0n });
     accountId = (await customer.get<{ user: { id: string } }>("/api/auth")).body.user.id;
     const current = (await admin.get<{ user: { id: string; role: string } }>("/api/auth")).body
       .user;
@@ -86,7 +86,6 @@ describe.skipIf(!databaseUrl)("account credit ledger", () => {
     const statement = await customer.get<{
       balance: { availableMicroCredits: string; reservedMicroCredits: string };
       items: { kind: string; amountMicroCredits: string }[];
-      automaticCharging: boolean;
       paymentsConnected: boolean;
     }>("/api/billing");
     expect(statement.status).toBe(200);
@@ -99,7 +98,6 @@ describe.skipIf(!databaseUrl)("account credit ledger", () => {
       kind: "credit",
       amountMicroCredits: "25125001",
     });
-    expect(statement.body.automaticCharging).toBe(false);
     expect(statement.body.paymentsConnected).toBe(false);
   });
   it("ledger cursors are scoped to the account and pagination does not repeat entries", async () => {
@@ -137,7 +135,7 @@ describe.skipIf(!databaseUrl)("按邮箱批量发放积分", () => {
   }
   beforeAll(async () => {
     if (!(await serverUp())) throw new Error("server unavailable");
-    admin = await newUser("batch-admin");
+    admin = await newUser("batch-admin", { credits: 0n });
     const me = (await admin.get<{ user: { id: string; role: string } }>("/api/auth")).body.user;
     if (me.role !== "admin") {
       promotedId = me.id;
@@ -149,7 +147,7 @@ describe.skipIf(!databaseUrl)("按邮箱批量发放积分", () => {
       }
     }
     for (const tag of ["batch-a", "batch-b", "batch-off"]) {
-      const client = await newUser(tag);
+      const client = await newUser(tag, { credits: 0n });
       const u = (await client.get<{ user: { id: string; email: string } }>("/api/auth")).body.user;
       people.push({ client, id: u.id, email: u.email });
     }
@@ -243,7 +241,7 @@ describe.skipIf(!databaseUrl)("按邮箱批量发放积分", () => {
   });
 
   it("到账后审计缺失、账号被停用:原批次重试补齐审计,余额不变", async () => {
-    const target = await newUser("batch-late");
+    const target = await newUser("batch-late", { credits: 0n });
     const u = (await target.get<{ user: { id: string; email: string } }>("/api/auth")).body.user;
     const key = `batch-late-${Date.now()}`;
     const body = { emails: u.email, credits: "3", reason: "E2E 补审计" };

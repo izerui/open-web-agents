@@ -615,8 +615,8 @@ export const billingWallets = mysqlTable("billing_wallets", {
 });
 
 /**
- * 每次运行的计费记录,与运行同一事务插入。受理时锁定计费模式:试算不动钱包,只记试算冻结与预计消耗;
- * 正式按 reservation_ids 在钱包里冻结,结束按锁定版本结算。月度额度按它汇总。
+ * 每次运行的计费记录,与运行同一事务插入。按 reservation_ids 在钱包里冻结,结束按锁定版本结算。
+ * 月度额度按它汇总。mode 恒为 live;trial 与 would_reject 只出现在已下线的试算留下的旧记录里。
  */
 export const runCharges = mysqlTable(
   "run_charges",
@@ -629,12 +629,12 @@ export const runCharges = mysqlTable(
     reservationIds: json("reservation_ids").notNull(),
     estimatedMicro: decimal("estimated_micro", { precision: 30, scale: 0 }),
     chargedMicro: decimal("charged_micro", { precision: 30, scale: 0 }),
-    /** 正式模式补扣不成的欠额 */
+    /** 补扣不成的欠额 */
     owedMicro: decimal("owed_micro", { precision: 30, scale: 0 }),
     /** 费用往下修正后自动退还的累计额;charged_micro 已是扣除它之后的净额 */
     refundedMicro: decimal("refunded_micro", { precision: 30, scale: 0 }),
     state: varchar("state", { length: 16 }).notNull(),
-    /** 试算下本应拒绝的原因(余额不足 / 账号超额 / Key 超额) */
+    /** 旧记录:已下线的试算下本应拒绝的原因 */
     wouldReject: varchar("would_reject", { length: 32 }),
     incomplete: int("incomplete").notNull().default(0),
     /** 等最终费用的期限过后已按快照(或 0)结算过:清扫不再为期限选它 */

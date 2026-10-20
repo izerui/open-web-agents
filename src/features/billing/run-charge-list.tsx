@@ -7,15 +7,8 @@ import type { RunChargeItem } from "@/lib/modules/billing/run-charge-ports";
 import { RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const REJECT_TEXT = {
-  insufficient_balance: "余额不足",
-  account_limit_exceeded: "账号月度上限已满",
-  key_limit_exceeded: "Key 月度上限已满",
-  account_limit_pending: "旧月度上限待按积分重新设置",
-} as const;
-
 function stateText(c: RunChargeItem): string {
-  if (c.state === "open") return c.mode === "live" ? "冻结中" : "进行中";
+  if (c.state === "open") return "冻结中";
   if (c.state === "provisional") {
     if (c.owedMicro && c.owedMicro !== "0") {
       return `余额不足,欠 ${creditsAmount(c.owedMicro)} 积分,充值后自动补扣`;
@@ -34,7 +27,7 @@ function stateText(c: RunChargeItem): string {
   return "已结算";
 }
 
-/** 运行计费明细:每次运行的预计消耗与实际扣除 */
+/** 运行计费明细:每次运行按用量应扣与实际扣除 */
 export function RunChargeList({ accountId }: { accountId?: string }) {
   const [items, setItems] = useState<RunChargeItem[]>([]);
   const [next, setNext] = useState<string | undefined>();
@@ -93,7 +86,7 @@ export function RunChargeList({ accountId }: { accountId?: string }) {
             <caption className="sr-only">运行计费明细</caption>
             <thead>
               <tr className="border-b text-muted-foreground">
-                {["时间", "智能体", "模式", "预计消耗", "实际扣除", "状态"].map((t) => (
+                {["时间", "智能体", "应扣", "实际扣除", "状态"].map((t) => (
                   <th scope="col" key={t} className="px-2 py-3">
                     {t}
                   </th>
@@ -110,9 +103,6 @@ export function RunChargeList({ accountId }: { accountId?: string }) {
                     {c.agentName ?? "已删除的智能体"}
                     <p className="mt-1 break-all text-muted-foreground">{c.runId}</p>
                   </td>
-                  <td className="whitespace-nowrap px-2 py-3">
-                    {c.mode === "trial" ? "试算" : "正式"}
-                  </td>
                   <td
                     className="whitespace-nowrap px-2 py-3 font-mono"
                     title={c.estimatedMicro ? `${creditsExact(c.estimatedMicro)} 积分` : undefined}
@@ -125,12 +115,7 @@ export function RunChargeList({ accountId }: { accountId?: string }) {
                   >
                     {c.chargedMicro === null ? "—" : creditsAmount(c.chargedMicro)}
                   </td>
-                  <td className="px-2 py-3">
-                    {stateText(c)}
-                    {c.wouldReject && (
-                      <p className="mt-1 text-warning">本应拒绝:{REJECT_TEXT[c.wouldReject]}</p>
-                    )}
-                  </td>
+                  <td className="px-2 py-3">{stateText(c)}</td>
                 </tr>
               ))}
             </tbody>

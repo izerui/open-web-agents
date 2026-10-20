@@ -78,9 +78,38 @@ export class Client {
   }
 }
 
+/** 服务用的测试库(scripts/e2e.sh 导出;库名必须含 test) */
+const TEST_DB = process.env.OWA_E2E_DATABASE_URL;
+const fundable = Boolean(TEST_DB && /test/i.test(new URL(TEST_DB).pathname));
+
+/**
+ * 给测试账号直接在测试库里入账(只用于 e2e)。运行一律正式计费,余额不足会被拒绝(402),
+ * 而 e2e 建不出管理员去走发放接口;产品本身没有新用户赠送。
+ */
+export async function fundTestAccount(accountId: string, credits: bigint): Promise<void> {
+  if (!fundable || credits <= 0n) return;
+  const { createDb } = await import("@/lib/db/client");
+  const { MysqlBillingRepo } = await import("@/lib/modules/billing/adapters/mysql-billing-repo");
+  const { db, pool } = createDb(TEST_DB as string);
+  try {
+    await new MysqlBillingRepo(db).credit({
+      accountId,
+      amountMicroCredits: (credits * 1_000_000n).toString(),
+      idempotencyKey: `e2e-fund-${accountId}`,
+      actorId: "e2e",
+      reason: "E2E 测试账号入账",
+    });
+  } finally {
+    await pool.end();
+  }
+}
+
 let seq = 0;
-/** 注册一个全新的普通用户(非 admin —— 库里已有用户时新注册的都是 user)。 */
-export async function newUser(tag: string): Promise<Client> {
+/**
+ * 注册一个全新的普通用户(非 admin —— 库里已有用户时新注册的都是 user)。
+ * 有测试库时默认入账 10 万积分(每次运行冻结数百积分,并发用例也够用);要从零余额开始的用例传 `{ credits: 0n }`。
+ */
+export async function newUser(tag: string, opts: { credits?: bigint } = {}): Promise<Client> {
   const c = new Client(tag);
   const email = `e2e-${tag}-${Date.now()}-${seq++}@example.test`;
   const res = await c.post<{ user?: { id: string; role?: string } }>("/api/auth", {
@@ -92,6 +121,8 @@ export async function newUser(tag: string): Promise<Client> {
   if (res.status !== 200 && res.status !== 201) {
     throw new Error(`注册失败(${res.status}):${JSON.stringify(res.body)}`);
   }
+  const id = res.body.user?.id;
+  if (id) await fundTestAccount(id, opts.credits ?? 100_000n);
   return c;
 }
 
