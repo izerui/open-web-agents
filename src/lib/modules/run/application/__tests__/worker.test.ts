@@ -740,7 +740,16 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
     });
     await repo.createWithPrompt("r1", opts.sessionId ?? "s1", "go");
     await worker.tick();
-    return { world, worker, repo, settleCalls };
+    /** 再结算一次(重复结算、清扫),走与 worker 相同的同步 */
+    const settleAgain = async () => {
+      await sync();
+      return charging.settle("r1", { final: true });
+    };
+    const sweepAgain = async () => {
+      await sync();
+      return charging.sweep();
+    };
+    return { world, worker, repo, settleCalls, settleAgain, sweepAgain };
   }
 
   const charged = DUE;
@@ -979,6 +988,44 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
         available: 1000n * C - DUE,
         reserved: 0n,
       });
+    });
+
+    it("带模型名的消息 → 不带模型名的消息 → 取消:两部分都收费(后者按主模型价),已知部分不重复,重复结算不多扣", async () => {
+      const { world, repo, settleCalls, settleAgain, sweepAgain } = await scenario(0, {
+        makeEngine: (cancel) =>
+          sdk(() =>
+            (async function* () {
+              yield { type: "system", subtype: "init", session_id: "s" };
+              yield assistant("m1", 10000, 0);
+              yield assistant("m1", 10000, 0); // 同一条消息再到一次:不重复
+              yield {
+                type: "assistant",
+                message: {
+                  id: "m2",
+                  content: [{ type: "text", text: "x" }],
+                  usage: { input_tokens: 10000, output_tokens: 0 },
+                },
+              };
+              await cancel();
+              throw new Error("aborted by user");
+            })(),
+          ),
+      });
+      expect((await repo.get("r1"))?.state).toBe("cancelled");
+      expect(settleCalls).toEqual([true]);
+      // 已知 1 万(23.1)+ 未归属 1 万按主模型价(23.1)
+      const due = 2n * SECOND;
+      expect(world.charge("r1")).toMatchObject({
+        state: "settled",
+        estimatedMicro: due.toString(),
+        chargedMicro: due.toString(),
+      });
+      expect(world.balance("u1")).toEqual({ available: 1000n * C - due, reserved: 0n });
+
+      expect(await settleAgain()).toBe("none");
+      expect(await sweepAgain()).toBe(0);
+      expect(world.charge("r1")?.chargedMicro).toBe(due.toString());
+      expect(world.balance("u1")).toEqual({ available: 1000n * C - due, reserved: 0n });
     });
 
     it("result₁ → 追加轮 usage₂ → 抛错 → 第二轮计入、第一轮不重复", async () => {

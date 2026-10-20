@@ -157,13 +157,24 @@ describe("ClaudeSdkEngine 回放", () => {
       new AbortController().signal,
     );
     expect(r.status).toBe("failed");
-    // m1 取最后一次(110 入 / 20 出),m2(210 入 / 30 出);缓存读计入输入。
-    // 这些消息没带模型标识:计量标为不完整,结算保持可补结算
+    // m1 取最后一次(110 入 / 20 出),m2(210 入 / 30 出);缓存读计入输入总数。
+    // 这些消息没带模型标识:按模型的明细为空,用量按四项分开记为未归属(结算按主模型价计)
     expect(r.cost).toEqual({
       input: 320,
       output: 50,
       partial: true,
-      metering: { source: "sdk_model_usage", complete: false, partial: true, models: [] },
+      metering: {
+        source: "sdk_model_usage",
+        complete: false,
+        partial: true,
+        models: [],
+        unattributed: {
+          inputTokens: 300,
+          outputTokens: 50,
+          cacheReadTokens: 20,
+          cacheWriteTokens: 0,
+        },
+      },
     });
   });
 
@@ -494,6 +505,68 @@ describe("ClaudeSdkEngine 部分计量(按模型)", () => {
           cacheWriteTokens: 0,
         },
       ],
+    });
+  });
+
+  it("带模型名的消息 → 不带模型名的消息 → 中断:后者单独记为未归属用量,不丢、不并入已知模型", async () => {
+    const q: QueryFn = () =>
+      (async function* () {
+        yield assistant("m1", "up-main", 10000, 0);
+        yield {
+          type: "assistant",
+          message: {
+            id: "m2",
+            content: [{ type: "text", text: "x" }],
+            usage: {
+              input_tokens: 10000,
+              output_tokens: 100,
+              cache_read_input_tokens: 4000,
+              cache_creation_input_tokens: 2000,
+            },
+          },
+        };
+        throw new Error("aborted by user");
+      })();
+    const r = await engine(q).run(spec(), ctx, () => {}, signal());
+    expect(r.cost?.metering).toEqual({
+      source: "sdk_model_usage",
+      complete: false,
+      partial: true,
+      models: [
+        {
+          modelId: "up-main",
+          inputTokens: 10000,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      ],
+      unattributed: {
+        inputTokens: 10000,
+        outputTokens: 100,
+        cacheReadTokens: 4000,
+        cacheWriteTokens: 2000,
+      },
+    });
+  });
+
+  it("result 没有按模型的明细 → 追加轮带模型名的用量 → 中断:result 的总数记为未归属,不被后来的明细盖掉", async () => {
+    const q: QueryFn = () =>
+      (async function* () {
+        yield { ...result1, modelUsage: undefined };
+        yield assistant("m2", "up-main", 10000, 0);
+        throw new Error("socket hang up");
+      })();
+    const r = await engine(q).run(spec(), ctx, () => {}, signal());
+    expect(r.cost?.metering).toMatchObject({
+      complete: false,
+      models: [{ modelId: "up-main", inputTokens: 10000, outputTokens: 0 }],
+      unattributed: {
+        inputTokens: 20000,
+        outputTokens: 1000,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
     });
   });
 

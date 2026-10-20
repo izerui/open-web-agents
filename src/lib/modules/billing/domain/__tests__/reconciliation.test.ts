@@ -51,6 +51,30 @@ const row = (over: Partial<ReconRow>): ReconRow => ({
 });
 
 describe("对账", () => {
+  it("没带模型名的用量:计入 token 合计并单列为无法计价,不计入成本估算", () => {
+    const cost = metering([{ id: "up-main", input: 1_000_000, output: 0 }], false);
+    const [line] = buildReconciliation([
+      row({
+        cost: {
+          ...cost,
+          metering: {
+            ...cost.metering,
+            unattributed: {
+              inputTokens: 500,
+              outputTokens: 20,
+              cacheReadTokens: 300,
+              cacheWriteTokens: 0,
+            },
+          },
+        },
+      }),
+    ]);
+    expect(line?.tokens).toEqual({ input: 1_000_500, output: 20, cacheRead: 300, cacheWrite: 0 });
+    expect(line?.unpricedTokens).toEqual({ input: 500, output: 20, cacheRead: 300, cacheWrite: 0 });
+    expect(line?.costMicro).toBe("2100000000");
+    expect(line?.counts.unpriced).toBe(1);
+  });
+
   it("按数据来源归类,缺失数据不当成已核实的零", () => {
     expect(categorize(row({ cost: metering([{ id: "up-main", input: 1, output: 1 }]) }))).toBe(
       "complete",

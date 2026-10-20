@@ -4,7 +4,7 @@
 // 缺失数据(用量未知、没收到用量按 0 结清、未开始、进行中)只计条数,不计入估算 ——
 // 它们不是"已核实为零"。
 
-import type { ModelMetering } from "@/lib/modules/agent-engine/domain/model-usage";
+import { type ModelMetering, unattributedOf } from "@/lib/modules/agent-engine/domain/model-usage";
 import { type Capability, type Meter, priceUsage } from "@/lib/modules/capabilities/domain/catalog";
 
 /** 一次运行在报表里归哪一类(按数据来源) */
@@ -179,6 +179,18 @@ export function buildReconciliation(rows: ReconRow[]): ReconLine[] {
     const priced = costOf(metering, r.models);
     line.cost += priced.micro;
     add(line.unpricedTokens, priced.unpriced);
+    // 没带模型名的用量:计入 token 合计;不知道是哪个模型,没有成本单价,单列为无法计价
+    const una = unattributedOf(metering);
+    if (una) {
+      const t = {
+        input: una.inputTokens,
+        output: una.outputTokens,
+        cacheRead: una.cacheReadTokens,
+        cacheWrite: una.cacheWriteTokens,
+      };
+      add(line.tokens, t);
+      add(line.unpricedTokens, t);
+    }
   }
   return [...lines.values()]
     .map(({ cost, est, chg, ...l }) => ({

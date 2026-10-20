@@ -1,10 +1,11 @@
 // 结算计价:按运行受理时锁定的价目版本(售价)把用量折成积分。
 //
 // 认得出的模型按它自己的售价;认不出模型或缺价目的那部分,按本次运行锁定的【主模型】售价计 ——
-// 每次运行结束都要能结清,不留需要人工处理的记录。连按模型的明细都没有的,用总 token 数按主模型计。
+// 每次运行结束都要能结清,不留需要人工处理的记录。没带模型名的用量(metering.unattributed)
+// 同样按主模型计,与按模型的明细相加。旧数据里既没有明细也没有未归属用量的,用总 token 数按主模型计。
 // 用到兜底的 token 数单独返回,对账报表据此列出,便于复盘配置(多半是上游回报的模型名与填写的标识不一致)。
 
-import type { ModelMetering } from "@/lib/modules/agent-engine/domain/model-usage";
+import { type ModelMetering, unattributedOf } from "@/lib/modules/agent-engine/domain/model-usage";
 import { type Capability, type Meter, priceUsage } from "@/lib/modules/capabilities/domain/catalog";
 
 export interface SettlePrice {
@@ -60,7 +61,8 @@ export function priceForSettlement(
   for (const m of llm) byModel.set(m.modelId, byModel.has(m.modelId) ? "ambiguous" : m);
 
   const usages = c.metering?.models ?? [];
-  if (usages.length === 0) {
+  const unattributed = unattributedOf(c.metering);
+  if (usages.length === 0 && !unattributed) {
     // 没有按模型的明细:用总 token 数按主模型计
     const tokens = {
       inputTokens: c.input ?? 0,
@@ -78,6 +80,16 @@ export function priceForSettlement(
 
   let micro = 0n;
   let fallbackTokens = 0;
+  if (unattributed) {
+    const priced = tryPrice(main, usageOf(unattributed));
+    if (priced === null) return { priceable: false, micro: 0n, fallbackTokens: 0 };
+    micro += priced;
+    fallbackTokens +=
+      unattributed.inputTokens +
+      unattributed.outputTokens +
+      unattributed.cacheReadTokens +
+      unattributed.cacheWriteTokens;
+  }
   for (const u of usages) {
     const usage = usageOf(u);
     const own = byModel.get(u.modelId);

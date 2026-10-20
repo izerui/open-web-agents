@@ -72,6 +72,55 @@ describe("结算计价", () => {
     expect(priceForSettlement({ input: 0, output: 0 }, [MAIN], "m-main").micro).toBe(0n);
   });
 
+  // 未归属:1M 输入(主模型 2000)+ 1M 缓存读(100)+ 1M 缓存写(1000)= 3100 积分
+  const UNATTRIBUTED = {
+    inputTokens: 1_000_000,
+    outputTokens: 0,
+    cacheReadTokens: 1_000_000,
+    cacheWriteTokens: 1_000_000,
+  };
+
+  it("有按模型的明细、又有没带模型名的用量:两部分都计,后者按主模型价、缓存分开计", () => {
+    const cost = metering([["up-sub", 1_000_000]]);
+    expect(
+      priceForSettlement(
+        { ...cost, metering: { ...cost.metering, complete: false, unattributed: UNATTRIBUTED } },
+        [MAIN, SUB],
+        "m-main",
+      ),
+    ).toEqual({ priceable: true, micro: 3_600_000_000n, fallbackTokens: 3_000_000 });
+  });
+
+  it("只有没带模型名的用量:按四项分开计,不用总数(总数里的缓存会被当成普通输入多算)", () => {
+    expect(
+      priceForSettlement(
+        {
+          input: 3_000_000,
+          output: 0,
+          metering: {
+            source: "sdk_model_usage",
+            complete: false,
+            models: [],
+            unattributed: UNATTRIBUTED,
+          },
+        },
+        [MAIN],
+        "m-main",
+      ),
+    ).toEqual({ priceable: true, micro: 3_100_000_000n, fallbackTokens: 3_000_000 });
+  });
+
+  it("没带模型名的用量也取不到主模型价目:算不出", () => {
+    const cost = metering([["up-sub", 1]]);
+    expect(
+      priceForSettlement(
+        { ...cost, metering: { ...cost.metering, unattributed: UNATTRIBUTED } },
+        [SUB],
+        "m-main",
+      ).priceable,
+    ).toBe(false);
+  });
+
   it("取不到主模型价目:算不出", () => {
     expect(priceForSettlement(metering([["renamed", 1]]), [SUB], "m-main").priceable).toBe(false);
     expect(priceForSettlement(metering([["up-main", 1]]), null, "m-main").priceable).toBe(false);
