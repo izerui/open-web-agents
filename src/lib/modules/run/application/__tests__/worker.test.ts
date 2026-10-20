@@ -1406,6 +1406,68 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
       });
     });
 
+    describe("多条 result:后到的累计快照部分字段读不出", () => {
+      const usage = (input: number, output: unknown) => ({
+        inputTokens: input,
+        outputTokens: output,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 0,
+      });
+      const run = (second: Record<string, unknown>) =>
+        scenario(0, {
+          engine: sdk(() =>
+            (async function* () {
+              yield { type: "system", subtype: "init", session_id: "s" };
+              yield assistant("m1", 10000, 1000);
+              yield {
+                type: "result",
+                subtype: "success",
+                result: "第一轮",
+                total_cost_usd: 0.02,
+                usage: { input_tokens: 10000, output_tokens: 1000 },
+                modelUsage: { "up-main": usage(10000, 1000) },
+              };
+              yield assistant("m2", 10000, 0); // 追加轮
+              yield {
+                type: "result",
+                subtype: "error_during_execution",
+                result: "追加轮出错",
+                total_cost_usd: 0.03,
+                ...second,
+              };
+            })(),
+          ),
+          cancel: false,
+        });
+
+      it("result₁ 确认 1 万输入 + 1000 输出 → result₂ 累计输入 2 万、输出读不出:按 2 万输入 + 1000 输出扣已知部分,保持暂记;重复结算、清扫不多扣", async () => {
+        const { world, settleAgain, sweepAgain } = await run({
+          modelUsage: { "up-main": usage(20000, "unreadable") },
+        });
+        // 2 万输入 46.2 + 1000 输出 11.55 = 57.75
+        expect(world.charge("r1")).toMatchObject({
+          state: "provisional",
+          incomplete: true,
+          estimatedMicro: DUE.toString(),
+          chargedMicro: DUE.toString(),
+        });
+        expect(await settleAgain()).toBe("none");
+        expect(await sweepAgain()).toBe(0);
+        expect(world.balance("u1")).toEqual({ available: 1000n * C - DUE, reserved: 0n });
+      });
+
+      it("对照:完整的 result₂(累计 2 万输入 + 1000 输出)按它收一次,不与 result₁ 相加", async () => {
+        const { world, settleAgain } = await run({ modelUsage: { "up-main": usage(20000, 1000) } });
+        expect(world.charge("r1")).toMatchObject({
+          state: "settled",
+          incomplete: false,
+          chargedMicro: DUE.toString(),
+        });
+        expect(await settleAgain()).toBe("none");
+        expect(world.balance("u1")).toEqual({ available: 1000n * C - DUE, reserved: 0n });
+      });
+    });
+
     describe("计数明确给出却读不出", () => {
       const resultOnly = (usage: Record<string, unknown>) =>
         scenario(0, {

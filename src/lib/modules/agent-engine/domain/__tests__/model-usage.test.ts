@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { combineResults } from "../../adapters/claude-sdk/runner";
 import { extractRunResult } from "../extract-result";
-import { extractModelUsage } from "../model-usage";
+import { extractModelUsage, mergeCumulative } from "../model-usage";
 
 const tokens = (inputTokens: number) => ({
   inputTokens,
@@ -73,7 +73,7 @@ describe("SDK model metering", () => {
     expect(m.unattributed).toBeUndefined();
   });
 
-  it("个别计数读不出:读得出的照常计,读不出的记计量缺失;整项不是对象整项计缺失", () => {
+  it("个别计数读不出:读得出的照常计,读不出的记计量缺失并标出是哪项;整项不是对象的保留模型、四项都标读不出", () => {
     const m = extractModelUsage({
       ok: { ...tokens(10), outputTokens: -1 },
       half: { inputTokens: 5 },
@@ -86,11 +86,77 @@ describe("SDK model metering", () => {
         outputTokens: 0,
         cacheReadTokens: 300,
         cacheWriteTokens: 40,
+        missingFields: ["outputTokens"],
       },
-      { modelId: "half", inputTokens: 5, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      {
+        modelId: "half",
+        inputTokens: 5,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        missingFields: ["outputTokens", "cacheReadTokens", "cacheWriteTokens"],
+      },
+      {
+        modelId: "bad",
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        missingFields: ["inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens"],
+      },
     ]);
     expect(m.missing).toBe(1 + 3 + 1);
     expect(m.complete).toBe(false);
+  });
+
+  it("合并累计快照:读得出的字段采用新值,读不出的保留此前确认的值并继续标缺失;不相加", () => {
+    const prev = extractModelUsage({
+      "up-main": { ...tokens(10000), outputTokens: 1000 },
+      sub: tokens(5),
+    });
+    const next = extractModelUsage({ "up-main": { ...tokens(20000), outputTokens: "x" } });
+    const m = mergeCumulative(prev, next);
+    expect(m.models).toEqual([
+      {
+        modelId: "up-main",
+        inputTokens: 20000,
+        outputTokens: 1000,
+        cacheReadTokens: 300,
+        cacheWriteTokens: 40,
+        missingFields: ["outputTokens"],
+      },
+      // 新快照里没出现的模型:保留此前的值
+      {
+        modelId: "sub",
+        inputTokens: 5,
+        outputTokens: 20,
+        cacheReadTokens: 300,
+        cacheWriteTokens: 40,
+      },
+    ]);
+    expect(m.missing).toBe(1);
+    expect(m.complete).toBe(false);
+
+    // 后来那份读得出:采用新值,缺失解除
+    const fixed = mergeCumulative(
+      m,
+      extractModelUsage({ "up-main": { ...tokens(20000), outputTokens: 1500 } }),
+    );
+    expect(fixed.models[0]).toMatchObject({ inputTokens: 20000, outputTokens: 1500 });
+    expect(fixed.models[0]?.missingFields).toBeUndefined();
+    expect(fixed.missing).toBeUndefined();
+  });
+
+  it("合并累计快照:未归属用量同样按字段合并", () => {
+    const long = "x".repeat(201);
+    const prev = extractModelUsage({ [long]: { ...tokens(100), outputTokens: 50 } });
+    const next = extractModelUsage({ [long]: { ...tokens(200), outputTokens: -1 } });
+    expect(mergeCumulative(prev, next).unattributed).toEqual({
+      inputTokens: 200,
+      outputTokens: 50,
+      cacheReadTokens: 300,
+      cacheWriteTokens: 40,
+    });
   });
 
   it("preserves metering on failures and keeps old responses compatible", () => {

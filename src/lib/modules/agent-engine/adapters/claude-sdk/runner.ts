@@ -11,6 +11,7 @@ import {
   type ModelMetering,
   addModels,
   addUnattributed,
+  mergeCumulative,
   missingOf,
   unattributedOf,
 } from "@/lib/modules/agent-engine/domain/model-usage";
@@ -70,15 +71,19 @@ export function combineResults(rs: RunResult[]): RunResult | undefined {
  */
 function combinedMetering(rs: RunResult[]): { metering?: ModelMetering } {
   let k = -1;
+  let base: ModelMetering | undefined;
   rs.forEach((r, i) => {
     const m = r.cost?.metering;
     // 只有带可用非零计数的累计快照才能覆盖前面已确认的用量:后到的空的、全零的、只有读不出计数的
     // 结果(常见于追加轮没产生新用量就失败的 error result)不能把它们抹成 0 —— 这些结果排在后面,
     // 按下面的逐条相加处理,它们记下的计量缺失照样带上
-    if (m && !m.fromResultUsage && hasMeteringBasis(m)) k = i;
+    if (m && !m.fromResultUsage && hasMeteringBasis(m)) {
+      // 累计快照之间按字段合并(不相加):新快照读不出的字段保留此前已确认的值
+      base = base ? mergeCumulative(base, m) : m;
+      k = i;
+    }
   });
-  const base = k >= 0 ? rs[k]?.cost?.metering : undefined;
-  // 最后一条就是 modelUsage 的累计快照:原样沿用(与之前一致)
+  // 最后一条就是 modelUsage 的累计快照:用合并后的(只有它一份时就是它本身)
   if (base && k === rs.length - 1) return { metering: base };
   let models = base?.models ?? [];
   let unattributed = unattributedOf(base) ?? undefined;

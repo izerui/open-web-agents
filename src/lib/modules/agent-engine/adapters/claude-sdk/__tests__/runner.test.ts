@@ -900,7 +900,7 @@ describe("combineResults:多条 result 的计量", () => {
 
   it("最后一条带明细:它是累计快照,原样沿用,前面的不重复累计", () => {
     const last = withModels(300);
-    expect(combineResults([withModels(100), noModels(50), last])?.cost?.metering).toBe(
+    expect(combineResults([withModels(100), noModels(50), last])?.cost?.metering).toEqual(
       last.cost?.metering,
     );
   });

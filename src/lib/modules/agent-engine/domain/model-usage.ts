@@ -1,15 +1,29 @@
-export interface ModelTokenUsage {
-  modelId: string;
-  /** SDK 的原始标签可能包含上下文窗口后缀;价格匹配使用 SDK 提供的 canonicalModel。 */
-  reportedModelId?: string;
+/** 一份按输入、输出、缓存读、缓存写分开的 token 用量 */
+export interface TokenBreakdown {
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
 }
 
-/** 一份按输入、输出、缓存读、缓存写分开的 token 用量 */
-export type TokenBreakdown = Omit<ModelTokenUsage, "modelId" | "reportedModelId">;
+export type TokenField = keyof TokenBreakdown;
+export const TOKEN_FIELDS: readonly TokenField[] = [
+  "inputTokens",
+  "outputTokens",
+  "cacheReadTokens",
+  "cacheWriteTokens",
+];
+
+export interface ModelTokenUsage extends TokenBreakdown {
+  modelId: string;
+  /** SDK 的原始标签可能包含上下文窗口后缀;价格匹配使用 SDK 提供的 canonicalModel。 */
+  reportedModelId?: string;
+  /**
+   * 这份(累计)明细里读不出的计数项:对应的值只是已知部分(合并累计快照时保留此前确认的值),
+   * 计量缺失已计入 ModelMetering.missing
+   */
+  missingFields?: TokenField[];
+}
 
 /** complete=false 或字段缺失不能作为自动积分结算的完整用量。 */
 export interface ModelMetering {
@@ -24,6 +38,8 @@ export interface ModelMetering {
    * 各来源的总数口径不同(有的含缓存,有的不含)。
    */
   unattributed?: TokenBreakdown;
+  /** 未归属用量里读不出的计数项(含义同 ModelTokenUsage.missingFields) */
+  unattributedMissing?: TokenField[];
   /**
    * 计量缺失:读不出来的计数项数(字段缺失、不是非负整数,或整项不是对象)。
    * 有它就不能当成已完整计价 —— 能算出的部分照常扣,结算保持暂记。
@@ -133,22 +149,30 @@ export function extractModelUsage(raw: unknown): ModelMetering {
   } as const;
   let missing = 0;
   let unattributed: TokenBreakdown | undefined;
+  const unattributedMissing = new Set<TokenField>();
   for (const [modelId, value] of Object.entries(raw)) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      missing += 1;
-      continue;
-    }
-    const v = value as Record<string, unknown>;
     const tokens: TokenBreakdown = {
       inputTokens: 0,
       outputTokens: 0,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
     };
-    for (const [key, field] of Object.entries(fields) as [keyof TokenBreakdown, string][]) {
-      const c = count(v[field]);
-      if (c === null) missing += 1;
-      else tokens[key] = c;
+    const bad: TokenField[] = [];
+    let v: Record<string, unknown> = {};
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      // 整项读不出:模型名合法就保留这个模型、四项都标读不出(合并累计快照时保留此前确认的值)
+      missing += 1;
+      if (!validId(modelId)) continue;
+      bad.push(...TOKEN_FIELDS);
+    } else {
+      v = value as Record<string, unknown>;
+      for (const [key, field] of Object.entries(fields) as [TokenField, string][]) {
+        const c = count(v[field]);
+        if (c === null) {
+          missing += 1;
+          bad.push(key);
+        } else tokens[key] = c;
+      }
     }
     const canonical = validId(v.canonicalModel)
       ? v.canonicalModel
@@ -157,17 +181,69 @@ export function extractModelUsage(raw: unknown): ModelMetering {
         : null;
     if (canonical === null) {
       unattributed = addUnattributed(unattributed, tokens);
+      for (const f of bad) unattributedMissing.add(f);
       continue;
     }
     out.models.push({
       modelId: canonical,
       ...(validId(modelId) && canonical !== modelId ? { reportedModelId: modelId } : {}),
       ...tokens,
+      ...(bad.length > 0 ? { missingFields: bad } : {}),
     });
   }
   if (unattributedOf({ unattributed })) out.unattributed = unattributed;
+  if (unattributedMissing.size > 0) out.unattributedMissing = [...unattributedMissing];
   if (missing > 0) out.missing = missing;
   // 没有模型明细、有认不出的或读不出的:都不是完整计量。没有明细也不能证明本次没有消耗,留给结算层核对
   if (out.models.length === 0 || out.unattributed || missing > 0) out.complete = false;
   return out;
 }
+
+/**
+ * 按字段合并两份累计快照(modelUsage 是整个 query 的累计值,不能相加):
+ * - 新快照里读得出的字段:采用新值;
+ * - 新快照里读不出的字段:保留此前已确认的值(累计值只增不减,取两者较大),继续标为读不出;
+ * - 新快照里没出现的模型 / 未归属用量:保留此前的值。
+ * 计量缺失的项数以新快照为准(此前读不出、后来读出来的已经解决)。
+ */
+export function mergeCumulative(prev: ModelMetering, next: ModelMetering): ModelMetering {
+  const pick = (
+    before: TokenBreakdown | undefined,
+    after: TokenBreakdown,
+    bad: readonly TokenField[] | undefined,
+  ): TokenBreakdown => {
+    const outT = { ...after };
+    for (const f of bad ?? []) outT[f] = Math.max(after[f], before?.[f] ?? 0);
+    return outT;
+  };
+  const prevById = new Map(prev.models.map((m) => [m.modelId, m]));
+  const models: ModelTokenUsage[] = next.models.map((m) => {
+    const merged = pick(prevById.get(m.modelId), m, m.missingFields);
+    prevById.delete(m.modelId);
+    return { ...m, ...merged };
+  });
+  for (const m of prevById.values()) models.push({ ...m });
+
+  const prevUna = unattributedOf(prev);
+  const nextUna = unattributedOf(next);
+  const unattributed = nextUna
+    ? pick(prevUna ?? undefined, nextUna, next.unattributedMissing)
+    : next.unattributedMissing?.length
+      ? pick(prevUna ?? undefined, ZERO, next.unattributedMissing)
+      : (prevUna ?? undefined);
+  const missing = missingOf(next);
+  return {
+    ...next,
+    complete: next.complete && missing === 0,
+    models,
+    ...(unattributed && unattributedOf({ unattributed }) ? { unattributed } : {}),
+    ...(missing > 0 ? { missing } : {}),
+  };
+}
+
+const ZERO: TokenBreakdown = {
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+};
