@@ -547,13 +547,25 @@ export class MysqlRunRepo implements RunRepo {
   }
 
   /**
-   * 运行中的累计用量快照(覆盖写)。已经有最终费用的就不再写 —— 快照只在没有最终费用时用于结算。
+   * 运行中的累计用量快照。已经有最终费用的就不再写 —— 快照只在没有最终费用时用于结算。
+   * 只接受序号(seq)比库里更大的:编排的异步写、worker 补写、恢复重放是几条独立路径,
+   * 晚到的旧快照不能覆盖新的。按序号判断新旧,不按 token 多少。同序号重写是空操作。
    */
   async saveUsageSnapshot(id: string, snapshot: unknown): Promise<void> {
+    const seq = snapshotSeqOf(snapshot);
     await this.db
       .update(runs)
       .set({ usageSnapshot: snapshot })
-      .where(and(eq(runs.id, id), isNull(runs.cost)));
+      .where(
+        and(
+          eq(runs.id, id),
+          isNull(runs.cost),
+          or(
+            isNull(runs.usageSnapshot),
+            sql`COALESCE(CAST(JSON_EXTRACT(${runs.usageSnapshot}, '$.seq') AS UNSIGNED), 0) < ${seq}`,
+          ),
+        ),
+      );
   }
 
   /** 补记花费:只在还没有花费记录时写入(不覆盖结算过的数据),见 RunPayloadSource.recordCost。 */
@@ -703,4 +715,10 @@ function toCallbackSnapshot(
   if (source === "none") return { source: "none" };
   if ((source === "agent" || source === "caller") && url) return { source, url };
   return undefined;
+}
+
+/** 快照序号:没有或不合法按 0(不会覆盖带序号的快照) */
+function snapshotSeqOf(snapshot: unknown): number {
+  const seq = (snapshot as { seq?: unknown } | null)?.seq;
+  return typeof seq === "number" && Number.isSafeInteger(seq) && seq > 0 ? seq : 0;
 }

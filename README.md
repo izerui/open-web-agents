@@ -274,6 +274,13 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 编排系统的 `terminationGracePeriodSeconds` 要**大于**这个值,否则进程会被 SIGKILL
 打断,白等一场。
 
+**只有独立 worker 会这样排空**。web 进程内嵌的 worker(没设 `OWA_EMBEDDED_WORKER=0`)
+不做排空:SIGTERM 由 Next.js 处理,它关闭 HTTP 服务后直接退出进程,在途运行随之中断,
+等租约过期被回收判 `failed`。这类运行的计费靠兜底补上 —— 运行中写下的用量快照
+(`runs.usage_snapshot`)先按已产生的用量计价并暂记;退出前已经拿到最终费用的,
+同一台机器上的费用恢复记录(`<数据目录>/cost-outbox/`)在重启后补写,再按完整费用结算。生产部署请用上面的拆进程方式
+(web 设 `OWA_EMBEDDED_WORKER=0`,另起 worker)。
+
 ### 工作目录回收
 
 每个进程每 30 分钟触发一次回收;Redis 锁让同一时刻只有一个进程去扫(只为省掉重复扫描)。
@@ -674,6 +681,7 @@ pnpm db:migrate
 - `docs/superpowers/specs/2026-07-26-open-web-agents-architecture.md` — 分层、模块、端口、设计模式
 - `docs/superpowers/specs/2026-07-28-open-web-agents-current-design.md` — **按当前代码收敛后的详细设计基线**
 - `docs/architecture-deviations.md` — **代码与文稿不一致的地方,以及每一处的理由**
+- `docs/billing.md` — **积分计费设计**:一次运行(多轮)从受理冻结到结算多退少补,积分怎么算
 
 两份 specs 是动工前写的,**原样保留、不回填修改** —— 它记录的是当时的判断,
 改掉它就抹掉了「我们后来知道了什么」。偏离都记在第三份文件里。

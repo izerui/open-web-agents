@@ -825,7 +825,7 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
   });
 
   for (const mode of ["live", "trial"] as const) {
-    it(`${mode}:引擎抛错、用量未知 → 不按零结清(暂记、不完整),冻结释放待核对`, async () => {
+    it(`${mode}:引擎抛错、一条用量都没收到 → 按规则自动按 0 结清,冻结全部退回`, async () => {
       const engine: EnginePort = {
         run: async () => {
           throw new Error("sdk crashed after calling the model");
@@ -833,8 +833,12 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
       };
       const { world, repo, settleCalls } = await scenario(mode, 0, { engine });
       expect((await repo.get("r1"))?.state).toBe("failed");
-      expect(settleCalls).toEqual([false]);
-      expect(world.charge("r1")).toMatchObject({ state: "provisional", incomplete: true });
+      expect(settleCalls).toEqual([true]);
+      expect(world.charge("r1")).toMatchObject({
+        state: "settled",
+        incomplete: false,
+        chargedMicro: "0",
+      });
       expect(world.balance("u1")).toEqual({ available: 1000n * C, reserved: 0n });
     });
   }
@@ -861,26 +865,34 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
       });
 
     for (const mode of ["live", "trial"] as const) {
-      it(`${mode}:SDK query 抛错、没收到用量 → 暂记不完整,不按零结清`, async () => {
+      it(`${mode}:SDK query 抛错、没收到用量 → 自动按 0 结清`, async () => {
         const q: QueryFn = () =>
           (async function* () {
             yield { type: "system", subtype: "init", session_id: "s" };
             throw new Error("socket hang up");
           })();
         const { world, settleCalls } = await scenario(mode, 0, { engine: sdk(q) });
-        expect(settleCalls).toEqual([false]);
-        expect(world.charge("r1")).toMatchObject({ state: "provisional", incomplete: true });
+        expect(settleCalls).toEqual([true]);
+        expect(world.charge("r1")).toMatchObject({
+          state: "settled",
+          incomplete: false,
+          chargedMicro: "0",
+        });
         expect(world.balance("u1")).toEqual({ available: 1000n * C, reserved: 0n });
       });
 
-      it(`${mode}:SDK 流结束没有 result、没有用量 → 暂记不完整,不按零结清`, async () => {
+      it(`${mode}:SDK 流结束没有 result、没有用量 → 自动按 0 结清`, async () => {
         const q: QueryFn = () =>
           (async function* () {
             yield { type: "system", subtype: "init", session_id: "s" };
           })();
         const { world, settleCalls } = await scenario(mode, 0, { engine: sdk(q) });
-        expect(settleCalls).toEqual([false]);
-        expect(world.charge("r1")).toMatchObject({ state: "provisional", incomplete: true });
+        expect(settleCalls).toEqual([true]);
+        expect(world.charge("r1")).toMatchObject({
+          state: "settled",
+          incomplete: false,
+          chargedMicro: "0",
+        });
       });
     }
 
@@ -1457,5 +1469,250 @@ describe("worker 中途挂掉:真实 runner + 编排写下的用量快照用于�
       chargedMicro: "23100000",
     });
     expect(ledger.deducted("u1")).toBe(23_100_000n);
+  });
+});
+
+describe("引擎报过非零用量后抛错(没有最终费用):按观察到的快照处理,不按零结清", () => {
+  const C = 1_000_000n;
+  const H = 3600_000;
+  const pricing: RunPricing = {
+    providerId: "p",
+    models: [{ capabilityId: "m-main", modelId: "up-main", version: 3 }],
+    binding: {
+      mainRef: "m-main",
+      main: "m-main",
+      subagents: {},
+      slots: { fable: null, opus: null, sonnet: null, haiku: null },
+    },
+  };
+  const priced: Capability = {
+    id: "m-main",
+    name: "主力",
+    kind: "llm",
+    modelId: "up-main",
+    enabled: true,
+    acceptsImages: false,
+    providerId: "p",
+    rates: [{ meter: "input_token", units: "1000000", microCredits: "2310000000" }],
+    version: 3,
+    updatedAt: 0,
+  };
+  // 1 万输入 = 23.1 积分
+  const SNAP = {
+    input: 10000,
+    output: 0,
+    partial: true,
+    metering: {
+      source: "sdk_model_usage",
+      complete: true,
+      partial: true,
+      models: [
+        {
+          modelId: "up-main",
+          inputTokens: 10000,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      ],
+    },
+  };
+
+  async function scene(mode: BillingMode) {
+    const ledger = new InMemoryChargeWorld();
+    ledger.credit("u1", 1000n * C);
+    const charging = new RunCharging({
+      mode: async () => mode,
+      bind: async () => ({ pricing, main: { capabilityId: "m-main" } }) as never,
+      reserveTargetOf: async () => 300n * C,
+      pricedModels: async () => [priced],
+      transaction: ledger.transaction,
+    });
+    /** 库里的 runs.usage_snapshot(只在没有最终费用时写入) */
+    const dbSnapshots = new Map<string, unknown>();
+    const db = { down: false };
+    const dbSave = async (runId: string, snap: unknown) => {
+      if (db.down) throw new Error("db down");
+      dbSnapshots.set(runId, structuredClone(snap));
+    };
+    // 编排的异步写:可以挡住
+    let releaseOrch: () => void = () => {};
+    const orchGate = { blocked: false };
+    const orchSave = async (runId: string, snap: unknown) => {
+      if (orchGate.blocked) {
+        await new Promise<void>((r) => {
+          releaseOrch = r;
+        });
+      }
+      await dbSave(runId, snap);
+    };
+    const engine: EnginePort = {
+      async run(_s, ctx) {
+        ctx.onCostSnapshot?.(SNAP);
+        await new Promise((r) => setTimeout(r, 0));
+        throw new Error("engine crashed");
+      },
+    };
+    const { repo } = await setup(engine);
+    const sessions = new InMemorySessionRepo();
+    await sessions.create({ id: "s1", agentId: "a1", workspaceDir: "/ws/s1" });
+    const orchestrator = new RunOrchestrator({
+      sessions,
+      agents: new InMemoryAgentRepo([
+        { id: "a1", ownerId: "u1", name: "a", config: { systemPrompt: "p", model: "sonnet" } },
+      ]),
+      engine,
+      bus: new InMemoryBus(),
+      resolveModels: platformModels({ baseUrl: "https://b.example", key: "k" }),
+      saveUsageSnapshot: orchSave,
+    });
+    const clock = { endedAt: Date.now() };
+    const sync = async () => {
+      const r = await repo.get("r1");
+      ledger.setRun("r1", {
+        status: r?.state ?? "pending",
+        cost: repo.recordedCosts.get("r1") ?? null,
+        usageSnapshot: dbSnapshots.get("r1") ?? null,
+        pricing,
+        startedAt: 1,
+        endedAt: clock.endedAt,
+      });
+    };
+    const snapshotOutbox = new InMemoryCostOutbox();
+    const settleCalls: boolean[] = [];
+    const worker = (now: number) =>
+      new RunWorker(
+        repo,
+        orchestrator,
+        { leaseMs: 60_000, heartbeatMs: 10_000, now: () => now, costRetries: 2, costRetryMs: 1 },
+        {
+          saveUsageSnapshot: dbSave,
+          snapshotOutbox,
+          settleCharge: async (id, opts) => {
+            settleCalls.push(opts.final);
+            await sync();
+            return charging.settle(id, opts);
+          },
+          sweepCharges: async () => {
+            await sync();
+            return charging.sweep();
+          },
+        },
+      );
+    await ledger.transaction((store) =>
+      charging.admit(store, { runId: "r1", accountId: "u1", apiKeyId: null, main: "m-main" }),
+    );
+    await repo.createWithPrompt("r1", "s1", "go");
+    /** 模拟时间过去:把运行结束时刻往前挪 */
+    const elapse = async (ms: number) => {
+      clock.endedAt -= ms;
+    };
+    const due = mode === "live" ? 23_100_000n : 0n;
+    return {
+      ledger,
+      charging,
+      db,
+      orchGate,
+      release: () => releaseOrch(),
+      dbSnapshots,
+      snapshotOutbox,
+      settleCalls,
+      worker,
+      elapse,
+      due,
+    };
+  }
+
+  for (const mode of ["live", "trial"] as const) {
+    it(`${mode}:编排的快照写入慢(worker 收尾后才放开)→ 不先按零结清;按快照暂记,24 小时后按快照结清`, async () => {
+      const s = await scene(mode);
+      s.orchGate.blocked = true;
+      await s.worker(1000).tick();
+      expect(s.settleCalls).toEqual([false]);
+      expect(s.ledger.charge("r1")?.state).not.toBe("settled");
+      s.release();
+      await new Promise((r) => setTimeout(r, 5));
+      await s.worker(1000).reclaim();
+      expect(s.ledger.charge("r1")).toMatchObject({
+        state: "provisional",
+        incomplete: true,
+        estimatedMicro: "23100000",
+        chargedMicro: s.due.toString(),
+      });
+      await s.elapse(24 * H);
+      await s.worker(1000).reclaim();
+      expect(s.ledger.charge("r1")).toMatchObject({
+        state: "settled",
+        incomplete: false,
+        estimatedMicro: "23100000",
+        chargedMicro: s.due.toString(),
+      });
+      expect(s.ledger.deducted("u1")).toBe(s.due);
+    });
+
+    it(`${mode}:快照首次写库失败(编排与 worker 都没写成)→ 引擎退出 → 数据库恢复后补写 → 按快照处理,不等 24 小时免掉`, async () => {
+      const s = await scene(mode);
+      s.db.down = true;
+      await s.worker(1000).tick();
+      expect(s.settleCalls).toEqual([false]);
+      expect(s.dbSnapshots.has("r1")).toBe(false);
+      expect(s.snapshotOutbox.files.get("r1")).toMatchObject({ input: 10000 });
+      expect(s.ledger.charge("r1")?.state).not.toBe("settled");
+
+      s.db.down = false;
+      await s.worker(1000).reclaim(); // 补写快照恢复记录 → 清扫按快照暂记
+      expect(s.snapshotOutbox.files.has("r1")).toBe(false);
+      expect(s.ledger.charge("r1")).toMatchObject({
+        state: "provisional",
+        estimatedMicro: "23100000",
+        chargedMicro: s.due.toString(),
+      });
+      await s.elapse(24 * H);
+      await s.worker(1000).reclaim();
+      expect(s.ledger.charge("r1")).toMatchObject({
+        state: "settled",
+        chargedMicro: s.due.toString(),
+      });
+      expect(s.ledger.deducted("u1")).toBe(s.due);
+    });
+  }
+
+  it("一条用量都没观察到就抛错:仍按规则直接按 0 结清", async () => {
+    const ledger = new InMemoryChargeWorld();
+    ledger.credit("u1", 1000n * C);
+    const charging = new RunCharging({
+      mode: async () => "live",
+      bind: async () => ({ pricing, main: { capabilityId: "m-main" } }) as never,
+      reserveTargetOf: async () => 300n * C,
+      pricedModels: async () => [priced],
+      transaction: ledger.transaction,
+    });
+    const engine: EnginePort = {
+      async run() {
+        throw new Error("engine crashed");
+      },
+    };
+    const { repo, orchestrator } = await setup(engine);
+    const calls: boolean[] = [];
+    await ledger.transaction((store) =>
+      charging.admit(store, { runId: "r1", accountId: "u1", apiKeyId: null, main: "m-main" }),
+    );
+    await repo.createWithPrompt("r1", "s1", "go");
+    await new RunWorker(
+      repo,
+      orchestrator,
+      { leaseMs: 60_000, now: () => 1000 },
+      {
+        saveUsageSnapshot: async () => {},
+        settleCharge: async (id, opts) => {
+          calls.push(opts.final);
+          const r = await repo.get("r1");
+          ledger.setRun("r1", { status: r?.state ?? "pending", cost: null, pricing, startedAt: 1 });
+          return charging.settle(id, opts);
+        },
+      },
+    ).tick();
+    expect(calls).toEqual([true]);
+    expect(ledger.charge("r1")).toMatchObject({ state: "settled", chargedMicro: "0" });
   });
 });

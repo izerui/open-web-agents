@@ -130,4 +130,73 @@ if (!url) {
       await expect(query.listPending({ limit: 10, cursor: "bad" })).rejects.toThrow(/cursor/);
     });
   });
+
+  describe("MySQL 对账报表原始数据", () => {
+    it("按数据库时钟取日期与区间;带锁定价目的提供者、费用与快照;可按模式筛选", async () => {
+      const [[todayRow]] = (await pool.query(
+        "SELECT DATE_FORMAT(NOW(), '%Y-%m-%d') AS d",
+      )) as unknown as [{ d: string }[]];
+      const today = todayRow?.d ?? "";
+      // 共享测试库:每次用新的提供者 id,只看本用例写入的
+      const providerId = `p-recon-${randomUUID().slice(0, 8)}`;
+      const pricing = {
+        providerId,
+        models: [{ capabilityId: "m", modelId: "u", version: 1 }],
+      };
+      const mk = async (opts: {
+        mode: "trial" | "live";
+        state: string;
+        cost?: unknown;
+        snapshot?: unknown;
+        started?: boolean;
+        daysAgo?: number;
+      }) => {
+        const id = randomUUID().replace(/-/g, "").slice(0, 24);
+        await pool.query(
+          `INSERT INTO runs (id, session_id, status, prompt, pricing, cost, usage_snapshot, started_at, created_at)
+           VALUES (?, 's', 'failed', 'x', ?, ?, ?, ${opts.started === false ? "NULL" : "NOW()"},
+                   NOW() - INTERVAL ? DAY)`,
+          [
+            id,
+            JSON.stringify(pricing),
+            opts.cost === undefined ? null : JSON.stringify(opts.cost),
+            opts.snapshot === undefined ? null : JSON.stringify(opts.snapshot),
+            opts.daysAgo ?? 0,
+          ],
+        );
+        await db.insert(runCharges).values({
+          ...row(randomUUID(), { createdAt: new Date(), state: opts.state, mode: opts.mode }),
+          runId: id,
+        });
+        return id;
+      };
+      const full = await mk({ mode: "trial", state: "settled", cost: { input: 1 } });
+      const snap = await mk({ mode: "trial", state: "provisional", snapshot: { input: 2 } });
+      const notStarted = await mk({ mode: "trial", state: "settled", started: false });
+      const live = await mk({ mode: "live", state: "settled", cost: { input: 3 } });
+      const old = await mk({ mode: "trial", state: "settled", daysAgo: 40 });
+
+      void [full, snap, notStarted, live, old];
+      const pick = async (mode?: "trial" | "live") => {
+        const { rows } = await query.reconciliationRows({
+          from: today,
+          to: today,
+          mode,
+          limit: 50_000,
+        });
+        // 共享测试库:只看本用例的提供者
+        return rows.filter((r) => r.providerId === providerId);
+      };
+      const all = await pick();
+      // 区间外(40 天前)的不在内
+      expect(all).toHaveLength(4);
+      for (const r of all) expect(r).toMatchObject({ day: today, providerId });
+      expect(all.map((r) => r.cost ?? r.snapshot ?? null).filter(Boolean)).toEqual(
+        expect.arrayContaining([{ input: 1 }, { input: 2 }, { input: 3 }]),
+      );
+      expect(all.filter((r) => !r.started)).toHaveLength(1);
+      expect(await pick("live")).toHaveLength(1);
+      expect(await pick("trial")).toHaveLength(3);
+    });
+  });
 }

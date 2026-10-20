@@ -1,4 +1,4 @@
-import type { BillingMode } from "../domain/run-charge";
+import { type BillingMode, FINAL_COST_WAIT_MS } from "../domain/run-charge";
 import { BillingError, type WalletBalance } from "../ports";
 import type {
   ChargeTransaction,
@@ -208,13 +208,28 @@ class Store implements RunChargeStore {
 
   async runForSettle(runId: string): Promise<RunForSettle | null> {
     const run = this.w.runs.get(runId);
-    return run ? { ...structuredClone(run), costDigest: runDigest(run) } : null;
+    if (!run) return null;
+    const c = this.w.charges.get(runId);
+    return {
+      ...structuredClone(run),
+      costDigest: runDigest(run),
+      finalCostWaitOver: waitOver(run, c?.createdAt ?? 0),
+    };
   }
 
   async openOfFinishedRuns(limit: number) {
     return [...this.w.charges.values()]
       .filter((c) => {
         const run = this.w.runs.get(c.runId);
+        if (
+          c.state === "provisional" &&
+          run &&
+          run.cost == null &&
+          waitOver(run, c.createdAt) &&
+          !c.finalWaitSettled
+        ) {
+          return true;
+        }
         if (c.state === "provisional") {
           const owed = BigInt(c.owedMicro ?? "0");
           if (owed > 0n && (this.w.wallets.get(c.accountId)?.available ?? 0n) >= owed) return true;
@@ -226,6 +241,10 @@ class Store implements RunChargeStore {
       .slice(0, limit)
       .map((c) => c.runId);
   }
+}
+
+function waitOver(run: RunForSettle, createdAt: number): boolean {
+  return (run.endedAt ?? createdAt) < Date.now() - FINAL_COST_WAIT_MS;
 }
 
 /** 同 MySQL 的 COST_DIGEST:最终费用原样,快照加来源前缀 */

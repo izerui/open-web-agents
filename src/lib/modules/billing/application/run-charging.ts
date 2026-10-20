@@ -8,7 +8,6 @@ import type { ModelMetering } from "@/lib/modules/agent-engine/domain/model-usag
 import type { Capability } from "@/lib/modules/capabilities/domain/catalog";
 import type { RunModelBinding } from "@/lib/modules/model-gateway/domain/resolve-run-models";
 import { ModelUnavailable } from "@/lib/modules/model-gateway/domain/resolve-run-models";
-import { estimateRunCredits } from "@/lib/modules/usage/domain/estimate";
 import { BrandedError, type ModelRef, type PinnedPricing, type RunPricing } from "@/lib/shared";
 import {
   type BillingMode,
@@ -21,6 +20,7 @@ import {
   planSettlement,
   remaining,
 } from "../domain/run-charge";
+import { priceForSettlement } from "../domain/settle-pricing";
 import { BillingError } from "../ports";
 import type { ChargeTransaction, RunChargeStore } from "../run-charge-ports";
 
@@ -144,6 +144,7 @@ export class RunCharging {
       wouldReject: mode === "trial" ? decision.rejection : null,
       incomplete: false,
       settledCostDigest: null,
+      finalWaitSettled: false,
       createdAt: this.now(),
       settledAt: null,
     });
@@ -315,9 +316,11 @@ export class RunCharging {
       const run = await store.runForSettle(runId);
       if (!run || !TERMINAL.has(run.status)) return "pending" as const;
 
-      // 没有最终费用(worker 中途挂掉)时按运行中的用量快照计价 —— 但快照不含崩溃那一刻
-      // 进行中的请求,只能算不完整:能算的先记上,保留暂记;最终费用之后到了再补差额
-      const cost = (run.cost ?? incompleteSnapshot(run.usageSnapshot)) as {
+      // 等最终费用的期限已过、仍没有最终费用:不再等,按快照(没有快照按 0)结清
+      const waitedOut = !run.cost && run.finalCostWaitOver === true;
+      // 没有最终费用(worker 中途挂掉)时按运行中的用量快照计价:期限内暂记(快照不含崩溃那一刻
+      // 进行中的请求,最终费用可能还会补到),期限过后按快照结清
+      const cost = (run.cost ?? run.usageSnapshot ?? null) as {
         metering?: ModelMetering;
       } | null;
       const digest = run.costDigest ?? null;
@@ -328,27 +331,27 @@ export class RunCharging {
         c.state === "provisional" &&
         digest === c.settledCostDigest &&
         !owing &&
-        !(opts.final && !cost)
+        !waitedOut &&
+        !(opts.final && !run.cost)
       ) {
         return "none" as const;
       }
       // 跑过却没有花费,而调用方又不能确认用量已定:可能是还没补记
-      const usageUnknown = !cost && run.startedAt !== null && !opts.final;
+      const usageUnknown = !cost && run.startedAt !== null && !opts.final && !waitedOut;
 
       let estimated = 0n;
-      // 有花费却不能完整计价(没有按模型的计量、认不出模型、缺价目):能算的先记上,其余待补
+      // 计价:认得出的模型按自己的售价,认不出或缺价目的按本次运行主模型的售价(见 settle-pricing.ts)。
+      // 只有连主模型价目都取不到时才算不出(暂记)
       let unresolved = false;
       if (cost) {
         const models = run.pricing ? await this.deps.pricedModels(run.pricing) : null;
-        if (cost.metering && models) {
-          const est = estimateRunCredits(cost.metering, models);
-          estimated = BigInt(est.totalMicroCredits);
-          unresolved = !est.complete || est.models.some((m) => m.unpriced);
-        } else {
-          unresolved = true;
-        }
+        const priced = priceForSettlement(cost, models, run.pricing?.binding?.main);
+        estimated = priced.micro;
+        unresolved = !priced.priceable;
       }
-      const pending = usageUnknown || unresolved;
+      // 期限内的快照:崩溃那一刻进行中的请求不在里面,先暂记,等最终费用或期限
+      const snapshotWaiting = !run.cost && !!run.usageSnapshot && !waitedOut;
+      const pending = usageUnknown || unresolved || snapshotWaiting;
       const nextState = pending ? ("provisional" as const) : ("settled" as const);
 
       if (c.mode === "trial") {
@@ -358,6 +361,7 @@ export class RunCharging {
           state: nextState,
           incomplete: pending,
           settledCostDigest: digest,
+          ...(waitedOut ? { finalWaitSettled: true } : {}),
           settledAt: this.now(),
         });
         return nextState;
@@ -417,6 +421,7 @@ export class RunCharging {
         state,
         incomplete: pending || owed > 0n || paid > estimated,
         settledCostDigest: digest,
+        ...(waitedOut ? { finalWaitSettled: true } : {}),
         settledAt: this.now(),
       });
       return state;
@@ -435,15 +440,4 @@ export class RunCharging {
     }
     return n;
   }
-}
-
-/** 用量快照当作费用用时,一律标为不完整 */
-function incompleteSnapshot(snapshot: unknown): unknown {
-  if (!snapshot || typeof snapshot !== "object") return null;
-  const s = snapshot as { metering?: ModelMetering };
-  return {
-    ...s,
-    partial: true,
-    ...(s.metering ? { metering: { ...s.metering, complete: false, partial: true } } : {}),
-  };
 }

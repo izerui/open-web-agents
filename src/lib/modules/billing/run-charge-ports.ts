@@ -1,4 +1,5 @@
 import type { RunPricing } from "@/lib/shared";
+import type { ReconRow } from "./domain/reconciliation";
 import type { BillingMode, HoldRejection, HoldSlice } from "./domain/run-charge";
 import type { WalletBalance } from "./ports";
 
@@ -28,6 +29,8 @@ export interface RunCharge {
   incomplete: boolean;
   /** 上次结算时运行花费的指纹:暂记的记录花费变了(补记、补齐明细)才需要再结算 */
   settledCostDigest: string | null;
+  /** 等最终费用的期限过后已结算过(清扫不再为期限选它) */
+  finalWaitSettled: boolean;
   createdAt: number;
   settledAt: number | null;
 }
@@ -41,6 +44,13 @@ export interface RunForSettle {
   pricing: RunPricing | null;
   /** 被 worker 认领的时刻;null = 从没开始执行(确认没有调用模型) */
   startedAt: number | null;
+  /** 运行结束时刻(仅供参考;期限是否已过以 finalCostWaitOver 为准) */
+  endedAt?: number | null;
+  /**
+   * 等最终费用的期限(运行结束起 24 小时)是否已过。由存储用数据库自己的时钟与运行表自己的时间算,
+   * 不拿应用的时钟去比 —— 两边时区约定不同时会差出几个小时
+   */
+  finalCostWaitOver?: boolean;
   /** 运行中的累计用量快照;没有最终费用时用于结算(视为不完整) */
   usageSnapshot?: unknown;
   /** 花费的指纹(没有最终费用时为快照的指纹;都没有为 null),由存储计算 */
@@ -135,7 +145,7 @@ export interface TrialStats {
  * 暂记(待核对)的原因。按这个优先级归类,一条记录只归一类:
  * - owed:用量完整,但余额不够,还欠着(充值后清扫自动补扣)
  * - usage_unknown:运行过,但结算时没有拿到任何用量
- * - unpriced:有用量,但不能完整计价(认不出模型、缺价目),能算的部分已记
+ * - unpriced:有用量,但连本次运行主模型的价目都取不到,暂时无法计价(认不出的模型已按主模型价计,不会落到这里)
  */
 export type PendingReason = "owed" | "usage_unknown" | "unpriced";
 export const PENDING_REASONS: readonly PendingReason[] = ["owed", "usage_unknown", "unpriced"];
@@ -146,6 +156,11 @@ export interface PendingChargeItem extends RunChargeItem {
   accountId: string;
   /** 账号邮箱(账号已删除为 null) */
   accountEmail: string | null;
+}
+
+/** 对账报表的一行原始数据(价目版本由应用层按 pricing 取) */
+export interface ReconRawRow extends Omit<ReconRow, "models"> {
+  pricing: RunPricing | null;
 }
 
 /** 只读查询:积分页、账号与 Key 的本月用量、试算统计、待核对列表 */
@@ -170,6 +185,16 @@ export interface RunChargeQuery {
     limit: number;
     cursor?: string;
   }): Promise<{ items: PendingChargeItem[]; nextCursor?: string }>;
+  /**
+   * 对账报表的原始数据:[from, to] 两天之间(含)创建的运行,一次运行一行。
+   * 日期与区间都按数据库时钟(运行表自己的创建时间)算。超过 limit 截断并说明。
+   */
+  reconciliationRows(opts: {
+    from: string;
+    to: string;
+    mode?: BillingMode;
+    limit: number;
+  }): Promise<{ rows: ReconRawRow[]; truncated: boolean }>;
   /** 各原因的暂记条数(可按计费模式筛选) */
   pendingCounts(mode?: BillingMode): Promise<Record<PendingReason, number>>;
 }

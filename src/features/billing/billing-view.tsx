@@ -28,6 +28,7 @@ import { toast } from "sonner";
 import { BatchCreditForm } from "./batch-credit-form";
 import { BillingModeCard } from "./billing-mode-card";
 import { PendingCharges } from "./pending-charges";
+import { ReconciliationView } from "./reconciliation-view";
 import { RunChargeList } from "./run-charge-list";
 
 type Statement = {
@@ -169,6 +170,7 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
   return (
     <SpaceShell area={admin ? "admin" : "personal"} title={admin ? "积分管理" : "积分账户"}>
       {admin && <BillingModeCard onChanged={() => load()} />}
+      {admin && <ReconciliationView />}
       {admin && <BatchCreditForm onDone={() => load()} />}
       {admin && (
         <PendingCharges

@@ -456,94 +456,132 @@ describe("升级遗留的美元上限", () => {
   });
 });
 
-describe("部分计量里有认不出的部分", () => {
-  const partialCost = (complete: boolean, input: number) => ({
-    input,
+describe("认不出模型或缺价目的部分:按本次运行主模型售价计,直接结清", () => {
+  const usage = (models: [string, number][], complete = true) => ({
+    input: 0,
     output: 0,
-    partial: true,
     metering: {
       source: "sdk_model_usage",
       complete,
-      partial: true,
-      models: [
-        {
-          modelId: "up-main",
-          inputTokens: input,
-          outputTokens: 0,
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-        },
-      ],
+      models: models.map(([modelId, input]) => ({
+        modelId,
+        inputTokens: input,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      })),
     },
   });
 
   for (const mode of ["live", "trial"] as const) {
-    it(`${mode}:能算的先记上并保持可补结算;补齐明细后只补差额一次`, async () => {
+    it(`${mode}:认得出的按自己的价,认不出的按主模型价,结清不留暂记`, async () => {
       const { world, charging, admit } = setup(mode);
       world.credit("u1", 1000n * C);
       await admit("r1");
-      // 1 万输入能计价(23.1 积分),另有一部分认不出模型
+      // 1 万输入(主模型自己)+ 1 万输入(上游回报的模型名对不上)
       world.setRun("r1", {
-        status: "cancelled",
-        cost: partialCost(false, 10000),
+        status: "failed",
+        cost: usage([
+          ["up-main", 10000],
+          ["claude-x-20250929", 10000],
+        ]),
         pricing,
         startedAt: 1,
       });
-      expect(await charging.settle("r1", { final: true })).toBe("provisional");
-      const first = mode === "live" ? 23_100_000n : 0n;
-      expect(world.charge("r1")).toMatchObject({
-        state: "provisional",
-        incomplete: true,
-        estimatedMicro: "23100000",
-        chargedMicro: first.toString(),
-      });
-      expect(world.balance("u1")).toEqual({ available: 1000n * C - first, reserved: 0n });
-      // 花费没变:清扫不再捞它,结算也不动
-      expect(await charging.sweep()).toBe(0);
-      expect(await charging.settle("r1", { final: true })).toBe("none");
-
-      // 补齐了明细:2 万输入,完整
-      world.setRun("r1", {
-        status: "cancelled",
-        cost: partialCost(true, 20000),
-        pricing,
-        startedAt: 1,
-      });
-      expect(await charging.sweep()).toBe(1);
-      const full = mode === "live" ? 46_200_000n : 0n;
+      expect(await charging.settle("r1", { final: true })).toBe("settled");
+      const due = mode === "live" ? 46_200_000n : 0n;
       expect(world.charge("r1")).toMatchObject({
         state: "settled",
         incomplete: false,
         estimatedMicro: "46200000",
-        chargedMicro: full.toString(),
+        chargedMicro: due.toString(),
       });
-      expect(await charging.sweep()).toBe(0);
-      expect(world.balance("u1")).toEqual({ available: 1000n * C - full, reserved: 0n });
+      expect(world.deducted("u1")).toBe(due);
     });
   }
 
-  it("同一运行补扣多次:每次编号不同,不会被钱包当成重复请求漏扣", async () => {
+  it("没有按模型的明细:用总 token 数按主模型价计", async () => {
     const { world, charging, admit } = setup("live");
     world.credit("u1", 1000n * C);
     await admit("r1");
-    world.setRun("r1", { status: "cancelled", cost: null, pricing, startedAt: 1 });
-    await charging.sweep(); // 暂记,0
     world.setRun("r1", {
       status: "cancelled",
-      cost: partialCost(false, 10000),
+      cost: { input: 20000, output: 1000, partial: true },
       pricing,
       startedAt: 1,
     });
-    await charging.sweep(); // 补 23.1
+    await charging.settle("r1", { final: true });
+    expect(world.charge("r1")).toMatchObject({ state: "settled", chargedMicro: EXPECTED });
+  });
+
+  it("计量不完整(有条目解析不了)也按能解析的部分结清", async () => {
+    const { world, charging, admit } = setup("live");
+    world.credit("u1", 1000n * C);
+    await admit("r1");
     world.setRun("r1", {
-      status: "cancelled",
-      cost: partialCost(true, 20000),
+      status: "failed",
+      cost: usage([["up-main", 10000]], false),
+      pricing,
+      startedAt: 1,
+    });
+    await charging.settle("r1", { final: true });
+    expect(world.charge("r1")).toMatchObject({ state: "settled", chargedMicro: "23100000" });
+  });
+
+  it("连主模型的价目都取不到:算不出,暂记、不扣", async () => {
+    const world = new InMemoryChargeWorld();
+    world.credit("u1", 1000n * C);
+    const charging = new RunCharging({
+      mode: async () => "live",
+      bind: async () => binding,
+      reserveTargetOf: async () => 300n * C,
+      pricedModels: async () => null,
+      transaction: world.transaction,
+    });
+    await world.transaction((st) =>
+      charging.admit(st, { runId: "r1", accountId: "u1", apiKeyId: null, main: "m-main" }),
+    );
+    world.setRun("r1", {
+      status: "failed",
+      cost: usage([["up-main", 10000]]),
+      pricing,
+      startedAt: 1,
+    });
+    expect(await charging.settle("r1", { final: true })).toBe("provisional");
+    expect(world.charge("r1")).toMatchObject({ chargedMicro: "0", incomplete: true });
+  });
+
+  it("同一运行补扣多次(快照 1 万 → 快照 2 万 → 最终 3 万):每次编号不同,不漏扣", async () => {
+    const { world, charging, admit } = setup("live");
+    world.credit("u1", 1000n * C);
+    await admit("r1");
+    const snap = (n: number, seq: number) => ({ ...usage([["up-main", n]]), seq });
+    world.setRun("r1", {
+      status: "failed",
+      cost: null,
+      usageSnapshot: snap(10000, 1),
+      pricing,
+      startedAt: 1,
+    });
+    await charging.sweep(); // 快照暂记 23.1
+    world.setRun("r1", {
+      status: "failed",
+      cost: null,
+      usageSnapshot: snap(20000, 2),
       pricing,
       startedAt: 1,
     });
     await charging.sweep(); // 再补 23.1
-    expect(world.charge("r1")).toMatchObject({ state: "settled", chargedMicro: "46200000" });
-    expect(world.balance("u1").available).toBe(1000n * C - 46_200_000n);
+    world.setRun("r1", {
+      status: "failed",
+      cost: usage([["up-main", 30000]]),
+      usageSnapshot: snap(20000, 2),
+      pricing,
+      startedAt: 1,
+    });
+    await charging.sweep(); // 最终费用:再补 23.1
+    expect(world.charge("r1")).toMatchObject({ state: "settled", chargedMicro: "69300000" });
+    expect(world.deducted("u1")).toBe(69_300_000n);
   });
 });
 
@@ -568,6 +606,17 @@ describe("补结算以真实已扣为基准(费用先往下、再往上修正)",
       ],
     },
   });
+  let seq = 0;
+  const asRun = (c: unknown) =>
+    (c as { metering?: { complete?: boolean } } | null)?.metering?.complete === false
+      ? {
+          status: "cancelled",
+          cost: null,
+          usageSnapshot: { ...(c as object), seq: ++seq },
+          pricing,
+          startedAt: 1,
+        }
+      : { status: "cancelled", cost: c, pricing, startedAt: 1 };
   const A = 92_400_000n;
   const B = 69_300_000n;
   const D = 115_500_000n;
@@ -575,8 +624,8 @@ describe("补结算以真实已扣为基准(费用先往下、再往上修正)",
   const liveFlow = () => {
     const { world, charging, admit } = setup("live");
     world.credit("u1", 1000n * C);
-    const set = (c: unknown) =>
-      world.setRun("r1", { status: "cancelled", cost: c, pricing, startedAt: 1 });
+    // 还不是最终费用的一步(complete=false)走期限内的快照:暂记,费用之后还会变
+    const set = (c: unknown) => world.setRun("r1", asRun(c));
     const check = (charged: bigint, refunded: bigint, estimated: bigint, state: string) => {
       expect(world.charge("r1")).toMatchObject({
         chargedMicro: charged.toString(),
@@ -613,26 +662,20 @@ describe("补结算以真实已扣为基准(费用先往下、再往上修正)",
     check(D, 0n, D, "settled");
   });
 
-  it("正式:已扣非零 → 费用明细缺失 / 取不到锁定价目时不退 → 补齐并确认减少后只退差额", async () => {
-    const { world, charging, admit, set, check } = liveFlow();
+  it("正式:已扣非零 → 取不到锁定价目时不退;最终费用只有总 token(无明细)时按主模型价算出减少,只退差额一次", async () => {
+    const { charging, admit, set, check } = liveFlow();
     await admit("r1");
-    set(cost(40000, false));
+    set(cost(40000, false)); // 快照暂记 92.4
     await charging.settle("r1", { final: true });
     check(A, 0n, A, "provisional");
 
-    // 费用有了、但没有按模型的计量:应扣算出来是 0,不代表应扣减少
-    set({ input: 30000, output: 0, partial: true });
-    await charging.sweep();
-    check(A, 0n, 0n, "provisional");
-    expect(world.charge("r1")?.incomplete).toBe(true);
-
-    // 计量有、但锁定价目取不到
+    // 另一个运行:锁定价目取不到 —— 算不出不等于应扣减少,不退
     const noPrice = setup("live");
     noPrice.world.credit("u1", 1000n * C);
     await noPrice.admit("r2");
     noPrice.world.setRun("r2", {
       status: "cancelled",
-      cost: cost(40000, false),
+      cost: cost(40000, true),
       pricing,
       startedAt: 1,
     });
@@ -654,12 +697,11 @@ describe("补结算以真实已扣为基准(费用先往下、再往上修正)",
     expect(noPrice.world.charge("r2")).toMatchObject({
       chargedMicro: A.toString(),
       refundedMicro: null,
-      state: "provisional",
     });
     expect(noPrice.world.deducted("u1")).toBe(A);
 
-    // 补齐并确认减少:只退差额 23.1,一次
-    set(cost(30000, true));
+    // 最终费用到了,只有总 token:3 万输入按主模型价 69.3 → 退差额 23.1
+    set({ input: 30000, output: 0, partial: true });
     expect(await charging.sweep()).toBe(1);
     check(B, A - B, B, "settled");
     expect(await charging.sweep()).toBe(0);
@@ -686,7 +728,7 @@ describe("补结算以真实已扣为基准(费用先往下、再往上修正)",
       [cost(30000, false), B],
       [cost(50000, true), D],
     ] as const) {
-      world.setRun("r1", { status: "cancelled", cost: c, pricing, startedAt: 1 });
+      world.setRun("r1", asRun(c));
       await charging.settle("r1", { final: true });
       expect(world.charge("r1")).toMatchObject({
         estimatedMicro: est.toString(),
@@ -961,4 +1003,106 @@ describe("快照与最终费用内容完全相同", () => {
       });
     }
   }
+});
+
+describe("worker 中途挂掉:等最终费用 24 小时", () => {
+  const H = 3600_000;
+  /** 模拟时间过去:把运行结束时刻往前挪 */
+  const elapse = async (world: InMemoryChargeWorld, ms: number) => {
+    await world.transaction(async (s) => {
+      const run = await s.runForSettle("r1");
+      if (run) world.setRun("r1", { ...run, endedAt: (run.endedAt ?? Date.now()) - ms });
+    });
+  };
+  // 快照:1 万输入(23.1 积分)
+  const snapshot = {
+    input: 10000,
+    output: 0,
+    partial: true,
+    metering: {
+      source: "sdk_model_usage",
+      complete: true,
+      partial: true,
+      models: [
+        {
+          modelId: "up-main",
+          inputTokens: 10000,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      ],
+    },
+  };
+  for (const mode of ["live", "trial"] as const) {
+    it(`${mode}:有快照 —— 期限内暂记;过了 24 小时仍没有最终费用就按快照结清,之后不再处理`, async () => {
+      const { world, charging, admit } = setup(mode);
+      world.credit("u1", 1000n * C);
+      await admit("r1");
+      const ended = (agoMs: number) =>
+        world.setRun("r1", {
+          status: "failed",
+          cost: null,
+          usageSnapshot: snapshot,
+          pricing,
+          startedAt: 1,
+          endedAt: Date.now() - agoMs,
+        });
+      const due = mode === "live" ? 23_100_000n : 0n;
+      ended(1 * H);
+      await charging.sweep();
+      expect(world.charge("r1")).toMatchObject({ state: "provisional", incomplete: true });
+      expect(await charging.sweep()).toBe(0);
+
+      await elapse(world, 24 * H);
+      expect(await charging.sweep()).toBe(1);
+      expect(world.charge("r1")).toMatchObject({
+        state: "settled",
+        incomplete: false,
+        estimatedMicro: "23100000",
+        chargedMicro: due.toString(),
+      });
+      expect(await charging.sweep()).toBe(0);
+      expect(world.deducted("u1")).toBe(due);
+
+      // 期限过后才补到的最终费用:已结清,不再改(也不重复扣)
+      world.setRun("r1", {
+        status: "failed",
+        cost: { ...snapshot, input: 20000 },
+        usageSnapshot: snapshot,
+        pricing,
+        startedAt: 1,
+        endedAt: Date.now() - 26 * H,
+      });
+      await charging.sweep();
+      expect(world.charge("r1")?.state).toBe("settled");
+      expect(world.deducted("u1")).toBe(due);
+    });
+  }
+
+  it("没有快照也没有费用(第一次收到用量前就挂了)—— 期限内暂记,过期按 0 结清", async () => {
+    const { world, charging, admit } = setup("live");
+    world.credit("u1", 1000n * C);
+    await admit("r1");
+    const ended = (agoMs: number) =>
+      world.setRun("r1", {
+        status: "failed",
+        cost: null,
+        pricing,
+        startedAt: 1,
+        endedAt: Date.now() - agoMs,
+      });
+    ended(1 * H);
+    await charging.sweep();
+    expect(world.charge("r1")).toMatchObject({ state: "provisional" });
+    expect(world.balance("u1")).toEqual({ available: 1000n * C, reserved: 0n });
+    await elapse(world, 24 * H);
+    expect(await charging.sweep()).toBe(1);
+    expect(world.charge("r1")).toMatchObject({
+      state: "settled",
+      incomplete: false,
+      chargedMicro: "0",
+    });
+    expect(await charging.sweep()).toBe(0);
+  });
 });

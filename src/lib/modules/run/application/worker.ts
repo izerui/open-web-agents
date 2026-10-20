@@ -123,6 +123,13 @@ export interface WorkerHooks {
    * 不给则只有进程内重试 —— 写库途中进程被杀,已经拿到的费用会丢。
    */
   costOutbox?: CostOutbox;
+  /**
+   * 写运行中的用量快照(只在没有最终费用时写入,见 MysqlRunRepo.saveUsageSnapshot)。
+   * 引擎出错、没有最终费用但观察到过用量时,worker 用它补写最新快照 —— 运行中的异步写可能没成功。
+   */
+  saveUsageSnapshot?: (runId: string, snapshot: unknown) => Promise<void>;
+  /** 快照的恢复记录(与最终费用的恢复记录分开存,补写时仍按快照处理,不当成最终费用) */
+  snapshotOutbox?: CostOutbox;
   /** 落结果前增强 cost(加入积分估算快照)。失败不影响结果写入。 */
   enrichCost?: (cost: unknown) => Promise<unknown>;
 }
@@ -233,7 +240,8 @@ export class RunWorker {
     const timeout = setTimeout(() => abort.abort(), Math.min(this.opts.maxDurationMs, 2 ** 31 - 1));
 
     let result: RunResult;
-    let usageUnknown = false;
+    /** 没有最终费用时,本轮观察到的最新用量快照(随引擎错误带来) */
+    let observedUsage: unknown;
     try {
       const payload = await this.repo.getPayload(claimed.id);
       // 空提示词不能当正常输入跑:那会真的调一次模型、产出无意义回答、还标成功
@@ -255,13 +263,16 @@ export class RunWorker {
         abort.signal,
       );
       // 引擎正常返回、却明说拿不到用量(SDK 异常或没有结算消息,且没收到任何用量)
-      usageUnknown = result.usageUnknown === true;
     } catch (err) {
       // 引擎启动之后抛错:可能已经调用过模型,用量不得而知 —— 计费只能暂记,不能当成零用量结清。
       // 启动之前的失败(读载荷、解密覆盖、解析模型、缺变量……)确认没有调用模型
       // 引擎启动之后的错误会带上已交回的费用(见 EngineRunFailed):照常记账,不按零用量结清
       const engineCost = err instanceof EngineRunFailed ? err.cost : undefined;
-      usageUnknown = err instanceof EngineRunFailed && !engineCost;
+      // 没有最终费用、但运行中观察到过用量(快照可能还没写进库):不能按零结清
+      observedUsage =
+        err instanceof EngineRunFailed && !engineCost
+          ? (err.observedUsage ?? undefined)
+          : undefined;
       result = {
         status: "failed",
         ...(engineCost ? { cost: engineCost } : {}),
@@ -297,7 +308,7 @@ export class RunWorker {
       // 已被取消或判为孤儿:本轮结果作废,不写结果、不通知 —— 终态由取消方/回收方负责。
       // 但花费照记:钱已经花出去了
       if (lostLease) {
-        await this.settleWithCost(claimed.id, enrichedCost, usageUnknown);
+        await this.settleWithCost(claimed.id, enrichedCost, observedUsage);
         return true;
       }
 
@@ -328,7 +339,7 @@ export class RunWorker {
       }
       // 没写进去 = 这一刻恰好被取消/回收了(上面带令牌的 saveResult 也同样没写进去),
       // 不归本 worker 通知 —— 但花费要补记。写进去了也再确认一次(花费已在库里时是空操作)
-      await this.settleWithCost(claimed.id, enrichedCost, usageUnknown);
+      await this.settleWithCost(claimed.id, enrichedCost, observedUsage);
       if (written) {
         await this.notifyFinalized({
           runId: claimed.id,
@@ -348,10 +359,15 @@ export class RunWorker {
 
   /**
    * 确认花费已落库再最终结算。写库失败先重试几次;仍失败就只做非最终结算(暂记、标不完整),
-   * 把花费留在重试队列里 —— 不能让结算读到 cost=null 就按 0 结清。
-   * 没有花费时也要分清:确认零用量才最终结算;引擎异常、用量未知只能暂记。
+   * 把花费留在重试队列与恢复记录里 —— 不能让结算读到 cost=null 就按 0 结清。
+   * 没有花费:本轮一条用量都没观察到(没开始、或开始了但一条用量都没收到),按规则直接按 0 最终结清;
+   * 观察到过用量(快照可能还没写进库)的只暂记,由清扫按快照处理(见 RunCharging.settle)。
    */
-  private async settleWithCost(runId: string, cost: unknown, usageUnknown: boolean): Promise<void> {
+  private async settleWithCost(
+    runId: string,
+    cost: unknown,
+    observedUsage?: unknown,
+  ): Promise<void> {
     if (cost && !(await this.persistCost(runId, cost))) {
       this.pendingCosts.set(runId, cost);
       await this.hooks.settleCharge?.(runId, { final: false }).catch(() => {});
@@ -359,21 +375,47 @@ export class RunWorker {
     }
     // 费用已确认在库里:恢复记录可以删了(删失败无妨,补写是幂等的)
     if (cost) await this.hooks.costOutbox?.remove(runId).catch(() => {});
-    const final = !!cost || !usageUnknown;
-    await this.hooks.settleCharge?.(runId, { final }).catch(() => {});
+    if (!cost && observedUsage) {
+      // 没有最终费用但观察到过用量:补写这份快照(运行中的异步写可能失败或还没写完),
+      // 先落快照恢复记录再写库,写成才删;只暂记,由清扫按快照处理(再按 24 小时规则结清)
+      await this.persistSnapshot(runId, observedUsage);
+      await this.hooks.settleCharge?.(runId, { final: false }).catch(() => {});
+      return;
+    }
+    await this.hooks.settleCharge?.(runId, { final: true }).catch(() => {});
+  }
+
+  /** 快照:先落恢复记录,再写库(带重试),写成才删;没写成的留给 flushPendingCosts */
+  private async persistSnapshot(runId: string, snapshot: unknown): Promise<void> {
+    const save = this.hooks.saveUsageSnapshot;
+    if (!save) return;
+    await this.hooks.snapshotOutbox?.save(runId, snapshot).catch((err) => {
+      console.warn(
+        `[owa][worker] 快照恢复记录写入失败(run=${runId}):`,
+        err instanceof Error ? err.message : err,
+      );
+    });
+    if (await this.withRetries(runId, "用量快照", () => save(runId, snapshot))) {
+      await this.hooks.snapshotOutbox?.remove(runId).catch(() => {});
+    }
   }
 
   /** 写花费(幂等),失败按间隔重试;返回最终是否写成 */
   private async persistCost(runId: string, cost: unknown): Promise<boolean> {
-    if (!this.repo.recordCost) return true;
+    const record = this.repo.recordCost?.bind(this.repo);
+    if (!record) return true;
+    return this.withRetries(runId, "花费", () => record(runId, cost));
+  }
+
+  private async withRetries(runId: string, what: string, write: () => Promise<void>) {
     for (let attempt = 0; attempt < this.opts.costRetries; attempt++) {
       try {
-        await this.repo.recordCost(runId, cost);
+        await write();
         return true;
       } catch (err) {
         if (attempt === this.opts.costRetries - 1) {
           console.warn(
-            `[owa][worker] 花费写库失败(run=${runId}),稍后重试:`,
+            `[owa][worker] ${what}写库失败(run=${runId}),稍后重试:`,
             err instanceof Error ? err.message : err,
           );
         } else {
@@ -407,6 +449,20 @@ export class RunWorker {
       await this.hooks.costOutbox?.remove(runId).catch(() => {});
       done++;
       await this.hooks.settleCharge?.(runId, { final: true }).catch(() => {});
+    }
+    // 快照恢复记录:补写快照(已有最终费用时写入是空操作),仍按快照暂记,由清扫处理
+    const snapshots = this.hooks.saveUsageSnapshot
+      ? await this.hooks.snapshotOutbox?.list().catch(() => [])
+      : [];
+    for (const { runId, cost } of snapshots ?? []) {
+      try {
+        await this.hooks.saveUsageSnapshot?.(runId, cost);
+      } catch {
+        continue;
+      }
+      await this.hooks.snapshotOutbox?.remove(runId).catch(() => {});
+      done++;
+      await this.hooks.settleCharge?.(runId, { final: false }).catch(() => {});
     }
     return done;
   }

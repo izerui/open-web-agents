@@ -30,6 +30,8 @@ interface ProbeResult {
   status?: number;
   latencyMs: number;
   message: string;
+  /** 上游回报的模型名与填写的标识不一致时才有 */
+  reportedModel?: string;
 }
 
 export function ProviderDetail({ id, initialTab }: { id: string; initialTab?: string }) {
@@ -427,6 +429,11 @@ function EndpointCard({
                 ? "连接成功"
                 : `失败${probe.status ? `(HTTP ${probe.status})` : ""}:${probe.message}`}
               <span className="ml-2 text-xs text-muted-foreground">{probe.latencyMs} ms</span>
+            </p>
+          )}
+          {probe?.ok && probe.reportedModel && (
+            <p className="text-sm text-warning" data-testid="probe-model-mismatch">
+              {probe.message}
             </p>
           )}
         </div>

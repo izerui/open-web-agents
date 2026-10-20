@@ -2,7 +2,12 @@ import type { Db } from "@/lib/db/client";
 import { apiKeys, billingWallets, runCharges, runs, users } from "@/lib/db/schema";
 import { type PinnedPricing, type RunPricing, isUnavailableAtAdmission } from "@/lib/shared";
 import { and, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
-import type { BillingMode, HoldRejection, HoldSlice } from "../domain/run-charge";
+import {
+  type BillingMode,
+  FINAL_COST_WAIT_MS,
+  type HoldRejection,
+  type HoldSlice,
+} from "../domain/run-charge";
 import { billingKey, emptyWallet } from "../domain/wallet";
 import { BillingError, type WalletBalance } from "../ports";
 import type { AccountLimit, RunCharge, RunChargeStore, RunForSettle } from "../run-charge-ports";
@@ -26,6 +31,7 @@ function chargeOf(r: Row): RunCharge {
     wouldReject: (r.wouldReject as HoldRejection | null) ?? null,
     incomplete: r.incomplete === 1,
     settledCostDigest: r.settledCostDigest ?? null,
+    finalWaitSettled: r.finalWaitSettled === 1,
     createdAt: r.createdAt.getTime(),
     settledAt: r.settledAt?.getTime() ?? null,
   };
@@ -50,6 +56,13 @@ export function monthUsedSql(mode: BillingMode) {
     string | null
   >`SUM(CASE WHEN ${runCharges.state} = 'open' THEN ${runCharges.reservedMicro} ELSE ${settled} END)`;
 }
+
+/**
+ * 等最终费用的期限是否已过。【只用运行表自己的时间与数据库的 NOW() 比】:
+ * 运行表的时间由数据库写(NOW()/默认值,会话时区),应用写进去的时间(drizzle)按 UTC 约定 ——
+ * 拿应用时钟去比,时区不是 UTC 的部署会差出几个小时
+ */
+const FINAL_COST_WAIT_OVER = sql<number>`(COALESCE(${runs.endedAt}, ${runs.createdAt}) < NOW() - INTERVAL ${FINAL_COST_WAIT_MS / 1000} SECOND)`;
 
 /** 运行花费的指纹:结算与清扫用同一个表达式,保证可比 */
 // 来源也算进指纹:快照与最终费用内容可以完全相同(结算消息之后的快照就是最终费用),
@@ -172,6 +185,7 @@ export class MysqlRunChargeStore implements RunChargeStore {
       wouldReject: c.wouldReject,
       incomplete: c.incomplete ? 1 : 0,
       settledCostDigest: c.settledCostDigest,
+      finalWaitSettled: c.finalWaitSettled ? 1 : 0,
       createdAt: new Date(c.createdAt),
       settledAt: c.settledAt === null ? null : new Date(c.settledAt),
     });
@@ -201,6 +215,7 @@ export class MysqlRunChargeStore implements RunChargeStore {
     if (patch.wouldReject !== undefined) set.wouldReject = patch.wouldReject;
     if (patch.incomplete !== undefined) set.incomplete = patch.incomplete ? 1 : 0;
     if (patch.settledCostDigest !== undefined) set.settledCostDigest = patch.settledCostDigest;
+    if (patch.finalWaitSettled !== undefined) set.finalWaitSettled = patch.finalWaitSettled ? 1 : 0;
     if (patch.settledAt !== undefined) {
       set.settledAt = patch.settledAt === null ? null : new Date(patch.settledAt);
     }
@@ -215,6 +230,8 @@ export class MysqlRunChargeStore implements RunChargeStore {
         cost: runs.cost,
         pricing: runs.pricing,
         startedAt: runs.startedAt,
+        endedAt: runs.endedAt,
+        waitOver: FINAL_COST_WAIT_OVER,
         usageSnapshot: runs.usageSnapshot,
         costDigest: COST_DIGEST,
       })
@@ -230,6 +247,8 @@ export class MysqlRunChargeStore implements RunChargeStore {
             ? null
             : ((row.pricing as RunPricing | null) ?? null),
           startedAt: row.startedAt?.getTime() ?? null,
+          endedAt: row.endedAt?.getTime() ?? null,
+          finalCostWaitOver: Number(row.waitOver) === 1,
           usageSnapshot: row.usageSnapshot ?? null,
           costDigest: row.costDigest ?? null,
         }
@@ -248,7 +267,10 @@ export class MysqlRunChargeStore implements RunChargeStore {
             inArray(runs.status, TERMINAL),
             // 取消接口先改状态,worker 中止后才补记花费:没有花费的先等一段宽限期再处理;
             // 过了宽限期仍没有花费的也只是暂记(provisional),迟到的花费还会补结算
-            or(isNotNull(runs.cost), lt(runs.endedAt, new Date(Date.now() - SWEEP_GRACE_MS))),
+            or(
+              isNotNull(runs.cost),
+              sql`${runs.endedAt} < NOW() - INTERVAL ${SWEEP_GRACE_MS / 1000} SECOND`,
+            ),
           ),
           // 暂记之后花费变了(补记上了、补齐了明细):worker 那次结算没成功时由清扫补上。
           // 指纹在库里比,没变化的暂记不会被反复捞出来、挤掉别的待清扫记录
@@ -259,6 +281,14 @@ export class MysqlRunChargeStore implements RunChargeStore {
               isNull(runCharges.settledCostDigest),
               sql`${runCharges.settledCostDigest} <> ${COST_DIGEST}`,
             ),
+          ),
+          // 等最终费用的期限已过、仍没有最终费用,且期限过后还没结算过:按快照(没有快照按 0)结清。
+          // 结清不了的(快照里有认不出的模型)只处理一次,不会每轮被捞
+          and(
+            eq(runCharges.state, "provisional"),
+            isNull(runs.cost),
+            FINAL_COST_WAIT_OVER,
+            eq(runCharges.finalWaitSettled, 0),
           ),
           // 欠款未收齐、而账户余额已经够补(充值之后):补扣。余额还不够的不捞,免得每轮都捞同一批
           and(

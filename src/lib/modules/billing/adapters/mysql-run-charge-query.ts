@@ -1,11 +1,13 @@
 import type { Db } from "@/lib/db/client";
 import { agents, runCharges, runs, sessions, users } from "@/lib/db/schema";
+import type { RunPricing } from "@/lib/shared";
 import { and, desc, eq, gte, isNotNull, lt, or, sql } from "drizzle-orm";
 import { type BillingMode, type HoldRejection, monthWindowUtc } from "../domain/run-charge";
 import {
   PENDING_REASONS,
   type PendingChargeItem,
   type PendingReason,
+  type ReconRawRow,
   type RunChargeItem,
   type RunChargeQuery,
   type TrialStats,
@@ -149,6 +151,58 @@ export class MysqlRunChargeQuery implements RunChargeQuery {
     return {
       items: page,
       ...(rows.length > opts.limit && last ? { nextCursor: encodeCursor(last) } : {}),
+    };
+  }
+
+  async reconciliationRows(opts: {
+    from: string;
+    to: string;
+    mode?: BillingMode;
+    limit: number;
+  }): Promise<{ rows: ReconRawRow[]; truncated: boolean }> {
+    // 日期与区间都用运行表自己的创建时间(数据库写的)和字符串边界,在数据库时钟下比较
+    const rows = await this.db
+      .select({
+        day: sql<string>`DATE_FORMAT(${runs.createdAt}, '%Y-%m-%d')`,
+        pricing: runs.pricing,
+        cost: runs.cost,
+        snapshot: runs.usageSnapshot,
+        started: sql<number>`(${runs.startedAt} IS NOT NULL)`,
+        state: runCharges.state,
+        finalWaitSettled: runCharges.finalWaitSettled,
+        estimatedMicro: runCharges.estimatedMicro,
+        chargedMicro: runCharges.chargedMicro,
+      })
+      .from(runCharges)
+      .innerJoin(runs, eq(runs.id, runCharges.runId))
+      .where(
+        and(
+          sql`${runs.createdAt} >= ${`${opts.from} 00:00:00`}`,
+          sql`${runs.createdAt} < DATE_ADD(${`${opts.to} 00:00:00`}, INTERVAL 1 DAY)`,
+          opts.mode ? eq(runCharges.mode, opts.mode) : undefined,
+        ),
+      )
+      .orderBy(desc(runs.createdAt))
+      .limit(opts.limit + 1);
+    return {
+      truncated: rows.length > opts.limit,
+      rows: rows.slice(0, opts.limit).map((r) => {
+        const pricing = (r.pricing as RunPricing | null) ?? null;
+        // "受理时不可用"的标记没有价目
+        const priced = pricing && "providerId" in pricing ? pricing : null;
+        return {
+          day: r.day,
+          providerId: priced?.providerId ?? null,
+          pricing: priced,
+          state: r.state as ReconRawRow["state"],
+          started: Number(r.started) === 1,
+          finalWaitSettled: r.finalWaitSettled === 1,
+          estimatedMicro: r.estimatedMicro,
+          chargedMicro: r.chargedMicro,
+          cost: r.cost ?? null,
+          snapshot: r.snapshot ?? null,
+        };
+      }),
     };
   }
 

@@ -637,6 +637,8 @@ export const runCharges = mysqlTable(
     /** 试算下本应拒绝的原因(余额不足 / 账号超额 / Key 超额) */
     wouldReject: varchar("would_reject", { length: 32 }),
     incomplete: int("incomplete").notNull().default(0),
+    /** 等最终费用的期限过后已按快照(或 0)结算过:清扫不再为期限选它 */
+    finalWaitSettled: int("final_wait_settled").notNull().default(0),
     /** 上次结算时运行花费的指纹(SHA-256);暂记的记录花费变了才再结算 */
     settledCostDigest: varchar("settled_cost_digest", { length: 64 }),
     createdAt: timestamp("created_at", { fsp: 3 }).notNull(),

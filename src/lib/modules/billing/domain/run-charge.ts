@@ -51,6 +51,12 @@ export function decideHold(input: HoldInput): HoldDecision {
   return { amount, rejection: null };
 }
 
+/**
+ * 运行结束后等最终费用补写的期限。worker 中途挂掉的运行先按用量快照(或没有用量)暂记;
+ * 期限内恢复记录补写了最终费用就按最终费用结清,过期仍没有就按快照结清,连快照都没有按 0 结清。
+ */
+export const FINAL_COST_WAIT_MS = 24 * 3600_000;
+
 /** 本月起点(UTC)。月度上限按自然月重置 */
 export function monthStartUtc(at: number): number {
   const d = new Date(at);

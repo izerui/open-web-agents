@@ -11,7 +11,7 @@ import { MysqlRunRepo } from "@/lib/modules/run/adapters/mysql-run-repo";
 import { RunEnqueuer } from "@/lib/modules/run/application/enqueue";
 import { DuplicateIdempotencyKey } from "@/lib/modules/run/ports";
 import type { RunPricing } from "@/lib/shared";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { type ChargeRejected, RunCharging } from "../../application/run-charging";
 import type { BillingMode } from "../../domain/run-charge";
@@ -138,13 +138,26 @@ if (!url) {
   };
   const charge = async (runId: string) =>
     (await db.select().from(runCharges).where(eq(runCharges.runId, runId)))[0] ?? null;
+  /**
+   * 让运行结束。结束时刻按"多久之前"给,用数据库自己的时钟写(与生产里 NOW() 写的一致)——
+   * 用应用的 Date 写会混进时区约定差异(会话时区不是 UTC 时差出几个小时)
+   */
   const finish = (
     runId: string,
     status = "success",
     cost: unknown = COST,
-    endedAt = new Date(),
-    startedAt: Date | null = new Date(),
-  ) => db.update(runs).set({ status, cost, endedAt, startedAt }).where(eq(runs.id, runId));
+    endedAgoMs = 0,
+    started = true,
+  ) =>
+    db
+      .update(runs)
+      .set({
+        status,
+        cost,
+        endedAt: sql`NOW() - INTERVAL ${Math.round(endedAgoMs / 1000)} SECOND`,
+        startedAt: started ? sql`NOW()` : null,
+      })
+      .where(eq(runs.id, runId));
 
   /** 走真实入队(与路由同一路径):会话归属 accountId,可带 API Key 与幂等键 */
   const enqueuerFor = (charging: RunCharging, accountId: string, apiKeyId?: string) =>
@@ -292,11 +305,11 @@ if (!url) {
       const { enqueue, charging } = setup("live");
       const acct = await fund(1000n);
       const runId = await enqueue(acct);
-      await finish(runId, "cancelled", null, new Date(), null);
+      await finish(runId, "cancelled", null, 0, false);
       const store = (fn: (s: MysqlRunChargeStore) => Promise<string[]>) =>
         db.transaction((tx) => fn(new MysqlRunChargeStore(tx as unknown as Db)));
       expect(await store((s) => s.openOfFinishedRuns(1000))).not.toContain(runId);
-      await finish(runId, "cancelled", null, new Date(Date.now() - SWEEP_GRACE_MS - 1000), null);
+      await finish(runId, "cancelled", null, SWEEP_GRACE_MS + 1000, false);
       expect(await store((s) => s.openOfFinishedRuns(1000))).toContain(runId);
       await charging.settle(runId);
       expect(await wallet.balance(acct)).toMatchObject({
@@ -316,7 +329,7 @@ if (!url) {
         const acct = await fund(1000n);
         const runId = await enqueue(acct);
         // 跑过(已认领)、被取消,花费还没补记,且已过宽限期
-        await finish(runId, "cancelled", null, new Date(Date.now() - SWEEP_GRACE_MS - 1000));
+        await finish(runId, "cancelled", null, SWEEP_GRACE_MS + 1000);
         for (let i = 0; i < 20 && (await charge(runId))?.state === "open"; i++) {
           await charging.sweep(200);
         }
@@ -350,7 +363,7 @@ if (!url) {
       });
     }
 
-    it("暂记且花费没变的不会被清扫反复捞出;花费变了才补结算(指纹在库里比)", async () => {
+    it("暂记(期限内的快照)且没变化的不会被清扫反复捞出;快照更新或最终费用到了才再结算(指纹在库里比)", async () => {
       const { enqueue, charging } = setup("live");
       const acct = await fund(1000n);
       const runId = await enqueue(acct);
@@ -373,7 +386,9 @@ if (!url) {
           ],
         },
       });
-      await finish(runId, "cancelled", partial(10000, false));
+      const repo = new MysqlRunRepo(db);
+      await repo.saveUsageSnapshot(runId, { ...partial(10000, true), seq: 1 });
+      await finish(runId, "cancelled", null);
       expect(await charging.settle(runId, { final: true })).toBe("provisional");
       expect(await charge(runId)).toMatchObject({ state: "provisional", chargedMicro: "23100000" });
       const open = () =>
@@ -382,10 +397,14 @@ if (!url) {
         );
       expect(await open()).not.toContain(runId);
 
-      await db
-        .update(runs)
-        .set({ cost: partial(20000, true) })
-        .where(eq(runs.id, runId));
+      // 快照更新:选中,仍暂记,补到 46.2
+      await repo.saveUsageSnapshot(runId, { ...partial(20000, true), seq: 2 });
+      expect(await open()).toContain(runId);
+      for (let i = 0; i < 20 && (await open()).includes(runId); i++) await charging.sweep(200);
+      expect(await charge(runId)).toMatchObject({ state: "provisional", chargedMicro: "46200000" });
+
+      // 最终费用到了(与最后一份快照相同):选中、结清
+      await repo.recordCost(runId, partial(20000, true));
       expect(await open()).toContain(runId);
       for (let i = 0; i < 20 && (await charge(runId))?.state !== "settled"; i++) {
         await charging.sweep(200);
@@ -401,7 +420,7 @@ if (!url) {
       expect(await open()).not.toContain(runId);
     });
 
-    it("已扣非零 → 明细缺失不退 → 补齐并确认减少后只退差额一次;净扣、钱包、流水(扣款 − 退还)一致", async () => {
+    it("快照暂记 92.4 → 最终费用只有总 token(无明细)按主模型价算出 69.3 → 只退差额一次;净扣、钱包、流水(扣款 − 退还)一致", async () => {
       const { enqueue, charging } = setup("live");
       const acct = await fund(1000n);
       const runId = await enqueue(acct);
@@ -452,31 +471,22 @@ if (!url) {
         }
       };
 
-      await finish(runId, "cancelled", cost(40000, false));
+      await new MysqlRunRepo(db).saveUsageSnapshot(runId, { ...cost(40000, true), seq: 1 });
+      await finish(runId, "cancelled", null);
       await charging.settle(runId, { final: true });
-      await check(92_400_000n, "provisional");
+      await check(92_400_000n, "provisional"); // 期限内的快照:先按它扣,暂记
 
-      await db
-        .update(runs)
-        .set({ cost: { input: 30000, output: 0, partial: true } }) // 没有按模型的计量
-        .where(eq(runs.id, runId));
+      // 最终费用只有总 token:按主模型价 69.3,能完整计价 → 退差额 23.1
+      await new MysqlRunRepo(db).recordCost(runId, { input: 30000, output: 0, partial: true });
       await settleUntilStable();
-      await check(92_400_000n, "provisional"); // 算不出来不等于应扣减少:不退
-      expect(await charge(runId)).toMatchObject({ estimatedMicro: "0", incomplete: 1 });
-
-      await db
-        .update(runs)
-        .set({ cost: cost(30000, true) })
-        .where(eq(runs.id, runId));
-      await settleUntilStable();
-      await check(69_300_000n, "settled", 23_100_000n); // 确认减少:只退差额 23.1
+      await check(69_300_000n, "settled", 23_100_000n);
 
       await charging.settle(runId, { final: true });
       await settleUntilStable();
       await check(69_300_000n, "settled", 23_100_000n);
     });
 
-    it("升级:旧规则留下的多扣暂记 —— 迁移 0051 后清扫重新结算:完整计价的退差额一次,不完整的不退、也不反复进入清扫", async () => {
+    it("升级:旧规则留下的多扣暂记 —— 迁移 0051 后清扫按现行规则重新结算一次:各退差额一次,不再进入清扫", async () => {
       const { enqueue, charging } = setup("live");
       const acct = await fund(1000n);
       const meter = (input: number, complete: boolean) => ({
@@ -522,7 +532,8 @@ if (!url) {
           .where(eq(runs.id, runId));
         await pool.query(
           `UPDATE run_charges rc JOIN runs r ON r.id = rc.run_id
-             SET rc.estimated_micro = 69300000, rc.settled_cost_digest = SHA2(CAST(r.cost AS CHAR), 256)
+             SET rc.state = 'provisional', rc.incomplete = 1, rc.estimated_micro = 69300000,
+                 rc.settled_cost_digest = SHA2(CAST(r.cost AS CHAR), 256)
            WHERE rc.run_id = ?`,
           [runId],
         );
@@ -561,23 +572,21 @@ if (!url) {
         chargedMicro: "69300000",
         refundedMicro: "23100000",
       });
-      // 不完整的:不退,继续暂记;指纹写回,不再进入清扫
+      // 计量不完整的旧记录:按现行规则能计价(认得出的部分按自己的价),同样退差额
       expect(await charge(partial)).toMatchObject({
-        state: "provisional",
-        chargedMicro: "92400000",
-        refundedMicro: null,
+        state: "settled",
+        chargedMicro: "69300000",
+        refundedMicro: "23100000",
       });
       expect(await open()).not.toContain(partial);
       expect(await open()).not.toContain(full);
 
       await charging.sweep(500);
       await charging.settle(full, { final: true });
-      expect(await ledgerSum("refund")).toBe(23_100_000n);
-      expect((await ledgerSum("settle")) - (await ledgerSum("refund"))).toBe(
-        69_300_000n + 92_400_000n,
-      );
+      expect(await ledgerSum("refund")).toBe(46_200_000n);
+      expect((await ledgerSum("settle")) - (await ledgerSum("refund"))).toBe(2n * 69_300_000n);
       expect((await wallet.balance(acct)).availableMicroCredits).toBe(
-        (1000n * C - 69_300_000n - 92_400_000n).toString(),
+        (1000n * C - 2n * 69_300_000n).toString(),
       );
     });
 
@@ -607,7 +616,7 @@ if (!url) {
       };
       await repo.saveUsageSnapshot(runId, snapshot);
       // 回收判失败(没有最终费用),已过宽限期
-      await finish(runId, "failed", null, new Date(Date.now() - SWEEP_GRACE_MS - 1000));
+      await finish(runId, "failed", null, SWEEP_GRACE_MS + 1000);
       const open = () =>
         db.transaction((tx) =>
           new MysqlRunChargeStore(tx as unknown as Db).openOfFinishedRuns(10_000),
@@ -648,7 +657,7 @@ if (!url) {
         const runId = await enqueue(acct);
         const repo = new MysqlRunRepo(db);
         await repo.saveUsageSnapshot(runId, COST); // 与最终费用一模一样
-        await finish(runId, "failed", null, new Date(Date.now() - SWEEP_GRACE_MS - 1000));
+        await finish(runId, "failed", null, SWEEP_GRACE_MS + 1000);
         const open = () =>
           db.transaction((tx) =>
             new MysqlRunChargeStore(tx as unknown as Db).openOfFinishedRuns(10_000),
@@ -679,6 +688,81 @@ if (!url) {
         );
       });
     }
+
+    it("等最终费用 24 小时:期限内按快照暂记;过期按快照结清且只处理一次(认不出的模型按主模型价)", async () => {
+      const { enqueue, charging } = setup("live");
+      const acct = await fund(1000n);
+      const repo = new MysqlRunRepo(db);
+      const H = 3600_000;
+      const open = () =>
+        db.transaction((tx) =>
+          new MysqlRunChargeStore(tx as unknown as Db).openOfFinishedRuns(10_000),
+        );
+      const snap = (modelId: string) => ({
+        input: 10000,
+        output: 0,
+        partial: true,
+        metering: {
+          source: "sdk_model_usage",
+          complete: true,
+          partial: true,
+          models: [
+            {
+              modelId,
+              inputTokens: 10000,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+            },
+          ],
+        },
+      });
+      const settleAll = async (ids: string[]) => {
+        for (let i = 0; i < 20 && (await open()).some((x) => ids.includes(x)); i++) {
+          await charging.sweep(500);
+        }
+      };
+
+      const ok = await enqueue(acct);
+      const unknown = await enqueue(acct);
+      await repo.saveUsageSnapshot(ok, snap("up-main"));
+      await repo.saveUsageSnapshot(unknown, snap("someone-else")); // 认不出的模型
+      for (const id of [ok, unknown]) await finish(id, "failed", null, 1 * H);
+      await settleAll([ok, unknown]);
+      expect(await charge(ok)).toMatchObject({ state: "provisional", chargedMicro: "23100000" });
+      // 认不出的模型按主模型价:期限内同样先按 23.1 暂记
+      expect(await charge(unknown)).toMatchObject({
+        state: "provisional",
+        chargedMicro: "23100000",
+      });
+
+      // 模拟 24 小时过去:把运行结束时刻往前挪(期限按数据库时钟算)
+      for (const id of [ok, unknown]) {
+        await pool.query("UPDATE runs SET ended_at = ended_at - INTERVAL 24 HOUR WHERE id = ?", [
+          id,
+        ]);
+      }
+      const selected = await open();
+      expect(selected).toContain(ok);
+      expect(selected).toContain(unknown);
+      await settleAll([ok, unknown]);
+      expect(await charge(ok)).toMatchObject({
+        state: "settled",
+        incomplete: 0,
+        chargedMicro: "23100000",
+      });
+      expect(await charge(unknown)).toMatchObject({
+        state: "settled",
+        incomplete: 0,
+        chargedMicro: "23100000",
+      });
+      const after = await open();
+      expect(after).not.toContain(ok);
+      expect(after).not.toContain(unknown);
+      expect((await wallet.balance(acct)).availableMicroCredits).toBe(
+        (1000n * C - 46_200_000n).toString(),
+      );
+    });
 
     it("欠款补扣:超过冻结额 → 余额不足留欠 → 充值 → 清扫补扣一次 → 重复执行不再扣(核对钱包、流水、实扣、欠额)", async () => {
       const { enqueue, charging } = setup("live", 30n * C);

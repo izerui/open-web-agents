@@ -119,6 +119,11 @@ export class EngineRunFailed extends BrandedError {
     readonly cause: unknown,
     /** 引擎已经交回的费用(引擎返回之后、收尾时才出错的情况);没有为空 */
     readonly cost?: RunResult["cost"],
+    /**
+     * 本轮运行中观察到的最新累计用量(用量快照,不管写库成没成)。
+     * 没有最终费用、但这里有值:用量不是零,只能暂记,不能按零结清
+     */
+    readonly observedUsage?: RunResult["cost"],
   ) {
     super(cause instanceof Error ? cause.message : String(cause));
     this.name = "EngineRunFailed";
@@ -189,6 +194,12 @@ export class RunOrchestrator {
 
     await this.deps.ensureWorkspace?.(session.id, session.workspaceDir);
 
+    let observedUsage: NonNullable<RunResult["cost"]> | undefined;
+    let snapshotSeq = 0;
+    const writeSnapshot =
+      cmd.runId && this.deps.saveUsageSnapshot
+        ? snapshotWriter(cmd.runId, this.deps.saveUsageSnapshot)
+        : undefined;
     const ctx = {
       designMode: session.source === "design",
       sessionId: cmd.sessionId,
@@ -205,11 +216,18 @@ export class RunOrchestrator {
           : ("ask" as const),
       credentials,
       modelSlots: binding.slots,
-      ...(cmd.runId && this.deps.saveUsageSnapshot
-        ? {
-            onCostSnapshot: snapshotWriter(cmd.runId, binding.pricing, this.deps.saveUsageSnapshot),
-          }
-        : {}),
+      // 每份快照都记在内存里(无论写库成没成):引擎之后出错时随错误带给 worker,
+      // 让它知道"本轮观察到过用量",不能按零用量结清
+      // 序号单调递增:编排的异步写、worker 补写、恢复重放都带同一个序号,仓储只接受更新的那份
+      onCostSnapshot: (cost: unknown) => {
+        snapshotSeq++;
+        observedUsage = {
+          ...(cost as NonNullable<RunResult["cost"]>),
+          pricing: binding.pricing,
+          seq: snapshotSeq,
+        } as NonNullable<RunResult["cost"]>;
+        writeSnapshot?.(observedUsage);
+      },
       env: { ...(this.deps.baseEnv ?? {}) },
     };
     // 知识检索:命中才注入。检索挂了就当没有知识库,不牵连整轮运行
@@ -328,7 +346,7 @@ export class RunOrchestrator {
             engineAbort.signal,
           );
         } catch (err) {
-          throw new EngineRunFailed(err);
+          throw new EngineRunFailed(err, undefined, observedUsage);
         }
         // 带上锁定的价目引用(结算按它计价)后立刻落恢复记录 —— 下面的等待都可能碰数据库
         if (result.cost) {
@@ -433,20 +451,19 @@ export class RunOrchestrator {
       return result;
     } catch (err) {
       if (err instanceof EngineRunFailed) throw err;
-      throw new EngineRunFailed(err, engineCost);
+      throw new EngineRunFailed(err, engineCost, observedUsage);
     }
   }
 }
 
 /**
- * 用量快照的写入器:带上锁定价目引用;同时只有一次写在进行,期间到的新快照覆盖旧的,
- * 写完再写最新的那份。失败只报告一次,不影响运行。
+ * 用量快照的写入器:同时只有一次写在进行,期间到的新快照覆盖旧的,写完再写最新的那份。
+ * 失败只报告一次,不影响运行。
  */
 function snapshotWriter(
   runId: string,
-  pricing: RunPricing,
   save: (runId: string, cost: NonNullable<RunResult["cost"]>) => Promise<void>,
-): (cost: unknown) => void {
+): (cost: NonNullable<RunResult["cost"]>) => void {
   let pending: NonNullable<RunResult["cost"]> | undefined;
   let writing = false;
   let warned = false;
@@ -467,7 +484,7 @@ function snapshotWriter(
     writing = false;
   };
   return (cost) => {
-    pending = { ...(cost as NonNullable<RunResult["cost"]>), pricing };
+    pending = cost;
     if (!writing) void drain();
   };
 }

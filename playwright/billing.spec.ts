@@ -408,4 +408,111 @@ test.describe("积分与计费界面", () => {
       if (promoted) await sql("UPDATE users SET role = 'user' WHERE id = ?", [admin.id]);
     }
   });
+
+  test("积分管理:试算对账 —— 按提供者汇总成本估算,缺失数据单独列出,可导出 CSV", async ({
+    page,
+    context,
+  }) => {
+    const admin = await register(context, "recon-admin");
+    const promoted = admin.role !== "admin";
+    if (promoted) await sql("UPDATE users SET role = 'admin' WHERE id = ?", [admin.id]);
+    const tag = Date.now() % 1_000_000;
+    const providerName = `对账厂商-${tag}`;
+    const runIds: string[] = [];
+    try {
+      const p = await context.request.post(`${BASE}/api/admin/providers`, {
+        data: { definition: { name: providerName, enabled: true, endpoints: {} } },
+      });
+      expect(p.ok()).toBeTruthy();
+      const providerId = ((await p.json()) as { provider: { id: string } }).provider.id;
+      const yuan = (v: string) => String(Math.round(Number(v) * 100_000_000));
+      const m = await context.request.post(`${BASE}/api/admin/models`, {
+        data: {
+          expectedVersion: null,
+          definition: {
+            name: `对账模型-${tag}`,
+            kind: "llm",
+            modelId: `recon-up-${tag}`,
+            enabled: true,
+            acceptsImages: false,
+            providerId,
+            markupBp: 1000,
+            costRates: [
+              { meter: "input_token", units: "1000000", microCredits: yuan("21") },
+              { meter: "output_token", units: "1000000", microCredits: yuan("105") },
+              { meter: "cache_read_token", units: "1000000", microCredits: yuan("2.1") },
+              { meter: "cache_write_token", units: "1000000", microCredits: yuan("26.25") },
+            ],
+            rates: [],
+          },
+        },
+      });
+      expect(m.ok()).toBeTruthy();
+      const model = ((await m.json()) as { model: { id: string; version: number } }).model;
+      const pricing = JSON.stringify({
+        providerId,
+        models: [{ capabilityId: model.id, modelId: `recon-up-${tag}`, version: model.version }],
+      });
+      const cost = JSON.stringify({
+        input: 10000,
+        output: 0,
+        metering: {
+          source: "sdk_model_usage",
+          complete: true,
+          models: [
+            {
+              modelId: `recon-up-${tag}`,
+              inputTokens: 10000,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+            },
+          ],
+        },
+      });
+      // 完整一条、用量未知一条、没收到用量按 0 结清一条
+      for (const [state, withCost] of [
+        ["settled", true],
+        ["provisional", false],
+        ["settled", false],
+      ] as const) {
+        const id = randomUUID().replace(/-/g, "").slice(0, 24);
+        runIds.push(id);
+        await sql(
+          "INSERT INTO runs (id, session_id, status, prompt, pricing, cost, started_at) VALUES (?, 's', 'failed', 'x', ?, ?, NOW())",
+          [id, pricing, withCost ? cost : null],
+        );
+        await sql(
+          `INSERT INTO run_charges (run_id, account_id, api_key_id, mode, reserved_micro, reservation_ids,
+             estimated_micro, charged_micro, owed_micro, state, would_reject, incomplete, created_at, settled_at)
+           VALUES (?, ?, NULL, 'trial', 0, '[]', ?, 0, NULL, ?, NULL, ?, NOW(3), NOW(3))`,
+          [id, admin.id, withCost ? 23_100_000 : 0, state, state === "provisional" ? 1 : 0],
+        );
+      }
+
+      await page.goto(`${BASE}/admin/billing`);
+      const section = page.getByRole("region", { name: "试算对账" });
+      const line = section.getByTestId("recon-line").filter({ hasText: providerName });
+      await expect(line).toContainText("3");
+      await expect(line).toContainText("完整 1");
+      await expect(line).toContainText("10,000 / 0");
+      await expect(line).toContainText("0.21"); // 成本估算:1 万输入 × 21 元/百万
+      await expect(line).toContainText("用量未知 1");
+      await expect(line).toContainText("未观察到用量(按 0 结清) 1");
+
+      const download = page.waitForEvent("download");
+      await section.getByRole("button", { name: "导出 CSV" }).click();
+      const file = await download;
+      const fs = await import("node:fs/promises");
+      const text = await fs.readFile((await file.path()) ?? "", "utf8");
+      expect(text).toContain(providerName);
+      expect(text).toContain("成本估算(元)");
+    } finally {
+      for (const id of runIds) {
+        await sql("DELETE FROM run_charges WHERE run_id = ?", [id]);
+        await sql("DELETE FROM runs WHERE id = ?", [id]);
+      }
+      if (promoted) await sql("UPDATE users SET role = 'user' WHERE id = ?", [admin.id]);
+    }
+  });
 });

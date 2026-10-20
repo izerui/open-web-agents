@@ -43,4 +43,19 @@ describe("AnthropicHttpProbe", () => {
     expect(r.status).toBeUndefined();
     expect(r.message).not.toContain("sk-secret");
   });
+
+  it("连接成功但上游回报的模型名对不上:提示改成上游回报的名字;一致时不提示", async () => {
+    const reply = (model: string) => async () =>
+      new Response(JSON.stringify({ model, content: [] }), { status: 200 });
+    const off = await new AnthropicHttpProbe(
+      reply("m-1-20250929") as unknown as typeof fetch,
+    ).testAnthropic(input);
+    expect(off).toMatchObject({ ok: true, reportedModel: "m-1-20250929" });
+    expect(off.message).toContain("建议把模型标识改成「m-1-20250929」");
+    const same = await new AnthropicHttpProbe(
+      reply("m-1") as unknown as typeof fetch,
+    ).testAnthropic(input);
+    expect(same).toMatchObject({ ok: true, message: "连接成功" });
+    expect(same.reportedModel).toBeUndefined();
+  });
 });

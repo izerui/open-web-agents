@@ -4,16 +4,20 @@
 import { randomUUID } from "node:crypto";
 import { type Db, createDb } from "@/lib/db/client";
 import { runCharges, runs } from "@/lib/db/schema";
+import type { EnginePort } from "@/lib/modules/agent-engine/ports";
+import { InMemoryAgentRepo } from "@/lib/modules/agent/adapters/in-memory-agent-repo";
 import { MysqlBillingRepo } from "@/lib/modules/billing/adapters/mysql-billing-repo";
 import { MysqlRunChargeStore } from "@/lib/modules/billing/adapters/mysql-run-charge-store";
 import { RunCharging } from "@/lib/modules/billing/application/run-charging";
 import type { Capability } from "@/lib/modules/capabilities/domain/catalog";
+import { InMemoryBus } from "@/lib/modules/events/adapters/in-memory-bus";
 import type { RunModelBinding } from "@/lib/modules/model-gateway/domain/resolve-run-models";
 import { InMemoryCostOutbox } from "@/lib/modules/run/adapters/fs-cost-outbox";
 import { MysqlRunRepo } from "@/lib/modules/run/adapters/mysql-run-repo";
-import { EngineRunFailed, type RunOrchestrator } from "@/lib/modules/run/application/orchestrator";
+import { EngineRunFailed, RunOrchestrator } from "@/lib/modules/run/application/orchestrator";
 import { RunWorker } from "@/lib/modules/run/application/worker";
 import type { Run } from "@/lib/modules/run/ports";
+import { InMemorySessionRepo } from "@/lib/modules/session/adapters/in-memory-session-repo";
 import type { RunPricing } from "@/lib/shared";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
@@ -218,4 +222,172 @@ if (!url) {
       );
     });
   }
+
+  describe("快照序号:旧快照不能覆盖新快照", () => {
+    const snap = (input: number) => ({
+      input,
+      output: 0,
+      partial: true,
+      metering: {
+        source: "sdk_model_usage",
+        complete: true,
+        partial: true,
+        models: [
+          {
+            modelId: "up-main",
+            inputTokens: input,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+          },
+        ],
+      },
+    });
+    // A = 1 万输入(23.1 积分),B = 2 万输入(46.2 积分)
+    const B_DUE = 46_200_000n;
+
+    for (const mode of ["live", "trial"] as const) {
+      it(`${mode}:编排写 A 卡住、期间收到 B → 引擎抛错、worker 写成 B → A 晚到被拒 → 编排重写 B 失败:库里始终是 B,24 小时后按 B 结清`, async () => {
+        const modeCharging = new RunCharging({
+          mode: async () => mode,
+          bind: async () =>
+            ({ pricing, main: { capabilityId: "m-main" } }) as unknown as RunModelBinding,
+          reserveTargetOf: async () => 300n * C,
+          pricedModels: async () => [model],
+          transaction: (fn) =>
+            db.transaction((tx) => fn(new MysqlRunChargeStore(tx as unknown as Db)), {
+              isolationLevel: "read committed",
+            }),
+        });
+        const accountId = randomUUID();
+        await wallet.credit({
+          accountId,
+          amountMicroCredits: (1000n * C).toString(),
+          idempotencyKey: randomUUID(),
+          actorId: "test",
+          reason: "测试",
+        });
+        const runId = randomUUID().replace(/-/g, "").slice(0, 24);
+        await db.transaction(async (tx) => {
+          const p = await modeCharging.admit(new MysqlRunChargeStore(tx as unknown as Db), {
+            runId,
+            accountId,
+            apiKeyId: null,
+            main: "m-main",
+          });
+          await new MysqlRunRepo(tx as unknown as Db).create({
+            id: runId,
+            sessionId: `s-${runId}`,
+            prompt: "go",
+            pricing: p,
+          });
+        });
+        const repo = new MysqlRunRepo(db);
+        const stored = async () => {
+          const [row] = await db
+            .select({ s: runs.usageSnapshot })
+            .from(runs)
+            .where(eq(runs.id, runId));
+          return row?.s as { input: number; seq: number } | null;
+        };
+
+        // 编排的异步写:第一笔(A)卡在门口;之后的重写失败
+        let orchCalls = 0;
+        let releaseA!: () => void;
+        const aHeld = new Promise<void>((r) => {
+          releaseA = r;
+        });
+        const aDone = { done: false };
+        const orchSave = async (id: string, cost: unknown) => {
+          orchCalls++;
+          if (orchCalls === 1) {
+            await aHeld;
+            await repo.saveUsageSnapshot(id, cost);
+            aDone.done = true;
+            return;
+          }
+          throw new Error("db down");
+        };
+        const sessions = new InMemorySessionRepo();
+        await sessions.create({ id: `s-${runId}`, agentId: "a1", workspaceDir: "/ws/x" });
+        const engine: EnginePort = {
+          async run(_s, ctx) {
+            ctx.onCostSnapshot?.(snap(10000)); // A
+            await new Promise((r) => setTimeout(r, 0));
+            ctx.onCostSnapshot?.(snap(20000)); // B
+            throw new Error("engine crashed");
+          },
+        };
+        const binding = {
+          providerId: "p",
+          baseUrl: "https://gw",
+          main: { ref: "m-main", modelId: "up-main", capabilityId: "m-main" },
+          subagents: {},
+          slots: { fable: "up-main", opus: "up-main", sonnet: "up-main", haiku: "up-main" },
+          pricing,
+        } as unknown as RunModelBinding;
+        const orchestrator = new RunOrchestrator({
+          sessions,
+          agents: new InMemoryAgentRepo([
+            { id: "a1", ownerId: "u1", name: "a", config: { systemPrompt: "p", model: "m-main" } },
+          ]),
+          engine,
+          bus: new InMemoryBus(),
+          resolveModels: async () => ({
+            binding,
+            credentials: { baseUrl: "https://gw", key: "k" },
+          }),
+          saveUsageSnapshot: orchSave,
+        });
+        const snapshotOutbox = new InMemoryCostOutbox();
+        const worker = new RunWorker(
+          repoFor(runId),
+          orchestrator,
+          { leaseMs: 60_000 },
+          {
+            saveUsageSnapshot: (id, sn) => repo.saveUsageSnapshot(id, sn),
+            snapshotOutbox,
+            settleCharge: (id, opts) => modeCharging.settle(id, opts),
+            sweepCharges: () => modeCharging.sweep(500),
+          },
+        );
+
+        await worker.tick();
+        // worker 把 B 写成了,恢复记录已删
+        expect(await stored()).toMatchObject({ input: 20000, seq: 2 });
+        expect(snapshotOutbox.files.has(runId)).toBe(false);
+
+        releaseA(); // A 晚到:序号更小,被拒
+        for (let i = 0; i < 100 && !aDone.done; i++) await new Promise((r) => setTimeout(r, 5));
+        for (let i = 0; i < 100 && orchCalls < 2; i++) await new Promise((r) => setTimeout(r, 5));
+        expect(orchCalls).toBe(2); // 编排随后重写 B,失败
+        expect(await stored()).toMatchObject({ input: 20000, seq: 2 });
+
+        // 清扫按 B 暂记;过 24 小时按 B 结清
+        for (let i = 0; i < 20; i++) await modeCharging.sweep(500);
+        const due = mode === "live" ? B_DUE : 0n;
+        let [c] = await db.select().from(runCharges).where(eq(runCharges.runId, runId));
+        expect(c).toMatchObject({
+          state: "provisional",
+          estimatedMicro: B_DUE.toString(),
+          chargedMicro: due.toString(),
+        });
+        await pool.query("UPDATE runs SET ended_at = ended_at - INTERVAL 25 HOUR WHERE id = ?", [
+          runId,
+        ]);
+        for (let i = 0; i < 20; i++) await modeCharging.sweep(500);
+        [c] = await db.select().from(runCharges).where(eq(runCharges.runId, runId));
+        expect(c).toMatchObject({
+          state: "settled",
+          incomplete: 0,
+          estimatedMicro: B_DUE.toString(),
+          chargedMicro: due.toString(),
+        });
+        expect(await stored()).toMatchObject({ input: 20000, seq: 2 });
+        expect((await wallet.balance(accountId)).availableMicroCredits).toBe(
+          (1000n * C - due).toString(),
+        );
+      });
+    }
+  });
 }

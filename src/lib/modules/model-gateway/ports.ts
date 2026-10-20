@@ -54,6 +54,11 @@ export interface ProbeResult {
   latencyMs: number;
   /** 截断、去除凭证后的说明 */
   message: string;
+  /**
+   * 连接成功但上游回报的模型名与填写的模型标识不一致:运行的用量会按上游回报的名字记,
+   * 对不上的那部分只能按主模型价兜底计费。提示管理员把模型标识改成上游回报的名字
+   */
+  reportedModel?: string;
 }
 
 /** 测试文本接入地址:用给定模型发一条最小请求。 */

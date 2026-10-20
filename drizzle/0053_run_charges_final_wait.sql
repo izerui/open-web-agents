@@ -1,0 +1,1 @@
+ALTER TABLE `run_charges` ADD `final_wait_settled` int DEFAULT 0 NOT NULL;

@@ -51,6 +51,7 @@ import { MysqlBillingRepo } from "@/lib/modules/billing/adapters/mysql-billing-r
 import { MysqlPackageRepo } from "@/lib/modules/billing/adapters/mysql-package-repo";
 import { MysqlRunChargeQuery } from "@/lib/modules/billing/adapters/mysql-run-charge-query";
 import { MysqlRunChargeStore } from "@/lib/modules/billing/adapters/mysql-run-charge-store";
+import { seedDefaultPackages } from "@/lib/modules/billing/application/default-packages";
 import { RunCharging } from "@/lib/modules/billing/application/run-charging";
 import type { PackageRepo } from "@/lib/modules/billing/package-ports";
 import type { BillingRepo } from "@/lib/modules/billing/ports";
@@ -370,6 +371,11 @@ function build(): Container {
         isolationLevel: "read committed",
       }),
   });
+  // 首次启动建好已确认的充值套餐档位;已有任何套餐就不动(见 default-packages.ts)
+  const packages = new MysqlPackageRepo(db);
+  void seedDefaultPackages(packages).catch((err) =>
+    console.error("[packages] 默认套餐初始化失败:", err instanceof Error ? err.message : err),
+  );
   void ensureModels().catch((err) =>
     console.error("[models] 平台默认提供者初始化失败,首次使用模型时会重试:", err),
   );
@@ -478,6 +484,8 @@ function build(): Container {
       },
       // 终态落库后立即结算;取消、回收孤儿等不经 worker 的结束路径由清扫补上
       costOutbox,
+      saveUsageSnapshot: (runId, snapshot) => runs.saveUsageSnapshot(runId, snapshot),
+      snapshotOutbox: new FsCostOutbox(path.join(env.dataDir, "usage-snapshot-outbox")),
       // final 由 worker 判断:只有花费确认落库(或本轮确实没有花费)才是最终结算
       settleCharge: (runId, opts) => runCharging.settle(runId, opts),
       sweepCharges: () => runCharging.sweep(),
@@ -674,7 +682,7 @@ function build(): Container {
     billingMode,
     runCharging,
     runCharges: new MysqlRunChargeQuery(db),
-    packages: new MysqlPackageRepo(db),
+    packages,
     variables: variableRepo,
     admission: new RunAdmission({
       sessions,
