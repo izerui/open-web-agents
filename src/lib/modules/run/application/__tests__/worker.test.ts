@@ -1091,6 +1091,70 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
       }
     });
 
+    describe("result 的 modelUsage 有不合规的项", () => {
+      const counts = (input: number, extra: Record<string, unknown> = {}) => ({
+        inputTokens: input,
+        outputTokens: 0,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 0,
+        ...extra,
+      });
+      const run = (modelUsage: Record<string, unknown>) =>
+        scenario(0, {
+          engine: sdk(() =>
+            (async function* () {
+              yield { type: "system", subtype: "init", session_id: "s" };
+              yield assistant("m1", 10000, 0); // 按消息累计的,会被 result 的累计快照覆盖
+              yield {
+                type: "result",
+                subtype: "success",
+                result: "好的",
+                total_cost_usd: 0.01,
+                usage: { input_tokens: 20000, output_tokens: 0 },
+                modelUsage,
+              };
+            })(),
+          ),
+          cancel: false,
+        });
+
+      it("正常模型明细 + 模型名非法但四项计数有效:两部分都收(后者按主模型价),不重复;重复结算、清扫不多扣", async () => {
+        const { world, repo, settleAgain, sweepAgain } = await run({
+          "up-main": counts(10000),
+          ["x".repeat(201)]: counts(10000),
+        });
+        expect((await repo.get("r1"))?.state).toBe("success");
+        const due = 2n * SECOND;
+        expect(world.charge("r1")).toMatchObject({
+          state: "settled",
+          incomplete: false,
+          estimatedMicro: due.toString(),
+          chargedMicro: due.toString(),
+        });
+        expect(await settleAgain()).toBe("none");
+        expect(await sweepAgain()).toBe(0);
+        expect(world.balance("u1")).toEqual({ available: 1000n * C - due, reserved: 0n });
+      });
+
+      it("有计数读不出(计量缺失):读得出的照扣,保持暂记、不当成结清;重复结算不多扣", async () => {
+        const { world, settleAgain, sweepAgain } = await run({
+          "up-main": counts(10000),
+          other: counts(10000, { outputTokens: "lots" }),
+        });
+        // 两项的输入都读得出:2 万输入;other 认不出模型,按主模型价
+        const due = 2n * SECOND;
+        expect(world.charge("r1")).toMatchObject({
+          state: "provisional",
+          incomplete: true,
+          estimatedMicro: due.toString(),
+          chargedMicro: due.toString(),
+        });
+        expect(await settleAgain()).toBe("none");
+        expect(await sweepAgain()).toBe(0);
+        expect(world.balance("u1")).toEqual({ available: 1000n * C - due, reserved: 0n });
+      });
+    });
+
     it("result₁ → 追加轮 usage₂ → 抛错 → 第二轮计入、第一轮不重复", async () => {
       const q: QueryFn = () =>
         (async function* () {

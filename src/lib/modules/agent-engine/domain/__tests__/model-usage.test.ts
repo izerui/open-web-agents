@@ -46,6 +46,53 @@ describe("SDK model metering", () => {
       expect(extractModelUsage(raw).complete).toBe(false);
     }
   });
+  it("模型名非法但四项计数有效:计数记进未归属用量,不丢;不算计量缺失", () => {
+    const m = extractModelUsage({ ok: tokens(10), ["x".repeat(201)]: tokens(7), "": tokens(1) });
+    expect(m.models.map((u) => u.modelId)).toEqual(["ok"]);
+    expect(m.unattributed).toEqual({
+      inputTokens: 8,
+      outputTokens: 40,
+      cacheReadTokens: 600,
+      cacheWriteTokens: 80,
+    });
+    expect(m.missing).toBeUndefined();
+    expect(m.complete).toBe(false);
+  });
+
+  it("模型名非法但带合法的 canonicalModel:按 canonicalModel 归属", () => {
+    const m = extractModelUsage({ ["x".repeat(201)]: { ...tokens(7), canonicalModel: "up-main" } });
+    expect(m.models).toEqual([
+      {
+        modelId: "up-main",
+        inputTokens: 7,
+        outputTokens: 20,
+        cacheReadTokens: 300,
+        cacheWriteTokens: 40,
+      },
+    ]);
+    expect(m.unattributed).toBeUndefined();
+  });
+
+  it("个别计数读不出:读得出的照常计,读不出的记计量缺失;整项不是对象整项计缺失", () => {
+    const m = extractModelUsage({
+      ok: { ...tokens(10), outputTokens: -1 },
+      half: { inputTokens: 5 },
+      bad: null,
+    });
+    expect(m.models).toEqual([
+      {
+        modelId: "ok",
+        inputTokens: 10,
+        outputTokens: 0,
+        cacheReadTokens: 300,
+        cacheWriteTokens: 40,
+      },
+      { modelId: "half", inputTokens: 5, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    ]);
+    expect(m.missing).toBe(1 + 3 + 1);
+    expect(m.complete).toBe(false);
+  });
+
   it("preserves metering on failures and keeps old responses compatible", () => {
     const r = extractRunResult(
       { subtype: "error_max_turns", modelUsage: { m: tokens(2) } },

@@ -24,6 +24,22 @@ export interface ModelMetering {
    * 各来源的总数口径不同(有的含缓存,有的不含)。
    */
   unattributed?: TokenBreakdown;
+  /**
+   * 计量缺失:读不出来的计数项数(字段缺失、不是非负整数,或整项不是对象)。
+   * 有它就不能当成已完整计价 —— 能算出的部分照常扣,结算保持暂记。
+   */
+  missing?: number;
+  /**
+   * 未归属用量取自这一条 result 自己的 usage(只算这一条),不是 modelUsage 的累计快照。
+   * 一轮里合并多条 result 时据此决定逐条相加还是沿用最后一份。
+   */
+  fromResultUsage?: boolean;
+}
+
+/** 读出计量缺失的项数(库里读回的数据也按这个口径校验) */
+export function missingOf(m: Pick<ModelMetering, "missing"> | null | undefined): number {
+  const v = m?.missing;
+  return typeof v === "number" && Number.isSafeInteger(v) && v > 0 ? v : 0;
 }
 
 const nonNeg = (v: unknown) => (typeof v === "number" && Number.isSafeInteger(v) && v > 0 ? v : 0);
@@ -55,55 +71,71 @@ export function addUnattributed(
   };
 }
 
-/** SDK result.modelUsage 按真实模型给出本次 query 累计计量,包括子代理。 */
+/** 合法的模型标识:非空、不超过 200 字符 */
+const validId = (v: unknown): v is string =>
+  typeof v === "string" && v.length > 0 && v.length <= 200;
+
+/** 合法的计数:非负安全整数;否则 null(无法读取) */
+const count = (v: unknown): number | null =>
+  typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : null;
+
+/**
+ * SDK result.modelUsage 按真实模型给出本次 query 累计计量,包括子代理。
+ *
+ * 某一项不合规时不整项丢弃 —— 那样其中合法的计数也跟着丢了,结算少扣还会被当成结清:
+ * - 模型身份认不出(标识为空或过长,也没有可用的 canonicalModel):合法的计数记进未归属用量,
+ *   结算按本次运行主模型的价格计;
+ * - 某个计数字段缺失或不是非负整数:读得出的照常计,读不出的记一项"计量缺失"(missing),
+ *   结算据此不当成已完整计价(能算的先扣,保持暂记);
+ * - 整项都不是对象:整项计为计量缺失。
+ */
 export function extractModelUsage(raw: unknown): ModelMetering {
   const out: ModelMetering = { source: "sdk_model_usage", complete: true, models: [] };
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ...out, complete: false };
-  const fields = [
-    "inputTokens",
-    "outputTokens",
-    "cacheReadInputTokens",
-    "cacheCreationInputTokens",
-  ] as const;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw))
+    return { ...out, complete: false, missing: 1 };
+  const fields = {
+    inputTokens: "inputTokens",
+    outputTokens: "outputTokens",
+    cacheReadTokens: "cacheReadInputTokens",
+    cacheWriteTokens: "cacheCreationInputTokens",
+  } as const;
+  let missing = 0;
+  let unattributed: TokenBreakdown | undefined;
   for (const [modelId, value] of Object.entries(raw)) {
-    if (
-      !modelId ||
-      modelId.length > 200 ||
-      !value ||
-      typeof value !== "object" ||
-      Array.isArray(value)
-    ) {
-      out.complete = false;
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      missing += 1;
       continue;
     }
     const v = value as Record<string, unknown>;
-    if (
-      fields.some(
-        (field) =>
-          typeof v[field] !== "number" ||
-          !Number.isSafeInteger(v[field]) ||
-          (v[field] as number) < 0,
-      )
-    ) {
-      out.complete = false;
+    const tokens: TokenBreakdown = {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    };
+    for (const [key, field] of Object.entries(fields) as [keyof TokenBreakdown, string][]) {
+      const c = count(v[field]);
+      if (c === null) missing += 1;
+      else tokens[key] = c;
+    }
+    const canonical = validId(v.canonicalModel)
+      ? v.canonicalModel
+      : validId(modelId)
+        ? modelId
+        : null;
+    if (canonical === null) {
+      unattributed = addUnattributed(unattributed, tokens);
       continue;
     }
-    const canonical =
-      typeof v.canonicalModel === "string" &&
-      v.canonicalModel.length > 0 &&
-      v.canonicalModel.length <= 200
-        ? v.canonicalModel
-        : modelId;
     out.models.push({
       modelId: canonical,
-      ...(canonical !== modelId ? { reportedModelId: modelId } : {}),
-      inputTokens: v.inputTokens as number,
-      outputTokens: v.outputTokens as number,
-      cacheReadTokens: v.cacheReadInputTokens as number,
-      cacheWriteTokens: v.cacheCreationInputTokens as number,
+      ...(validId(modelId) && canonical !== modelId ? { reportedModelId: modelId } : {}),
+      ...tokens,
     });
   }
-  // 没有模型明细不能证明本次没有消耗,留给结算层核对。
-  if (out.models.length === 0) out.complete = false;
+  if (unattributedOf({ unattributed })) out.unattributed = unattributed;
+  if (missing > 0) out.missing = missing;
+  // 没有模型明细、有认不出的或读不出的:都不是完整计量。没有明细也不能证明本次没有消耗,留给结算层核对
+  if (out.models.length === 0 || out.unattributed || missing > 0) out.complete = false;
   return out;
 }

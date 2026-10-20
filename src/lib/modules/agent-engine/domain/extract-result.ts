@@ -26,10 +26,11 @@ function meteringOf(m: Record<string, unknown>): { metering?: ModelMetering } {
     breakdown.cacheWriteTokens;
   if (m.modelUsage !== undefined) {
     const metering = extractModelUsage(m.modelUsage);
-    return {
-      metering:
-        metering.models.length === 0 && any ? { ...metering, unattributed: breakdown } : metering,
-    };
+    // modelUsage 里一点能用的计数都没有(空的,或各项都读不出):退回用 result.usage 的四项
+    if (metering.models.length === 0 && !metering.unattributed && any) {
+      return { metering: { ...metering, unattributed: breakdown, fromResultUsage: true } };
+    }
+    return { metering };
   }
   return any
     ? {
@@ -38,6 +39,7 @@ function meteringOf(m: Record<string, unknown>): { metering?: ModelMetering } {
           complete: false,
           models: [],
           unattributed: breakdown,
+          fromResultUsage: true,
         },
       }
     : {};

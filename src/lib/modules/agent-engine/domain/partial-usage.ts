@@ -11,6 +11,7 @@ import {
   type ModelTokenUsage,
   type TokenBreakdown,
   addUnattributed,
+  missingOf,
   unattributedOf,
 } from "./model-usage";
 
@@ -178,12 +179,14 @@ export function mergeCost(
         }
       : null);
   const unattributed = addUnattributed(baseUnattributed, unattributedOf(extra.metering));
+  const missing = missingOf(base.metering) + missingOf(extra.metering);
   const metering: ModelMetering = {
     source: "sdk_model_usage",
     complete: base.metering?.complete === true && extra.metering?.complete === true,
     partial: true,
     models: [...models.values()],
     ...(unattributed ? { unattributed } : {}),
+    ...(missing > 0 ? { missing } : {}),
   };
   return {
     ...base,

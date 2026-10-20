@@ -327,7 +327,8 @@ export class RunCharging {
         const models = run.pricing ? await this.deps.pricedModels(run.pricing) : null;
         const priced = priceForSettlement(cost, models, run.pricing?.binding?.main);
         estimated = priced.micro;
-        unresolved = !priced.priceable;
+        // 计量缺失:读得出的已算进应扣(照扣),读不出的那部分没法确认,不当成结清
+        unresolved = !priced.priceable || priced.missing;
       }
       // 期限内的快照:崩溃那一刻进行中的请求不在里面,先暂记,等最终费用或期限
       const snapshotWaiting = !run.cost && !!run.usageSnapshot && !waitedOut;

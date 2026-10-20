@@ -10,7 +10,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 const REASON: Record<PendingReason, { label: string; hint: string }> = {
   owed: { label: "欠款", hint: "余额不足未扣齐,充值后自动补扣" },
   usage_unknown: { label: "用量未知", hint: "运行过,但结算时没有拿到用量" },
-  unpriced: { label: "无法完整计价", hint: "连本次运行主模型的价目都取不到,暂时无法计价" },
+  unpriced: {
+    label: "无法完整计价",
+    hint: "取不到本次运行主模型的价目,或上游计量有读不出的计数;能算出的部分已扣",
+  },
 };
 const REASONS = Object.keys(REASON) as PendingReason[];
 

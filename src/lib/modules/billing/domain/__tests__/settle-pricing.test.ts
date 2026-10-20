@@ -47,7 +47,7 @@ describe("结算计价", () => {
         [MAIN, SUB],
         "m-main",
       ),
-    ).toEqual({ priceable: true, micro: 2_500_000_000n, fallbackTokens: 0 });
+    ).toEqual({ priceable: true, micro: 2_500_000_000n, fallbackTokens: 0, missing: false });
   });
 
   it("认不出的按主模型售价,并报告兜底的 token 数", () => {
@@ -60,7 +60,12 @@ describe("结算计价", () => {
         [MAIN, SUB],
         "m-main",
       ),
-    ).toEqual({ priceable: true, micro: 2_500_000_000n, fallbackTokens: 1_000_000 });
+    ).toEqual({
+      priceable: true,
+      micro: 2_500_000_000n,
+      fallbackTokens: 1_000_000,
+      missing: false,
+    });
   });
 
   it("没有按模型的明细:总 token 按主模型价;没有用量为 0", () => {
@@ -68,6 +73,7 @@ describe("结算计价", () => {
       priceable: true,
       micro: 2_000_000_000n,
       fallbackTokens: 1_000_000,
+      missing: false,
     });
     expect(priceForSettlement({ input: 0, output: 0 }, [MAIN], "m-main").micro).toBe(0n);
   });
@@ -88,7 +94,12 @@ describe("结算计价", () => {
         [MAIN, SUB],
         "m-main",
       ),
-    ).toEqual({ priceable: true, micro: 3_600_000_000n, fallbackTokens: 3_000_000 });
+    ).toEqual({
+      priceable: true,
+      micro: 3_600_000_000n,
+      fallbackTokens: 3_000_000,
+      missing: false,
+    });
   });
 
   it("只有没带模型名的用量:按四项分开计,不用总数(总数里的缓存会被当成普通输入多算)", () => {
@@ -107,7 +118,12 @@ describe("结算计价", () => {
         [MAIN],
         "m-main",
       ),
-    ).toEqual({ priceable: true, micro: 3_100_000_000n, fallbackTokens: 3_000_000 });
+    ).toEqual({
+      priceable: true,
+      micro: 3_100_000_000n,
+      fallbackTokens: 3_000_000,
+      missing: false,
+    });
   });
 
   it("没带模型名的用量也取不到主模型价目:算不出", () => {
@@ -119,6 +135,13 @@ describe("结算计价", () => {
         "m-main",
       ).priceable,
     ).toBe(false);
+  });
+
+  it("计量缺失:照常算出已知部分,另外标出,不当成已完整计价", () => {
+    const cost = metering([["up-main", 1_000_000]]);
+    expect(
+      priceForSettlement({ ...cost, metering: { ...cost.metering, missing: 1 } }, [MAIN], "m-main"),
+    ).toEqual({ priceable: true, micro: 2_000_000_000n, fallbackTokens: 0, missing: true });
   });
 
   it("取不到主模型价目:算不出", () => {

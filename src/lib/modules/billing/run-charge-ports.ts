@@ -126,7 +126,8 @@ export interface RunChargeItem {
  * 暂记(待核对)的原因。按这个优先级归类,一条记录只归一类:
  * - owed:用量完整,但余额不够,还欠着(充值后清扫自动补扣)
  * - usage_unknown:运行过,但结算时没有拿到任何用量
- * - unpriced:有用量,但连本次运行主模型的价目都取不到,暂时无法计价(认不出的模型已按主模型价计,不会落到这里)
+ * - unpriced:有用量,但取不到本次运行主模型的价目,或计量里有读不出的计数(计量缺失);
+ *   能算出的部分已扣(认不出的模型、没带模型名的用量已按主模型价计,不会因此落到这里)
  */
 export type PendingReason = "owed" | "usage_unknown" | "unpriced";
 export const PENDING_REASONS: readonly PendingReason[] = ["owed", "usage_unknown", "unpriced"];

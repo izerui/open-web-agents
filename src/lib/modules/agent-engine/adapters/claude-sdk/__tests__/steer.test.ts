@@ -273,6 +273,7 @@ describe("多条 result 的结局与计费", () => {
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
         },
+        fromResultUsage: true,
       },
     });
   });

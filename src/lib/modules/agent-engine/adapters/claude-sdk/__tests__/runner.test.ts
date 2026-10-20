@@ -90,6 +90,7 @@ describe("ClaudeSdkEngine 回放", () => {
         complete: false,
         models: [],
         unattributed: { inputTokens: 20, outputTokens: 8, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        fromResultUsage: true,
       },
     });
   });
@@ -258,6 +259,7 @@ describe("ClaudeSdkEngine 回放", () => {
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
         },
+        fromResultUsage: true,
       },
     }); // 钱不能丢
     expect(r.sessionId).toBe("s1");
@@ -782,6 +784,7 @@ describe("combineResults:多条 result 的计量", () => {
           cacheReadTokens: cacheRead,
           cacheWriteTokens: 0,
         },
+        fromResultUsage: true,
       },
     },
   });

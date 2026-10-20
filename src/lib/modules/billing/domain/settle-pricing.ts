@@ -4,8 +4,13 @@
 // 每次运行结束都要能结清,不留需要人工处理的记录。没带模型名的用量(metering.unattributed)
 // 同样按主模型计,与按模型的明细相加。旧数据里既没有明细也没有未归属用量的,用总 token 数按主模型计。
 // 用到兜底的 token 数单独返回,对账报表据此列出,便于复盘配置(多半是上游回报的模型名与填写的标识不一致)。
+// 计量里有读不出的计数(missing)时照常算出已知部分,另外标出,结算据此保持暂记、不当成结清。
 
-import { type ModelMetering, unattributedOf } from "@/lib/modules/agent-engine/domain/model-usage";
+import {
+  type ModelMetering,
+  missingOf,
+  unattributedOf,
+} from "@/lib/modules/agent-engine/domain/model-usage";
 import { type Capability, type Meter, priceUsage } from "@/lib/modules/capabilities/domain/catalog";
 
 export interface SettlePrice {
@@ -15,6 +20,8 @@ export interface SettlePrice {
   micro: bigint;
   /** 按主模型价兜底的 token 数 */
   fallbackTokens: number;
+  /** 计量里有读不出的计数(计量缺失):算出的只是已知部分,不能当成已完整计价 */
+  missing: boolean;
 }
 
 interface CostLike {
@@ -49,11 +56,11 @@ function tryPrice(
   }
 }
 
-export function priceForSettlement(
+function priceKnown(
   cost: unknown,
   models: Capability[] | null,
   mainCapabilityId: string | null | undefined,
-): SettlePrice {
+): Omit<SettlePrice, "missing"> {
   const c = (cost ?? {}) as CostLike;
   const llm = (models ?? []).filter((m) => m.kind === "llm");
   const main = llm.find((m) => m.id === mainCapabilityId);
@@ -104,4 +111,13 @@ export function priceForSettlement(
     fallbackTokens += u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheWriteTokens;
   }
   return { priceable: true, micro, fallbackTokens };
+}
+
+export function priceForSettlement(
+  cost: unknown,
+  models: Capability[] | null,
+  mainCapabilityId: string | null | undefined,
+): SettlePrice {
+  const missing = missingOf((cost as CostLike | null)?.metering) > 0;
+  return { ...priceKnown(cost, models, mainCapabilityId), missing };
 }

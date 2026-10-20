@@ -31,6 +31,7 @@ describe("extractRunResult", () => {
           cacheReadTokens: 10000,
           cacheWriteTokens: 300,
         },
+        fromResultUsage: true,
       });
     });
 
@@ -97,6 +98,7 @@ describe("extractRunResult", () => {
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
         },
+        fromResultUsage: true,
       },
     });
   });
