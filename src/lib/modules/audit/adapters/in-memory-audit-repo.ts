@@ -6,6 +6,7 @@ export class InMemoryAuditRepo implements AuditRepo {
   readonly events: AuditEvent[] = [];
 
   async append(e: AuditEvent): Promise<void> {
+    if (this.events.some((x) => x.id === e.id)) return;
     this.events.push(structuredClone(e));
   }
 

@@ -10,7 +10,7 @@
 // 超时同样按"尽力记录"处理:报告错误、让请求返回。
 // 超时只表示【不再等】,底层的查询与写入并没有被取消,之后仍可能落库(或失败)。
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { type AuditAction, sanitizeDetails } from "@/lib/modules/audit/domain/events";
 import type { AuditActorType, AuditRepo } from "@/lib/modules/audit/ports";
 
@@ -29,6 +29,11 @@ export interface AuditInput {
   details?: Record<string, unknown>;
   /** 用来取来源地址与 User-Agent */
   req?: Request;
+  /**
+   * 去重键:同一个键只记一条(记录 id 由它确定性生成,重复写入被忽略)。
+   * 用于"业务可以安全重放、审计可能上次没写成"的操作 —— 重放时补记,不重复记。
+   */
+  dedupeKey?: string;
 }
 
 export interface AuditLogDeps {
@@ -56,13 +61,14 @@ export class AuditLog {
   constructor(private readonly deps: AuditLogDeps) {}
 
   /**
-   * 永不抛错,且有界返回(见文件头)。
+   * 永不抛错,且有界返回(见文件头)。返回这条是否确认写成:写失败或超时为 false ——
+   * 需要"缺了就补"的调用方(如可重放的发放)据此提示管理员重试。
    *
    * 可以传一个"构造记录的函数":只为审计才需要的查询(资源归属、展示用的名称)放进去,
    * 和写入一起受总上限约束。【不要】在路由里先 await 这类查询再调 record —— 那一步
    * 不在上限之内,数据库不返回时,已完成的业务照样挂住。
    */
-  async record(input: AuditInput | (() => Promise<AuditInput>)): Promise<void> {
+  async record(input: AuditInput | (() => Promise<AuditInput>)): Promise<boolean> {
     const ms = this.deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -72,8 +78,10 @@ export class AuditLog {
           timer = setTimeout(() => reject(new AuditTimeout(ms)), ms);
         }),
       ]);
+      return true;
     } catch (err) {
       (this.deps.onError ?? ((e) => console.error("[audit] 写入失败", e)))(err);
+      return false;
     } finally {
       clearTimeout(timer);
     }
@@ -83,7 +91,7 @@ export class AuditLog {
     const input = typeof given === "function" ? await given() : given;
     const actor = await this.actorOf(input.actor);
     await this.deps.repo.append({
-      id: randomUUID(),
+      id: input.dedupeKey ? dedupeId(input.dedupeKey) : randomUUID(),
       at: (this.deps.now ?? Date.now)(),
       actor,
       action: input.action,
@@ -115,6 +123,12 @@ export class AuditLog {
       label: await this.deps.emailOf?.(a.userId).catch(() => undefined),
     };
   }
+}
+
+/** 由去重键生成 UUID 形式的记录 id(36 字符,与随机 id 同列) */
+function dedupeId(key: string): string {
+  const h = createHash("sha256").update(`audit:${key}`).digest("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
 }
 
 /** 反向代理后取 X-Forwarded-For 的第一段。只作记录,不用于鉴权。 */

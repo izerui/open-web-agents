@@ -41,6 +41,7 @@ export interface AuditFilter {
 }
 
 export interface AuditRepo {
+  /** 只追加。同一 id 已存在时忽略(去重键生成的 id 靠它实现"只记一条") */
   append(e: AuditEvent): Promise<void>;
   /** 按时间倒序,键集分页 */
   list(f: AuditFilter): Promise<{ items: AuditEvent[]; nextCursor?: string }>;

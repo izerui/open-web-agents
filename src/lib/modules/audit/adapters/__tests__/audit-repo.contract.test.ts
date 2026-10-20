@@ -30,6 +30,17 @@ function contract(name: string, make: () => AuditRepo) {
       expect((await repo.list({ visibleTo: stranger })).items).toHaveLength(0);
     });
 
+    it("同一 id 重复追加:只留第一条,不报错、不改写", async () => {
+      const repo = make();
+      const owner = `o-${tag()}`;
+      const id = randomUUID();
+      await repo.append(ev({ id, at: 10, ownerId: owner, details: { n: 1 } }));
+      await repo.append(ev({ id, at: 20, ownerId: owner, details: { n: 2 } }));
+      const items = (await repo.list({ visibleTo: owner })).items;
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({ at: 10, details: { n: 1 } });
+    });
+
     it("按时间倒序,键集分页不重不漏(含同一毫秒的多条)", async () => {
       const repo = make();
       const owner = `o-${tag()}`;

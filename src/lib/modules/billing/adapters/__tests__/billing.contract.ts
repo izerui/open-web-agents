@@ -25,6 +25,17 @@ export function billingContract(
     reason: "Test funding",
   });
   describe(name, () => {
+    it("findCredit returns the entry for that account and key only, without changing balances", async () => {
+      const { repo, accountId } = make();
+      const key = randomUUID();
+      expect(await repo.findCredit(accountId, key)).toBeNull();
+      const { entry } = await repo.credit(credit(accountId, "100", key));
+      expect(await repo.findCredit(accountId, key)).toEqual(entry);
+      expect(await repo.findCredit(accountId, randomUUID())).toBeNull();
+      expect(await repo.findCredit(randomUUID(), key)).toBeNull();
+      expect((await repo.balance(accountId)).availableMicroCredits).toBe("100");
+    });
+
     it("missing accounts read as zero with no ledger", async () => {
       const { repo, accountId } = make();
       expect(await repo.balance(accountId)).toEqual({

@@ -72,6 +72,11 @@ export class InMemoryBillingRepo implements BillingRepo {
     this.operations.set(key, entry);
   }
 
+  async findCredit(accountId: string, idempotencyKey: string): Promise<LedgerEntry | null> {
+    const e = this.operations.get(billingKey(accountId, "credit", idempotencyKey));
+    return e ? structuredClone(e) : null;
+  }
+
   async credit(input: CreditRequest) {
     validateCredit(input);
     const balance = this.wallets.get(input.accountId) ?? emptyWallet(input.accountId);

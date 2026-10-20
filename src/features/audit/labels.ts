@@ -125,6 +125,10 @@ export function describeAudit(e: AuditItem): string {
       return `「${s(d.name) || "未命名"}」每分钟上限 ${d.from ?? "默认"} → ${d.to ?? "默认"}`;
     case "api_key.monthly_limit":
       return `「${s(d.name) || "未命名"}」本月积分上限 ${limitText(d.from)} → ${limitText(d.to)}`;
+    case "billing.credit":
+      return typeof d.amountMicroCredits === "string" && /^\d+$/.test(d.amountMicroCredits)
+        ? `${creditsAmount(d.amountMicroCredits)} 积分${d.via === "batch" ? "(批量发放)" : ""}`
+        : "";
     case "billing.mode_update":
       return `${modeText(d.from)} → ${modeText(d.to)}`;
     case "approval.decide":

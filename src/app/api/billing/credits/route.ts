@@ -48,16 +48,15 @@ export async function POST(req: Request) {
       actorId: actor.userId,
       reason: body.reason.trim(),
     });
-    if (!result.replayed) {
-      await audit.record({
-        actor: principal,
-        action: "billing.credit",
-        resource: { type: "wallet", id: account.id },
-        ownerId: account.id,
-        details: { amountMicroCredits, ledgerId: result.entry.id, via: "manual" },
-        req,
-      });
-    }
+    await audit.record({
+      dedupeKey: `billing.credit:${result.entry.id}`,
+      actor: principal,
+      action: "billing.credit",
+      resource: { type: "wallet", id: account.id },
+      ownerId: account.id,
+      details: { amountMicroCredits, ledgerId: result.entry.id, via: "manual" },
+      req,
+    });
     return Response.json(result, {
       status: result.replayed ? 200 : 201,
       headers: { "Cache-Control": "no-store" },

@@ -155,6 +155,15 @@ export class MysqlBillingRepo implements BillingRepo {
     });
   }
 
+  async findCredit(accountId: string, idempotencyKey: string): Promise<LedgerEntry | null> {
+    const [row] = await this.db
+      .select()
+      .from(billingLedger)
+      .where(eq(billingLedger.operationKey, billingKey(accountId, "credit", idempotencyKey)))
+      .limit(1);
+    return row ? ledgerOf(row) : null;
+  }
+
   async credit(input: CreditRequest) {
     validateCredit(input);
     try {

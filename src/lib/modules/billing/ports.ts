@@ -78,6 +78,9 @@ export interface BillingRepo {
     input: CreditRequest,
   ): Promise<{ balance: WalletBalance; entry: LedgerEntry; replayed: boolean }>;
 
+  /** 只读:该账户用这个幂等键入账过的流水;没有返回 null。不改动余额 */
+  findCredit(accountId: string, idempotencyKey: string): Promise<LedgerEntry | null>;
+
   /** 同ID同账户同金额重放当前预占状态;不再次冻结资金。 */
   reserve(input: ReserveRequest): Promise<Reservation>;
 

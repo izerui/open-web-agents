@@ -52,8 +52,21 @@ describe("AuditLog.record", () => {
         action: "auth.login_failed",
         resource: { type: "account" },
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(false); // 不抛错,但如实告诉调用方没写成
     expect(errors).toHaveLength(1);
+  });
+
+  it("写成返回 true", async () => {
+    const log = new AuditLog({
+      repo: { append: async () => {}, list: async () => ({ items: [] }) },
+    });
+    await expect(
+      log.record({
+        actor: { type: "anonymous" },
+        action: "auth.login_failed",
+        resource: { type: "account" },
+      }),
+    ).resolves.toBe(true);
   });
 });
 

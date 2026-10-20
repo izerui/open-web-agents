@@ -9,20 +9,24 @@ export class MysqlAuditRepo implements AuditRepo {
   constructor(private readonly db: Db) {}
 
   async append(e: AuditEvent): Promise<void> {
-    await this.db.insert(auditLogs).values({
-      id: e.id,
-      atMs: e.at,
-      actorType: e.actor.type,
-      actorId: e.actor.id ?? null,
-      actorLabel: e.actor.label?.slice(0, 255) ?? null,
-      action: e.action,
-      resourceType: e.resource.type,
-      resourceId: e.resource.id ?? null,
-      ownerId: e.ownerId ?? null,
-      details: e.details ?? null,
-      ip: e.ip?.slice(0, 64) ?? null,
-      userAgent: e.userAgent?.slice(0, 256) ?? null,
-    });
+    await this.db
+      .insert(auditLogs)
+      .values({
+        id: e.id,
+        atMs: e.at,
+        actorType: e.actor.type,
+        actorId: e.actor.id ?? null,
+        actorLabel: e.actor.label?.slice(0, 255) ?? null,
+        action: e.action,
+        resourceType: e.resource.type,
+        resourceId: e.resource.id ?? null,
+        ownerId: e.ownerId ?? null,
+        details: e.details ?? null,
+        ip: e.ip?.slice(0, 64) ?? null,
+        userAgent: e.userAgent?.slice(0, 256) ?? null,
+      })
+      // 同一 id 已存在(去重键重放):保留第一条,不改写
+      .onDuplicateKeyUpdate({ set: { id: e.id } });
   }
 
   async list(f: AuditFilter): Promise<{ items: AuditEvent[]; nextCursor?: string }> {

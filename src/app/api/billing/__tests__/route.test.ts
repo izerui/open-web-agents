@@ -1,16 +1,31 @@
 import { Forbidden, Unauthorized } from "@/lib/modules/access/application/authorize";
+import { InMemoryAuditRepo } from "@/lib/modules/audit/adapters/in-memory-audit-repo";
+import { AuditLog } from "@/lib/modules/audit/application/audit-log";
 import { InMemoryBillingRepo } from "@/lib/modules/billing/adapters/in-memory-billing-repo";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({ admin: false, apiKey: false, authenticated: true }));
 let billing = new InMemoryBillingRepo();
-const record = vi.fn(async () => {});
+const auditFault = { failNext: false };
+class FlakyAuditRepo extends InMemoryAuditRepo {
+  override async append(e: Parameters<InMemoryAuditRepo["append"]>[0]) {
+    if (auditFault.failNext) {
+      auditFault.failNext = false;
+      throw new Error("audit db down");
+    }
+    return super.append(e);
+  }
+}
+let auditRepo = new FlakyAuditRepo();
+const audit = () => new AuditLog({ repo: auditRepo });
+/** 实际落库的审计(按去重键只记一条) */
+const audited = async () => (await auditRepo.list({ limit: 200 })).items;
 vi.mock("@/lib/container", () => ({
   getContainer: () => ({
     billing,
     billingMode: { get: async () => "trial" },
     runCharges: { monthUsageByAccount: async () => new Map() },
-    audit: { record },
+    audit: { record: (e: Parameters<AuditLog["record"]>[0]) => audit().record(e) },
     users: {
       get: async (id: string) =>
         ["alice", "bob"].includes(id.toLowerCase()) ? { id: id.toLowerCase() } : null,
@@ -47,7 +62,8 @@ describe("billing HTTP permissions and idempotency", () => {
     state.admin = false;
     state.apiKey = false;
     state.authenticated = true;
-    record.mockClear();
+    auditRepo = new FlakyAuditRepo();
+    auditFault.failNext = false;
   });
   it("requires login, isolates account statements and rejects integration keys", async () => {
     state.authenticated = false;
@@ -81,8 +97,18 @@ describe("billing HTTP permissions and idempotency", () => {
     expect((await again.json()).replayed).toBe(true);
     expect((await credit("13")).status).toBe(409);
     expect((await billing.balance("bob")).availableMicroCredits).toBe("12000001");
-    expect(record).toHaveBeenCalledTimes(1);
+    expect(await audited()).toHaveLength(1);
     expect((await GET(new Request("http://test/api/billing?accountId=bob"))).status).toBe(200);
+  });
+  it("first credit lands but its audit fails: replaying the same request fills the audit once", async () => {
+    state.admin = true;
+    auditFault.failNext = true;
+    expect((await credit()).status).toBe(201);
+    expect(await audited()).toHaveLength(0);
+    expect((await credit()).status).toBe(200);
+    expect((await credit()).status).toBe(200);
+    expect((await billing.balance("bob")).availableMicroCredits).toBe("12000001");
+    expect(await audited()).toHaveLength(1);
   });
   it("uses the canonical identity ID, not a second wallet for a differently cased lookup", async () => {
     state.admin = true;
@@ -96,7 +122,7 @@ describe("billing HTTP permissions and idempotency", () => {
     for (const value of ["-1", "0", "1e3", "0.0000001"])
       expect((await credit(value)).status).toBe(400);
     expect((await credit("1", "unknown", "nobody")).status).toBe(404);
-    expect(record).not.toHaveBeenCalled();
+    expect(await audited()).toHaveLength(0);
     expect((await billing.balance("bob")).availableMicroCredits).toBe("0");
   });
 });

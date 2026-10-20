@@ -173,4 +173,124 @@ test.describe("积分与计费界面", () => {
       if (promoted) await sql("UPDATE users SET role = 'user' WHERE id = ?", [admin.id]);
     }
   });
+
+  test("积分管理:按邮箱批量发放 —— 预览标出跳过原因,确认后只给可发放的账号入账", async ({
+    page,
+    context,
+    browser,
+  }) => {
+    const admin = await register(context, "batch-admin");
+    const promoted = admin.role !== "admin";
+    if (promoted) await sql("UPDATE users SET role = 'admin' WHERE id = ?", [admin.id]);
+    const other = await browser.newContext();
+    const a = await register(other, "batch-a");
+    await other.close();
+    const [rows] = (await sql("SELECT email FROM users WHERE id = ?", [a.id])) as unknown as [
+      { email: string }[],
+    ];
+    const email = rows[0]?.email ?? "";
+    const missing = `nobody-${Date.now()}@example.test`;
+    try {
+      await page.goto(`${BASE}/admin/billing`);
+      await page.getByLabel(/^邮箱/).fill(`${email}\n${missing}\nnot-an-email`);
+      await page.getByLabel("每人积分").fill("8.8");
+      await page.getByLabel("发放说明").fill("PW 批量发放");
+      await page.getByRole("button", { name: "预览" }).click();
+      const table = page.getByTestId("batch-lines");
+      await expect(table.locator("tr").filter({ hasText: email })).toContainText("可发放");
+      await expect(table.locator("tr").filter({ hasText: missing })).toContainText("没有这个账号");
+      await expect(table.locator("tr").filter({ hasText: "not-an-email" })).toContainText(
+        "邮箱格式不对",
+      );
+      await page.getByRole("button", { name: "向 1 个账号发放" }).click();
+      await expect(page.getByRole("dialog")).toContainText("向 1 个账号各发放 8.8 积分");
+      await page.getByRole("button", { name: "确认发放" }).click();
+      await expect(table.locator("tr").filter({ hasText: email })).toContainText("已发放");
+      const [w] = (await sql(
+        "SELECT available_micro_credits AS v FROM billing_wallets WHERE account_id = ?",
+        [a.id],
+      )) as unknown as [{ v: string }[]];
+      expect(String(w[0]?.v)).toBe("8800000");
+    } finally {
+      if (promoted) await sql("UPDATE users SET role = 'user' WHERE id = ?", [admin.id]);
+    }
+  });
+
+  test("批量发放故障注入:到账但审计失败 → 显示审计待补 → 账号被停用、预览也不影响 → 原批次重试补齐,余额不变", async ({
+    page,
+    context,
+    browser,
+  }) => {
+    const admin = await register(context, "audit-admin");
+    const promoted = admin.role !== "admin";
+    if (promoted) await sql("UPDATE users SET role = 'admin' WHERE id = ?", [admin.id]);
+    const other = await browser.newContext();
+    const target = await register(other, "audit-target");
+    await other.close();
+    const [rows] = (await sql("SELECT email FROM users WHERE id = ?", [target.id])) as unknown as [
+      { email: string }[],
+    ];
+    const email = rows[0]?.email ?? "";
+    // 只拦这个账号的审计写入:钱照常到账,审计写失败
+    const trigger = `pw_audit_fail_${Date.now()}`;
+    const raw = async (q: string) => {
+      const { createConnection } = await import("mysql2/promise");
+      const db = await createConnection(DB as string);
+      try {
+        await db.query(q);
+      } finally {
+        await db.end();
+      }
+    };
+    await raw(
+      `CREATE TRIGGER ${trigger} BEFORE INSERT ON audit_logs FOR EACH ROW BEGIN IF NEW.owner_id = '${target.id}' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'audit down'; END IF; END`,
+    );
+    let dropped = false;
+    const drop = async () => {
+      if (dropped) return;
+      dropped = true;
+      await raw(`DROP TRIGGER IF EXISTS ${trigger}`);
+    };
+    try {
+      await page.goto(`${BASE}/admin/billing`);
+      await page.getByLabel(/^邮箱/).fill(email);
+      await page.getByLabel("每人积分").fill("6");
+      await page.getByLabel("发放说明").fill("PW 审计故障");
+      await page.getByRole("button", { name: "预览" }).click();
+      await page.getByRole("button", { name: "向 1 个账号发放" }).click();
+      await page.getByRole("button", { name: "确认发放" }).click();
+
+      const table = page.getByTestId("batch-lines");
+      const row = table.locator("tr").filter({ hasText: email });
+      await expect(row).toContainText("已到账,审计待补");
+      const retry = page.getByRole("button", { name: /用原批次重试.*1 个审计待补/ });
+      await expect(retry).toBeVisible();
+
+      // 管理员随后停用了这个账号,又点了预览:发放按钮不可用,但重试入口还在
+      await sql("UPDATE users SET disabled = 1 WHERE id = ?", [target.id]);
+      await page.getByRole("button", { name: "预览" }).click();
+      await expect(row).toContainText("账号已停用");
+      await expect(retry).toBeVisible();
+
+      await drop();
+      await retry.click();
+      await expect(row).toContainText("此前已发放");
+      await expect(row).not.toContainText("审计待补");
+      await expect(page.getByRole("button", { name: /用原批次重试/ })).toHaveCount(0);
+
+      const [w] = (await sql(
+        "SELECT available_micro_credits AS v FROM billing_wallets WHERE account_id = ?",
+        [target.id],
+      )) as unknown as [{ v: string }[]];
+      expect(String(w[0]?.v)).toBe("6000000");
+      const [a] = (await sql(
+        "SELECT COUNT(*) AS n FROM audit_logs WHERE owner_id = ? AND action = 'billing.credit'",
+        [target.id],
+      )) as unknown as [{ n: number }[]];
+      expect(Number(a[0]?.n)).toBe(1);
+    } finally {
+      await drop();
+      if (promoted) await sql("UPDATE users SET role = 'user' WHERE id = ?", [admin.id]);
+    }
+  });
 });
