@@ -1,5 +1,43 @@
-import { extractRunResult } from "@/lib/modules/agent-engine/domain/extract-result";
+import {
+  extractRunResult,
+  hasMeteringBasis,
+} from "@/lib/modules/agent-engine/domain/extract-result";
 import { describe, expect, it } from "vitest";
+
+describe("hasMeteringBasis", () => {
+  const meter = (raw: Record<string, unknown>) =>
+    extractRunResult(
+      { type: "result", subtype: "error_during_execution", ...raw },
+      { hasSchema: false },
+    ).cost?.metering;
+  const zero = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadInputTokens: 0,
+    cacheCreationInputTokens: 0,
+  };
+
+  it("没有可用的非零计数都不算依据", () => {
+    for (const raw of [
+      {},
+      { usage: { input_tokens: 0, output_tokens: 0 } },
+      { modelUsage: {} },
+      { modelUsage: {}, usage: { input_tokens: 0 } },
+      { modelUsage: { "up-main": zero } },
+      { modelUsage: null },
+      { usage: { input_tokens: -1 } },
+    ]) {
+      expect(hasMeteringBasis(meter(raw)), JSON.stringify(raw)).toBe(false);
+    }
+  });
+
+  it("有非零的按模型明细或未归属用量才算", () => {
+    expect(
+      hasMeteringBasis(meter({ modelUsage: { "up-main": { ...zero, inputTokens: 1 } } })),
+    ).toBe(true);
+    expect(hasMeteringBasis(meter({ usage: { cache_read_input_tokens: 5 } }))).toBe(true);
+  });
+});
 
 describe("extractRunResult", () => {
   describe("计量:result 的四项 usage", () => {

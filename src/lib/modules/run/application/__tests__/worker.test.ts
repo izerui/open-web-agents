@@ -1155,7 +1155,7 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
       });
     });
 
-    describe("result 没带任何计量(没有 usage 也没有 modelUsage)", () => {
+    describe("result 的计量里没有可用的非零计数(没带计量、全是 0、空 modelUsage)", () => {
       const errorResult = {
         type: "result",
         subtype: "error_during_execution",
@@ -1199,6 +1199,60 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
           state: "settled",
           chargedMicro: SECOND.toString(),
         });
+      });
+
+      const zeroCounts = {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 0,
+      };
+      for (const [label, extra] of [
+        ["modelUsage 为空对象、没有 usage", { modelUsage: {} }],
+        [
+          "modelUsage 为空对象、usage 全是 0",
+          { modelUsage: {}, usage: { input_tokens: 0, output_tokens: 0 } },
+        ],
+        ["modelUsage 里的模型全是 0", { modelUsage: { "up-main": zeroCounts } }],
+      ] as const) {
+        it(`assistant 已报 1 万输入 → error result 的 ${label}:收取那 1 万输入;重复结算、清扫不多扣`, async () => {
+          const { world, settleAgain, sweepAgain } = await run(true, { ...errorResult, ...extra });
+          expect(world.charge("r1")).toMatchObject({
+            state: "settled",
+            estimatedMicro: SECOND.toString(),
+            chargedMicro: SECOND.toString(),
+          });
+          expect(await settleAgain()).toBe("none");
+          expect(await sweepAgain()).toBe(0);
+          expect(world.balance("u1")).toEqual({ available: 1000n * C - SECOND, reserved: 0n });
+        });
+      }
+
+      it("assistant 已报 1 万输入 → error result 的 modelUsage 读不出(null):收取那 1 万输入,带着计量缺失保持暂记", async () => {
+        const { world } = await run(true, { ...errorResult, modelUsage: null });
+        expect(world.charge("r1")).toMatchObject({
+          state: "provisional",
+          incomplete: true,
+          chargedMicro: SECOND.toString(),
+        });
+      });
+
+      it("对照:result 带完整累计明细(已含观察到的 1 万输入)→ 由它覆盖,只收一次", async () => {
+        const { world, settleAgain } = await run(true, {
+          type: "result",
+          subtype: "success",
+          result: "好的",
+          total_cost_usd: 0.01,
+          usage: { input_tokens: 10000, output_tokens: 0 },
+          modelUsage: { "up-main": { ...zeroCounts, inputTokens: 10000 } },
+        });
+        expect(world.charge("r1")).toMatchObject({
+          state: "settled",
+          incomplete: false,
+          chargedMicro: SECOND.toString(),
+        });
+        expect(await settleAgain()).toBe("none");
+        expect(world.balance("u1")).toEqual({ available: 1000n * C - SECOND, reserved: 0n });
       });
 
       it("对照:确实没有观察到任何用量 → error result 没带计量:按零结清,冻结全部退回", async () => {

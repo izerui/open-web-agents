@@ -242,12 +242,13 @@ export class ClaudeSdkEngine implements EnginePort {
           sessionId = m.session_id ?? sessionId;
         } else if (m?.type === "result") {
           let r = extractRunResult(msg, { hasSchema });
-          // 结果没带任何计量依据(没有 usage 也没有 modelUsage,常见于 error result):它的 0 不代表
-          // 没花钱。清空之前按消息观察到的用量前,把它们记进这条结果(只算这一条、不完整);
-          // 带了计量的照旧由 result 覆盖(modelUsage 是累计快照),不重复计
-          if (!hasMeteringBasis(msg)) {
+          // 结果的计量里没有可用的非零计数(没带计量、全是 0、modelUsage 为空对象,常见于 error result):
+          // 它的 0 不代表没花钱。清空之前按消息观察到的用量前,把它们记进这条结果(只算这一条、不完整),
+          // 结果里记下的计量缺失一并带上;有可用计数的照旧由 result 覆盖(modelUsage 是累计快照),不重复计
+          if (!hasMeteringBasis(r.cost?.metering)) {
             const observed = unsettled.cost();
             if (observed?.metering) {
+              const missing = missingOf(r.cost?.metering) + missingOf(observed.metering);
               r = {
                 ...r,
                 cost: {
@@ -255,7 +256,12 @@ export class ClaudeSdkEngine implements EnginePort {
                   input: observed.input,
                   output: observed.output,
                   partial: true,
-                  metering: { ...observed.metering, complete: false, fromResultUsage: true },
+                  metering: {
+                    ...observed.metering,
+                    complete: false,
+                    fromResultUsage: true,
+                    ...(missing > 0 ? { missing } : {}),
+                  },
                 },
               };
             }
