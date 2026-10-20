@@ -450,6 +450,7 @@ function build(): Container {
     },
     chargeProgress: (runId, tokens) => runCharging.progress(runId, tokens),
     saveCostRecovery: (runId, cost) => costOutbox.save(runId, cost),
+    saveUsageSnapshot: (runId, cost) => runs.saveUsageSnapshot(runId, cost),
   });
 
   // 同进程内起 worker。拆成独立进程时,web 侧用 OWA_EMBEDDED_WORKER=0 关掉,

@@ -820,3 +820,145 @@ describe("跨月运行:月度占用按受理月份归属", () => {
     });
   }
 });
+
+describe("没有最终费用时按运行中的用量快照结算", () => {
+  // 快照:1 万输入(23.1 积分);最终费用:2 万输入 + 1 千输出(57.75 积分)
+  const snapshot = {
+    input: 10000,
+    output: 0,
+    partial: true,
+    metering: {
+      source: "sdk_model_usage",
+      complete: true, // 快照自己说完整,结算也要按不完整对待
+      partial: true,
+      models: [
+        {
+          modelId: "up-main",
+          inputTokens: 10000,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      ],
+    },
+  };
+
+  for (const mode of ["live", "trial"] as const) {
+    it(`${mode}:worker 中途挂掉(没有最终费用)→ 按快照计价、保留暂记 → 最终费用补写后只补差额`, async () => {
+      const { world, charging, admit, finish } = setup(mode);
+      world.credit("u1", 1000n * C);
+      await admit("r1");
+      world.setRun("r1", {
+        status: "failed",
+        cost: null,
+        usageSnapshot: snapshot,
+        pricing,
+        startedAt: 1,
+      });
+      expect(await charging.sweep()).toBe(1);
+      const first = mode === "live" ? 23_100_000n : 0n;
+      expect(world.charge("r1")).toMatchObject({
+        state: "provisional",
+        incomplete: true,
+        estimatedMicro: "23100000",
+        chargedMicro: first.toString(),
+      });
+      expect(await charging.sweep()).toBe(0); // 快照没变:不再处理
+
+      // 恢复记录补写了最终费用
+      finish("r1", "failed");
+      expect(await charging.sweep()).toBe(1);
+      expect(world.charge("r1")).toMatchObject({
+        state: "settled",
+        incomplete: false,
+        estimatedMicro: EXPECTED,
+        chargedMicro: (mode === "live" ? 57_750_000n : 0n).toString(),
+      });
+      expect(world.deducted("u1")).toBe(mode === "live" ? 57_750_000n : 0n);
+      expect(await charging.sweep()).toBe(0);
+    });
+  }
+
+  it("有最终费用时不看快照", async () => {
+    const { world, charging, admit } = setup("live");
+    world.credit("u1", 1000n * C);
+    await admit("r1");
+    world.setRun("r1", {
+      status: "success",
+      cost: {
+        input: 0,
+        output: 0,
+        metering: { source: "sdk_model_usage", complete: true, models: [] },
+      },
+      usageSnapshot: snapshot,
+      pricing,
+      startedAt: 1,
+    });
+    await charging.settle("r1", { final: true });
+    expect(world.charge("r1")).toMatchObject({ chargedMicro: "0" });
+  });
+});
+
+describe("快照与最终费用内容完全相同", () => {
+  // 结算消息之后的快照就是最终费用:内容一模一样
+  const full = {
+    input: 20000,
+    output: 1000,
+    metering: {
+      source: "sdk_model_usage",
+      complete: true,
+      models: [
+        {
+          modelId: "up-main",
+          inputTokens: 20000,
+          outputTokens: 1000,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      ],
+    },
+  };
+  for (const mode of ["live", "trial"] as const) {
+    for (const via of ["清扫", "直接最终结算"] as const) {
+      it(`${mode}:完整费用先作为快照暂记 → 原样补进最终费用 → ${via}转已结清,不重复扣`, async () => {
+        const { world, charging, admit } = setup(mode);
+        world.credit("u1", 1000n * C);
+        await admit("r1");
+        world.setRun("r1", {
+          status: "failed",
+          cost: null,
+          usageSnapshot: full,
+          pricing,
+          startedAt: 1,
+        });
+        await charging.sweep();
+        const due = mode === "live" ? 57_750_000n : 0n;
+        expect(world.charge("r1")).toMatchObject({
+          state: "provisional",
+          incomplete: true,
+          estimatedMicro: EXPECTED,
+          chargedMicro: due.toString(),
+        });
+
+        world.setRun("r1", {
+          status: "failed",
+          cost: structuredClone(full),
+          usageSnapshot: full,
+          pricing,
+          startedAt: 1,
+        });
+        if (via === "清扫") expect(await charging.sweep()).toBe(1);
+        else expect(await charging.settle("r1", { final: true })).toBe("settled");
+        expect(world.charge("r1")).toMatchObject({
+          state: "settled",
+          incomplete: false,
+          estimatedMicro: EXPECTED,
+          chargedMicro: due.toString(),
+        });
+        expect(world.deducted("u1")).toBe(due);
+        expect(world.balance("u1")).toEqual({ available: 1000n * C - due, reserved: 0n });
+        expect(await charging.sweep()).toBe(0);
+      });
+    }
+  }
+});

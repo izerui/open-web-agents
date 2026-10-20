@@ -190,6 +190,11 @@ export interface RunContext {
   env: Record<string, string>;
   /** 运行中途追加消息的收件箱;不给 = 这一轮不接受追加(一次性输入)。 */
   steer?: SteerInbox;
+  /**
+   * 运行中每收到一次用量,引擎交出到此为止的累计费用(形状同 RunResult.cost:token 合计 + 按模型的计量)。
+   * 编排据此写用量快照,worker 中途挂掉时按它结算。回调出错不影响运行。
+   */
+  onCostSnapshot?: (cost: unknown) => void;
 }
 
 /** 一条追加消息。 */

@@ -208,7 +208,7 @@ class Store implements RunChargeStore {
 
   async runForSettle(runId: string): Promise<RunForSettle | null> {
     const run = this.w.runs.get(runId);
-    return run ? { ...structuredClone(run), costDigest: digestOf(run.cost) } : null;
+    return run ? { ...structuredClone(run), costDigest: runDigest(run) } : null;
   }
 
   async openOfFinishedRuns(limit: number) {
@@ -218,13 +218,21 @@ class Store implements RunChargeStore {
         if (c.state === "provisional") {
           const owed = BigInt(c.owedMicro ?? "0");
           if (owed > 0n && (this.w.wallets.get(c.accountId)?.available ?? 0n) >= owed) return true;
-          return !!run?.cost && digestOf(run.cost) !== c.settledCostDigest;
+          const digest = run ? runDigest(run) : null;
+          return digest !== null && digest !== c.settledCostDigest;
         }
         return c.state === "open" && ["success", "failed", "cancelled"].includes(run?.status ?? "");
       })
       .slice(0, limit)
       .map((c) => c.runId);
   }
+}
+
+/** 同 MySQL 的 COST_DIGEST:最终费用原样,快照加来源前缀 */
+function runDigest(run: RunForSettle): string | null {
+  if (run.cost != null) return digestOf(run.cost);
+  if (run.usageSnapshot != null) return `snapshot:${digestOf(run.usageSnapshot)}`;
+  return null;
 }
 
 function digestOf(cost: unknown): string | null {

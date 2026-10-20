@@ -122,6 +122,18 @@ export class ClaudeSdkEngine implements EnginePort {
     // 没等到结算消息(result)的那部分用量:按模型、按消息累计(见 domain/partial-usage.ts)。
     // 取消、失败、多轮中断时按它结算,不能因为没有 result 就当成没花钱
     const unsettled = new UnsettledUsage();
+    // 累计费用快照:与中断时 finish() 会返回的一致(已结算的 result 累计 + 之后尚未结算的用量)
+    let reportSnapshot = false;
+    const snapshot = () => {
+      if (!ctx.onCostSnapshot) return;
+      const cost = mergeCost(combineResults(results)?.cost, unsettled.cost());
+      if (!cost) return;
+      try {
+        ctx.onCostSnapshot(cost);
+      } catch {
+        // 快照只是兜底,不能影响运行
+      }
+    };
 
     try {
       const skillPluginPath = this.deps.skillsRoot
@@ -172,6 +184,7 @@ export class ClaudeSdkEngine implements EnginePort {
         } | null;
         if (m) trackUuid(m);
         unsettled.observe(msg);
+        if (carriesUsage(msg)) reportSnapshot = true;
 
         if (m?.type === "system" && m.subtype === "init") {
           sessionId = m.session_id ?? sessionId;
@@ -194,6 +207,10 @@ export class ClaudeSdkEngine implements EnginePort {
           }
           // assistant 消息处理完毕,重置标记 —— 下一条 assistant 消息重新计数
           if (m?.type === "assistant") hasStreamed = false;
+        }
+        if (reportSnapshot) {
+          reportSnapshot = false;
+          snapshot();
         }
       }
     } catch (err) {
@@ -267,4 +284,20 @@ export class ClaudeSdkEngine implements EnginePort {
       error,
     };
   }
+}
+
+/** 这条 SDK 消息是否带来了用量变化(流式消息开始/结束、完整 assistant 消息、结算消息) */
+function carriesUsage(msg: unknown): boolean {
+  const m = msg as {
+    type?: string;
+    message?: { usage?: unknown };
+    event?: { type?: string };
+  } | null;
+  if (!m) return false;
+  if (m.type === "result") return true;
+  if (m.type === "assistant") return !!m.message?.usage;
+  return (
+    m.type === "stream_event" &&
+    (m.event?.type === "message_start" || m.event?.type === "message_delta")
+  );
 }

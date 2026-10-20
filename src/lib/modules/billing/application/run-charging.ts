@@ -315,7 +315,11 @@ export class RunCharging {
       const run = await store.runForSettle(runId);
       if (!run || !TERMINAL.has(run.status)) return "pending" as const;
 
-      const cost = (run.cost ?? null) as { metering?: ModelMetering } | null;
+      // 没有最终费用(worker 中途挂掉)时按运行中的用量快照计价 —— 但快照不含崩溃那一刻
+      // 进行中的请求,只能算不完整:能算的先记上,保留暂记;最终费用之后到了再补差额
+      const cost = (run.cost ?? incompleteSnapshot(run.usageSnapshot)) as {
+        metering?: ModelMetering;
+      } | null;
       const digest = run.costDigest ?? null;
       // 暂记之后花费没变、也没有欠款要补:没有新的信息,保持原样
       // (worker 确认"没有花费 = 没有用量"的除外)。有欠款时不受指纹限制 —— 充值后要能补扣
@@ -431,4 +435,15 @@ export class RunCharging {
     }
     return n;
   }
+}
+
+/** 用量快照当作费用用时,一律标为不完整 */
+function incompleteSnapshot(snapshot: unknown): unknown {
+  if (!snapshot || typeof snapshot !== "object") return null;
+  const s = snapshot as { metering?: ModelMetering };
+  return {
+    ...s,
+    partial: true,
+    ...(s.metering ? { metering: { ...s.metering, complete: false, partial: true } } : {}),
+  };
 }

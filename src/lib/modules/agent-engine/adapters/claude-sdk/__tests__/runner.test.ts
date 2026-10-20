@@ -564,3 +564,84 @@ describe("ClaudeSdkEngine 部分计量(按模型)", () => {
     expect(r.cost?.metering?.partial).toBeUndefined();
   });
 });
+
+describe("ClaudeSdkEngine 运行中的累计费用快照", () => {
+  const assistant = (id: string, input: number, output: number) => ({
+    type: "assistant",
+    message: {
+      id,
+      model: "up-main",
+      content: [{ type: "text", text: "x" }],
+      usage: { input_tokens: input, output_tokens: output },
+    },
+  });
+  const result1 = {
+    type: "result",
+    subtype: "success",
+    result: "第一轮",
+    total_cost_usd: 0.2,
+    usage: { input_tokens: 20000, output_tokens: 1000 },
+    modelUsage: {
+      "up-main": {
+        inputTokens: 20000,
+        outputTokens: 1000,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 0,
+      },
+    },
+  };
+  type Snap = { metering?: { models: { inputTokens: number; outputTokens: number }[] } };
+  const tokens = (c: unknown) =>
+    ((c as Snap).metering?.models ?? []).map((m) => [m.inputTokens, m.outputTokens]);
+
+  it("每次用量变化交出累计快照;多轮不重复计第一轮;最后一份等于中断时的结算费用", async () => {
+    const snaps: unknown[] = [];
+    const q: QueryFn = () =>
+      (async function* () {
+        yield { type: "system", subtype: "init", session_id: "s" };
+        yield {
+          type: "stream_event",
+          event: {
+            type: "message_start",
+            message: {
+              id: "m1",
+              model: "up-main",
+              usage: { input_tokens: 20000, output_tokens: 1 },
+            },
+          },
+        };
+        yield assistant("m1", 20000, 1000);
+        yield result1;
+        yield assistant("m2", 10000, 0);
+        throw new Error("socket hang up");
+      })();
+    const r = await engine(q).run(
+      spec(),
+      { ...ctx, onCostSnapshot: (c) => snaps.push(structuredClone(c)) },
+      () => {},
+      new AbortController().signal,
+    );
+    expect(snaps.map(tokens)).toEqual([
+      [[20000, 1]], // 流式开始:输入已知
+      [[20000, 1000]], // 完整消息
+      [[20000, 1000]], // 结算消息:累计快照,不重复
+      [[30000, 1000]], // 追加轮:第一轮 + 第二轮
+    ]);
+    expect(snaps.at(-1)).toEqual(r.cost);
+  });
+
+  it("回调抛错不影响运行", async () => {
+    const r = await engine(replay([assistant("m1", 1, 1), result1])).run(
+      spec(),
+      {
+        ...ctx,
+        onCostSnapshot: () => {
+          throw new Error("db down");
+        },
+      },
+      () => {},
+      new AbortController().signal,
+    );
+    expect(r.status).toBe("success");
+  });
+});

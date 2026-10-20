@@ -546,6 +546,16 @@ export class MysqlRunRepo implements RunRepo {
     }));
   }
 
+  /**
+   * 运行中的累计用量快照(覆盖写)。已经有最终费用的就不再写 —— 快照只在没有最终费用时用于结算。
+   */
+  async saveUsageSnapshot(id: string, snapshot: unknown): Promise<void> {
+    await this.db
+      .update(runs)
+      .set({ usageSnapshot: snapshot })
+      .where(and(eq(runs.id, id), isNull(runs.cost)));
+  }
+
   /** 补记花费:只在还没有花费记录时写入(不覆盖结算过的数据),见 RunPayloadSource.recordCost。 */
   async recordCost(id: string, cost: unknown): Promise<void> {
     await this.db

@@ -20,7 +20,13 @@ import type {
 import { ModelUnavailable } from "@/lib/modules/model-gateway/domain/resolve-run-models";
 import type { SteerChannel } from "@/lib/modules/run/ports";
 import type { SessionRepo } from "@/lib/modules/session/ports";
-import { type AgentEvent, BrandedError, type ModelRef, type PinnedPricing } from "@/lib/shared";
+import {
+  type AgentEvent,
+  BrandedError,
+  type ModelRef,
+  type PinnedPricing,
+  type RunPricing,
+} from "@/lib/shared";
 import { EventCoalescer } from "./event-coalescer";
 import { ChannelSteerInbox } from "./steer-inbox";
 
@@ -61,6 +67,11 @@ export interface OrchestratorDeps {
    * (运行中计费检查的收尾、记录会话锚点)。失败只报告,不影响运行;worker 之后还会再存一次。
    */
   saveCostRecovery?: (runId: string, cost: NonNullable<RunResult["cost"]>) => Promise<void>;
+  /**
+   * 写运行中的累计用量快照(见 RunContext.onCostSnapshot)。同一次运行只保留最新一份待写:
+   * 前一次还没写完时,新的覆盖旧的。写失败只报告,不影响运行。
+   */
+  saveUsageSnapshot?: (runId: string, cost: NonNullable<RunResult["cost"]>) => Promise<void>;
   /** 传给 agent 子进程的基础环境。 */
   baseEnv?: Record<string, string>;
   /**
@@ -194,6 +205,11 @@ export class RunOrchestrator {
           : ("ask" as const),
       credentials,
       modelSlots: binding.slots,
+      ...(cmd.runId && this.deps.saveUsageSnapshot
+        ? {
+            onCostSnapshot: snapshotWriter(cmd.runId, binding.pricing, this.deps.saveUsageSnapshot),
+          }
+        : {}),
       env: { ...(this.deps.baseEnv ?? {}) },
     };
     // 知识检索:命中才注入。检索挂了就当没有知识库,不牵连整轮运行
@@ -420,4 +436,38 @@ export class RunOrchestrator {
       throw new EngineRunFailed(err, engineCost);
     }
   }
+}
+
+/**
+ * 用量快照的写入器:带上锁定价目引用;同时只有一次写在进行,期间到的新快照覆盖旧的,
+ * 写完再写最新的那份。失败只报告一次,不影响运行。
+ */
+function snapshotWriter(
+  runId: string,
+  pricing: RunPricing,
+  save: (runId: string, cost: NonNullable<RunResult["cost"]>) => Promise<void>,
+): (cost: unknown) => void {
+  let pending: NonNullable<RunResult["cost"]> | undefined;
+  let writing = false;
+  let warned = false;
+  const drain = async () => {
+    writing = true;
+    while (pending) {
+      const next = pending;
+      pending = undefined;
+      await save(runId, next).catch((err) => {
+        if (warned) return;
+        warned = true;
+        console.warn(
+          `[owa] 用量快照写入失败(run=${runId}),之后的失败不再提示:`,
+          err instanceof Error ? err.message : err,
+        );
+      });
+    }
+    writing = false;
+  };
+  return (cost) => {
+    pending = { ...(cost as NonNullable<RunResult["cost"]>), pricing };
+    if (!writing) void drain();
+  };
 }

@@ -501,3 +501,64 @@ describe("费用恢复记录", () => {
     expect(err).not.toBeInstanceOf(EngineRunFailed);
   });
 });
+
+describe("运行中的用量快照", () => {
+  async function build(save: (runId: string, cost: unknown) => Promise<void>, costs: number[]) {
+    const sessions = new InMemorySessionRepo();
+    const agents = new InMemoryAgentRepo([
+      { id: "a1", ownerId: "u1", name: "a", config: { systemPrompt: "p", model: "sonnet" } },
+    ]);
+    await sessions.create({ id: "s1", agentId: "a1", workspaceDir: "/ws/s1", ownerId: "u1" });
+    const engine: EnginePort = {
+      async run(_s, ctx) {
+        for (const input of costs) ctx.onCostSnapshot?.({ input, output: 0 });
+        return { status: "success", summary: "ok" };
+      },
+    };
+    return new RunOrchestrator({
+      sessions,
+      agents,
+      engine,
+      bus: new InMemoryBus(),
+      resolveModels: platformModels(PLATFORM),
+      saveUsageSnapshot: save,
+    });
+  }
+
+  it("带上锁定价目引用;前一次没写完时只保留最新一份", async () => {
+    const writes: { runId: string; cost: unknown }[] = [];
+    let release!: () => void;
+    const first = new Promise<void>((r) => {
+      release = r;
+    });
+    const orch = await build(
+      async (runId, cost) => {
+        writes.push({ runId, cost });
+        if (writes.length === 1) await first; // 第一笔写得慢
+      },
+      [1, 2, 3, 4],
+    );
+    await orch.execute(
+      { sessionId: "s1", prompt: "hi", runId: "r1" },
+      new AbortController().signal,
+    );
+    release();
+    for (let i = 0; i < 50 && writes.length < 2; i++) await new Promise((r) => setTimeout(r, 2));
+    expect(writes.map((w) => (w.cost as { input: number }).input)).toEqual([1, 4]);
+    expect(writes[0]).toMatchObject({
+      runId: "r1",
+      cost: { pricing: { providerId: "platform-default" } },
+    });
+  });
+
+  it("写失败不影响运行", async () => {
+    const orch = await build(async () => {
+      throw new Error("db down");
+    }, [1, 2]);
+    const r = await orch.execute(
+      { sessionId: "s1", prompt: "hi", runId: "r1" },
+      new AbortController().signal,
+    );
+    expect(r.status).toBe("success");
+  });
+});

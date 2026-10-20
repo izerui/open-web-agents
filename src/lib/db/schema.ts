@@ -213,6 +213,11 @@ export const runs = mysqlTable(
      * 迁移前入队的旧任务为空,回退到当前配置。
      */
     agentConfig: json("agent_config"),
+    /**
+     * 运行中最新的累计用量快照(引擎每次收到用量就更新)。只在运行没能写下最终费用
+     * (worker 中途挂掉)时用于结算:按它计价,但视为不完整 —— 崩溃那一刻进行中的请求不在里面。
+     */
+    usageSnapshot: json("usage_snapshot"),
     /** 执行的智能体版本;NULL = 草稿。结果、运行记录、回调里都带上,便于追溯。 */
     agentVersion: int("agent_version"),
     /** 请求级凭证覆盖(三级链最高优先),整体加密的 JSON。只在 worker 执行时解密。 */

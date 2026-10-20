@@ -52,7 +52,13 @@ export function monthUsedSql(mode: BillingMode) {
 }
 
 /** 运行花费的指纹:结算与清扫用同一个表达式,保证可比 */
-const COST_DIGEST = sql<string | null>`SHA2(CAST(${runs.cost} AS CHAR), 256)`;
+// 来源也算进指纹:快照与最终费用内容可以完全相同(结算消息之后的快照就是最终费用),
+// 不区分的话,按快照暂记之后补写同一份最终费用,指纹不变,清扫不选、结算提前返回,记录永远停在不完整。
+// 最终费用的指纹保持原样(已有记录不受影响),快照加前缀
+const COST_DIGEST = sql<string | null>`CASE
+  WHEN ${runs.cost} IS NOT NULL THEN SHA2(CAST(${runs.cost} AS CHAR), 256)
+  WHEN ${runs.usageSnapshot} IS NOT NULL THEN SHA2(CONCAT('snapshot:', CAST(${runs.usageSnapshot} AS CHAR)), 256)
+  END`;
 
 /** 必须用外层事务的连接构造(`new MysqlRunChargeStore(tx as Db)`):行锁持有到外层事务结束 */
 export class MysqlRunChargeStore implements RunChargeStore {
@@ -209,6 +215,7 @@ export class MysqlRunChargeStore implements RunChargeStore {
         cost: runs.cost,
         pricing: runs.pricing,
         startedAt: runs.startedAt,
+        usageSnapshot: runs.usageSnapshot,
         costDigest: COST_DIGEST,
       })
       .from(runs)
@@ -223,6 +230,7 @@ export class MysqlRunChargeStore implements RunChargeStore {
             ? null
             : ((row.pricing as RunPricing | null) ?? null),
           startedAt: row.startedAt?.getTime() ?? null,
+          usageSnapshot: row.usageSnapshot ?? null,
           costDigest: row.costDigest ?? null,
         }
       : null;
@@ -246,7 +254,7 @@ export class MysqlRunChargeStore implements RunChargeStore {
           // 指纹在库里比,没变化的暂记不会被反复捞出来、挤掉别的待清扫记录
           and(
             eq(runCharges.state, "provisional"),
-            isNotNull(runs.cost),
+            sql`COALESCE(${runs.cost}, ${runs.usageSnapshot}) IS NOT NULL`,
             or(
               isNull(runCharges.settledCostDigest),
               sql`${runCharges.settledCostDigest} <> ${COST_DIGEST}`,

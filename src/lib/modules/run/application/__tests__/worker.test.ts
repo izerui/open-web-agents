@@ -1341,3 +1341,121 @@ describe("RunWorker 费用恢复记录:先落恢复记录再写库,重启后补�
     expect(w.ledger.deducted("u1")).toBe(DUE);
   });
 });
+
+describe("worker 中途挂掉:真实 runner + 编排写下的用量快照用于结算", () => {
+  it("SDK 报了用量后不再返回(进程死了)→ 重启回收 → 按快照计价,保留暂记", async () => {
+    const C = 1_000_000n;
+    const pricing: RunPricing = {
+      providerId: "p",
+      models: [{ capabilityId: "m-main", modelId: "up-main", version: 3 }],
+      binding: {
+        mainRef: "m-main",
+        main: "m-main",
+        subagents: {},
+        slots: { fable: null, opus: null, sonnet: null, haiku: null },
+      },
+    };
+    const priced: Capability = {
+      id: "m-main",
+      name: "主力",
+      kind: "llm",
+      modelId: "up-main",
+      enabled: true,
+      acceptsImages: false,
+      providerId: "p",
+      rates: [{ meter: "input_token", units: "1000000", microCredits: "2310000000" }],
+      version: 3,
+      updatedAt: 0,
+    };
+    const ledger = new InMemoryChargeWorld();
+    ledger.credit("u1", 1000n * C);
+    const charging = new RunCharging({
+      mode: async () => "live",
+      bind: async () => ({ pricing, main: { capabilityId: "m-main" } }) as never,
+      reserveTargetOf: async () => 300n * C,
+      pricedModels: async () => [priced],
+      transaction: ledger.transaction,
+    });
+    const snapshots = new Map<string, unknown>();
+    // 真实 runner:报一条 1 万输入的用量,然后永远不再返回
+    const engine = new ClaudeSdkEngine(
+      () =>
+        (async function* () {
+          yield { type: "system", subtype: "init", session_id: "s" };
+          yield {
+            type: "assistant",
+            message: {
+              id: "m1",
+              model: "up-main",
+              content: [{ type: "text", text: "x" }],
+              usage: { input_tokens: 10000, output_tokens: 0 },
+            },
+          };
+          await new Promise(() => {});
+        })(),
+      { sharedHome: "/h", hostHome: "/u", sandboxEnabled: false, allowStdioMcp: false },
+    );
+    const { repo } = await setup(engine);
+    const sessions = new InMemorySessionRepo();
+    await sessions.create({ id: "s1", agentId: "a1", workspaceDir: "/ws/s1" });
+    const orchestrator = new RunOrchestrator({
+      sessions,
+      agents: new InMemoryAgentRepo([
+        { id: "a1", ownerId: "u1", name: "a", config: { systemPrompt: "p", model: "sonnet" } },
+      ]),
+      engine,
+      bus: new InMemoryBus(),
+      resolveModels: platformModels({ baseUrl: "https://b.example", key: "k" }),
+      saveUsageSnapshot: async (runId, cost) => {
+        snapshots.set(runId, structuredClone(cost));
+      },
+    });
+    const sync = async () => {
+      const r = await repo.get("r1");
+      ledger.setRun("r1", {
+        status: r?.state ?? "pending",
+        cost: repo.recordedCosts.get("r1") ?? null,
+        usageSnapshot: snapshots.get("r1") ?? null,
+        pricing,
+        startedAt: 1,
+      });
+    };
+    const worker = (now: number) =>
+      new RunWorker(
+        repo,
+        orchestrator,
+        { leaseMs: 1000, heartbeatMs: 10_000, now: () => now },
+        {
+          settleCharge: async (id, opts) => {
+            await sync();
+            return charging.settle(id, opts);
+          },
+          sweepCharges: async () => {
+            await sync();
+            return charging.sweep();
+          },
+        },
+      );
+    await ledger.transaction((store) =>
+      charging.admit(store, { runId: "r1", accountId: "u1", apiKeyId: null, main: "m-main" }),
+    );
+    await repo.createWithPrompt("r1", "s1", "go");
+    void worker(1000).tick(); // 卡死在 SDK 上
+    for (let i = 0; i < 100 && !snapshots.has("r1"); i++)
+      await new Promise((r) => setTimeout(r, 5));
+    expect(snapshots.get("r1")).toMatchObject({
+      input: 10000,
+      metering: { models: [{ modelId: "up-main", inputTokens: 10000 }] },
+    });
+
+    await worker(10_000).reclaim(); // 租约过期:回收判失败 → 清扫按快照结算
+    expect((await repo.get("r1"))?.state).toBe("failed");
+    expect(ledger.charge("r1")).toMatchObject({
+      state: "provisional",
+      incomplete: true,
+      estimatedMicro: "23100000",
+      chargedMicro: "23100000",
+    });
+    expect(ledger.deducted("u1")).toBe(23_100_000n);
+  });
+});

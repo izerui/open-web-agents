@@ -41,7 +41,9 @@ export interface RunForSettle {
   pricing: RunPricing | null;
   /** 被 worker 认领的时刻;null = 从没开始执行(确认没有调用模型) */
   startedAt: number | null;
-  /** 花费的指纹(没有花费为 null),由存储计算 */
+  /** 运行中的累计用量快照;没有最终费用时用于结算(视为不完整) */
+  usageSnapshot?: unknown;
+  /** 花费的指纹(没有最终费用时为快照的指纹;都没有为 null),由存储计算 */
   costDigest?: string | null;
 }
 
