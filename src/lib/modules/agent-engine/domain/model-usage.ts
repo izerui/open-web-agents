@@ -203,8 +203,9 @@ export function extractModelUsage(raw: unknown): ModelMetering {
  * 按字段合并两份累计快照(modelUsage 是整个 query 的累计值,不能相加):
  * - 新快照里读得出的字段:采用新值;
  * - 新快照里读不出的字段:保留此前已确认的值(累计值只增不减,取两者较大),继续标为读不出;
- * - 新快照里没出现的模型 / 未归属用量:保留此前的值。
- * 计量缺失的项数以新快照为准(此前读不出、后来读出来的已经解决)。
+ * - 新快照里没出现的模型 / 未归属用量:保留此前的值,连同它们读不出的标记 ——"没再提到"不等于"已经补齐";
+ * - 此前认不出身份、整项读不出的(无法被后来的快照明确补齐)同样沿用其缺失。
+ * 计量缺失的项数 = 新快照自己的 + 沿用下来的;只有后来的快照明确给出了对应字段的合法值才算解除。
  */
 export function mergeCumulative(prev: ModelMetering, next: ModelMetering): ModelMetering {
   const pick = (
@@ -222,21 +223,38 @@ export function mergeCumulative(prev: ModelMetering, next: ModelMetering): Model
     prevById.delete(m.modelId);
     return { ...m, ...merged };
   });
-  for (const m of prevById.values()) models.push({ ...m });
+  // 新快照没提到的模型:沿用此前的值与读不出的标记
+  let carried = 0;
+  for (const m of prevById.values()) {
+    models.push({ ...m });
+    carried += m.missingFields?.length ?? 0;
+  }
 
   const prevUna = unattributedOf(prev);
   const nextUna = unattributedOf(next);
+  const nextMentionsUna = nextUna !== null || (next.unattributedMissing?.length ?? 0) > 0;
   const unattributed = nextUna
     ? pick(prevUna ?? undefined, nextUna, next.unattributedMissing)
     : next.unattributedMissing?.length
       ? pick(prevUna ?? undefined, ZERO, next.unattributedMissing)
       : (prevUna ?? undefined);
-  const missing = missingOf(next);
+  // 未归属部分新快照没提到:沿用此前读不出的标记
+  const unattributedMissing = nextMentionsUna ? next.unattributedMissing : prev.unattributedMissing;
+  if (!nextMentionsUna) carried += prev.unattributedMissing?.length ?? 0;
+
+  // 此前认不出身份、整项读不出的:没有身份可供后来的快照补齐,沿用其缺失
+  const trackedPrev =
+    prev.models.reduce((n, m) => n + (m.missingFields?.length ?? 0), 0) +
+    (prev.unattributedMissing?.length ?? 0);
+  carried += Math.max(0, missingOf(prev) - trackedPrev);
+
+  const missing = missingOf(next) + carried;
   return {
     ...next,
     complete: next.complete && missing === 0,
     models,
     ...(unattributed && unattributedOf({ unattributed }) ? { unattributed } : {}),
+    ...(unattributedMissing?.length ? { unattributedMissing } : {}),
     ...(missing > 0 ? { missing } : {}),
   };
 }

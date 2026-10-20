@@ -147,6 +147,42 @@ describe("SDK model metering", () => {
     expect(fixed.missing).toBeUndefined();
   });
 
+  it("合并累计快照:新快照没提到的模型连同缺失标记一起沿用;后来明确补齐才解除", () => {
+    const prev = extractModelUsage({
+      "up-main": tokens(10000),
+      "up-sub": { ...tokens(5000), outputTokens: "x" },
+    });
+    const onlyMain = mergeCumulative(prev, extractModelUsage({ "up-main": tokens(20000) }));
+    expect(onlyMain.models.find((m) => m.modelId === "up-sub")).toMatchObject({
+      inputTokens: 5000,
+      missingFields: ["outputTokens"],
+    });
+    expect(onlyMain.missing).toBe(1);
+    expect(onlyMain.complete).toBe(false);
+
+    const filled = mergeCumulative(
+      onlyMain,
+      extractModelUsage({ "up-main": tokens(20000), "up-sub": tokens(5000) }),
+    );
+    expect(filled.missing).toBeUndefined();
+    expect(filled.models.find((m) => m.modelId === "up-sub")?.missingFields).toBeUndefined();
+  });
+
+  it("合并累计快照:没提到的未归属部分、此前认不出身份且整项读不出的,缺失同样沿用", () => {
+    const long = "x".repeat(201);
+    const una = mergeCumulative(
+      extractModelUsage({ "up-main": tokens(1), [long]: { ...tokens(100), outputTokens: -1 } }),
+      extractModelUsage({ "up-main": tokens(2) }),
+    );
+    expect(una).toMatchObject({ unattributedMissing: ["outputTokens"], missing: 1 });
+
+    const anonymous = mergeCumulative(
+      extractModelUsage({ "up-main": tokens(1), [long]: null }),
+      extractModelUsage({ "up-main": tokens(2) }),
+    );
+    expect(anonymous.missing).toBe(1);
+  });
+
   it("合并累计快照:未归属用量同样按字段合并", () => {
     const long = "x".repeat(201);
     const prev = extractModelUsage({ [long]: { ...tokens(100), outputTokens: 50 } });

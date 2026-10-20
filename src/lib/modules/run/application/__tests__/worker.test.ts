@@ -1456,6 +1456,65 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
         expect(world.balance("u1")).toEqual({ available: 1000n * C - DUE, reserved: 0n });
       });
 
+      describe("新快照没提到的模型:缺失标记一并沿用", () => {
+        const twoRounds = (second: Record<string, unknown>) =>
+          scenario(0, {
+            engine: sdk(() =>
+              (async function* () {
+                yield { type: "system", subtype: "init", session_id: "s" };
+                yield {
+                  type: "result",
+                  subtype: "success",
+                  result: "第一轮",
+                  total_cost_usd: 0.02,
+                  usage: { input_tokens: 20000, output_tokens: 0 },
+                  modelUsage: {
+                    "up-main": usage(10000, 0),
+                    "up-sub": usage(10000, "unreadable"), // 子模型输出读不出
+                  },
+                };
+                yield assistant("m2", 10000, 0); // 追加轮
+                yield {
+                  type: "result",
+                  subtype: "error_during_execution",
+                  result: "追加轮出错",
+                  total_cost_usd: 0.03,
+                  modelUsage: second,
+                };
+              })(),
+            ),
+            cancel: false,
+          });
+
+        it("子模型输出缺失 → 后续快照只含主模型:子模型的已知输入照扣,仍保持暂记;重复结算、清扫不多扣", async () => {
+          const { world, settleAgain, sweepAgain } = await twoRounds({
+            "up-main": usage(20000, 0),
+          });
+          // 主模型 2 万 + 子模型 1 万输入(子模型认不出,按主模型价)= 3 万输入 = 69.3
+          expect(world.charge("r1")).toMatchObject({
+            state: "provisional",
+            incomplete: true,
+            chargedMicro: "69300000",
+          });
+          expect(await settleAgain()).toBe("none");
+          expect(await sweepAgain()).toBe(0);
+          expect(world.balance("u1")).toEqual({ available: 1000n * C - 69_300_000n, reserved: 0n });
+        });
+
+        it("对照:后续快照明确补齐子模型输出 → 结清", async () => {
+          const { world } = await twoRounds({
+            "up-main": usage(20000, 0),
+            "up-sub": usage(10000, 100),
+          });
+          // 3 万输入 69.3 + 100 输出 1.155 = 70.455
+          expect(world.charge("r1")).toMatchObject({
+            state: "settled",
+            incomplete: false,
+            chargedMicro: "70455000",
+          });
+        });
+      });
+
       it("对照:完整的 result₂(累计 2 万输入 + 1000 输出)按它收一次,不与 result₁ 相加", async () => {
         const { world, settleAgain } = await run({ modelUsage: { "up-main": usage(20000, 1000) } });
         expect(world.charge("r1")).toMatchObject({
