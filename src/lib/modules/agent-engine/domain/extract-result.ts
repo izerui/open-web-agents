@@ -2,46 +2,77 @@
 
 import type { RunResult } from "@/lib/modules/agent-engine/ports";
 import { extractJsonObject } from "./extract-json";
-import { type ModelMetering, type TokenBreakdown, extractModelUsage } from "./model-usage";
-
-const n = (v: unknown) => (typeof v === "number" && Number.isSafeInteger(v) && v > 0 ? v : 0);
+import {
+  type ModelMetering,
+  type TokenBreakdown,
+  extractModelUsage,
+  missingOf,
+  readTokenCount,
+} from "./model-usage";
 
 /**
  * 计量:有 modelUsage 按模型给出;没有按模型的明细时,把 result.usage 里明确给出的四项
  * (输入、输出、缓存读、缓存写)记为未归属用量,结算按主模型价计 —— 收到 result 后之前按消息
  * 累计的用量会清空,这里不留下缓存两项,观察到的缓存用量就整段丢了。
  */
-function meteringOf(m: Record<string, unknown>): { metering?: ModelMetering } {
-  const raw = (m.usage ?? {}) as Record<string, unknown>;
-  const breakdown: TokenBreakdown = {
-    inputTokens: n(raw.input_tokens),
-    outputTokens: n(raw.output_tokens),
-    cacheReadTokens: n(raw.cache_read_input_tokens),
-    cacheWriteTokens: n(raw.cache_creation_input_tokens),
+const count = (v: unknown) => {
+  const c = readTokenCount(v);
+  return c === "missing" ? 0 : c;
+};
+
+/**
+ * result.usage 的四项:读得出的(含有效的零、没给的缓存项)照常计;明确给出却读不出的
+ * (负数、字符串等)不能当零 —— 记为计量缺失,结算据此保持暂记。usage 本身不是对象也算缺失。
+ */
+function readResultUsage(usage: unknown): { tokens: TokenBreakdown; missing: number } {
+  const tokens: TokenBreakdown = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
   };
+  if (usage === undefined || usage === null) return { tokens, missing: 0 };
+  if (typeof usage !== "object" || Array.isArray(usage)) return { tokens, missing: 1 };
+  const raw = usage as Record<string, unknown>;
+  let missing = 0;
+  for (const [key, field] of [
+    ["inputTokens", "input_tokens"],
+    ["outputTokens", "output_tokens"],
+    ["cacheReadTokens", "cache_read_input_tokens"],
+    ["cacheWriteTokens", "cache_creation_input_tokens"],
+  ] as const) {
+    const c = readTokenCount(raw[field]);
+    if (c === "missing") missing += 1;
+    else tokens[key] = c;
+  }
+  return { tokens, missing };
+}
+
+function meteringOf(m: Record<string, unknown>): { metering?: ModelMetering } {
+  const { tokens, missing } = readResultUsage(m.usage);
   const any =
-    breakdown.inputTokens ||
-    breakdown.outputTokens ||
-    breakdown.cacheReadTokens ||
-    breakdown.cacheWriteTokens;
+    tokens.inputTokens || tokens.outputTokens || tokens.cacheReadTokens || tokens.cacheWriteTokens;
+  // 只算 result 自己这一条的用量(多条 result 合并时逐条相加)
+  const fromUsage = (base: ModelMetering): ModelMetering => {
+    const total = missingOf(base) + missing;
+    return {
+      ...base,
+      complete: false,
+      ...(any ? { unattributed: tokens } : {}),
+      ...(total > 0 ? { missing: total } : {}),
+      fromResultUsage: true,
+    };
+  };
   if (m.modelUsage !== undefined) {
     const metering = extractModelUsage(m.modelUsage);
     // modelUsage 里一点能用的计数都没有(空的,或各项都读不出):退回用 result.usage 的四项
-    if (metering.models.length === 0 && !metering.unattributed && any) {
-      return { metering: { ...metering, unattributed: breakdown, fromResultUsage: true } };
+    if (metering.models.length === 0 && !metering.unattributed && (any || missing > 0)) {
+      return { metering: fromUsage(metering) };
     }
     return { metering };
   }
-  return any
-    ? {
-        metering: {
-          source: "sdk_model_usage",
-          complete: false,
-          models: [],
-          unattributed: breakdown,
-          fromResultUsage: true,
-        },
-      }
+  return any || missing > 0
+    ? { metering: fromUsage({ source: "sdk_model_usage", complete: false, models: [] }) }
     : {};
 }
 
@@ -64,8 +95,9 @@ export function extractRunResult(resultMsg: unknown, opts: { hasSchema: boolean 
 
   const cost = {
     usd: typeof m.total_cost_usd === "number" ? m.total_cost_usd : 0,
-    input: usage.input_tokens ?? 0,
-    output: usage.output_tokens ?? 0,
+    // 总数只取读得出的;读不出的已在计量里记为缺失
+    input: count(usage.input_tokens),
+    output: count(usage.output_tokens),
     ...meteringOf(m),
   };
   const summary = typeof m.result === "string" ? m.result : undefined;

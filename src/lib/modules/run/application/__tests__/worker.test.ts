@@ -1155,6 +1155,85 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
       });
     });
 
+    describe("计数明确给出却读不出", () => {
+      const resultOnly = (usage: Record<string, unknown>) =>
+        scenario(0, {
+          engine: sdk(() =>
+            (async function* () {
+              yield { type: "system", subtype: "init", session_id: "s" };
+              yield {
+                type: "result",
+                subtype: "success",
+                result: "好的",
+                total_cost_usd: 0.01,
+                usage,
+              };
+            })(),
+          ),
+          cancel: false,
+        });
+
+      it("result 没有 modelUsage、usage 给出 1 万输入与 output_tokens: -1:已知输入照扣,保持暂记;重复结算不多扣", async () => {
+        const { world, repo, settleAgain, sweepAgain } = await resultOnly({
+          input_tokens: 10000,
+          output_tokens: -1,
+        });
+        expect((await repo.get("r1"))?.state).toBe("success");
+        expect(world.charge("r1")).toMatchObject({
+          state: "provisional",
+          incomplete: true,
+          estimatedMicro: SECOND.toString(),
+          chargedMicro: SECOND.toString(),
+        });
+        expect(await settleAgain()).toBe("none");
+        expect(await sweepAgain()).toBe(0);
+        expect(world.balance("u1")).toEqual({ available: 1000n * C - SECOND, reserved: 0n });
+      });
+
+      it("对照:有效的零、省略或为 null 的缓存项不算异常,照常结清", async () => {
+        const { world } = await resultOnly({
+          input_tokens: 10000,
+          output_tokens: 0,
+          cache_creation_input_tokens: null,
+        });
+        expect(world.charge("r1")).toMatchObject({
+          state: "settled",
+          incomplete: false,
+          chargedMicro: SECOND.toString(),
+        });
+      });
+
+      it("取消路径:按消息累计时 output_tokens 读不出 → 已知输入照扣,保持暂记;重复结算不多扣", async () => {
+        const { world, settleAgain, sweepAgain } = await scenario(0, {
+          makeEngine: (cancel) =>
+            sdk(() =>
+              (async function* () {
+                yield { type: "system", subtype: "init", session_id: "s" };
+                yield {
+                  type: "assistant",
+                  message: {
+                    id: "m1",
+                    model: "up-main",
+                    content: [{ type: "text", text: "x" }],
+                    usage: { input_tokens: 10000, output_tokens: "lots" },
+                  },
+                };
+                await cancel();
+                throw new Error("aborted by user");
+              })(),
+            ),
+        });
+        expect(world.charge("r1")).toMatchObject({
+          state: "provisional",
+          incomplete: true,
+          chargedMicro: SECOND.toString(),
+        });
+        expect(await settleAgain()).toBe("none");
+        expect(await sweepAgain()).toBe(0);
+        expect(world.balance("u1")).toEqual({ available: 1000n * C - SECOND, reserved: 0n });
+      });
+    });
+
     it("result₁ → 追加轮 usage₂ → 抛错 → 第二轮计入、第一轮不重复", async () => {
       const q: QueryFn = () =>
         (async function* () {

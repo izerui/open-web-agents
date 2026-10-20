@@ -59,6 +59,62 @@ describe("extractRunResult", () => {
       expect(m?.models).toHaveLength(1);
     });
 
+    it("计数明确给出却读不出(负数、字符串):读得出的照常计,读不出的记计量缺失,不当零", () => {
+      const r = extractRunResult(
+        {
+          type: "result",
+          subtype: "success",
+          result: "ok",
+          usage: { input_tokens: 10000, output_tokens: -1, cache_read_input_tokens: "5" },
+        },
+        { hasSchema: false },
+      );
+      expect(r.cost).toMatchObject({ input: 10000, output: 0 });
+      expect(r.cost?.metering).toEqual({
+        source: "sdk_model_usage",
+        complete: false,
+        models: [],
+        unattributed: {
+          inputTokens: 10000,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+        missing: 2,
+        fromResultUsage: true,
+      });
+    });
+
+    it("有效的零、省略或为 null 的缓存项:都不算异常", () => {
+      const m = extractRunResult(
+        {
+          type: "result",
+          subtype: "success",
+          result: "ok",
+          usage: { input_tokens: 10000, output_tokens: 0, cache_creation_input_tokens: null },
+        },
+        { hasSchema: false },
+      ).cost?.metering;
+      expect(m?.missing).toBeUndefined();
+      expect(m?.unattributed).toEqual({
+        inputTokens: 10000,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      });
+    });
+
+    it("只有读不出的计数、没有任何可用计数:仍留下计量缺失,不能按零结清", () => {
+      for (const usage of [{ input_tokens: -1 }, "garbled"]) {
+        const m = extractRunResult(
+          { type: "result", subtype: "success", result: "ok", usage },
+          { hasSchema: false },
+        ).cost?.metering;
+        expect(m).toMatchObject({ complete: false, models: [], missing: 1 });
+        expect(m?.unattributed).toBeUndefined();
+      }
+    });
+
     it("一点用量都没有:不造计量", () => {
       expect(
         extractRunResult(

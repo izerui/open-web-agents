@@ -36,6 +36,17 @@ export interface ModelMetering {
   fromResultUsage?: boolean;
 }
 
+/**
+ * 读一个 API 风格(snake_case)的 token 计数:
+ * - 非负安全整数 → 该值(0 是有效的零);
+ * - 没给(undefined / null,缓存两项常常省略或给 null)→ 0,不算异常;
+ * - 给了但读不出(负数、字符串、小数、超范围等)→ "missing",由调用方记为计量缺失,不能当零结清。
+ */
+export function readTokenCount(v: unknown): number | "missing" {
+  if (v === undefined || v === null) return 0;
+  return typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : "missing";
+}
+
 /** 读出计量缺失的项数(库里读回的数据也按这个口径校验) */
 export function missingOf(m: Pick<ModelMetering, "missing"> | null | undefined): number {
   const v = m?.missing;

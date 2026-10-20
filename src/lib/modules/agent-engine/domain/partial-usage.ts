@@ -12,8 +12,11 @@ import {
   type TokenBreakdown,
   addUnattributed,
   missingOf,
+  readTokenCount,
   unattributedOf,
 } from "./model-usage";
+
+type Field = "input" | "output" | "cacheRead" | "cacheWrite";
 
 interface MessageUsage {
   model?: string;
@@ -21,6 +24,11 @@ interface MessageUsage {
   output: number;
   cacheRead: number;
   cacheWrite: number;
+  /**
+   * 明确给出却读不出的计数(负数、字符串等;"usage" 表示整个 usage 不是对象)。
+   * 同一条消息后来到达的那份把它读出来了就撤掉;最后仍在的记为计量缺失,不能当零结清
+   */
+  bad: Set<Field | "usage">;
 }
 
 type RawUsage = {
@@ -30,7 +38,23 @@ type RawUsage = {
   cache_creation_input_tokens?: unknown;
 };
 
-const n = (v: unknown) => (typeof v === "number" && Number.isSafeInteger(v) && v > 0 ? v : 0);
+const FIELDS: [Field, keyof RawUsage][] = [
+  ["input", "input_tokens"],
+  ["output", "output_tokens"],
+  ["cacheRead", "cache_read_input_tokens"],
+  ["cacheWrite", "cache_creation_input_tokens"],
+];
+
+/** 把一份计数并进消息:读得出的取最大(同一条消息的累计值),读不出的记下 */
+function absorb(into: MessageUsage, field: Field, raw: unknown): void {
+  const c = readTokenCount(raw);
+  if (c === "missing") {
+    into.bad.add(field);
+    return;
+  }
+  into.bad.delete(field);
+  into[field] = Math.max(into[field], c);
+}
 
 export type EngineCost = NonNullable<RunResult["cost"]>;
 
@@ -64,19 +88,26 @@ export class UnsettledUsage {
       const id = this.streaming.get(parent);
       const cur = id ? this.byMessage.get(id) : undefined;
       // message_delta 的 output_tokens 是这条消息到目前为止的累计
-      if (cur) cur.output = Math.max(cur.output, n(m.event.usage.output_tokens));
+      if (cur) absorb(cur, "output", m.event.usage.output_tokens);
     }
   }
 
-  private put(id: unknown, model: unknown, u: RawUsage): void {
+  private put(id: unknown, model: unknown, u: unknown): void {
     const prev = typeof id === "string" ? this.byMessage.get(id) : undefined;
     const next: MessageUsage = {
       model: typeof model === "string" && model ? model : prev?.model,
-      input: Math.max(n(u.input_tokens), prev?.input ?? 0),
-      output: Math.max(n(u.output_tokens), prev?.output ?? 0),
-      cacheRead: Math.max(n(u.cache_read_input_tokens), prev?.cacheRead ?? 0),
-      cacheWrite: Math.max(n(u.cache_creation_input_tokens), prev?.cacheWrite ?? 0),
+      input: prev?.input ?? 0,
+      output: prev?.output ?? 0,
+      cacheRead: prev?.cacheRead ?? 0,
+      cacheWrite: prev?.cacheWrite ?? 0,
+      bad: new Set(prev?.bad),
     };
+    if (u && typeof u === "object" && !Array.isArray(u)) {
+      next.bad.delete("usage");
+      for (const [field, key] of FIELDS) absorb(next, field, (u as RawUsage)[key]);
+    } else {
+      next.bad.add("usage");
+    }
     if (typeof id === "string") this.byMessage.set(id, next);
     else this.anonymous.push(next);
   }
@@ -91,9 +122,10 @@ export class UnsettledUsage {
   /** 尚未被 result 覆盖的部分用量;一点都没有返回 undefined */
   cost(): EngineCost | undefined {
     const all = [...this.byMessage.values(), ...this.anonymous].filter(
-      (u) => u.input || u.output || u.cacheRead || u.cacheWrite,
+      (u) => u.input || u.output || u.cacheRead || u.cacheWrite || u.bad.size > 0,
     );
     if (all.length === 0) return undefined;
+    const missing = all.reduce((k, u) => k + u.bad.size, 0);
     const byModel = new Map<string, ModelTokenUsage>();
     let unattributed: TokenBreakdown | undefined;
     let input = 0;
@@ -130,11 +162,12 @@ export class UnsettledUsage {
       partial: true,
       metering: {
         source: "sdk_model_usage",
-        // 有认不出模型的部分:按模型的明细不完整(结算对这部分按主模型价计)
-        complete: !unattributed,
+        // 有认不出模型的部分:按模型的明细不完整(结算对这部分按主模型价计);有读不出的计数同样不完整
+        complete: !unattributedOf({ unattributed }) && missing === 0,
         partial: true,
         models: [...byModel.values()],
-        ...(unattributed ? { unattributed } : {}),
+        ...(unattributedOf({ unattributed }) ? { unattributed } : {}),
+        ...(missing > 0 ? { missing } : {}),
       },
     };
   }

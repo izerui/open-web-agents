@@ -599,6 +599,36 @@ describe("ClaudeSdkEngine 部分计量(按模型)", () => {
     });
   });
 
+  it("按消息累计时计数读不出:记计量缺失;同一条消息后来那份读得出就撤掉;省略的缓存项不算异常", async () => {
+    const msg = (id: string, usage: Record<string, unknown>) => ({
+      type: "assistant",
+      message: { id, model: "up-main", content: [{ type: "text", text: "x" }], usage },
+    });
+    const q: QueryFn = () =>
+      (async function* () {
+        yield msg("m1", { input_tokens: 10000, output_tokens: "lots" });
+        yield msg("m1", { input_tokens: 10000, output_tokens: 50 }); // 同一条消息:读出来了
+        yield msg("m2", { input_tokens: 5000, output_tokens: -1 }); // 一直读不出
+        throw new Error("aborted by user");
+      })();
+    const r = await engine(q).run(spec(), ctx, () => {}, signal());
+    expect(r.cost?.metering).toEqual({
+      source: "sdk_model_usage",
+      complete: false,
+      partial: true,
+      missing: 1,
+      models: [
+        {
+          modelId: "up-main",
+          inputTokens: 15000,
+          outputTokens: 50,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      ],
+    });
+  });
+
   it("只收到流式事件(完整消息还没到)就中断:message_start / message_delta 也计入", async () => {
     const q: QueryFn = () =>
       (async function* () {
