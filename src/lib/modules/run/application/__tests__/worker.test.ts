@@ -1506,6 +1506,50 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
         }
       });
 
+      it("部分归属已修正、仍有另一项未归属且缺字段:那 1000 输出只收一次,保持暂记;重复结算、清扫不多扣", async () => {
+        const { world, settleAgain, sweepAgain } = await scenario(0, {
+          engine: sdk(() =>
+            (async function* () {
+              yield { type: "system", subtype: "init", session_id: "s" };
+              yield {
+                type: "result",
+                subtype: "success",
+                result: "第一轮",
+                total_cost_usd: 0.02,
+                usage: { input_tokens: 10000, output_tokens: 1000 },
+                modelUsage: {
+                  "up-main": usage(10000, 0),
+                  ["x".repeat(201)]: usage(0, 1000), // 未归属:1000 输出
+                },
+              };
+              yield assistant("m2", 15000, 0); // 追加轮
+              yield {
+                type: "result",
+                subtype: "error_during_execution",
+                result: "追加轮出错",
+                total_cost_usd: 0.04,
+                modelUsage: {
+                  "up-main": usage(20000, 1000), // 那 1000 输出已归到主模型
+                  ["y".repeat(201)]: usage(5000, "unreadable"), // 另一项认不出、输出读不出
+                },
+              };
+            })(),
+          ),
+          cancel: false,
+        });
+        // 主模型 2 万输入 + 1000 输出 + 未归属 5000 输入(按主模型价)= 2.5 万输入 57.75 + 1000 输出 11.55 = 69.3
+        // (若把旧快照的未归属 1000 输出补回来,会再收 11.55)
+        expect(world.charge("r1")).toMatchObject({
+          state: "provisional",
+          incomplete: true,
+          estimatedMicro: "69300000",
+          chargedMicro: "69300000",
+        });
+        expect(await settleAgain()).toBe("none");
+        expect(await sweepAgain()).toBe(0);
+        expect(world.balance("u1")).toEqual({ available: 1000n * C - 69_300_000n, reserved: 0n });
+      });
+
       describe("新快照没提到的模型:缺失标记一并沿用", () => {
         const twoRounds = (second: Record<string, unknown>) =>
           scenario(0, {

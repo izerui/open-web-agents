@@ -189,16 +189,29 @@ describe("SDK model metering", () => {
     expect(m.complete).toBe(true);
   });
 
-  it("合并累计快照:未归属用量同样按字段合并", () => {
+  it("合并累计快照:未归属用量身份对不上,读不出的字段不拿旧值补,只保留缺失标记", () => {
     const long = "x".repeat(201);
     const prev = extractModelUsage({ [long]: { ...tokens(100), outputTokens: 50 } });
     const next = extractModelUsage({ [long]: { ...tokens(200), outputTokens: -1 } });
-    expect(mergeCumulative(prev, next).unattributed).toEqual({
+    const m = mergeCumulative(prev, next);
+    expect(m.unattributed).toEqual({
       inputTokens: 200,
-      outputTokens: 50,
+      outputTokens: 0,
       cacheReadTokens: 300,
       cacheWriteTokens: 40,
     });
+    expect(m.unattributedMissing).toEqual(["outputTokens"]);
+    expect(m.missing).toBe(1);
+  });
+
+  it("合并累计快照:旧的未归属部分有读不出的字段,后来的快照无法证明已补齐,缺失一律沿用", () => {
+    const long = "x".repeat(201);
+    const m = mergeCumulative(
+      extractModelUsage({ [long]: { ...tokens(100), outputTokens: -1 } }),
+      extractModelUsage({ [long]: tokens(200), "up-main": tokens(1) }),
+    );
+    expect(m.unattributedMissing).toEqual(["outputTokens"]);
+    expect(m.missing).toBe(1);
   });
 
   it("preserves metering on failures and keeps old responses compatible", () => {

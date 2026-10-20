@@ -203,15 +203,16 @@ export function extractModelUsage(raw: unknown): ModelMetering {
  * 按字段合并两份累计快照(modelUsage 是整个 query 的累计值,不能相加)。收费数量与缺失状态分开处理:
  *
  * 数量 —— 只取新快照(它覆盖到此为止的全部):
- * - 同一身份(同一模型 / 未归属部分)读得出的字段:采用新值;
- * - 同一身份读不出的字段:保留此前已确认的值(累计值只增不减,取两者较大,不相加);
+ * - 同一模型读得出的字段:采用新值;
+ * - 同一模型读不出的字段:保留此前已确认的值(累计值只增不减,取两者较大,不相加);
+ * - 未归属用量(多个认不出模型的项的合计,身份对不上):只取新快照的,读不出的字段也不拿旧值补;
  * - 新快照没提到的模型 / 未归属用量:不沿用旧数量 —— 后来的明细可能已把它归到别的模型
  *   (例如修正了模型名),再加上旧数量就重复收费。
  *
  * 缺失状态 —— "没再提到"不等于"已经补齐":
- * - 新快照没提到、此前有读不出字段的模型 / 未归属部分:数量清零,读不出的标记照样沿用;
- * - 此前认不出身份、整项读不出的(无法被后来的快照明确补齐)同样沿用其缺失;
- * - 只有后来的快照对同一身份明确给出对应字段的合法值才解除。
+ * - 新快照没提到、此前有读不出字段的模型:数量清零,读不出的标记照样沿用;
+ * - 未归属部分、此前认不出身份且整项读不出的:没有身份,后来的快照无法证明已补齐,缺失一律沿用;
+ * - 只有后来的快照对同一模型明确给出对应字段的合法值才解除。
  * 计量缺失的项数 = 新快照自己的 + 沿用下来的。
  */
 export function mergeCumulative(prev: ModelMetering, next: ModelMetering): ModelMetering {
@@ -238,18 +239,14 @@ export function mergeCumulative(prev: ModelMetering, next: ModelMetering): Model
     carried += m.missingFields.length;
   }
 
-  const prevUna = unattributedOf(prev);
-  const nextUna = unattributedOf(next);
-  const nextMentionsUna = nextUna !== null || (next.unattributedMissing?.length ?? 0) > 0;
-  // 未归属部分新快照没提到:不沿用旧数量(可能已归到新明细的某个模型)
-  const unattributed = nextUna
-    ? pick(prevUna ?? undefined, nextUna, next.unattributedMissing)
-    : next.unattributedMissing?.length
-      ? pick(prevUna ?? undefined, ZERO, next.unattributedMissing)
-      : undefined;
-  // 未归属部分新快照没提到:读不出的标记照样沿用
-  const unattributedMissing = nextMentionsUna ? next.unattributedMissing : prev.unattributedMissing;
-  if (!nextMentionsUna) carried += prev.unattributedMissing?.length ?? 0;
+  // 未归属用量是多个认不出模型的项的合计,两份快照之间对不上是哪一部分(旧的可能已归到新明细的某个模型):
+  // 数量只取新快照的,读不出的字段也不拿旧值补 —— 否则可能把已含在新明细里的数量再收一次
+  const unattributed = unattributedOf(next) ?? undefined;
+  // 缺失标记:旧的未归属部分没有身份,后来的快照无法证明它已补齐,一律沿用(与新快照的标记合并)
+  const unattributedMissing = [
+    ...new Set([...(next.unattributedMissing ?? []), ...(prev.unattributedMissing ?? [])]),
+  ];
+  carried += prev.unattributedMissing?.length ?? 0;
 
   // 此前认不出身份、整项读不出的:没有身份可供后来的快照补齐,沿用其缺失
   const trackedPrev =
