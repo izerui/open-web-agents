@@ -3,6 +3,8 @@ import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { canInvokeAgent } from "@/lib/modules/access/domain/principal";
 import { isSystemAgent } from "@/lib/modules/agent/domain/system-agent";
+import { monthStartUtc } from "@/lib/modules/billing/application/run-charging";
+import { parseCredits } from "@/lib/modules/capabilities/domain/catalog";
 import { validateKeyRateLimit } from "@/lib/modules/identity/application/invoke-rate-limit";
 import {
   generateApiKey,
@@ -38,10 +40,21 @@ async function currentUser(req: Request): Promise<{ userId: string; isAdmin: boo
 
 /** 列出本账户的 key(只回元信息,永不回明文)。 */
 export async function GET(req: Request) {
-  const { apiKeys, env } = getContainer();
+  const { apiKeys, env, billingMode, runCharges } = getContainer();
   try {
+    const ownerId = await currentUserId(req);
+    const mode = await billingMode.get();
+    const [keys, used] = await Promise.all([
+      apiKeys.list(ownerId),
+      runCharges.monthUsageByKey(ownerId, mode, monthStartUtc(Date.now())),
+    ]);
     return Response.json({
-      keys: await apiKeys.list(await currentUserId(req)),
+      // 本月用量口径同受理时的月度上限检查(试算 = 预计消耗,正式 = 实际扣除,均含在途冻结)
+      keys: keys.map((k) => ({
+        ...k,
+        monthUsedMicroCredits: (used.get(k.id) ?? 0n).toString(),
+      })),
+      billingMode: mode,
       // 平台默认的调用限流(0 = 不限),界面据此显示每把 Key 的实际上限
       rateLimits: {
         perKeyPerMinute: env.invokeRateLimitPerKey,
@@ -193,8 +206,9 @@ export async function DELETE(req: Request) {
 }
 
 /**
- * 调整一把 Key 的每分钟调用上限(PATCH /api/keys?id=...,body: { rateLimitPerMinute: n | null })。
- * null 恢复平台默认;普通用户只能调得比平台默认更严。
+ * 调整一把 Key 的上限(PATCH /api/keys?id=...):
+ * - `{ rateLimitPerMinute: n | null }` 每分钟调用上限;null 恢复平台默认;普通用户只能调得比平台默认更严。
+ * - `{ monthlyLimitCredits: "500" | null }` 本月积分上限;null = 不单独限制(仍受账号余额与上限约束)。
  */
 export async function PATCH(req: Request) {
   const { apiKeys, env } = getContainer();
@@ -216,7 +230,37 @@ export async function PATCH(req: Request) {
     return Response.json({ error: "key not found", code: "not_found" }, { status: 404 });
   }
 
-  const body = (await req.json().catch(() => ({}))) as { rateLimitPerMinute?: unknown };
+  const body = (await req.json().catch(() => ({}))) as {
+    rateLimitPerMinute?: unknown;
+    monthlyLimitCredits?: unknown;
+  };
+  if ("monthlyLimitCredits" in body) {
+    let micro: string | null = null;
+    if (body.monthlyLimitCredits !== null) {
+      try {
+        if (typeof body.monthlyLimitCredits !== "string") throw new Error();
+        micro = parseCredits(body.monthlyLimitCredits.trim());
+      } catch {
+        return Response.json(
+          {
+            error: "monthlyLimitCredits 须为非负积分数(最多六位小数),或 null 表示不单独限制",
+            code: "invalid_request",
+          },
+          { status: 400 },
+        );
+      }
+    }
+    await apiKeys.setMonthlyLimit(id, micro);
+    await getContainer().audit.record({
+      actor: { type: "web", userId: user.userId },
+      action: "api_key.monthly_limit",
+      resource: { type: "api_key", id },
+      ownerId: user.userId,
+      details: { name: record.name, from: record.monthlyLimitMicroCredits ?? null, to: micro },
+      req,
+    });
+    return Response.json({ key: await apiKeys.get(id) });
+  }
   if (!("rateLimitPerMinute" in body)) {
     return Response.json(
       { error: "rateLimitPerMinute is required", code: "invalid_request" },

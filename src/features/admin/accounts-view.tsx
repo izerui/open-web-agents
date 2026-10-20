@@ -9,7 +9,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { errorText, fetchJson } from "@/lib/fetch-json";
-import { formatUsd } from "@/lib/modules/usage/domain/aggregate";
+import { creditsAmount } from "@/lib/modules/billing/domain/credits-display";
+import { formatCredits, parseCredits } from "@/lib/modules/capabilities/domain/catalog";
 import { peekMe } from "@/lib/use-me";
 import { cn } from "@/lib/utils";
 import { Ban, Check, KeyRound, ShieldCheck, User as UserIcon, UserPlus } from "lucide-react";
@@ -23,13 +24,12 @@ interface Account {
   disabled: boolean;
   createdAt: number;
   agentCount: number;
-  monthCostMicroUsd: number;
-  monthlyQuotaMicroUsd: number | null;
+  /** 本月已用(微积分;口径同当前计费模式) */
+  monthUsedMicroCredits: string;
+  monthlyLimitMicroCredits: string | null;
+  /** 升级遗留的美元上限(微美元),待按积分重新设置 */
+  legacyLimitMicroUsd: number | null;
 }
-
-/** 微美元 ↔ 美元。界面上填的是美元,存的是微美元。 */
-const toMicro = (usd: number) => Math.round(usd * 1_000_000);
-const toUsd = (micro: number) => micro / 1_000_000;
 
 /**
  * 平台账号管理。
@@ -40,6 +40,7 @@ const toUsd = (micro: number) => micro / 1_000_000;
  */
 export function AccountsView() {
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [mode, setMode] = useState<"trial" | "live">("trial");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -55,8 +56,11 @@ export function AccountsView() {
 
   const load = useCallback(async () => {
     try {
-      const d = await fetchJson<{ accounts?: Account[] }>("/api/admin/accounts");
+      const d = await fetchJson<{ accounts?: Account[]; billingMode?: "trial" | "live" }>(
+        "/api/admin/accounts",
+      );
       setAccounts(d.accounts ?? []);
+      setMode(d.billingMode ?? "trial");
       setError(null);
     } catch (e) {
       setError(errorText(e));
@@ -121,16 +125,19 @@ export function AccountsView() {
 
   async function saveQuota(a: Account) {
     const raw = quotaDraft[a.id]?.trim() ?? "";
-    // 清空 = 取消限额,和"填 0"是两回事(0 意味着一分钱都不许花)
-    const value = raw === "" ? null : Number(raw);
-    if (value !== null && (!Number.isFinite(value) || value < 0)) {
-      toast.error("额度要填一个非负数字,或留空表示不限");
-      return;
+    // 清空 = 取消限额,和"填 0"是两回事(0 意味着一个积分都不许花)
+    if (raw !== "") {
+      try {
+        parseCredits(raw);
+      } catch {
+        toast.error("上限要填非负积分数(最多六位小数),或留空表示不限");
+        return;
+      }
     }
     const ok = await patch(
       a.id,
-      { monthlyQuotaMicroUsd: value === null ? null : toMicro(value) },
-      value === null ? "已取消该账号的额度限制" : `额度已设为 $${value}`,
+      { monthlyLimitCredits: raw === "" ? null : raw },
+      raw === "" ? "已取消该账号的月度上限" : `月度上限已设为 ${raw} 积分`,
     );
     if (!ok) return;
     setQuotaDraft((m) => {
@@ -140,14 +147,14 @@ export function AccountsView() {
     });
   }
 
-  const totalCost = accounts.reduce((s, a) => s + a.monthCostMicroUsd, 0);
+  const totalUsed = accounts.reduce((s, a) => s + BigInt(a.monthUsedMicroCredits), 0n);
   const activeCount = accounts.filter((a) => !a.disabled).length;
 
   return (
     <SpaceShell
       area="admin"
       title="账号管理"
-      subtitle={`${accounts.length} 个账号 · ${activeCount} 个启用中 · 本月合计 ${formatUsd(totalCost)}`}
+      subtitle={`${accounts.length} 个账号 · ${activeCount} 个启用中 · 本月${mode === "trial" ? "预计消耗" : "消耗"} ${creditsAmount(totalUsed)} 积分`}
     >
       {confirm.dialog}
       <OneTimeSecretDialog
@@ -221,7 +228,8 @@ export function AccountsView() {
         {accounts.map((a) => {
           const isSelf = a.id === selfId;
           const over =
-            a.monthlyQuotaMicroUsd !== null && a.monthCostMicroUsd >= a.monthlyQuotaMicroUsd;
+            a.monthlyLimitMicroCredits !== null &&
+            BigInt(a.monthUsedMicroCredits) >= BigInt(a.monthlyLimitMicroCredits);
           return (
             <Card key={a.id} className={cn(a.disabled && "opacity-60")}>
               <CardContent className="space-y-3 p-4">
@@ -249,30 +257,37 @@ export function AccountsView() {
                   <span>注册于 {new Date(a.createdAt).toLocaleDateString()}</span>
                   <span>{a.agentCount} 个智能体</span>
                   <span className={cn(over && "font-medium text-warning")}>
-                    本月 {formatUsd(a.monthCostMicroUsd)}
-                    {a.monthlyQuotaMicroUsd !== null &&
-                      ` / 上限 ${formatUsd(a.monthlyQuotaMicroUsd)}`}
-                    {over && " —— 已超额"}
+                    本月{mode === "trial" ? "预计" : ""} {creditsAmount(a.monthUsedMicroCredits)}{" "}
+                    积分
+                    {a.monthlyLimitMicroCredits !== null &&
+                      ` / 上限 ${creditsAmount(a.monthlyLimitMicroCredits)}`}
+                    {over && " —— 已达上限"}
                   </span>
+                  {a.legacyLimitMicroUsd !== null && (
+                    <span data-testid="legacy-limit" className="font-medium text-warning">
+                      旧上限 ${(a.legacyLimitMicroUsd / 1_000_000).toFixed(2)}{" "}
+                      待按积分重新设置(或留空保存为不限);设置前正式扣费下不能发起运行
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
                   <label className="flex items-center gap-1.5">
-                    <span className="text-xs text-muted-foreground">月度上限 $</span>
+                    <span className="text-xs text-muted-foreground">月度上限(积分)</span>
                     <Input
                       className="h-7 w-24 text-xs"
                       inputMode="decimal"
-                      placeholder={a.monthlyQuotaMicroUsd === null ? "不限" : ""}
+                      placeholder={a.monthlyLimitMicroCredits === null ? "不限" : ""}
                       value={
                         quotaDraft[a.id] ??
-                        (a.monthlyQuotaMicroUsd === null
+                        (a.monthlyLimitMicroCredits === null
                           ? ""
-                          : String(toUsd(a.monthlyQuotaMicroUsd)))
+                          : formatCredits(a.monthlyLimitMicroCredits))
                       }
                       onChange={(e) => setQuotaDraft((m) => ({ ...m, [a.id]: e.target.value }))}
                     />
                   </label>
-                  {quotaDraft[a.id] !== undefined && (
+                  {(quotaDraft[a.id] !== undefined || a.legacyLimitMicroUsd !== null) && (
                     <Button
                       size="sm"
                       className="h-7"
@@ -280,7 +295,7 @@ export function AccountsView() {
                       onClick={() => void saveQuota(a)}
                     >
                       <Check className="size-3.5" />
-                      保存额度
+                      保存上限
                     </Button>
                   )}
 

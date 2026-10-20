@@ -22,7 +22,7 @@ import {
 import { contentHash, snapshotOf } from "../domain/release";
 import { diffSnapshots } from "../domain/snapshot-diff";
 import { DESIGN_EXECUTOR_ID, isSystemAgent } from "../domain/system-agent";
-import { validateAgentConfig } from "../domain/validate-config";
+import { type ModelCatalogView, validateAgentConfig } from "../domain/validate-config";
 import type { Agent, AgentRepo, AgentSnapshot } from "../ports";
 
 export class DesignError extends BrandedError {
@@ -54,6 +54,8 @@ export interface DesignerDeps {
 
   storage: StoragePort;
   allowStdioMcp: boolean;
+  /** 模型目录视图:检查草稿里的模型是否存在、可用、子代理与主模型同一来源 */
+  modelCatalogView?: () => Promise<ModelCatalogView>;
 }
 
 export class AgentDesigner {
@@ -136,8 +138,12 @@ export class AgentDesigner {
       const resolved = resolveDesign(state.draft, resources);
       const restoredConfig = restoreMcpSecrets(resolved.config, target?.config, state.mcpBaseline);
       candidate = { ...resolved, icon: target?.icon, config: restoredConfig };
+      const models = await this.deps.modelCatalogView?.();
       issues.push(
-        ...validateAgentConfig(candidate.config, { allowStdioMcp: this.deps.allowStdioMcp }),
+        ...validateAgentConfig(candidate.config, {
+          allowStdioMcp: this.deps.allowStdioMcp,
+          models,
+        }),
       );
     } catch (err) {
       issues.push({ field: "draft", message: err instanceof Error ? err.message : "草稿无法解析" });

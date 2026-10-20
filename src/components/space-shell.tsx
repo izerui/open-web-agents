@@ -26,6 +26,7 @@ import {
   Lock,
   Package,
   ScrollText,
+  Server,
   ShieldCheck,
   Store,
   Terminal,
@@ -62,7 +63,8 @@ export const PERSONAL_NAV = [
  */
 export const ADMIN_NAV = [
   { href: "/admin/accounts", label: "账号管理", icon: Users },
-  { href: "/admin/capabilities", label: "模型与价目", icon: Cpu },
+  { href: "/admin/providers", label: "模型提供者", icon: Server },
+  { href: "/admin/models", label: "模型总览", icon: Cpu },
   { href: "/admin/billing", label: "积分管理", icon: Wallet },
   { href: "/admin/packages", label: "套餐与订单", icon: Package },
   { href: "/admin/usage", label: "全平台用量", icon: BarChart3 },

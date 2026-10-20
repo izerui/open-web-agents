@@ -40,7 +40,7 @@ function setup(patterns: string[], granted: string[]) {
   };
   const spec: AgentSpec = {
     systemPrompt: "p",
-    model: { alias: "sonnet" },
+    model: { ref: "sonnet", modelId: "model-sonnet" },
     limits: {},
     approvalRules: { commandPatterns: patterns },
   };
@@ -48,7 +48,6 @@ function setup(patterns: string[], granted: string[]) {
     sharedHome: "/data/.agent-home",
     hostHome: "/Users/operator",
     abort: new AbortController(),
-    slots: { fable: "m", opus: "m", sonnet: "m", haiku: "m" },
     sandboxEnabled: false,
     allowStdioMcp: false,
     requestApproval: (r, signal) =>

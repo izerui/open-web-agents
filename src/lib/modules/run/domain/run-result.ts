@@ -5,7 +5,7 @@
 // 而且"结构化结果是从文本里捞出来的"这条降级信号(salvaged)哪里都看不到。
 // 三处都从同一行数据库记录、经同一个函数组装 —— 数据库是结果的唯一真相。
 
-import type { ModelMetering } from "@/lib/modules/agent-engine/domain/model-usage";
+import type { PublicCreditEstimate } from "@/lib/modules/usage/domain/public-estimate";
 import type { RunState } from "@/lib/shared";
 
 export interface RunRecord {
@@ -36,19 +36,41 @@ export interface RunResult {
   /** 最终回答文本 */
   text: string | null;
   error: { kind: string; message: string; status?: number } | null;
-  cost: {
-    usd?: number;
-    input: number;
-    output: number;
-    partial?: boolean;
-    metering?: ModelMetering;
-  } | null;
+  cost: PublicRunCost | null;
   /** ISO 时间;未开始 / 未结束为 null */
   startedAt: string | null;
   endedAt: string | null;
 }
 
 const DONE: ReadonlySet<string> = new Set(["success", "failed", "cancelled"]);
+
+/**
+ * 对外可见的费用。库里的 cost 还有原始计量与估算(上游模型标识)和计价上下文(所属提供者),
+ * 只留给结算与对账;对外按模型只给公开模型 id、名称、价目版本、token 与积分。
+ */
+export interface PublicRunCost {
+  usd?: number;
+  input: number;
+  output: number;
+  partial?: boolean;
+  creditEstimate?: PublicCreditEstimate;
+}
+
+/**
+ * 按白名单挑字段,而不是整份透传 —— 类型断言过滤不了字段,透传会把内部的提供者 id 与上游模型标识
+ * 带给结果轮询、阻塞响应、webhook 与运行详情的调用方。按模型的明细只取结算时生成的公开版本。
+ */
+export function publicCost(raw: unknown): PublicRunCost | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const c = raw as Record<string, unknown>;
+  return {
+    ...(typeof c.usd === "number" ? { usd: c.usd } : {}),
+    input: Number(c.input ?? 0),
+    output: Number(c.output ?? 0),
+    ...(c.partial === true ? { partial: true } : {}),
+    ...(c.publicEstimate ? { creditEstimate: c.publicEstimate as PublicCreditEstimate } : {}),
+  };
+}
 
 export function toRunResult(r: RunRecord): RunResult {
   return {
@@ -60,7 +82,7 @@ export function toRunResult(r: RunRecord): RunResult {
     salvaged: r.salvaged === true,
     text: r.finalText,
     error: (r.error as RunResult["error"]) ?? null,
-    cost: (r.cost as RunResult["cost"]) ?? null,
+    cost: publicCost(r.cost),
     startedAt: r.startedAt ? r.startedAt.toISOString() : null,
     endedAt: r.endedAt ? r.endedAt.toISOString() : null,
   };

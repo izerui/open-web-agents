@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 const ERROR_CLASSES: [string, string[]][] = [
   ["@/lib/modules/access/application/authorize", ["Unauthorized", "Forbidden"]],
   ["@/lib/modules/identity/application/auth-service", ["AuthError"]],
-  ["@/lib/modules/usage/application/quota-guard", ["QuotaExceeded"]],
+  ["@/lib/modules/billing/application/run-charging", ["ChargeRejected"]],
   ["@/lib/modules/agent/application/releases", ["VersionNotFound", "NothingToPublish"]],
   ["@/lib/modules/run/ports", ["DuplicateIdempotencyKey"]],
   ["@/lib/modules/run/application/enqueue", ["PromptTooLarge", "EnqueueTargetMissing"]],
@@ -14,6 +14,7 @@ const ERROR_CLASSES: [string, string[]][] = [
   ["@/lib/modules/integration/application/webhook", ["WebhookTargetRejected"]],
   ["@/lib/modules/knowledge/domain/limits", ["KnowledgeLimitExceeded"]],
   ["@/lib/modules/run/application/admission", ["AdmissionRejected"]],
+  ["@/lib/modules/run/application/orchestrator", ["EngineRunFailed"]],
 ];
 
 type Cls = (new (...a: never[]) => Error) & { brand?: symbol };

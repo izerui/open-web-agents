@@ -66,7 +66,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const title = body.title?.trim();
     const content = body.content?.trim();
     if (!title) return Response.json({ error: "title is required" }, { status: 400 });
-    if ([...title].length > 255) return Response.json({ error: "标题不能超过 255 字" }, { status: 400 });
+    if ([...title].length > 255)
+      return Response.json({ error: "标题不能超过 255 字" }, { status: 400 });
     if (!content) return Response.json({ error: "content is required" }, { status: 400 });
     // 单篇、篇数、总字数的上限在仓储里与插入同一事务判定(见 knowledge/domain/limits.ts)
     let doc: Awaited<ReturnType<typeof knowledge.create>>;

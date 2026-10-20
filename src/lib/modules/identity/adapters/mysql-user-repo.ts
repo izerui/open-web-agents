@@ -13,6 +13,7 @@ interface Row {
   webhookSecretPrevEnc: string | null;
   webhookSecretPrevUntil: Date | null;
   disabled: number;
+  monthlyLimitMicroCredits: string | null;
   monthlyQuotaMicroUsd: number | null;
   createdAt: Date;
 }
@@ -27,6 +28,7 @@ const COLUMNS = {
   webhookSecretPrevEnc: users.webhookSecretPrevEnc,
   webhookSecretPrevUntil: users.webhookSecretPrevUntil,
   disabled: users.disabled,
+  monthlyLimitMicroCredits: users.monthlyLimitMicroCredits,
   monthlyQuotaMicroUsd: users.monthlyQuotaMicroUsd,
   createdAt: users.createdAt,
 };
@@ -43,7 +45,12 @@ function toUser(r: Row): User {
     webhookSecretPrevUntil: r.webhookSecretPrevUntil?.getTime(),
     // 存量行是 NULL(加列前就有的数据),按"未禁用"处理
     disabled: Number(r.disabled ?? 0) !== 0,
-    monthlyQuotaMicroUsd: r.monthlyQuotaMicroUsd ?? undefined,
+    monthlyLimitMicroCredits: r.monthlyLimitMicroCredits ?? undefined,
+    // 已按积分设置过就不再有遗留(设置时会清掉旧值;这里再兜一层)
+    legacyMonthlyLimitMicroUsd:
+      r.monthlyLimitMicroCredits === null && r.monthlyQuotaMicroUsd !== null
+        ? r.monthlyQuotaMicroUsd
+        : undefined,
     createdAt: r.createdAt.getTime(),
   };
 }
@@ -122,12 +129,16 @@ export class MysqlUserRepo implements UserRepo {
 
   async adminUpdate(
     id: string,
-    v: { role?: "admin" | "user"; disabled?: boolean; monthlyQuotaMicroUsd?: number | null },
+    v: { role?: "admin" | "user"; disabled?: boolean; monthlyLimitMicroCredits?: string | null },
   ): Promise<void> {
     const patch: Record<string, string | number | null> = {};
     if (v.role !== undefined) patch.role = v.role;
     if (v.disabled !== undefined) patch.disabled = v.disabled ? 1 : 0;
-    if (v.monthlyQuotaMicroUsd !== undefined) patch.monthlyQuotaMicroUsd = v.monthlyQuotaMicroUsd;
+    if (v.monthlyLimitMicroCredits !== undefined) {
+      patch.monthlyLimitMicroCredits = v.monthlyLimitMicroCredits;
+      // 管理员按积分设置了上限(或明确设为不限):旧美元上限就此处理完毕
+      patch.monthlyQuotaMicroUsd = null;
+    }
     // 【为什么空补丁要早退】drizzle 的 update().set({}) 会生成非法 SQL 直接抛错
     if (Object.keys(patch).length === 0) return;
     await this.db.update(users).set(patch).where(eq(users.id, id));

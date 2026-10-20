@@ -75,6 +75,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     agentId: old.agentId,
     name: old.name,
     rateLimitPerMinute: old.rateLimitPerMinute,
+    monthlyLimitMicroCredits: old.monthlyLimitMicroCredits,
     ...(plan.newExpiresAt ? { expiresAt: plan.newExpiresAt } : {}),
     hashedKey: hashApiKey(plain),
   });

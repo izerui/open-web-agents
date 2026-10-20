@@ -138,7 +138,7 @@ interface CreateBody {
  * 改已有智能体需 write 权限:只被分享了 read 的人能用、不能改。
  */
 export async function POST(req: Request) {
-  const { agents, grants, auth, env, audit } = getContainer();
+  const { agents, grants, auth, env, audit, modelCatalogView } = getContainer();
 
   let subject: Subject;
   let principal: Principal;
@@ -163,6 +163,7 @@ export async function POST(req: Request) {
   // 配置错了要在保存时就拦住 —— 否则问题会推迟到运行时才暴露,排查成本高得多
   const issues = validateAgentConfig(body.config ?? {}, {
     allowStdioMcp: env.allowStdioMcp,
+    models: await modelCatalogView(),
   });
   if (issues.length) {
     return Response.json(

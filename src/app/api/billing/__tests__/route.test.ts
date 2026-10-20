@@ -8,6 +8,8 @@ const record = vi.fn(async () => {});
 vi.mock("@/lib/container", () => ({
   getContainer: () => ({
     billing,
+    billingMode: { get: async () => "trial" },
+    runCharges: { monthUsageByAccount: async () => new Map() },
     audit: { record },
     users: {
       get: async (id: string) =>

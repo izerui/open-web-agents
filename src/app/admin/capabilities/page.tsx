@@ -1,9 +1,6 @@
-import { CapabilityManager } from "@/features/capabilities/capability-manager";
-import { requireAdmin } from "@/lib/server-guard";
+import { redirect } from "next/navigation";
 
-export const dynamic = "force-dynamic";
-
-export default async function Page() {
-  await requireAdmin();
-  return <CapabilityManager />;
+/** 旧地址:模型管理已改为按提供者维护 */
+export default function Page() {
+  redirect("/admin/providers");
 }

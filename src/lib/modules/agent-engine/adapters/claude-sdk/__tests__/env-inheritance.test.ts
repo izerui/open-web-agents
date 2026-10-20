@@ -12,7 +12,7 @@ const SLOTS = { fable: "m", opus: "m", sonnet: "m", haiku: "m" };
 
 const spec: AgentSpec = {
   systemPrompt: "p",
-  model: { alias: "sonnet" },
+  model: { ref: "sonnet", modelId: "model-sonnet" },
   limits: {},
 };
 
@@ -31,7 +31,6 @@ describe("agent 子进程环境", () => {
     sharedHome: "/data/.agent-home",
     hostHome: "/Users/operator",
     abort: new AbortController(),
-    slots: SLOTS,
     sandboxEnabled: false,
     allowStdioMcp: false,
   });

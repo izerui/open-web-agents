@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { admissionErrorResponse, callerOf } from "@/app/api/_lib/admission";
 import { streamRun } from "@/app/api/_lib/run-stream";
+import { chargeErrorResponse } from "@/lib/api-error";
 import { getContainer } from "@/lib/container";
 import { designCaller, designError } from "../../_lib/access";
 
@@ -30,6 +31,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       enqueue: async () => {},
     });
   } catch (err) {
-    return admissionErrorResponse(err) ?? designError(err);
+    return admissionErrorResponse(err) ?? chargeErrorResponse(err) ?? designError(err);
   }
 }

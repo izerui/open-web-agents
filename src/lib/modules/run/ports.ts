@@ -1,4 +1,4 @@
-import type { RunState } from "@/lib/shared";
+import type { PinnedPricing, RunState } from "@/lib/shared";
 import { BrandedError } from "@/lib/shared";
 
 export interface Run {
@@ -43,6 +43,8 @@ export interface NewRun {
   agentVersion?: number;
   /** 请求级凭证覆盖,已加密。 */
   overrideEnc?: string;
+  /** 受理时锁定的模型绑定与价目版本(执行与结算只读它) */
+  pricing?: PinnedPricing | null;
   /** 受理时定下的回调目标快照(见 CallbackSnapshot);不传 = 旧行为,按投递时的配置投。 */
   callback?: CallbackSnapshot;
   /** 幂等键(已带调用方作用域)。重复则 create 抛 DuplicateIdempotencyKey。 */

@@ -7,10 +7,16 @@
 import type { AgentReleases } from "@/lib/modules/agent/application/releases";
 import type { AgentConfig } from "@/lib/modules/agent/domain/config";
 import type { AgentRepo } from "@/lib/modules/agent/ports";
+import type { AdmitRequest } from "@/lib/modules/billing/application/run-charging";
 import { checkPromptSize } from "@/lib/modules/run/domain/limits";
-import type { Run, RunRepo } from "@/lib/modules/run/ports";
+import {
+  DuplicateIdempotencyKey,
+  type NewRun,
+  type Run,
+  type RunRepo,
+} from "@/lib/modules/run/ports";
 import type { SessionRepo } from "@/lib/modules/session/ports";
-import { BrandedError } from "@/lib/shared";
+import { BrandedError, type PinnedPricing } from "@/lib/shared";
 import type { RunCommand } from "./orchestrator";
 
 /** 输入超长。路由翻成 413。 */
@@ -61,8 +67,23 @@ export interface EnqueueRequest {
   idempotencyHash?: string;
 }
 
+/**
+ * 计费受理与插入运行记录在同一事务里:先锁账户、算额度、冻结、写 run_charges,
+ * 再插入运行 —— 任何一步失败(含幂等键重复)整体回滚,不会留下没有运行的冻结。
+ */
+export type ChargedCreate = <T>(
+  fn: (scope: {
+    runs: Pick<RunRepo, "create" | "findByIdempotencyKey">;
+    /** 锁住账户(持有到事务结束):同一账户的受理在这里排队 */
+    lockAccount: (accountId: string) => Promise<void>;
+    admit: (req: AdmitRequest) => Promise<PinnedPricing>;
+  }) => Promise<T>,
+) => Promise<T>;
+
 export interface EnqueueDeps {
   runs: Pick<RunRepo, "create">;
+  /** 不给则不计费(单测、旧装配) */
+  charged?: ChargedCreate;
   sessions: Pick<SessionRepo, "get">;
   agents: Pick<AgentRepo, "get">;
   /** 会话锁定了版本时按版本取配置快照。 */
@@ -106,7 +127,7 @@ export class RunEnqueuer {
       overrideEnc = this.deps.encryptOverride(req.override);
     }
 
-    return this.deps.runs.create({
+    const newRun = (pricing: PinnedPricing | null): NewRun => ({
       id: req.runId,
       sessionId: req.sessionId,
       prompt: req.prompt,
@@ -126,6 +147,31 @@ export class RunEnqueuer {
             : { source: "none" },
       idempotencyKey: req.idempotencyKey,
       idempotencyHash: req.idempotencyHash,
+      pricing,
+    });
+
+    // 花费记在会话的计费账号上;API Key 发起的会话同时计入那把 Key 的月度额度
+    const accountId = session.billingUserId ?? session.ownerId;
+    if (!this.deps.charged || !accountId) return this.deps.runs.create(newRun(null));
+    return this.deps.charged(async ({ runs, lockAccount, admit }) => {
+      // 同键并发:两个请求都过了入口的重放查询。后到的在账户锁上等先到的提交,
+      // 拿到锁后先重查幂等键 —— 否则它会先撞上"额度只够一次"被拒(402),
+      // 根本走不到插入时的重复键判断,调用方拿不回原任务
+      if (req.idempotencyKey) {
+        await lockAccount(accountId);
+        if (await runs.findByIdempotencyKey(req.idempotencyKey)) {
+          throw new DuplicateIdempotencyKey(req.idempotencyKey);
+        }
+      }
+      const pricing = await admit({
+        runId: req.runId,
+        accountId,
+        apiKeyId: session.callerApiKeyId ?? null,
+        main: release.config.model,
+        override: req.override?.model,
+        subagents: release.config.subagents?.map((s) => ({ name: s.name, model: s.model })),
+      });
+      return runs.create(newRun(pricing));
     });
   }
 }

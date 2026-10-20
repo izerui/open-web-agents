@@ -15,6 +15,10 @@ export interface SessionSummary {
   lastActiveAt?: number;
   /** 工作目录被自动清理的时刻(长期未活动);之前生成的文件已不在 */
   workspacePurgedAt?: number;
+  /** 锁定的智能体版本;没有 = 跟随草稿 */
+  agentVersion?: number;
+  /** 这个会话实际运行的模型(按锁定版本或草稿解析,服务端给出) */
+  model?: string;
 }
 
 export interface AgentSummary {
@@ -23,6 +27,8 @@ export interface AgentSummary {
   icon?: string;
   description?: string;
   config: {
+    /** 别名或模型目录 id;显示时换成模型名与售价 */
+    model?: string;
     inputSchema?: Record<string, unknown>;
     outputSchema?: Record<string, unknown>;
     starters?: string[];

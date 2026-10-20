@@ -8,7 +8,8 @@ import type { AgentConfig } from "@/lib/modules/agent/domain/config";
 import { nextRunState } from "@/lib/modules/run/domain/state-machine";
 import { type CancelSignal, type RunRepo, WORKER_LOST } from "@/lib/modules/run/ports";
 import type { RunState } from "@/lib/shared";
-import type { RunCommand, RunOrchestrator } from "./orchestrator";
+import type { PinnedPricing } from "@/lib/shared";
+import { EngineRunFailed, type RunCommand, type RunOrchestrator } from "./orchestrator";
 
 export interface WorkerOptions {
   /** 租约时长;worker 崩溃后最多这么久任务被别人接手。 */
@@ -27,6 +28,10 @@ export interface WorkerOptions {
    * worker 被永久占住,任务也永远不落终态)。
    */
   maxDurationMs?: number;
+  /** 花费写库失败时立即重试的次数(含第一次);仍失败就交给回收循环重试 */
+  costRetries?: number;
+  /** 立即重试的基础间隔(第 n 次等 n 倍) */
+  costRetryMs?: number;
   /**
    * 本进程同时执行的运行数。
    *
@@ -54,13 +59,18 @@ const DEFAULTS = {
   /** 30 分钟:够跑长任务,又不至于让卡死的运行永久占用 worker。 */
   maxDurationMs: 30 * 60_000,
   concurrency: 4,
+  costRetries: 3,
+  costRetryMs: 200,
 };
 
 export interface RunPayloadSource {
   /** 取出 run 待执行的载荷:输入、入队时的配置快照、加密的请求级覆盖。 */
-  getPayload(
-    id: string,
-  ): Promise<{ prompt: string; agentConfig?: unknown; overrideEnc?: string } | null>;
+  getPayload(id: string): Promise<{
+    prompt: string;
+    agentConfig?: unknown;
+    overrideEnc?: string;
+    pricing?: PinnedPricing;
+  } | null>;
   /**
    * 补记花费,只在该运行还没有花费记录时写入,不需要租约令牌。
    * 被取消的运行已经不归本 worker 写结果,但它花掉的钱仍要入账 —— 否则在运行快结束时
@@ -92,6 +102,15 @@ export interface WorkerHooks {
   onFinalized?: (info: RunFinalized) => void | Promise<void>;
   /** 解密请求级覆盖。解不开必须抛错 —— 不能悄悄回落到平台凭证。 */
   decodeOverride?: (enc: string) => RunCommand["override"];
+  /**
+   * 按计费快照结算。出错不影响运行,由清扫任务补结算。
+   * final = 花费已确认落库(或本轮确实没有花费):结算可以把"没有花费"当成没有用量。
+   * 花费拿到了却还没写进库时给 false:只能暂记(释放冻结、标不完整),等花费写成后再最终结算 ——
+   * 绝不能按 0 结清。
+   */
+  settleCharge?: (runId: string, opts: { final: boolean }) => Promise<unknown>;
+  /** 回收循环里顺带清扫:补结算运行已结束、计费还开着的(取消、回收孤儿等不经 worker 的路径) */
+  sweepCharges?: () => Promise<unknown>;
   /** 取消通知:收到就立即中止对应的在途运行,不必等下一次续租心跳。 */
   cancelSignal?: CancelSignal;
   /** 落结果前增强 cost(加入积分估算快照)。失败不影响结果写入。 */
@@ -110,13 +129,25 @@ export class RunWorker {
   /** 连续轮询失败次数。健康检查据此判断 worker 是不是在空转假死。 */
   private consecutiveFailures = 0;
   private lastError?: string;
+  /**
+   * 已经拿到、但还没写进库的花费(写库失败)。回收循环里逐个重试,写成后再最终结算。
+   * recordCost 只在库里没有花费时写入,重试是幂等的。进程退出前没写成的,计费停在
+   * "暂记、不完整",留给管理员核对 —— 不会被当成没有用量结清。
+   */
+  private readonly pendingCosts = new Map<string, unknown>();
 
   /** 供 /api/health 暴露 —— 光探 DB 连通性看不出 worker 已经死循环了。 */
-  health(): { running: boolean; consecutiveFailures: number; lastError?: string } {
+  health(): {
+    running: boolean;
+    consecutiveFailures: number;
+    lastError?: string;
+    pendingCosts: number;
+  } {
     return {
       running: this.activeLoops > 0,
       consecutiveFailures: this.consecutiveFailures,
       lastError: this.lastError,
+      pendingCosts: this.pendingCosts.size,
     };
   }
 
@@ -133,6 +164,8 @@ export class RunWorker {
       heartbeatMs: options.heartbeatMs ?? DEFAULTS.heartbeatMs,
       idleMs: options.idleMs ?? DEFAULTS.idleMs,
       reclaimMs: options.reclaimMs ?? DEFAULTS.reclaimMs,
+      costRetries: options.costRetries ?? DEFAULTS.costRetries,
+      costRetryMs: options.costRetryMs ?? DEFAULTS.costRetryMs,
       maxDurationMs: options.maxDurationMs ?? DEFAULTS.maxDurationMs,
       concurrency: Math.max(1, Math.floor(options.concurrency ?? DEFAULTS.concurrency)),
       now: options.now ?? (() => Date.now()),
@@ -190,6 +223,7 @@ export class RunWorker {
     const timeout = setTimeout(() => abort.abort(), Math.min(this.opts.maxDurationMs, 2 ** 31 - 1));
 
     let result: RunResult;
+    let usageUnknown = false;
     try {
       const payload = await this.repo.getPayload(claimed.id);
       // 空提示词不能当正常输入跑:那会真的调一次模型、产出无意义回答、还标成功
@@ -206,10 +240,16 @@ export class RunWorker {
           runId: claimed.id,
           override,
           agentConfig: payload.agentConfig as AgentConfig | undefined,
+          pricing: payload.pricing,
         },
         abort.signal,
       );
+      // 引擎正常返回、却明说拿不到用量(SDK 异常或没有结算消息,且没收到任何用量)
+      usageUnknown = result.usageUnknown === true;
     } catch (err) {
+      // 引擎启动之后抛错:可能已经调用过模型,用量不得而知 —— 计费只能暂记,不能当成零用量结清。
+      // 启动之前的失败(读载荷、解密覆盖、解析模型、缺变量……)确认没有调用模型
+      usageUnknown = err instanceof EngineRunFailed;
       result = {
         status: "failed",
         error: {
@@ -229,7 +269,7 @@ export class RunWorker {
       // 已被取消或判为孤儿:本轮结果作废,不写结果、不通知 —— 终态由取消方/回收方负责。
       // 但花费照记:钱已经花出去了
       if (lostLease) {
-        if (enrichedCost) await this.repo.recordCost?.(claimed.id, enrichedCost).catch(() => {});
+        await this.settleWithCost(claimed.id, enrichedCost, usageUnknown);
         return true;
       }
 
@@ -238,23 +278,28 @@ export class RunWorker {
         result.status === "success" ? "finishOk" : "finishErr",
       );
       // 先落结果再落终态:轮询方看到终态时结果必定已可读,避免"成功但取不到结果"的竞态
-      await this.repo.saveResult?.(
-        claimed.id,
-        {
-          finalText: result.summary,
-          structured: result.structured,
-          salvaged: result.salvagedFromText === true,
-          cost: enrichedCost,
-          error: result.error,
-        },
-        fence,
-      );
-      const written = await this.repo.complete(claimed.id, finalState, fence);
-      // 没写进去 = 这一刻恰好被取消/回收了(上面带令牌的 saveResult 也同样没写进去),
-      // 不归本 worker 通知 —— 但花费要补记
-      if (!written && enrichedCost) {
-        await this.repo.recordCost?.(claimed.id, enrichedCost).catch(() => {});
+      let written: boolean;
+      try {
+        await this.repo.saveResult?.(
+          claimed.id,
+          {
+            finalText: result.summary,
+            structured: result.structured,
+            salvaged: result.salvagedFromText === true,
+            cost: enrichedCost,
+            error: result.error,
+          },
+          fence,
+        );
+        written = await this.repo.complete(claimed.id, finalState, fence);
+      } catch (err) {
+        // 落结果失败:运行之后由回收判失败,但这轮已经花掉的钱不能跟着丢 —— 交给重试队列补记
+        if (enrichedCost) this.pendingCosts.set(claimed.id, enrichedCost);
+        throw err;
       }
+      // 没写进去 = 这一刻恰好被取消/回收了(上面带令牌的 saveResult 也同样没写进去),
+      // 不归本 worker 通知 —— 但花费要补记。写进去了也再确认一次(花费已在库里时是空操作)
+      await this.settleWithCost(claimed.id, enrichedCost, usageUnknown);
       if (written) {
         await this.notifyFinalized({
           runId: claimed.id,
@@ -270,6 +315,58 @@ export class RunWorker {
       this.cancelByRun.delete(claimed.id);
     }
     return true;
+  }
+
+  /**
+   * 确认花费已落库再最终结算。写库失败先重试几次;仍失败就只做非最终结算(暂记、标不完整),
+   * 把花费留在重试队列里 —— 不能让结算读到 cost=null 就按 0 结清。
+   * 没有花费时也要分清:确认零用量才最终结算;引擎异常、用量未知只能暂记。
+   */
+  private async settleWithCost(runId: string, cost: unknown, usageUnknown: boolean): Promise<void> {
+    if (cost && !(await this.persistCost(runId, cost))) {
+      this.pendingCosts.set(runId, cost);
+      await this.hooks.settleCharge?.(runId, { final: false }).catch(() => {});
+      return;
+    }
+    const final = !!cost || !usageUnknown;
+    await this.hooks.settleCharge?.(runId, { final }).catch(() => {});
+  }
+
+  /** 写花费(幂等),失败按间隔重试;返回最终是否写成 */
+  private async persistCost(runId: string, cost: unknown): Promise<boolean> {
+    if (!this.repo.recordCost) return true;
+    for (let attempt = 0; attempt < this.opts.costRetries; attempt++) {
+      try {
+        await this.repo.recordCost(runId, cost);
+        return true;
+      } catch (err) {
+        if (attempt === this.opts.costRetries - 1) {
+          console.warn(
+            `[owa][worker] 花费写库失败(run=${runId}),稍后重试:`,
+            err instanceof Error ? err.message : err,
+          );
+        } else {
+          await new Promise((r) => setTimeout(r, this.opts.costRetryMs * (attempt + 1)));
+        }
+      }
+    }
+    return false;
+  }
+
+  /** 重试写入之前没写成的花费;写成的立即最终结算。回收循环与排空时调用 */
+  async flushPendingCosts(): Promise<number> {
+    let done = 0;
+    for (const [runId, cost] of [...this.pendingCosts]) {
+      try {
+        await this.repo.recordCost?.(runId, cost);
+      } catch {
+        continue;
+      }
+      this.pendingCosts.delete(runId);
+      done++;
+      await this.hooks.settleCharge?.(runId, { final: true }).catch(() => {});
+    }
+    return done;
   }
 
   private async notifyFinalized(info: RunFinalized): Promise<void> {
@@ -301,6 +398,8 @@ export class RunWorker {
         },
       });
     }
+    await this.flushPendingCosts().catch(() => {});
+    await this.hooks.sweepCharges?.().catch(() => {});
     return reclaimed.length;
   }
 
@@ -381,6 +480,8 @@ export class RunWorker {
       // 关停时那点超出就是白白多占的部署窗口
       await new Promise((r) => setTimeout(r, Math.min(100, left)));
     }
+    // 退出前再试一次写入没写成的花费
+    await this.flushPendingCosts().catch(() => {});
     return this.activeLoops === 0;
   }
 

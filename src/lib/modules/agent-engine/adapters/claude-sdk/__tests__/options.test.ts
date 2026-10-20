@@ -12,6 +12,7 @@ const ctx: RunContext = {
   prompt: "go",
   resumeSessionId: "sess_9",
   credentials: { baseUrl: "https://gw", key: "sk-real" },
+  modelSlots: { fable: "m-fable", opus: "m-opus", sonnet: "m-sonnet", haiku: "m-haiku" },
   env: { FOO: "bar" },
 };
 
@@ -21,7 +22,6 @@ const deps = () => ({
   sharedHome: "/data/.agent-home",
   hostHome: "/Users/operator",
   abort: new AbortController(),
-  slots: SLOTS,
   sandboxEnabled: false,
   allowStdioMcp: false,
 });
@@ -29,7 +29,7 @@ const deps = () => ({
 function specOf(over: Partial<AgentSpec> = {}): AgentSpec {
   return {
     systemPrompt: "p",
-    model: { alias: "sonnet" },
+    model: { ref: "sonnet", modelId: "model-sonnet" },
     limits: { maxTurns: 30, effort: "medium" },
     ...over,
   };
@@ -57,11 +57,11 @@ describe("aliasEnv", () => {
 });
 
 describe("buildSdkOptions", () => {
-  it("cwd 锁到会话工作目录,model 用别名,resume 透传", () => {
+  it("cwd 锁到会话工作目录,model 用解析后的真实模型,resume 透传", () => {
     const d = deps();
     const o = buildSdkOptions(specOf(), ctx, d);
     expect(o.cwd).toBe("/ws/s1");
-    expect(o.model).toBe("sonnet");
+    expect(o.model).toBe("model-sonnet");
     expect(o.resume).toBe("sess_9");
     expect(o.permissionMode).toBe("default");
     expect(o.abortController).toBe(d.abort);
@@ -75,10 +75,29 @@ describe("buildSdkOptions", () => {
     expect(env.HOME).toBe("/data/.agent-home");
   });
 
-  it("options.model 传别名,由 env 槽映射到真实 modelId", () => {
+  it("options.model 传真实 modelId;别名槽取本次运行的槽位", () => {
     const o = buildSdkOptions(specOf(), ctx, deps());
-    expect(o.model).toBe("sonnet");
+    expect(o.model).toBe("model-sonnet");
     expect((o.env as Record<string, string>).ANTHROPIC_DEFAULT_SONNET_MODEL).toBe("m-sonnet");
+  });
+
+  it("运行上下文没给槽位时,别名槽一律用主模型,辅助调用不越出本提供者", () => {
+    const { modelSlots: _, ...noSlots } = ctx;
+    const env = buildSdkOptions(specOf(), noSlots, deps()).env as Record<string, string>;
+    for (const k of [
+      "ANTHROPIC_DEFAULT_FABLE_MODEL",
+      "ANTHROPIC_DEFAULT_OPUS_MODEL",
+      "ANTHROPIC_DEFAULT_SONNET_MODEL",
+      "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+      "ANTHROPIC_SMALL_FAST_MODEL",
+    ]) {
+      expect(env[k]).toBe("model-sonnet");
+    }
+  });
+
+  it("子进程读不到模型 Key:开启 SDK 的子进程环境清理", () => {
+    const env = buildSdkOptions(specOf(), ctx, deps()).env as Record<string, string>;
+    expect(env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe("1");
   });
 
   it("无 outputSchema → 不带 outputFormat", () => {
@@ -176,13 +195,26 @@ describe("buildSdkOptions", () => {
   });
 
   it("逃生舱可覆盖平台没建模的普通参数", () => {
+    const o = buildSdkOptions(specOf({ escapeHatch: { maxBudgetUsd: 3 } }), ctx, deps());
+    expect(o.maxBudgetUsd).toBe(3);
+  });
+
+  // 模型由平台按提供者解析与计价:逃生舱改了就绕过了价目与凭证边界
+  it("逃生舱改不了模型:model、fallbackModel、子代理 agents", () => {
     const o = buildSdkOptions(
-      specOf({ escapeHatch: { maxBudgetUsd: 3, fallbackModel: "haiku" } }),
+      specOf({
+        escapeHatch: {
+          model: "other-vendor-model",
+          fallbackModel: "other-vendor-model",
+          agents: { x: { description: "d", prompt: "p", model: "other-vendor-model" } },
+        },
+      }),
       ctx,
       deps(),
     );
-    expect(o.maxBudgetUsd).toBe(3);
-    expect(o.fallbackModel).toBe("haiku");
+    expect(o.model).toBe("model-sonnet");
+    expect(o.fallbackModel).toBeUndefined();
+    expect(o.agents).toBeUndefined();
   });
 
   // 【越权回归】逃生舱曾经能一次性拆掉所有安全设置
@@ -224,7 +256,6 @@ describe("执行隔离进入 SDK options", () => {
     sharedHome: "/data/.agent-home",
     hostHome: "/Users/operator",
     abort: new AbortController(),
-    slots: SLOTS,
     sandboxEnabled: true,
     allowStdioMcp: false,
   });
@@ -316,13 +347,20 @@ describe("子代理传给 SDK 的形状", () => {
     expect(a?.r?.background).toBe(false);
   });
 
-  it("子代理单独指定的模型别名原样交给 SDK;不指定就不传(跟随主 agent)", () => {
-    // SDK 按 ANTHROPIC_DEFAULT_<别名>_MODEL 换成真实模型(scripts/sdk-probe/subagent-model.mjs 实测)
-    const a = agentsOf([
-      { name: "cheap", prompt: "p", model: "haiku", background: false },
-      { name: "same", prompt: "p", background: false },
-    ]);
-    expect(a?.cheap?.model).toBe("haiku");
+  it("子代理单独指定的模型传解析后的真实 modelId;不指定就不传(跟随主 agent)", () => {
+    // 真实 modelId 直接传给 SDK(scripts/sdk-probe/raw-model-id.mjs 实测)
+    const a = buildSdkOptions(
+      specOf({
+        subagents: [
+          { name: "cheap", prompt: "p", model: "haiku", background: false },
+          { name: "same", prompt: "p", background: false },
+        ],
+        subagentModels: { cheap: "model-haiku" },
+      }),
+      ctx,
+      deps(),
+    ).agents as Record<string, { model?: string }>;
+    expect(a?.cheap?.model).toBe("model-haiku");
     expect(a?.same && "model" in a.same).toBe(false);
   });
 

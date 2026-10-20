@@ -111,4 +111,17 @@ describe("release 领域规则", () => {
     expect(parseVersion("12")).toEqual({ ok: true, value: 12 });
     for (const bad of [0, -1, 1.5, "v1", "", true, {}]) expect(parseVersion(bad).ok).toBe(false);
   });
+
+  it("modelsOf:锁定版本的会话取那一版的模型,跟随草稿的取当前草稿;找不到的不给", async () => {
+    const { agents, releases, get } = await setup();
+    const v1 = await releases.publish(await get(), "u1");
+    await agents.upsert({ ...(await get()), config: { systemPrompt: "v2", model: "model-b" } });
+    const models = await releases.modelsOf([
+      { id: "pinned", agentId: "a1", agentVersion: v1.version },
+      { id: "draft", agentId: "a1" },
+      { id: "gone-version", agentId: "a1", agentVersion: 99 },
+      { id: "gone-agent", agentId: "nope" },
+    ]);
+    expect(Object.fromEntries(models)).toEqual({ pinned: "sonnet", draft: "model-b" });
+  });
 });

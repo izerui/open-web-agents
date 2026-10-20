@@ -3,6 +3,7 @@
 import { SpaceShell } from "@/components/space-shell";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { ModelPrice } from "@/features/models/model-price";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { MARKET_CATEGORIES, type MarketAgent } from "@/lib/modules/market/domain/catalog";
 import { ArrowLeft, Bot } from "lucide-react";
@@ -63,7 +64,10 @@ export function MarketDetail({ id }: { id: string }) {
               </p>
               <p className="text-xs text-muted-foreground">
                 {MARKET_CATEGORIES.find((c) => c.id === agent.category)?.name} · v
-                {agent.publishedVersion} · {agent.config.model}
+                {agent.publishedVersion}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                <ModelPrice model={agent.config.model} />
               </p>
               <MarketActions agentId={agent.id} />
             </div>

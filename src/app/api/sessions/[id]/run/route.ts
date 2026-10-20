@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { admissionErrorResponse, callerOf } from "@/app/api/_lib/admission";
-import { apiError } from "@/lib/api-error";
+import { apiError, chargeErrorResponse } from "@/lib/api-error";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import type { Principal } from "@/lib/modules/access/domain/principal";
@@ -57,8 +57,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   };
 
   /*
-   * 受理:计费账号、Key 调用限流、额度、输入规范化与契约 —— 与分支重跑同一套规则
-   * (见 run/application/admission.ts)。额度拦在发起之前才叫"上限";worker 执行前还会再复核。
+   * 受理:计费账号、Key 调用限流、输入规范化与契约 —— 与分支重跑同一套规则
+   * (见 run/application/admission.ts)。积分冻结与月度上限在入队时随运行记录一起落库。
    */
   let prompt: string;
   try {
@@ -91,7 +91,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         sessions.get(id).then((s) => (s ? { sessionId: id, workspaceDir: s.workspaceDir } : null)),
       ),
   };
-  return streaming ? handleStreaming(req, ctx) : handleBlocking(req, ctx);
+  // 先入队再开始响应:积分或月度上限不够要能回 402,而不是一条失败事件或 500 的 JSON。
+  // 事件从 Stream 起点(0-0)补读,入队早于订阅也不会漏掉最早的事件
+  const enqueued = await ctx.enqueue({ runId, sessionId: id, prompt }).then(
+    () => null,
+    (err: unknown) => err ?? new Error("入队失败"),
+  );
+  const charge = enqueued && chargeErrorResponse(enqueued);
+  if (charge) return charge;
+  const routed = { ...ctx, enqueued };
+  return streaming ? handleStreaming(req, routed) : handleBlocking(req, routed);
 }
 
 interface RunRouteContext {
@@ -99,6 +108,8 @@ interface RunRouteContext {
   runId: string;
   prompt: string;
   enqueue(r: EnqueueRequest): Promise<unknown>;
+  /** 入队的结果:null = 已入队;否则是入队时的错误(由各模式按原有方式报告) */
+  enqueued?: unknown;
   /** 终态兜底与结果契约的数据源:事件总线上的 result 丢了也能从库里收尾。 */
   results: { getResult(id: string): Promise<RunRecord | null> };
   /** 工作目录的文件清单(阻塞响应附带;有等待上限,失败为 null) */
@@ -110,13 +121,15 @@ interface RunRouteContext {
 
 /** stream: true → 逐事件 SSE 推送,Web 页面实时打字机效果。 */
 function handleStreaming(req: Request, ctx: RunRouteContext) {
-  const { id, runId, prompt, enqueue, results, bus } = ctx;
+  const { id, runId, results, bus, enqueued } = ctx;
   return streamRun(req, {
     bus,
     results,
     sessionId: id,
     runId,
-    enqueue: () => enqueue({ runId, sessionId: id, prompt }),
+    enqueue: async () => {
+      if (enqueued) throw enqueued;
+    },
   });
 }
 
@@ -145,7 +158,7 @@ type BlockingResponse = RunResult & {
 
 /** stream: false → 等运行完成,返回单个 JSON。适合程序调用。 */
 function handleBlocking(req: Request, ctx: RunRouteContext): Promise<Response> {
-  const { id, runId, prompt, enqueue, results, bus } = ctx;
+  const { id, runId, results, bus, enqueued } = ctx;
 
   return new Promise<Response>((resolve) => {
     const events: AgentEvent[] = [];
@@ -205,7 +218,7 @@ function handleBlocking(req: Request, ctx: RunRouteContext): Promise<Response> {
     (async () => {
       try {
         // 事件通道不可用也照常执行:过程事件拿不到,结局由数据库终态送达
-        await enqueue({ runId, sessionId: id, prompt });
+        if (enqueued) throw enqueued;
         // 总线上的 result 丢了也不能让请求永远挂着:库里有终态就用库里的收尾
         stopWatch = watchTerminal(results, runId, (e) => {
           events.push(e);

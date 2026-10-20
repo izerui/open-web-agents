@@ -5,7 +5,6 @@
 
 import os from "node:os";
 import path from "node:path";
-import type { ModelGatewayPort } from "@/lib/modules/model-gateway/ports";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { ClaudeSdkEngine, type EngineDeps, type QueryFn } from "./runner";
 
@@ -25,7 +24,6 @@ const sdkQuery: QueryFn = ({ prompt, options }) =>
  */
 export function createClaudeSdkEngine(
   dataDir: string,
-  gateway: ModelGatewayPort,
   sandboxEnabled: boolean,
   allowStdioMcp: boolean,
   requestApproval?: EngineDeps["requestApproval"],
@@ -36,7 +34,6 @@ export function createClaudeSdkEngine(
     // 那是 agent 自己的家,拿它展开会把 SDK 的 session 目录误伤,而真正该护的
     // 平台运维凭证(~/.ssh、~/.claude)反而没拦。
     hostHome: process.env.HOME ?? os.homedir(),
-    gateway,
     sandboxEnabled,
     allowStdioMcp,
     requestApproval,

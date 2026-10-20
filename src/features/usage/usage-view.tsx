@@ -12,7 +12,7 @@ import {
   type UsageTotals,
   formatUsd,
 } from "@/lib/modules/usage/domain/aggregate";
-import type { RunCreditEstimate } from "@/lib/modules/usage/domain/estimate";
+import type { PublicCreditEstimate } from "@/lib/modules/usage/domain/public-estimate";
 import { AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 
@@ -25,8 +25,8 @@ interface RunDetail {
   inputTokens: number;
   outputTokens: number;
   at: number;
-  estimatedCredits: RunCreditEstimate;
-  estimateSource: "run_snapshot" | "current_price";
+  estimatedCredits: PublicCreditEstimate;
+  estimateSource: "run_snapshot" | "run_price_version" | "current_price";
 }
 
 interface UsageData {
@@ -327,12 +327,15 @@ function RunDetailSection({ runs, note }: { runs: RunDetail[]; note?: string }) 
                     {open &&
                       est.models.map((m, i) => (
                         <tr
-                          key={`${r.runId}-${m.modelId}-${i}`}
+                          key={`${r.runId}-${m.model ?? "unknown"}-${i}`}
                           className="border-b bg-muted/30 text-muted-foreground"
                         >
                           <td className="px-2 py-1" />
-                          <td colSpan={2} className="truncate px-2 py-1 font-mono text-[11px]">
-                            {m.modelId}
+                          <td colSpan={2} className="truncate px-2 py-1 text-[11px]">
+                            {m.name}
+                            {m.version !== null && (
+                              <span className="ml-1 text-[10px]">v{m.version}</span>
+                            )}
                           </td>
                           <td className="px-2 py-1">
                             {m.unpriced && (

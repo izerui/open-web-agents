@@ -1,6 +1,7 @@
 // 审计记录的中文展示:动作名称 + 一句话描述。纯函数,便于测试。
 
 import type { AuditAction } from "@/lib/modules/audit/domain/events";
+import { creditsAmount } from "@/lib/modules/billing/domain/credits-display";
 
 /** Record<AuditAction, …>:新增动作忘了配中文名,编译期就会报错。 */
 export const ACTION_LABEL: Record<AuditAction, string> = {
@@ -19,6 +20,7 @@ export const ACTION_LABEL: Record<AuditAction, string> = {
   "api_key.revoke": "吊销 API Key",
   "api_key.rotate": "轮换 API Key",
   "api_key.rate_limit": "调整 Key 限额",
+  "api_key.monthly_limit": "调整 Key 月度积分上限",
   "approval.decide": "审批",
   "approval.revoke_grant": "撤销同类授权",
   "account.create": "创建账号",
@@ -38,8 +40,15 @@ export const ACTION_LABEL: Record<AuditAction, string> = {
   "webhook.redeliver": "重发回调",
   "eval.run": "运行评测",
   "capability.update": "更新模型能力与价目",
+  "provider.create": "新建模型提供者",
+  "provider.update": "更新模型提供者",
+  "provider.key_replace": "替换提供者 API Key",
+  "provider.test": "测试提供者连接",
+  "model.update": "更新模型与价目",
+  "model.alias_update": "更新模型别名映射",
   "agent.clone": "克隆智能体",
   "billing.credit": "人工发放积分",
+  "billing.mode_update": "切换计费模式",
   "billing.package_update": "更新积分套餐",
   "billing.order_create": "创建套餐订单",
   "billing.order_cancel": "取消套餐订单",
@@ -114,6 +123,10 @@ export function describeAudit(e: AuditItem): string {
       return `「${s(d.name) || "未命名"}」签发新 Key,旧 Key 于 ${s(d.oldExpiresAt)} 失效`;
     case "api_key.rate_limit":
       return `「${s(d.name) || "未命名"}」每分钟上限 ${d.from ?? "默认"} → ${d.to ?? "默认"}`;
+    case "api_key.monthly_limit":
+      return `「${s(d.name) || "未命名"}」本月积分上限 ${limitText(d.from)} → ${limitText(d.to)}`;
+    case "billing.mode_update":
+      return `${modeText(d.from)} → ${modeText(d.to)}`;
     case "approval.decide":
       return `${d.decision === "approved" ? "批准" : "拒绝"} ${s(d.tool)}${
         d.remember ? `,并授权本会话内同类(${s(d.grantLabel)})不再询问` : ""
@@ -124,8 +137,12 @@ export function describeAudit(e: AuditItem): string {
       return `${s(d.email)}(${s(d.role)})`;
     case "account.update": {
       const changes = (d.changes ?? {}) as Record<string, { from: unknown; to: unknown }>;
-      const parts = Object.entries(changes).map(
-        ([k, v]) => `${k}: ${String(v.from)} → ${String(v.to)}`,
+      const parts = Object.entries(changes).map(([k, v]) =>
+        k === "monthlyLimitMicroCredits"
+          ? `月度积分上限: ${limitText(v.from)} → ${limitText(v.to)}`
+          : k === "legacyMonthlyLimitMicroUsd"
+            ? `旧美元上限 $${(Number(v.from) / 1_000_000).toFixed(2)} 已改为积分上限`
+            : `${k}: ${String(v.from)} → ${String(v.to)}`,
       );
       return `${s(d.email)}${parts.length ? `:${parts.join(",")}` : ""}`;
     }
@@ -154,4 +171,12 @@ export function describeAudit(e: AuditItem): string {
     default:
       return "";
   }
+}
+
+function limitText(v: unknown): string {
+  return typeof v === "string" && /^\d+$/.test(v) ? `${creditsAmount(v)} 积分` : "不限";
+}
+
+function modeText(v: unknown): string {
+  return v === "live" ? "正式扣费" : v === "trial" ? "试算" : String(v);
 }

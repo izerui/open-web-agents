@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentSpec, RunContext } from "@/lib/shared";
+import type { AgentEvent, AgentSpec, RunContext, RunPricing } from "@/lib/shared";
 import type { ModelMetering } from "./domain/model-usage";
 
 /** 一轮在 transcript 里的范围:首尾两条消息的 uuid(含两端)。 */
@@ -29,7 +29,14 @@ export interface RunResult {
     output: number;
     partial?: boolean;
     metering?: ModelMetering;
+    /** 本次运行所属提供者与各模型的价目版本(编排器在引擎返回后写入)。 */
+    pricing?: RunPricing;
   };
+  /**
+   * 引擎可能已经调用过模型,却拿不到任何用量(SDK 异常、流结束没有结算消息,且一条用量都没收到)。
+   * 计费不能把"没有 cost"当成零用量结清,只能暂记待核对。确认没调用模型时不设。
+   */
+  usageUnknown?: boolean;
   /** status:上游模型 API 的 HTTP 状态码(仅 api_error 有)。 */
   error?: { kind: string; message: string; status?: number };
   /**

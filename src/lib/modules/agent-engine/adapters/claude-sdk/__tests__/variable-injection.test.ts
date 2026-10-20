@@ -10,7 +10,7 @@ describe("variable injection through SDK options to script execution", () => {
   it("script reads OWA_VAR env vars, skill file on disk has no secrets", () => {
     const spec: AgentSpec = {
       systemPrompt: "test",
-      model: { alias: "sonnet" },
+      model: { ref: "sonnet", modelId: "model-sonnet" },
       limits: { maxTurns: 5 },
       skillPackages: [
         {
@@ -43,7 +43,6 @@ describe("variable injection through SDK options to script execution", () => {
       sharedHome: tmpdir(),
       hostHome: tmpdir(),
       abort: new AbortController(),
-      slots: { sonnet: "claude-sonnet-4-20250514", fable: "fable", opus: "opus", haiku: "haiku" },
       allowStdioMcp: false,
       sandboxEnabled: false,
     };

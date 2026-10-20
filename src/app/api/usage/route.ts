@@ -3,6 +3,7 @@ import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { ownerFilter, resolveScope } from "@/lib/modules/access/domain/scope";
 import { aggregateUsage } from "@/lib/modules/usage/domain/aggregate";
 import { estimateRunCredits } from "@/lib/modules/usage/domain/estimate";
+import { toPublicEstimate } from "@/lib/modules/usage/domain/public-estimate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,7 +15,7 @@ const MAX_DAYS = 90;
  * 普通用户只看自己的;admin 看全平台(`?scope=all`)。
  */
 export async function GET(req: Request) {
-  const { usage, auth, capabilities } = getContainer();
+  const { usage, auth, capabilities, pricedModels } = getContainer();
 
   let principal: Awaited<ReturnType<typeof auth.resolveWeb>>;
   try {
@@ -40,22 +41,34 @@ export async function GET(req: Request) {
     capabilities.list(),
   ]);
 
-  const runs = records.map((r) => {
-    const stored = r.creditEstimate;
-    const estimated = stored ?? estimateRunCredits(r.metering, catalog);
-    return {
-      runId: r.runId,
-      agentId: r.agentId,
-      agentName: r.agentName,
-      status: r.status,
-      costMicroUsd: r.costMicroUsd,
-      inputTokens: r.inputTokens,
-      outputTokens: r.outputTokens,
-      at: r.at,
-      estimatedCredits: estimated,
-      estimateSource: stored ? ("run_snapshot" as const) : ("current_price" as const),
-    };
-  });
+  const runs = await Promise.all(
+    records.map(async (r) => {
+      const stored = r.creditEstimate;
+      // 运行锁定的价目版本:没有快照时按它重算,对外映射模型名称也按它;更早的运行只能按当前目录
+      const atRunPrice = await pricedModels.forRun(r.pricing);
+      const estimated = stored ?? estimateRunCredits(r.metering, atRunPrice ?? catalog);
+      // 对外只给公开模型 id 与名称,上游模型标识不出库
+      const publicEstimate =
+        r.publicEstimate ??
+        toPublicEstimate(estimated, atRunPrice ?? catalog, r.pricing?.providerId);
+      return {
+        runId: r.runId,
+        agentId: r.agentId,
+        agentName: r.agentName,
+        status: r.status,
+        costMicroUsd: r.costMicroUsd,
+        inputTokens: r.inputTokens,
+        outputTokens: r.outputTokens,
+        at: r.at,
+        estimatedCredits: publicEstimate,
+        estimateSource: stored
+          ? ("run_snapshot" as const)
+          : r.pricing && atRunPrice
+            ? ("run_price_version" as const)
+            : ("current_price" as const),
+      };
+    }),
+  );
 
   return Response.json({
     days,

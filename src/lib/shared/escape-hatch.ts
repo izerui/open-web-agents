@@ -3,8 +3,12 @@
 /**
  * 逃生舱改不了的字段:隔离、围栏、凭证、进程与会话控制。
  * 权限模式有正式的配置字段(permissionMode),不走逃生舱。
+ * 模型(model/fallbackModel/子代理 agents)由平台按提供者解析与计价,改了就绕过了价目与凭证边界。
  */
 export const ESCAPE_HATCH_PROTECTED = [
+  "model",
+  "fallbackModel",
+  "agents",
   "cwd",
   "env",
   "hooks",

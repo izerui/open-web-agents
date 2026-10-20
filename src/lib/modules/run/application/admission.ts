@@ -1,13 +1,15 @@
 // 在已有会话里"受理一轮新运行"的统一关卡:对话(sessions/run)、分支重跑(branch)都走这里。鉴权与权限复查由各入口按自己的凭证完成,之后统一:
 //
-//   会话存在且未删除 → 计费账号 → API Key 调用限流 → 额度 → 输入规范化与限长
+//   会话存在且未删除 → 计费账号 → API Key 调用限流 → 输入规范化与限长
 //   → 输入契约(API Key 建的会话)
+//
+// 余额与月度上限不在这里查:冻结和运行记录要在同一事务里落库,统一在入队时做(见 enqueue.ts)。
 //
 // 【为什么收拢】这几条规则曾经在四个路由里各写一遍,各漏一点:
 // - 用 API Key 在会话里跑,同一个智能体走 invoke 要校验 inputSchema,走 sessions/run 什么都收;
 // - Key 的调用限流只拦 invoke,同一把 Key 经 API 会话可以无限发起;
 // - 没有计费账号时,run 回落到会话归属或调用方去查额度,branch 干脆跳过额度。
-// invoke 自己建会话、且必须先做幂等重放,不走这里,但复用同一组限流与额度函数。
+// invoke 自己建会话、且必须先做幂等重放,不走这里,但复用同一组限流函数。
 
 import { checkPromptSize } from "@/lib/modules/run/domain/limits";
 import type { Session, SessionRepo } from "@/lib/modules/session/ports";
@@ -23,8 +25,7 @@ export class AdmissionRejected extends BrandedError {
       | "invalid_request"
       | "input_invalid"
       | "prompt_too_large"
-      | "rate_limited"
-      | "quota_exceeded",
+      | "rate_limited",
     message: string,
     readonly extra: Record<string, unknown> = {},
     readonly headers: Record<string, string> = {},
@@ -40,8 +41,6 @@ export type AdmissionCaller =
 
 export interface AdmissionDeps {
   sessions: Pick<SessionRepo, "get">;
-  /** 超出月度额度时抛错(QuotaExceeded),由 quotaRejection 转成 402 */
-  checkQuota(userId: string): Promise<void>;
   /** 每把 Key、每个智能体的调用限流;不提供 = 不限流 */
   checkRate?(input: {
     keyId: string;
@@ -54,8 +53,6 @@ export interface AdmissionDeps {
   /** 会话锁定版本(或草稿)的 inputSchema;没有返回 undefined */
   inputSchemaOf(session: Session): Promise<JsonSchema | undefined>;
   validateInput(schema: JsonSchema, value: unknown): { ok: boolean; errors?: string[] };
-  /** 识别额度异常(QuotaExceeded),转成受理拒绝 */
-  quotaRejection(err: unknown): AdmissionRejected | null;
 }
 
 export interface AdmissionRequest {
@@ -84,7 +81,7 @@ export class RunAdmission {
       throw new AdmissionRejected(404, "not_found", "session not found");
     }
 
-    // 计费账号:花费记给谁、额度就查谁(worker 也按它取凭证)。一条规则,四个入口一致
+    // 计费账号:花费记给谁(入队时按它冻结,worker 也按它取变量)。一条规则,四个入口一致
     const billingUserId =
       session.billingUserId ??
       session.ownerId ??
@@ -110,16 +107,6 @@ export class RunAdmission {
           { scope: v.scope, limit: v.limit, retryAfterSeconds: retryAfter },
           { "Retry-After": String(retryAfter) },
         );
-      }
-    }
-
-    if (billingUserId) {
-      try {
-        await this.deps.checkQuota(billingUserId);
-      } catch (err) {
-        const rejected = this.deps.quotaRejection(err);
-        if (rejected) throw rejected;
-        throw err;
       }
     }
 

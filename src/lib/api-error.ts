@@ -3,14 +3,25 @@
 // 【为什么要 code】error 是给人看的中文说明,会改措辞;集成方不能靠匹配文案来分支处理。
 // code 一旦发布就不改含义。
 
+import { ChargeRejected } from "@/lib/modules/billing/application/run-charging";
+
 export type ApiErrorCode =
   | "unauthorized"
   | "forbidden"
   | "not_found"
+  /** 版本冲突或唯一性冲突:刷新后重试 */
+  | "conflict"
   | "invalid_request"
   | "input_invalid"
   | "prompt_too_large"
-  | "quota_exceeded"
+  /** 积分可用余额不足(正式计费模式) */
+  | "insufficient_balance"
+  /** 账号本月积分上限已用完 */
+  | "account_limit_exceeded"
+  /** 这把 API Key 本月积分上限已用完 */
+  | "key_limit_exceeded"
+  /** 账号的旧美元月度上限待管理员按积分重新设置 */
+  | "account_limit_pending"
   | "rate_limited"
   | "idempotency_key_invalid"
   | "idempotency_conflict"
@@ -32,4 +43,13 @@ export function apiError(
   headers?: HeadersInit,
 ): Response {
   return Response.json({ error: message, code, ...extra }, { status, headers });
+}
+
+/**
+ * 计费受理被拒翻成 402;不是就返回 null 交给调用方。
+ * 402 而非 429:余额或月度上限不是"等一会儿再试"能解决的,客户端不该退避重试。
+ */
+export function chargeErrorResponse(err: unknown): Response | null {
+  if (!(err instanceof ChargeRejected)) return null;
+  return apiError(402, err.code, err.message);
 }

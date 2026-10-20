@@ -4,7 +4,7 @@ import type {
   Effort,
   JsonSchema,
   McpDef,
-  ModelAlias,
+  ModelRef,
   PermissionMode,
   SkillPackage,
   SubagentDef,
@@ -27,7 +27,8 @@ export interface AgentConfig {
   mcpServers?: McpDef[];
   tools?: ToolDef[];
   subagents?: SubagentDef[];
-  model: ModelAlias;
+  /** 别名(按平台别名映射)或模型目录中的模型 id */
+  model: ModelRef;
   effort?: Effort;
   maxTurns?: number;
   /**

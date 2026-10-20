@@ -1,0 +1,1 @@
+ALTER TABLE `run_charges` MODIFY COLUMN `state` varchar(16) NOT NULL;

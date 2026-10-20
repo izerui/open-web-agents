@@ -60,6 +60,20 @@ CLAUDE_CONFIG_DIR: 临时空目录,  // 隔离 ~/.claude.json 里的登录态
 
 ## 已验证的结论
 
+### 直接传真实模型 id 与子进程凭证隔离(2026-10-19)
+
+`raw-model-id.mjs`(SDK 0.3.245):
+
+- `options.model` 与子代理 `model` 直接传上游真实 id(非别名)可行:网关收到的 `model`
+  就是传入值,`result.modelUsage` 的键也是真实 id,计量可按它匹配价目。
+- 本场景四次请求都是主模型或子代理 id,没有出现 `ANTHROPIC_SMALL_FAST_MODEL` /
+  `ANTHROPIC_DEFAULT_HAIKU_MODEL` 的值;辅助调用走哪个槽未在此确认,所以别名槽仍须全部
+  指向同一提供者的模型。
+- 不设 `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` 时,Bash 子进程能读到 `ANTHROPIC_API_KEY`
+  (`printenv`、Python `os.environ` 都读得到)。设为 `1` 后读到空值,普通命令照常执行,
+  模型调用不受影响。生产同款配置(default + 放行的 canUseTool)与 bypassPermissions 结论一致。
+- 注意:不给 `canUseTool` 时开启清理,Bash 命令会一律变成"需要审批";生产配置给了回调,不受影响。
+
 ### 模型用量(2026-10-15)
 
 `model-metering.mjs` 用真实 SDK 与本地假网关验证:同一 query 中追加输入产生两条 result,

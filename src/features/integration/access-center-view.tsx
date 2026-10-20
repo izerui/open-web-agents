@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect as Select } from "@/components/ui/native-select";
 import { Separator } from "@/components/ui/separator";
 import { InvokeSnippetTabs } from "@/features/integration/invoke-snippet";
+import { KeyMonthlyLimit } from "@/features/integration/key-monthly-limit";
 import { KeyRateLimit, type PlatformRateLimits } from "@/features/integration/key-rate-limit";
 import { WebhookDeliveries } from "@/features/integration/webhook-deliveries";
 import { WebhookSecretCard } from "@/features/integration/webhook-secret-card";
@@ -24,6 +25,10 @@ interface KeyRecord {
   name?: string;
   agentId?: string;
   rateLimitPerMinute?: number;
+  /** 本月积分上限(微积分);没有 = 不单独限额 */
+  monthlyLimitMicroCredits?: string;
+  /** 本月已用(微积分,含在途冻结) */
+  monthUsedMicroCredits?: string;
   /** 到期时刻(ms);没有 = 不过期 */
   expiresAt?: number;
   createdAt: number;
@@ -63,6 +68,7 @@ export function AccessCenterView() {
   const [issued, setIssued] = useState<{ id: string; plaintext: string } | null>(null);
   const [busy, setBusy] = useState<"issue" | string | null>(null);
   const [keysLoaded, setKeysLoaded] = useState(false);
+  const [trial, setTrial] = useState(true);
   const [docAgentId, setDocAgentId] = useState("");
   const agentName = useMemo(() => new Map(agents.map((a) => [a.id, a.name])), [agents]);
   const docAgent = agents.find((a) => a.id === docAgentId) ?? agents[0];
@@ -78,13 +84,18 @@ export function AccessCenterView() {
    */
   const reload = useCallback(async () => {
     const [k, a] = await Promise.allSettled([
-      fetchJson<{ keys?: KeyRecord[]; rateLimits?: PlatformRateLimits }>("/api/keys"),
+      fetchJson<{
+        keys?: KeyRecord[];
+        rateLimits?: PlatformRateLimits;
+        billingMode?: "trial" | "live";
+      }>("/api/keys"),
       fetchJson<{ agents?: AgentSummary[] }>("/api/agents"),
     ]);
 
     if (k.status === "fulfilled") {
       setKeys(k.value.keys ?? []);
       if (k.value.rateLimits) setLimits(k.value.rateLimits);
+      setTrial(k.value.billingMode !== "live");
     } else toast.error(`API Key 列表加载失败:${errorText(k.reason)}`);
     setKeysLoaded(true);
 
@@ -289,7 +300,7 @@ export function AccessCenterView() {
               <p className="p-3 text-xs text-muted-foreground">暂无 key</p>
             )}
             {keys.map((k) => (
-              <div key={k.id} className="flex items-center gap-3 p-2 text-xs">
+              <div key={k.id} className="flex flex-wrap items-center gap-3 p-2 text-xs">
                 <span className="flex-1 truncate">
                   {k.name || "(未命名)"}
                   {k.agentId && (
@@ -302,6 +313,13 @@ export function AccessCenterView() {
                   keyId={k.id}
                   value={k.rateLimitPerMinute}
                   platform={limits.perKeyPerMinute}
+                  onSaved={reload}
+                />
+                <KeyMonthlyLimit
+                  keyId={k.id}
+                  limitMicro={k.monthlyLimitMicroCredits}
+                  usedMicro={k.monthUsedMicroCredits ?? "0"}
+                  trial={trial}
                   onSaved={reload}
                 />
                 <span className="text-muted-foreground">

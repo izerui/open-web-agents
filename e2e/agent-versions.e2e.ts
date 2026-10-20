@@ -343,7 +343,7 @@ describe("幂等重放先于额度:首次受理 → 额度耗尽 → 原键重�
     );
   }
 
-  it.skipIf(!dbUrl)("原键原请求仍返回原任务;新键请求返回 402", async () => {
+  it.skipIf(!dbUrl)("原键原请求仍返回原任务;新键请求按上限已满处理", async () => {
     if (!(await serverUp())) throw new Error("e2e 需要一个跑着的服务");
     const owner = await newUser("quota-owner");
     const email = (await owner.get<{ user?: { email: string } }>("/api/auth")).body.user?.email;
@@ -375,7 +375,7 @@ describe("幂等重放先于额度:首次受理 → 额度耗尽 → 原键重�
     const conn = await mysql.createConnection(dbUrl as string);
     try {
       const [res] = await conn.execute(
-        "UPDATE users SET monthly_quota_micro_usd = 0 WHERE email = ?",
+        "UPDATE users SET monthly_limit_micro_credits = 0 WHERE email = ?",
         [email],
       );
       expect((res as { affectedRows: number }).affectedRows).toBe(1);
@@ -388,8 +388,28 @@ describe("幂等重放先于额度:首次受理 → 额度耗尽 → 原键重�
     expect(retry.body.replayed).toBe(true);
     expect(retry.body.taskId).toBe(first.body.taskId);
 
+    // 新键是新请求:上限已满。试算模式(默认)不拦截,只记本应拒绝;正式模式会是 402
     const fresh = await call(`quota-new-${id}`);
-    expect(fresh.status).toBe(402);
-    expect(fresh.body.code).toBe("quota_exceeded");
+    const conn2 = await mysql.createConnection(dbUrl as string);
+    try {
+      const [[mode]] = (await conn2.execute(
+        "SELECT v FROM platform_state WHERE k = 'billing_mode'",
+      )) as unknown as [{ v: string }[]];
+      if (mode?.v === "live") {
+        expect(fresh.status).toBe(402);
+        expect(fresh.body.code).toBe("account_limit_exceeded");
+      } else {
+        expect(fresh.status).toBe(202);
+        const [rows] = await conn2.execute(
+          "SELECT would_reject FROM run_charges WHERE run_id = ?",
+          [fresh.body.taskId],
+        );
+        expect((rows as { would_reject: string | null }[])[0]?.would_reject).toBe(
+          "account_limit_exceeded",
+        );
+      }
+    } finally {
+      await conn2.end();
+    }
   });
 });

@@ -9,8 +9,8 @@ import {
   normalizeSdkMessage,
   normalizeStreamEvent,
 } from "@/lib/modules/agent-engine/domain/normalize";
+import { UnsettledUsage, mergeCost } from "@/lib/modules/agent-engine/domain/partial-usage";
 import type { EnginePort, RunResult, TranscriptRange } from "@/lib/modules/agent-engine/ports";
-import type { ModelGatewayPort } from "@/lib/modules/model-gateway/ports";
 import type { AgentEvent, AgentSpec, RunContext } from "@/lib/shared";
 import { buildSdkOptions } from "./options";
 import { materializeSkillPlugin } from "./skill-plugin";
@@ -57,8 +57,6 @@ export interface EngineDeps {
   sharedHome: string;
   /** 宿主真实 HOME。只用于把禁读目录里的 `~` 展开到平台运维自己的家。 */
   hostHome: string;
-  /** 别名 → 真实 modelId 的映射来源。 */
-  gateway: ModelGatewayPort;
   /** 是否启用 OS 内核沙箱(macOS 本地开发常关:seatbelt 会吞 stdout)。 */
   sandboxEnabled: boolean;
   /** 是否允许在宿主机启动 stdio MCP 进程。 */
@@ -121,29 +119,9 @@ export class ClaudeSdkEngine implements EnginePort {
     const range = (): TranscriptRange | undefined =>
       firstUuid && lastUuid ? { first: firstUuid, last: lastUuid } : undefined;
 
-    // 按消息累计 token,给"没等到结算消息就中止"的运行一个部分花费。
-    // 同一条 assistant 消息可能分多次到达,按 messageId 取最后一次
-    const usageByMessage = new Map<string, { input: number; output: number }>();
-    let anonymousUsage = { input: 0, output: 0 };
-    const trackUsage = (e: AgentEvent) => {
-      if (e.kind !== "usage") return;
-      const u = { input: e.input + (e.cacheRead ?? 0) + (e.cacheCreation ?? 0), output: e.output };
-      if (e.messageId) usageByMessage.set(e.messageId, u);
-      else
-        anonymousUsage = {
-          input: anonymousUsage.input + u.input,
-          output: anonymousUsage.output + u.output,
-        };
-    };
-    const partialCost = (): RunResult["cost"] => {
-      let input = anonymousUsage.input;
-      let output = anonymousUsage.output;
-      for (const u of usageByMessage.values()) {
-        input += u.input;
-        output += u.output;
-      }
-      return input || output ? { input, output, partial: true } : undefined;
-    };
+    // 没等到结算消息(result)的那部分用量:按模型、按消息累计(见 domain/partial-usage.ts)。
+    // 取消、失败、多轮中断时按它结算,不能因为没有 result 就当成没花钱
+    const unsettled = new UnsettledUsage();
 
     try {
       const skillPluginPath = this.deps.skillsRoot
@@ -173,7 +151,6 @@ export class ClaudeSdkEngine implements EnginePort {
           sharedHome: this.deps.sharedHome,
           hostHome: this.deps.hostHome,
           abort,
-          slots: this.deps.gateway.slots(),
           sandboxEnabled: this.deps.sandboxEnabled,
           allowStdioMcp: this.deps.allowStdioMcp,
           requestApproval: this.deps.requestApproval,
@@ -194,11 +171,14 @@ export class ClaudeSdkEngine implements EnginePort {
           parent_tool_use_id?: unknown;
         } | null;
         if (m) trackUuid(m);
+        unsettled.observe(msg);
 
         if (m?.type === "system" && m.subtype === "init") {
           sessionId = m.session_id ?? sessionId;
         } else if (m?.type === "result") {
           results.push(extractRunResult(msg, { hasSchema }));
+          // result 的 modelUsage 是累计快照:到此为止的用量都已结算
+          unsettled.settled();
           // 不再受理新的追加;已受理的照样交给模型(可能因此再答一轮、再来一条 result)
           if (steer) void steer.close();
         } else if (m?.type === "stream_event") {
@@ -210,7 +190,6 @@ export class ClaudeSdkEngine implements EnginePort {
           // 完整消息(assistant / user)。
           // 流式模式下:text / thinking 已经增量推过,只提取 tool_use / question / usage。
           for (const e of normalizeSdkMessage(msg, { skipStreamed: hasStreamed })) {
-            trackUsage(e);
             onEvent(label(e));
           }
           // assistant 消息处理完毕,重置标记 —— 下一条 assistant 消息重新计数
@@ -223,41 +202,69 @@ export class ClaudeSdkEngine implements EnginePort {
       // 这一轮真实花掉的钱就永远统计不到,失败原因也从 error_max_turns 这类
       // 具体子类型退化成笼统的 engine_error —— 排查时看到的是"引擎炸了",
       // 而实际上是"轮次用完了",两者的处置完全不同。
-      const done = combineResults(results);
-      if (done) return { ...done, sessionId, transcriptRange: range() };
-
       const message = err instanceof Error ? err.message : String(err);
-      return {
-        status: "failed",
-        sessionId,
-        transcriptRange: range(),
-        cost: partialCost(),
-        error: { kind: abort.signal.aborted ? "aborted" : "engine_error", message },
-      };
+      const error = { kind: abort.signal.aborted ? "aborted" : "engine_error", message };
+      return this.finish(combineResults(results), unsettled.cost(), error, sessionId, range());
     } finally {
       signal.removeEventListener("abort", onOuterAbort);
-      // 模型不再读输入了:还没交出去的追加消息记为未送达,并告诉界面
+      // 模型不再读输入了:还没交出去的追加消息记为未送达,并告诉界面。
+      // 【收尾出错不能往外抛】从 finally 里抛出会盖掉上面已经拿到的结果与花费 ——
+      // 一次真实花过钱的运行就成了"引擎异常、用量未知"
       if (steer) {
-        for (const m of await steer.abandon()) {
-          onEvent({ kind: "steer", id: m.id, text: m.text, outcome: "dropped" });
+        try {
+          for (const m of await steer.abandon()) {
+            onEvent({ kind: "steer", id: m.id, text: m.text, outcome: "dropped" });
+          }
+        } catch (err) {
+          console.warn(
+            `[owa] SDK 运行收尾时处理追加消息失败(session=${ctx.sessionId}),结果照常返回:`,
+            err instanceof Error ? err.message : err,
+          );
         }
       }
     }
 
-    const result = combineResults(results);
-    // 流结束却没收到 result 消息:被中断或 SDK 异常终止
-    if (!result) {
+    // 流结束却没收到(最后一轮的)result 消息:被中断或 SDK 异常终止
+    const error = abort.signal.aborted
+      ? { kind: "aborted", message: "运行被中断" }
+      : { kind: "no_result", message: "SDK 未产出 result 消息" };
+    return this.finish(combineResults(results), unsettled.cost(), error, sessionId, range());
+  }
+
+  /**
+   * 收尾:已结算的结果(各条 result 合并)+ 最后一条 result 之后尚未结算的用量。
+   * - 最后一条 result 之后没有新的用量:就是那份结果(SDK 在 error result 之后还会再抛一次异常)。
+   * - 之后又有一轮在跑(追加消息)却没等到它的 result:这一轮失败,花费 = 已结算 + 这一轮的部分用量,
+   *   不返回上一轮的成功状态,也不重复累计上一轮。
+   * - 一条 result 都没有:按部分用量;一点用量都没收到时标"用量未知"(请求可能已经发出)。
+   */
+  private finish(
+    done: RunResult | undefined,
+    extra: RunResult["cost"],
+    error: { kind: string; message: string },
+    sessionId: string | undefined,
+    transcriptRange: TranscriptRange | undefined,
+  ): RunResult {
+    if (done && !extra) return { ...done, sessionId, transcriptRange };
+    if (done) {
       return {
+        ...done,
         status: "failed",
+        structured: undefined,
+        salvagedFromText: undefined,
+        cost: mergeCost(done.cost, extra),
+        error,
         sessionId,
-        transcriptRange: range(),
-        cost: partialCost(),
-        error: abort.signal.aborted
-          ? { kind: "aborted", message: "运行被中断" }
-          : { kind: "no_result", message: "SDK 未产出 result 消息" },
+        transcriptRange,
       };
     }
-
-    return { ...result, sessionId, transcriptRange: range() };
+    return {
+      status: "failed",
+      sessionId,
+      transcriptRange,
+      cost: extra,
+      ...(extra ? {} : { usageUnknown: true }),
+      error,
+    };
   }
 }

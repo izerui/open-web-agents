@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
-import { apiError } from "@/lib/api-error";
+import { apiError, chargeErrorResponse } from "@/lib/api-error";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { VersionNotFound } from "@/lib/modules/agent/application/releases";
 import { parseVersion } from "@/lib/modules/agent/domain/release";
+import { validateAgentConfig } from "@/lib/modules/agent/domain/validate-config";
 import { validateInput } from "@/lib/modules/agent/domain/validate-output";
 import { resolveInWorkspace } from "@/lib/modules/artifacts/domain/safe-path";
 import {
@@ -16,8 +17,7 @@ import { PromptTooLarge, assertPromptSize } from "@/lib/modules/run/application/
 import { isValidIdempotencyKey } from "@/lib/modules/run/domain/limits";
 import { DuplicateIdempotencyKey } from "@/lib/modules/run/ports";
 import { workspacePathFor } from "@/lib/modules/session/domain/workspace";
-import { assertWithinQuota, quotaErrorResponse } from "@/lib/modules/usage/application/quota-guard";
-import { type ModelAlias, isModelAlias } from "@/lib/shared";
+import type { ModelRef } from "@/lib/shared";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,7 +26,7 @@ interface InvokeBody {
   /** 符合智能体 inputSchema 的输入;字符串则直接当 prompt。 */
   input?: unknown;
   /** 仅支持平台模型别名选择。 */
-  override?: { model?: ModelAlias };
+  override?: { model?: ModelRef };
   /** 锁定智能体版本;不传 = 当前发布的版本(从未发布则为草稿)。 */
   version?: number;
   /** 本次结果回调到这个地址(代替智能体配置的地址),用调用方自己的签名密钥签名。 */
@@ -58,19 +58,18 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     runs,
     env,
     auth,
-    users,
-    usage,
     enqueuer,
     releases,
     rateLimiter,
     storage,
+    modelCatalogView,
   } = getContainer();
 
   /*
    * 关卡顺序:
    *   鉴权与权限复查(每个请求都要过,重放也不例外 —— 吊销的 Key 拿不回任何东西)
    *   → 请求形状与摘要 → 幂等重放
-   *   → 【只对新请求】额度、版本解析、契约校验、入队。
+   *   → 【只对新请求】限流、版本解析、契约校验、入队(入队时冻结积分、检查月度上限)。
    * 额度(以及之后的调用限流)只约束"新开一次运行";重放不产生新的执行和花费,
    * 拦它只会让调用方拿不回已经受理、甚至已经扣过费的任务。
    */
@@ -155,10 +154,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (existing) return replayed(existing, requestHash, agent.config.outputSchema !== undefined);
   }
 
-  // ── 第三步:新请求 —— 限流、额度,再解析这次跑哪一版、按那一版校验契约 ─────────────
+  // ── 第三步:新请求 —— 限流,再解析这次跑哪一版、按那一版校验契约 ──────────────────
+  // 余额与月度上限在入队时随运行记录同一事务冻结(见 enqueue.ts);放在幂等重放之后:
+  // 首次受理的那次运行可能恰好把额度用完,原键重试仍要拿回原任务。
   /*
    * 调用限流:每把 Key、每个智能体各一个每分钟窗口(见 invoke-rate-limit.ts)。
-   * 排在额度前面:它只查 Redis,比聚合花费便宜;被拒的请求也不必再碰数据库。
+   * 只查 Redis,被拒的请求不必再碰数据库。
    */
   const rate = await checkInvokeRate(rateLimiter, {
     keyId: principal.type === "apiKey" ? principal.keyId : `user:${principal.userId}`,
@@ -186,19 +187,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   /*
-   * 额度关卡 —— 对外接口尤其需要:invoke 是给第三方系统轮询调用的,
-   * 对方的一个死循环就能在几分钟内烧掉整月预算,而且没有人盯着屏幕。
-   * 放在幂等重放之后:首次受理的那次运行可能恰好把额度用完,原键重试仍要拿回原任务。
-   */
-  try {
-    await assertWithinQuota({ users, usage }, billingUserId);
-  } catch (err) {
-    const quota = quotaErrorResponse(err);
-    if (quota) return quota;
-    throw err;
-  }
-
-  /*
    * 入参校验、结构化结果的有无都以【这一版】为准 ——
    * 草稿里刚改的 inputSchema 不该影响还在用已发布版本的调用方。
    */
@@ -208,6 +196,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   } catch (err) {
     if (err instanceof VersionNotFound) return apiError(404, "not_found", err.message);
     throw err;
+  }
+
+  // 覆盖的模型须存在、可用,且与该版本的子代理模型同一来源 —— 与保存配置时同一套规则
+  if (override.value?.model) {
+    const modelIssues = validateAgentConfig(
+      { ...release.config, model: override.value.model },
+      { allowStdioMcp: true, models: await modelCatalogView() },
+    ).filter((i) => i.field === "model" || /^subagents\[\d+\]\.model$/.test(i.field));
+    if (modelIssues.length) {
+      return apiError(400, "invalid_request", `override.model:${modelIssues[0]?.message}`);
+    }
   }
   const structured = release.config.outputSchema !== undefined;
 
@@ -286,12 +285,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     await sessions.delete(sessionId).catch(() => {});
     await fs.rm(workspaceDir, { recursive: true, force: true }).catch(() => {});
     if (err instanceof DuplicateIdempotencyKey) {
-      // 并发的同键请求:另一个先入队了,返回它
+      // 并发的同键请求:另一个先入队了,返回它(本次的冻结随事务回滚,不重复冻结)
       const existing = await runs.findByIdempotencyKey(err.idempotencyKey);
       if (existing) {
         return replayed(existing, requestHash, agent.config.outputSchema !== undefined);
       }
     }
+    const charge = chargeErrorResponse(err);
+    if (charge) return charge;
     throw err;
   }
 
@@ -344,7 +345,10 @@ function replayed(
   );
 }
 
-type Override = { model?: ModelAlias };
+type Override = { model?: ModelRef };
+
+/** 别名或模型 id(格式与模型 id 一致);是否可用在解析出版本后再查 */
+const MODEL_REF = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 function parseOverride(
   raw: unknown,
@@ -362,8 +366,8 @@ function parseOverride(
     };
   }
   if (o.model !== undefined) {
-    if (typeof o.model !== "string" || !isModelAlias(o.model)) {
-      return { ok: false, reason: "override.model 不是已知的模型别名" };
+    if (typeof o.model !== "string" || !MODEL_REF.test(o.model)) {
+      return { ok: false, reason: "override.model 须为模型别名或平台模型 id" };
     }
     out.model = o.model;
   }

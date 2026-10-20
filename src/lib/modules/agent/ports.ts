@@ -117,3 +117,8 @@ export interface AgentRepo {
   /** 这个 id 是否已被占用(含已删除的)—— 新建时用,防止撞上已删除的智能体。 */
   idTaken(id: string): Promise<boolean>;
 }
+
+/** 全部未删除智能体的模型引用(草稿 + 当前发布版本)。只取模型字段,不读整份配置。 */
+export interface AgentModelRefsQuery {
+  list(): Promise<{ agentId: string; refs: string[] }[]>;
+}

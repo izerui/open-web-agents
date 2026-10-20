@@ -12,17 +12,46 @@ export function isModelAlias(v: string): v is ModelAlias {
   return (MODEL_ALIASES as readonly string[]).includes(v);
 }
 
+/**
+ * 配置里对模型的引用:别名(fable/opus/sonnet/haiku,经平台别名映射)或模型目录里的模型 id。
+ * 别名是保留字,模型 id 不会与之重名。
+ */
+export type ModelRef = string;
+
+/** 运行时解析后的主模型:ref 是配置里写的,modelId 是发给提供者的真实标识。 */
 export interface ModelSelection {
-  alias: ModelAlias;
+  ref: ModelRef;
+  modelId: string;
+}
+
+/** 一次运行用到的提供者与模型价目版本 —— 结算与对账按它取当时的价格。 */
+export interface RunPricing {
+  providerId: string;
+  models: { capabilityId: string; modelId: string; version: number }[];
+  /**
+   * 受理时锁定的模型绑定(模型目录 id):执行按它取模型,之后改别名映射或换模型都不影响这次运行。
+   * 旧运行没有,执行时按配置现解析。
+   */
+  binding?: {
+    mainRef: ModelRef;
+    main: string;
+    subagents: Record<string, { ref: ModelRef; id: string }>;
+    /** 别名槽指向的模型;null = 用主模型 */
+    slots: Record<ModelAlias, string | null>;
+  };
 }
 
 /**
- * 模型凭证统一由平台提供。请求只能选择平台支持的模型别名。
+ * 受理时模型就不可用(停用、不存在、提供者没配好)。这次运行不可执行:没有冻结、没有锁定价目,
+ * 执行时照此失败 —— 绝不能当成"缺快照的旧任务"去现解析,否则排队期间模型被重新启用,
+ * 它就会绕过受理时的余额与额度检查,真的调用模型。
  */
-export interface CredentialChain {
-  platform?: { baseUrl?: string; key?: string };
-  request?: { model?: ModelAlias };
+export interface UnavailableAtAdmission {
+  unavailableAtAdmission: { code: string; message: string };
 }
+
+/** 运行记录里锁定的计价上下文:正常的价目绑定,或"受理时不可用"的标记 */
+export type PinnedPricing = RunPricing | UnavailableAtAdmission;
 
 export interface ResolvedCredentials {
   baseUrl: string;
@@ -58,11 +87,10 @@ export interface SubagentDef {
   description?: string;
   prompt: string;
   /**
-   * 这个子代理用的模型别名;不填 = 跟主 agent 一样。
-   * 只收别名,不收完整模型 id —— 别名经平台的模型映射(OWA_MODEL_*)落到真实模型,
-   * 子代理不该绕开它。典型用法:主 agent 用 opus,检索 / 汇总类子代理用 haiku 省钱。
+   * 这个子代理用的模型:别名或模型目录中的模型 id;不填 = 跟主 agent 一样。
+   * 必须与主模型属于同一提供者(一次运行只有一套凭证)。真实模型标识由平台解析,不收上游原始 id。
    */
-  model?: ModelAlias;
+  model?: ModelRef;
   background: false;
 }
 
@@ -108,6 +136,8 @@ export interface AgentSpec {
   tools?: ToolDef[];
   subagents?: SubagentDef[];
   model: ModelSelection;
+  /** 子代理名 → 解析后的真实模型标识;不在表里的子代理跟主模型一样。 */
+  subagentModels?: Record<string, string>;
   /** 有则启用结构化输出 —— 决定该智能体能否被企业系统当接口消费。 */
   outputSchema?: JsonSchema;
   /** 人工审批规则(HITL);不配则不审批。 */
@@ -152,6 +182,11 @@ export interface RunContext {
    */
   approvalPolicy?: "ask" | "allow" | "deny";
   credentials: ResolvedCredentials;
+  /**
+   * 本次运行的别名槽(SDK 内部按别名发起的辅助调用会用到)。全部指向本次运行所属提供者的模型;
+   * 不给时一律用主模型。
+   */
+  modelSlots?: Record<ModelAlias, string>;
   env: Record<string, string>;
   /** 运行中途追加消息的收件箱;不给 = 这一轮不接受追加(一次性输入)。 */
   steer?: SteerInbox;

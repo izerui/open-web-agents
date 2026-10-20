@@ -10,6 +10,7 @@
 import type { EnginePort, RunResult } from "@/lib/modules/agent-engine/ports";
 import { InMemoryAgentRepo } from "@/lib/modules/agent/adapters/in-memory-agent-repo";
 import { InMemoryBus } from "@/lib/modules/events/adapters/in-memory-bus";
+import { platformModels } from "@/lib/modules/model-gateway/application/__tests__/platform-models";
 import { InMemoryRunRepo } from "@/lib/modules/run/adapters/in-memory-run-repo";
 import { type OrchestratorDeps, RunOrchestrator } from "@/lib/modules/run/application/orchestrator";
 import { RunWorker } from "@/lib/modules/run/application/worker";
@@ -46,7 +47,7 @@ async function setup(over: Partial<OrchestratorDeps> = {}, engine = new OkEngine
     agents,
     engine,
     bus: new InMemoryBus(),
-    platformCredentials: { baseUrl: "platform", key: "pk" },
+    resolveModels: platformModels({ baseUrl: "https://platform", key: "pk" }),
     ...over,
   });
   return { orch, sessions, engine };
@@ -103,18 +104,21 @@ describe("故障注入 / 知识检索", () => {
 });
 
 describe("故障注入 / 平台凭证", () => {
-  it("平台 Key 未配置时中止,不尝试其它来源", async () => {
-    const { orch, engine } = await setup({ platformCredentials: { baseUrl: "platform", key: "" } });
-    await expect(orch.execute({ sessionId: "s1", prompt: "hi" }, signal())).rejects.toThrow(
-      "平台尚未配置",
-    );
+  it("平台 Key 未配置时以模型不可用失败,不启动引擎", async () => {
+    const { orch, engine } = await setup({
+      resolveModels: platformModels({ baseUrl: "https://platform", key: "" }),
+    });
+    const r = await orch.execute({ sessionId: "s1", prompt: "hi" }, signal());
+    expect(r.status).toBe("failed");
+    expect(r.error?.kind).toBe("model_unavailable");
+    expect(r.error?.message).toContain("平台尚未完成模型配置");
     expect(engine.lastCtx).toBeUndefined();
   });
 
   it("账号不需要配置模型凭证", async () => {
     const { orch, engine } = await setup({});
     await orch.execute({ sessionId: "s1", prompt: "hi" }, signal());
-    expect(engine.lastCtx?.credentials).toEqual({ baseUrl: "platform", key: "pk" });
+    expect(engine.lastCtx?.credentials).toEqual({ baseUrl: "https://platform", key: "pk" });
   });
 });
 
@@ -184,14 +188,13 @@ describe("故障注入 / 审计与回调", () => {
     });
   });
 
-  it("平台网关未配置时中止本轮", async () => {
+  it("文本接入地址未配置时以模型不可用失败,不启动引擎", async () => {
     const { orch, engine, sessions } = await setup({
-      platformCredentials: { baseUrl: "", key: "pk" },
+      resolveModels: platformModels({ baseUrl: "", key: "pk" }),
     });
     await sessions.create({ id: "s-own", agentId: "a1", workspaceDir: "/ws", ownerId: "u1" });
-    await expect(orch.execute({ sessionId: "s-own", prompt: "hi" }, signal())).rejects.toThrow(
-      "平台尚未配置",
-    );
+    const r = await orch.execute({ sessionId: "s-own", prompt: "hi" }, signal());
+    expect(r.error?.kind).toBe("model_unavailable");
     expect(engine.lastCtx).toBeUndefined();
   });
 });

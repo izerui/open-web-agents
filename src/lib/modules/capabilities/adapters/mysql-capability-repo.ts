@@ -1,8 +1,13 @@
 import type { Db } from "@/lib/db/client";
 import { capabilityCatalog, capabilityVersions } from "@/lib/db/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { type Capability, type CapabilityDefinition, validateCapability } from "../domain/catalog";
-import { CapabilityConflict, type CapabilityRepo, type CapabilityVersion } from "../ports";
+import {
+  CapabilityConflict,
+  type CapabilityRepo,
+  type CapabilityVersion,
+  DuplicateModelId,
+} from "../ports";
 
 function asCapability(row: { definition: unknown; version: number; updatedAt: Date }): Capability {
   return {
@@ -42,9 +47,30 @@ export class MysqlCapabilityRepo implements CapabilityRepo {
     try {
       return await this.db.transaction(
         async (tx) => {
+          // 同一提供者下的保存串行化,文本模型标识的查重才可靠
+          if (definition.providerId) {
+            await tx.execute(
+              sql`SELECT id FROM model_providers WHERE id = ${definition.providerId} FOR UPDATE`,
+            );
+          }
           await tx.execute(
             sql`SELECT id FROM capability_catalog WHERE id = ${definition.id} FOR UPDATE`,
           );
+          if (definition.providerId && definition.kind === "llm") {
+            const dup = await tx
+              .select({ id: capabilityCatalog.id })
+              .from(capabilityCatalog)
+              .where(
+                and(
+                  eq(capabilityCatalog.providerId, definition.providerId),
+                  eq(capabilityCatalog.kind, "llm"),
+                  eq(capabilityCatalog.modelId, definition.modelId),
+                  ne(capabilityCatalog.id, definition.id),
+                ),
+              )
+              .limit(1);
+            if (dup[0]) throw new DuplicateModelId(definition.modelId);
+          }
           const rows = await tx
             .select()
             .from(capabilityCatalog)
@@ -58,6 +84,7 @@ export class MysqlCapabilityRepo implements CapabilityRepo {
             id: definition.id,
             kind: definition.kind,
             modelId: definition.modelId,
+            providerId: definition.providerId ?? null,
             enabled: definition.enabled ? 1 : 0,
             version,
             definition,
@@ -85,6 +112,38 @@ export class MysqlCapabilityRepo implements CapabilityRepo {
       if (code === "ER_DUP_ENTRY") throw new CapabilityConflict();
       throw err;
     }
+  }
+
+  async retire(id: string, replacedBy: string, actorId: string): Promise<void> {
+    await this.db.transaction(
+      async (tx) => {
+        await tx.execute(sql`SELECT id FROM capability_catalog WHERE id = ${id} FOR UPDATE`);
+        const rows = await tx
+          .select()
+          .from(capabilityCatalog)
+          .where(eq(capabilityCatalog.id, id))
+          .limit(1);
+        const row = rows[0];
+        if (!row) return;
+        const current = row.definition as CapabilityDefinition;
+        if (current.replacedBy) return;
+        const definition = { ...current, enabled: false, replacedBy };
+        const version = row.version + 1;
+        const at = new Date();
+        await tx
+          .update(capabilityCatalog)
+          .set({ enabled: 0, version, definition, updatedAt: at })
+          .where(eq(capabilityCatalog.id, id));
+        await tx.insert(capabilityVersions).values({
+          capabilityId: id,
+          version,
+          definition,
+          createdBy: actorId,
+          createdAt: at,
+        });
+      },
+      { isolationLevel: "read committed" },
+    );
   }
 
   async version(id: string, version: number): Promise<CapabilityVersion | null> {

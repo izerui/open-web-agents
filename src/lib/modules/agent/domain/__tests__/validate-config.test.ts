@@ -1,6 +1,7 @@
 import { validateAgentConfig } from "@/lib/modules/agent/domain/validate-config";
 import { PERMISSION_MODES } from "@/lib/shared";
 import { describe, expect, it } from "vitest";
+import { catalogView } from "./model-catalog";
 
 const ok = { systemPrompt: "你是智能体", model: "sonnet" as const };
 
@@ -18,8 +19,24 @@ describe("validateAgentConfig / 基础字段", () => {
     expect(fields({ ...ok, systemPrompt: "   " })).toContain("systemPrompt");
   });
 
-  it("未知模型别名被拦", () => {
-    expect(fields({ ...ok, model: "gpt5" as never })).toContain("model");
+  it("模型写法不合法被拦;目录里不存在、不是文本模型、已停用也被拦", () => {
+    expect(fields({ ...ok, model: "GPT 5!" })).toContain("model");
+    const models = catalogView({
+      img: { kind: "image" },
+      off: { enabled: false },
+      "vendor-x": {},
+    });
+    const issueOf = (model: string) =>
+      validateAgentConfig({ ...ok, model }, { models }).find((i) => i.field === "model")?.message;
+    expect(issueOf("gpt5")).toMatch(/不存在/);
+    expect(issueOf("img")).toMatch(/只能选择文本模型/);
+    expect(issueOf("off")).toMatch(/已停用/);
+    expect(issueOf("vendor-x")).toBeUndefined();
+    expect(issueOf("sonnet")).toBeUndefined();
+  });
+
+  it("不给目录视图时只检查写法(别名或模型 id)", () => {
+    expect(fields({ ...ok, model: "vendor-model-1" })).not.toContain("model");
   });
 
   it("非法 effort 被拦", () => {
@@ -33,7 +50,7 @@ describe("validateAgentConfig / 基础字段", () => {
   });
 
   it("一次性报出所有问题,不是遇到第一个就停", () => {
-    const issues = validateAgentConfig({ systemPrompt: "", model: "x" as never, maxTurns: 0 });
+    const issues = validateAgentConfig({ systemPrompt: "", model: "X!" as never, maxTurns: 0 });
     expect(issues.length).toBeGreaterThanOrEqual(3);
   });
 });
@@ -174,16 +191,19 @@ describe("validateAgentConfig / skills 与子代理", () => {
     expect(f).toContain("subagents[0].prompt");
   });
 
-  it("子代理模型只收别名:完整模型 id 或乱写被拦,别名与不填都可以", () => {
+  it("子代理模型:须在目录中可用,且与主模型同一来源;别名与不填都可以", () => {
+    const models = catalogView({ "other-src": { group: "g2" }, off: { enabled: false } });
     const withModel = (model: unknown) =>
-      fields({
-        ...ok,
-        subagents: [{ name: "s", prompt: "p", model, background: false } as never],
-      });
-    expect(withModel("claude-opus-5-5")).toContain("subagents[0].model");
-    expect(withModel("gpt-4")).toContain("subagents[0].model");
-    expect(withModel("haiku")).not.toContain("subagents[0].model");
-    expect(withModel(undefined)).not.toContain("subagents[0].model");
+      validateAgentConfig(
+        { ...ok, subagents: [{ name: "s", prompt: "p", model, background: false } as never] },
+        { models },
+      ).find((i) => i.field === "subagents[0].model")?.message;
+    expect(withModel("Bad Model")).toMatch(/须从平台模型中选择/);
+    expect(withModel("claude-opus-5-5")).toMatch(/不存在/);
+    expect(withModel("off")).toMatch(/已停用/);
+    expect(withModel("other-src")).toMatch(/不能与主模型同时使用/);
+    expect(withModel("haiku")).toBeUndefined();
+    expect(withModel(undefined)).toBeUndefined();
   });
 
   it("子代理重名被拦", () => {
@@ -251,8 +271,19 @@ describe("validateAgentConfig / 逃生舱", () => {
     const issues = validateAgentConfig({
       systemPrompt: "p",
       model: "sonnet",
-      escapeHatch: { maxBudgetUsd: 1, fallbackModel: "haiku" },
+      escapeHatch: { maxBudgetUsd: 1 },
     });
     expect(issues.find((i) => i.field === "escapeHatch")).toBeUndefined();
+  });
+
+  it("模型字段不能放进逃生舱:由平台按提供者解析与计价", () => {
+    for (const key of ["model", "fallbackModel", "agents"]) {
+      const issues = validateAgentConfig({
+        systemPrompt: "p",
+        model: "sonnet",
+        escapeHatch: { [key]: "x" },
+      });
+      expect(issues.find((i) => i.field === "escapeHatch")?.message).toContain(key);
+    }
   });
 });

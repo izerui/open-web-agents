@@ -17,7 +17,7 @@ const ctx: RunContext = {
 
 const spec = (over: Partial<AgentSpec> = {}): AgentSpec => ({
   systemPrompt: "p",
-  model: { alias: "sonnet" },
+  model: { ref: "sonnet", modelId: "model-sonnet" },
   limits: {},
   ...over,
 });
@@ -38,7 +38,6 @@ const engine = (q: QueryFn) =>
   new ClaudeSdkEngine(q, {
     sharedHome: "/data/.agent-home",
     hostHome: "/Users/operator",
-    gateway,
     sandboxEnabled: false,
     allowStdioMcp: false,
   });
@@ -158,8 +157,14 @@ describe("ClaudeSdkEngine 回放", () => {
       new AbortController().signal,
     );
     expect(r.status).toBe("failed");
-    // m1 取最后一次(110 入 / 20 出),m2(210 入 / 30 出);缓存读计入输入
-    expect(r.cost).toEqual({ input: 320, output: 50, partial: true });
+    // m1 取最后一次(110 入 / 20 出),m2(210 入 / 30 出);缓存读计入输入。
+    // 这些消息没带模型标识:计量标为不完整,结算保持可补结算
+    expect(r.cost).toEqual({
+      input: 320,
+      output: 50,
+      partial: true,
+      metering: { source: "sdk_model_usage", complete: false, partial: true, models: [] },
+    });
   });
 
   it("流里没有 result 消息 → 失败并标 no_result", async () => {
@@ -348,5 +353,214 @@ describe("ClaudeSdkEngine 回放", () => {
 
     const child = events.find((e) => e.kind === "text") as { subagent?: string };
     expect(child.subagent).toBe("reviewer");
+  });
+});
+
+describe("ClaudeSdkEngine 用量未知与收尾故障", () => {
+  const signal = () => new AbortController().signal;
+
+  it("SDK 抛错且一条用量都没收到 → 标 usageUnknown(可能已调用模型,不能当零用量)", async () => {
+    const q: QueryFn = () =>
+      (async function* () {
+        yield { type: "system", subtype: "init", session_id: "s" };
+        throw new Error("socket hang up");
+      })();
+    const r = await engine(q).run(spec(), ctx, () => {}, signal());
+    expect(r).toMatchObject({ status: "failed", usageUnknown: true });
+    expect(r.cost).toBeUndefined();
+  });
+
+  it("流结束没有 result 也没有用量 → 标 usageUnknown", async () => {
+    const r = await engine(replay([{ type: "system", subtype: "init", session_id: "s" }])).run(
+      spec(),
+      ctx,
+      () => {},
+      signal(),
+    );
+    expect(r).toMatchObject({ status: "failed", usageUnknown: true });
+    expect(r.error?.kind).toBe("no_result");
+  });
+
+  it("收到过用量再抛错 → 带部分花费,不标 usageUnknown", async () => {
+    const q: QueryFn = () =>
+      (async function* () {
+        yield {
+          type: "assistant",
+          message: {
+            id: "m1",
+            content: [{ type: "text", text: "x" }],
+            usage: { input_tokens: 50, output_tokens: 5 },
+          },
+        };
+        throw new Error("boom");
+      })();
+    const r = await engine(q).run(spec(), ctx, () => {}, signal());
+    expect(r.cost).toMatchObject({ input: 50, output: 5, partial: true });
+    expect(r.usageUnknown).toBeUndefined();
+  });
+
+  it("SDK 已给出非零费用的 result、追加消息收尾抛错 → 结果与花费照常返回", async () => {
+    const steer = {
+      next: () => new Promise<never>(() => {}),
+      delivered: async () => {},
+      close: async () => {},
+      abandon: async () => {
+        throw new Error("redis gone");
+      },
+    };
+    const q: QueryFn = () =>
+      (async function* () {
+        yield { type: "system", subtype: "init", session_id: "s" };
+        yield {
+          type: "result",
+          subtype: "success",
+          result: "完成",
+          total_cost_usd: 0.2,
+          usage: { input_tokens: 20000, output_tokens: 1000 },
+          modelUsage: {
+            "up-main": {
+              inputTokens: 20000,
+              outputTokens: 1000,
+              cacheReadInputTokens: 0,
+              cacheCreationInputTokens: 0,
+            },
+          },
+        };
+      })();
+    const r = await engine(q).run(spec(), { ...ctx, steer }, () => {}, signal());
+    expect(r.status).toBe("success");
+    expect(r.cost?.metering?.models).toEqual([
+      expect.objectContaining({ modelId: "up-main", inputTokens: 20000, outputTokens: 1000 }),
+    ]);
+    expect(r.usageUnknown).toBeUndefined();
+  });
+});
+
+describe("ClaudeSdkEngine 部分计量(按模型)", () => {
+  const signal = () => new AbortController().signal;
+  const assistant = (id: string, model: string | undefined, input: number, output: number) => ({
+    type: "assistant",
+    message: {
+      id,
+      ...(model ? { model } : {}),
+      content: [{ type: "text", text: "x" }],
+      usage: { input_tokens: input, output_tokens: output },
+    },
+  });
+  const result1 = {
+    type: "result",
+    subtype: "success",
+    result: "第一轮",
+    total_cost_usd: 0.2,
+    usage: { input_tokens: 20000, output_tokens: 1000 },
+    modelUsage: {
+      "up-main": {
+        inputTokens: 20000,
+        outputTokens: 1000,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 0,
+      },
+    },
+  };
+
+  it("取消前已收到非零 usage、没有 result:按消息的模型标识给出可计价的部分计量", async () => {
+    const q: QueryFn = () =>
+      (async function* () {
+        yield assistant("m1", "up-main", 15000, 200);
+        yield assistant("m1", "up-main", 15000, 800); // 同一条消息再到一次,取最后一份
+        yield assistant("m2", "up-sub", 5000, 200);
+        throw new Error("aborted by user");
+      })();
+    const r = await engine(q).run(spec(), ctx, () => {}, signal());
+    expect(r.status).toBe("failed");
+    expect(r.usageUnknown).toBeUndefined();
+    expect(r.cost?.metering).toEqual({
+      source: "sdk_model_usage",
+      complete: true,
+      partial: true,
+      models: [
+        {
+          modelId: "up-main",
+          inputTokens: 15000,
+          outputTokens: 800,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+        {
+          modelId: "up-sub",
+          inputTokens: 5000,
+          outputTokens: 200,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      ],
+    });
+  });
+
+  it("只收到流式事件(完整消息还没到)就中断:message_start / message_delta 也计入", async () => {
+    const q: QueryFn = () =>
+      (async function* () {
+        yield {
+          type: "stream_event",
+          event: {
+            type: "message_start",
+            message: {
+              id: "m1",
+              model: "up-main",
+              usage: { input_tokens: 12000, output_tokens: 1 },
+            },
+          },
+        };
+        yield {
+          type: "stream_event",
+          event: { type: "message_delta", usage: { output_tokens: 300 } },
+        };
+        throw new Error("aborted");
+      })();
+    const r = await engine(q).run(spec(), ctx, () => {}, signal());
+    expect(r.cost?.metering?.models).toEqual([
+      {
+        modelId: "up-main",
+        inputTokens: 12000,
+        outputTokens: 300,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+    ]);
+  });
+
+  it("result₁ → 追加轮 usage₂ → 抛错:失败,花费 = result₁ 的累计快照 + 第二轮部分用量,第一轮不重复", async () => {
+    const q: QueryFn = () =>
+      (async function* () {
+        yield assistant("m1", "up-main", 20000, 1000); // 已被 result₁ 覆盖
+        yield result1;
+        yield assistant("m2", "up-main", 10000, 0);
+        throw new Error("socket hang up");
+      })();
+    const r = await engine(q).run(
+      spec({ outputSchema: { type: "object" } }),
+      ctx,
+      () => {},
+      signal(),
+    );
+    expect(r.status).toBe("failed");
+    expect(r.structured).toBeUndefined();
+    expect(r.error?.kind).toBe("engine_error");
+    expect(r.cost?.metering).toMatchObject({
+      complete: true,
+      partial: true,
+      models: [{ modelId: "up-main", inputTokens: 30000, outputTokens: 1000 }],
+    });
+  });
+
+  it("result 之后没有新的用量再抛错:仍是那份结果(SDK 在 error result 之后还会再抛一次)", async () => {
+    const q: QueryFn = () =>
+      (async function* () {
+        yield result1;
+        throw new Error("exit code 1");
+      })();
+    const r = await engine(q).run(spec(), ctx, () => {}, signal());
+    expect(r.status).toBe("success");
+    expect(r.cost?.metering?.partial).toBeUndefined();
   });
 });

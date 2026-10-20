@@ -4,9 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const SCHEMA = { type: "object", required: ["topic"], properties: { topic: { type: "string" } } };
 
-class QuotaHit extends Error {}
-
-async function setup(opts: { schema?: boolean; rateAllowed?: boolean; quotaOk?: boolean } = {}) {
+async function setup(opts: { schema?: boolean; rateAllowed?: boolean } = {}) {
   const sessions = new InMemorySessionRepo();
   await sessions.create({ id: "web", agentId: "a", workspaceDir: "/w", ownerId: "u1" });
   await sessions.create({
@@ -20,13 +18,9 @@ async function setup(opts: { schema?: boolean; rateAllowed?: boolean; quotaOk?: 
   await sessions.create({ id: "orphan", agentId: "a", workspaceDir: "/w" });
   await sessions.create({ id: "gone", agentId: "a", workspaceDir: "/w", ownerId: "u1" });
   await sessions.update("gone", { status: "deleted" });
-  const calls = { rate: [] as unknown[], quota: [] as string[] };
+  const calls = { rate: [] as unknown[] };
   const admission = new RunAdmission({
     sessions,
-    checkQuota: async (u) => {
-      calls.quota.push(u);
-      if (opts.quotaOk === false) throw new QuotaHit("超额");
-    },
     checkRate: async (i) => {
       calls.rate.push(i);
       return opts.rateAllowed === false
@@ -38,8 +32,6 @@ async function setup(opts: { schema?: boolean; rateAllowed?: boolean; quotaOk?: 
       typeof (v as { topic?: unknown })?.topic === "string"
         ? { ok: true }
         : { ok: false, errors: ["/topic 必填"] },
-    quotaRejection: (err) =>
-      err instanceof QuotaHit ? new AdmissionRejected(402, "quota_exceeded", "超额") : null,
   });
   return { admission, calls };
 }
@@ -69,11 +61,14 @@ describe("RunAdmission", () => {
   });
 
   it("计费账号一条规则:会话计费账号 → 会话归属 → 调用方", async () => {
-    const { admission, calls } = await setup();
-    await admission.admit({ sessionId: "api", caller: key, prompt: "x" });
-    await admission.admit({ sessionId: "web", caller: web, prompt: "x" });
-    await admission.admit({ sessionId: "orphan", caller: web, prompt: "x" });
-    expect(calls.quota).toEqual(["owner", "u1", "u1"]);
+    const { admission } = await setup();
+    const of = async (sessionId: string, caller: typeof web | typeof key) =>
+      (await admission.admit({ sessionId, caller, prompt: "x" })).billingUserId;
+    expect([await of("api", key), await of("web", web), await of("orphan", web)]).toEqual([
+      "owner",
+      "u1",
+      "u1",
+    ]);
   });
 
   it("API Key 调用方走限流(带上 Key 自己的上限);网页登录不限流", async () => {
@@ -83,22 +78,14 @@ describe("RunAdmission", () => {
     expect(calls.rate).toEqual([{ keyId: "k1", keyLimit: 5, agentId: "a" }]);
   });
 
-  it("限流拒绝:429 带 Retry-After,且不再查额度", async () => {
-    const { admission, calls } = await setup({ rateAllowed: false });
+  it("限流拒绝:429 带 Retry-After", async () => {
+    const { admission } = await setup({ rateAllowed: false });
     const r = await rejected(admission.admit({ sessionId: "api", caller: key, prompt: "x" }));
     expect(r).toMatchObject({ status: 429, code: "rate_limited" });
     expect((r.e as AdmissionRejected).headers["Retry-After"]).toBe("2");
-    expect(calls.quota).toEqual([]);
   });
 
-  it("额度拒绝:402", async () => {
-    const { admission } = await setup({ quotaOk: false });
-    expect(
-      (await rejected(admission.admit({ sessionId: "web", caller: web, prompt: "x" }))).status,
-    ).toBe(402);
-  });
-
-  it("输入不合法的请求不占限流与额度", async () => {
+  it("输入不合法的请求不占限流", async () => {
     const { admission, calls } = await setup();
     expect(
       (await rejected(admission.admit({ sessionId: "api", caller: key, prompt: "   " }))).code,
@@ -111,7 +98,6 @@ describe("RunAdmission", () => {
       ).status,
     ).toBe(413);
     expect(calls.rate).toEqual([]);
-    expect(calls.quota).toEqual([]);
   });
 
   it("API Key 会话 + 声明了 inputSchema:纯文本拒绝,不合格拒绝并给出原因,合格的序列化为 JSON", async () => {

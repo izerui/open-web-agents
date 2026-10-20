@@ -6,6 +6,7 @@ import {
   type RunStats,
 } from "@/lib/modules/run/ports";
 import type { RunState } from "@/lib/shared";
+import type { PinnedPricing } from "@/lib/shared";
 
 /** 内存队列 fake。application 层测试用,不碰真 IO。 */
 export class InMemoryRunRepo implements RunRepo {
@@ -52,6 +53,7 @@ export class InMemoryRunRepo implements RunRepo {
     agentConfig?: unknown;
     overrideEnc?: string;
     agentVersion?: number;
+    pricing?: PinnedPricing;
   } | null> {
     const p = this.payloads.get(id);
     if (!p) return null;
@@ -60,6 +62,7 @@ export class InMemoryRunRepo implements RunRepo {
       agentConfig: p.agentConfig,
       overrideEnc: p.overrideEnc,
       agentVersion: p.agentVersion,
+      pricing: p.pricing ?? undefined,
     };
   }
 

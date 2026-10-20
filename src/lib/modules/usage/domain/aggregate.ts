@@ -3,6 +3,8 @@
 
 import type { ModelMetering } from "@/lib/modules/agent-engine/domain/model-usage";
 import type { RunCreditEstimate } from "@/lib/modules/usage/domain/estimate";
+import type { PublicCreditEstimate } from "@/lib/modules/usage/domain/public-estimate";
+import type { RunPricing } from "@/lib/shared";
 
 export interface RunUsageRecord {
   runId: string;
@@ -20,6 +22,10 @@ export interface RunUsageRecord {
   metering?: ModelMetering;
   /** 结束时按当时价目算的积分估算快照;旧 run 可能没有。 */
   creditEstimate?: RunCreditEstimate;
+  /** 运行所属提供者与模型价目版本;旧 run 没有。 */
+  pricing?: RunPricing;
+  /** 结算时生成的对外估算(公开模型 id 与名称);更早的 run 没有。 */
+  publicEstimate?: PublicCreditEstimate;
 }
 
 export interface UsageTotals {

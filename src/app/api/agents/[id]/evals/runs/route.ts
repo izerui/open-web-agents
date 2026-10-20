@@ -3,7 +3,6 @@ import { apiError } from "@/lib/api-error";
 import { getContainer } from "@/lib/container";
 import { parseVersion } from "@/lib/modules/agent/domain/release";
 import { startEvalRun } from "@/lib/modules/eval/application/eval-runner";
-import { assertWithinQuota, quotaErrorResponse } from "@/lib/modules/usage/application/quota-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,14 +17,15 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
 /**
  * 发起一次评测:body { target: "draft" | 版本号 },对该版本跑一遍全部用例。
- * 会真正调用模型、产生费用:记在发起人名下、计入额度,额度用完了直接拒绝。
+ * 会真正调用模型、产生费用:记在发起人名下。每个用例入队时各自冻结积分;
+ * 积分或月度上限不够的用例记为"没能发起运行",不影响已发起的。
  * 只在有人点了才跑 —— 没有自动触发。
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const opened = await openAgent(req, id, "write");
   if (!opened.ok) return opened.res;
-  const { users, usage, evalDeps, audit } = getContainer();
+  const { evalDeps, audit } = getContainer();
   const userId = opened.subject.userId;
 
   const body = (await req.json().catch(() => ({}))) as { target?: unknown };
@@ -36,14 +36,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return apiError(400, "invalid_request", 'target 须为 "draft" 或正整数版本号');
     }
     target = n.value;
-  }
-
-  try {
-    await assertWithinQuota({ users, usage }, userId);
-  } catch (err) {
-    const res = quotaErrorResponse(err);
-    if (res) return res;
-    throw err;
   }
 
   const r = await startEvalRun(evalDeps, { agentId: id, target, userId });

@@ -8,6 +8,7 @@ import { agents, runs, sessions } from "@/lib/db/schema";
 import type { SessionSource } from "@/lib/modules/session/ports";
 import type { RunState } from "@/lib/shared";
 import { and, desc, eq, gte, inArray, lt, lte, or, sql } from "drizzle-orm";
+import { type PublicRunCost, publicCost } from "../domain/run-result";
 
 export interface RunQueryFilter {
   /** 计费账号(网页用户看自己名下的全部运行)。 */
@@ -38,7 +39,7 @@ export interface RunListItem {
   startedAt?: number;
   endedAt?: number;
   durationMs?: number;
-  cost?: { usd?: number; input?: number; output?: number; partial?: boolean };
+  cost?: PublicRunCost;
   error?: { kind?: string; message?: string };
   parentRunId?: string;
 }
@@ -118,7 +119,7 @@ function toItem(r: Row): RunListItem {
     startedAt,
     endedAt,
     durationMs: startedAt && endedAt ? endedAt - startedAt : undefined,
-    cost: (r.cost ?? undefined) as RunListItem["cost"],
+    cost: publicCost(r.cost) ?? undefined,
     error: (r.error ?? undefined) as RunListItem["error"],
     parentRunId: r.parentRunId ?? undefined,
   };

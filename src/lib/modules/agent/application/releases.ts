@@ -111,6 +111,37 @@ export class AgentReleases {
     return this.resolve(agent, version);
   }
 
+  /**
+   * 每个会话实际运行的模型引用:锁定版本的取那一版配置,否则取当前草稿 —— 与入队时
+   * `at(agent, session.agentVersion)` 同一口径。智能体或版本已不存在的不给。
+   */
+  async modelsOf(
+    sessions: { id: string; agentId: string; agentVersion?: number }[],
+  ): Promise<Map<string, string>> {
+    const pinned = sessions.filter((s) => s.agentVersion !== undefined);
+    const versions = await this.versions.getMany(
+      pinned.map((s) => ({ agentId: s.agentId, version: s.agentVersion as number })),
+    );
+    const byVersion = new Map(versions.map((v) => [`${v.agentId}:${v.version}`, v.config.model]));
+    const draftIds = [
+      ...new Set(sessions.filter((s) => s.agentVersion === undefined).map((s) => s.agentId)),
+    ];
+    const drafts = new Map<string, string>();
+    for (const id of draftIds) {
+      const agent = await this.agents.get(id);
+      if (agent) drafts.set(id, agent.config.model);
+    }
+    const out = new Map<string, string>();
+    for (const s of sessions) {
+      const model =
+        s.agentVersion !== undefined
+          ? byVersion.get(`${s.agentId}:${s.agentVersion}`)
+          : drafts.get(s.agentId);
+      if (model) out.set(s.id, model);
+    }
+    return out;
+  }
+
   /** 列表页:一次取齐各智能体当前发布的版本。 */
   async publishedOf(list: Agent[]): Promise<Map<string, AgentVersion>> {
     const keys = list

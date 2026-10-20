@@ -16,8 +16,13 @@ export interface User {
   defaultModel?: ModelAlias;
   /** 禁用的账号不能登录,已登录的会话也立即失效。 */
   disabled: boolean;
-  /** 月度花费上限(微美元)。undefined = 不限。 */
-  monthlyQuotaMicroUsd?: number;
+  /** 月度积分上限(微积分,十进制字符串)。undefined = 不限。 */
+  monthlyLimitMicroCredits?: string;
+  /**
+   * 升级前配置的美元月度上限(微美元),只在还没按积分重新设置时存在。
+   * 不擅自换算成积分:正式扣费模式下这类账号不受理运行,直到管理员按积分设置上限或明确设为不限。
+   */
+  legacyMonthlyLimitMicroUsd?: number;
   createdAt: number;
 }
 
@@ -67,7 +72,7 @@ export interface UserRepo {
    */
   adminUpdate(
     id: string,
-    v: { role?: "admin" | "user"; disabled?: boolean; monthlyQuotaMicroUsd?: number | null },
+    v: { role?: "admin" | "user"; disabled?: boolean; monthlyLimitMicroCredits?: string | null },
   ): Promise<void>;
 
   /** 当前管理员数量 —— 用来挡住"把最后一个管理员降级/禁用"。 */

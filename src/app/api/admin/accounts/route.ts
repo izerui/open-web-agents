@@ -1,15 +1,11 @@
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
+import { monthStartUtc } from "@/lib/modules/billing/application/run-charging";
+import { parseCredits } from "@/lib/modules/capabilities/domain/catalog";
 import { AuthError } from "@/lib/modules/identity/application/auth-service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-/** 本月起点(UTC)。花费统计和额度都按自然月算。 */
-function monthStart(): number {
-  const now = new Date();
-  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
-}
 
 /**
  * 平台账号列表。
@@ -18,22 +14,25 @@ function monthStart(): number {
  * 判断不了任何事 —— 谁在真正使用、谁在烧钱,才是决定要不要调额度/停用的依据。
  */
 export async function GET(req: Request) {
-  const { users, usage, agents, auth } = getContainer();
+  const { users, agents, auth, billingMode, runCharges } = getContainer();
   try {
     const principal = await auth.resolveWeb(req);
     auth.assertCanAdministerPlatform(principal);
 
-    const since = monthStart();
-    // 三个查询互不依赖,并行拿;各自都是一次性批量,没有 N+1
+    const since = monthStartUtc(Date.now());
+    // 本月用量按当前计费模式的口径(与受理时检查月度上限一致):试算看预计消耗,正式看实际扣除
+    const mode = await billingMode.get();
+    // 几个查询互不依赖,并行拿;各自都是一次性批量,没有 N+1
     // 智能体数量用聚合查询 —— 曾经数的是"全库最新 200 条",智能体一多就数错
-    const [list, costMap, agentCount] = await Promise.all([
+    const [list, usedMap, agentCount] = await Promise.all([
       users.listAll(),
-      usage.costByOwner(since),
+      runCharges.monthUsageByAccount(mode, since),
       agents.countByOwner(),
     ]);
 
     return Response.json({
       monthStart: since,
+      billingMode: mode,
       accounts: list.map((u) => ({
         id: u.id,
         email: u.email,
@@ -41,8 +40,10 @@ export async function GET(req: Request) {
         disabled: u.disabled,
         createdAt: u.createdAt,
         agentCount: agentCount.get(u.id) ?? 0,
-        monthCostMicroUsd: costMap.get(u.id) ?? 0,
-        monthlyQuotaMicroUsd: u.monthlyQuotaMicroUsd ?? null,
+        monthUsedMicroCredits: (usedMap.get(u.id) ?? 0n).toString(),
+        monthlyLimitMicroCredits: u.monthlyLimitMicroCredits ?? null,
+        // 升级遗留的美元上限:待管理员按积分设置(或明确设为不限)
+        legacyLimitMicroUsd: u.legacyMonthlyLimitMicroUsd ?? null,
       })),
     });
   } catch (err) {
@@ -56,8 +57,8 @@ interface PatchBody {
   id?: string;
   role?: "admin" | "user";
   disabled?: boolean;
-  /** 微美元;null 表示取消限额。 */
-  monthlyQuotaMicroUsd?: number | null;
+  /** 月度积分上限(积分文本,如 "500");null 表示取消限额。 */
+  monthlyLimitCredits?: string | null;
   /** 重置密码:返回一次性新密码。 */
   resetPassword?: boolean;
 }
@@ -100,7 +101,7 @@ export async function POST(req: Request) {
   }
 }
 
-/** 改一个账号的角色 / 停用状态 / 月度额度。 */
+/** 改一个账号的角色 / 停用状态 / 月度积分上限。 */
 export async function PATCH(req: Request) {
   const { users, auth, authService, audit } = getContainer();
   try {
@@ -144,16 +145,24 @@ export async function PATCH(req: Request) {
       );
     }
 
-    if (body.monthlyQuotaMicroUsd !== undefined && body.monthlyQuotaMicroUsd !== null) {
-      if (!Number.isFinite(body.monthlyQuotaMicroUsd) || body.monthlyQuotaMicroUsd < 0) {
-        return Response.json({ error: "额度必须是非负数" }, { status: 400 });
+    let monthlyLimitMicroCredits: string | null | undefined;
+    if (body.monthlyLimitCredits === null) monthlyLimitMicroCredits = null;
+    else if (body.monthlyLimitCredits !== undefined) {
+      try {
+        if (typeof body.monthlyLimitCredits !== "string") throw new Error();
+        monthlyLimitMicroCredits = parseCredits(body.monthlyLimitCredits.trim());
+      } catch {
+        return Response.json(
+          { error: "月度上限须为非负积分数(最多六位小数),或 null 表示不限" },
+          { status: 400 },
+        );
       }
     }
 
     await users.adminUpdate(body.id, {
       role: body.role,
       disabled: body.disabled,
-      monthlyQuotaMicroUsd: body.monthlyQuotaMicroUsd,
+      monthlyLimitMicroCredits,
     });
     const tempPassword = body.resetPassword ? await authService.resetPassword(body.id) : undefined;
 
@@ -168,13 +177,16 @@ export async function PATCH(req: Request) {
       changes.disabled = { from: target.disabled, to: body.disabled };
     }
     if (
-      body.monthlyQuotaMicroUsd !== undefined &&
-      body.monthlyQuotaMicroUsd !== (target.monthlyQuotaMicroUsd ?? null)
+      monthlyLimitMicroCredits !== undefined &&
+      monthlyLimitMicroCredits !== (target.monthlyLimitMicroCredits ?? null)
     ) {
-      changes.monthlyQuotaMicroUsd = {
-        from: target.monthlyQuotaMicroUsd ?? null,
-        to: body.monthlyQuotaMicroUsd,
+      changes.monthlyLimitMicroCredits = {
+        from: target.monthlyLimitMicroCredits ?? null,
+        to: monthlyLimitMicroCredits,
       };
+    }
+    if (monthlyLimitMicroCredits !== undefined && target.legacyMonthlyLimitMicroUsd !== undefined) {
+      changes.legacyMonthlyLimitMicroUsd = { from: target.legacyMonthlyLimitMicroUsd, to: null };
     }
     if (Object.keys(changes).length > 0) {
       await audit.record({
@@ -204,7 +216,7 @@ export async function PATCH(req: Request) {
         email: updated.email,
         role: updated.role,
         disabled: updated.disabled,
-        monthlyQuotaMicroUsd: updated.monthlyQuotaMicroUsd ?? null,
+        monthlyLimitMicroCredits: updated.monthlyLimitMicroCredits ?? null,
       },
       ...(tempPassword ? { tempPassword } : {}),
     });

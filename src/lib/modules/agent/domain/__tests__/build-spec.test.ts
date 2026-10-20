@@ -15,7 +15,7 @@ describe("buildSpec", () => {
   it("最小配置产出合法 AgentSpec", () => {
     const spec = buildSpec({ systemPrompt: "你是智能体", model: "sonnet" }, ctx);
     expect(spec.systemPrompt).toBe("你是智能体");
-    expect(spec.model).toEqual({ alias: "sonnet" });
+    expect(spec.model).toEqual({ ref: "sonnet", modelId: "sonnet" });
     expect(spec.limits).toEqual({ maxTurns: undefined, effort: undefined });
     expect(spec.outputSchema).toBeUndefined();
   });
@@ -83,8 +83,12 @@ describe("buildSpec", () => {
     expect(spec.subagents?.[0]).toEqual({ name: "rev", prompt: "审", background: false });
   });
 
-  it("模型别名可被请求级覆盖", () => {
-    const spec = buildSpec({ systemPrompt: "p", model: "sonnet" }, ctx, { model: "haiku" });
-    expect(spec.model).toEqual({ alias: "haiku" });
+  it("用运行时解析出的模型与子代理模型", () => {
+    const spec = buildSpec({ systemPrompt: "p", model: "sonnet" }, ctx, {
+      model: { ref: "haiku", modelId: "vendor-haiku" },
+      subagentModels: { rev: "vendor-sonnet" },
+    });
+    expect(spec.model).toEqual({ ref: "haiku", modelId: "vendor-haiku" });
+    expect(spec.subagentModels).toEqual({ rev: "vendor-sonnet" });
   });
 });

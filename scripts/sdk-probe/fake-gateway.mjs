@@ -97,6 +97,8 @@ export async function startFakeGateway(script) {
   let turn = 0;
   /** 每一轮请求里 SDK 送来的 messages —— 工具结果长什么样要靠它看。 */
   const seenRequests = [];
+  /** 每一轮请求的 x-api-key —— 验证用的是哪把凭证 */
+  const seenKeys = [];
 
   const server = http.createServer((req, res) => {
     // 连通性探测
@@ -113,6 +115,7 @@ export async function startFakeGateway(script) {
         res.writeHead(200, { "content-type": "application/json" }).end("{}");
         return;
       }
+      seenKeys.push(req.headers["x-api-key"] ?? null);
       try {
         seenRequests.push(JSON.parse(body));
       } catch {
@@ -137,6 +140,7 @@ export async function startFakeGateway(script) {
   return {
     baseUrl: `http://127.0.0.1:${port}`,
     seenRequests,
+    seenKeys,
     turns: () => turn,
     close: () => server.close(),
   };

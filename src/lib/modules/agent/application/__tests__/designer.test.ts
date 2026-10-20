@@ -6,6 +6,7 @@ import { InMemorySessionRepo } from "@/lib/modules/session/adapters/in-memory-se
 import { describe, expect, it, vi } from "vitest";
 import { InMemoryAgentRepo } from "../../adapters/in-memory-agent-repo";
 import { InMemoryAgentVersionRepo } from "../../adapters/in-memory-agent-version-repo";
+import { catalogView } from "../../domain/__tests__/model-catalog";
 import {
   DRAFT_FILE,
   type DesignDraft,
@@ -102,7 +103,12 @@ async function setup(opts: { target?: Agent; legacy?: boolean } = {}) {
   const enqueue = vi.fn<DesignTx["enqueue"]>(async () => {});
   const inSession: DesignerDeps["inSession"] = (id, fn) =>
     sessions.withWorkspaceLock(id, () => fn({ agents, sessions, grants, runs, busy, enqueue }));
-  const designer = new AgentDesigner({ inSession, storage, allowStdioMcp: false });
+  const designer = new AgentDesigner({
+    inSession,
+    storage,
+    allowStdioMcp: false,
+    modelCatalogView: async () => catalogView(),
+  });
   await sessions.create({
     id: "design",
     agentId: DESIGN_EXECUTOR_ID,

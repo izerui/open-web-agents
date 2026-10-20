@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createDb } from "@/lib/db/client";
 import { runs } from "@/lib/db/schema";
+import { MysqlProviderRepo } from "@/lib/modules/model-gateway/adapters/mysql-provider-repo";
 import { MysqlRunRepo } from "@/lib/modules/run/adapters/mysql-run-repo";
 import { toRunResult } from "@/lib/modules/run/domain/run-result";
 import { eq } from "drizzle-orm";
@@ -17,8 +18,15 @@ if (!url) {
   if (!/test/i.test(new URL(url).pathname)) throw new Error("Dedicated test database required");
   const { db, pool } = createDb(url);
   afterAll(() => pool.end());
-  capabilityContract("MySQL", () => new MysqlCapabilityRepo(db));
-  it("model metering survives persistence and the public run-result contract", async () => {
+  const providers = new MysqlProviderRepo(db);
+  capabilityContract(
+    "MySQL",
+    () => new MysqlCapabilityRepo(db),
+    async (id) => {
+      await providers.save({ id, name: `测试-${id}`, enabled: true, endpoints: {} }, null, "test");
+    },
+  );
+  it("model metering survives persistence but stays out of the public run-result contract", async () => {
     const repo = new MysqlRunRepo(db);
     const id = randomUUID();
     const metering = {
@@ -39,7 +47,10 @@ if (!url) {
       await repo.saveResult(id, { cost: { input: 100, output: 20, metering } });
       const record = await repo.getResult(id);
       if (!record) throw new Error("missing run");
-      expect(toRunResult(record).cost?.metering).toEqual(metering);
+      // 原始计量(含上游模型标识)只在库里;对外结果契约不带
+      expect(record.cost).toMatchObject({ metering });
+      expect(JSON.stringify(toRunResult(record))).not.toContain("actual-model");
+      expect(toRunResult(record).cost).toMatchObject({ input: 100, output: 20 });
       await repo.saveResult(id, { error: { kind: "later_error" } });
       expect((await repo.getResult(id))?.cost).toMatchObject({ metering });
     } finally {

@@ -7,19 +7,24 @@ import { describeToolCall, needsApproval } from "@/lib/modules/agent-engine/doma
 import { materializeSandbox } from "@/lib/modules/agent-engine/domain/sandbox";
 import { guardToolUse } from "@/lib/modules/agent-engine/domain/tool-guard";
 import { DRAFT_FILE } from "@/lib/modules/agent/domain/design";
-import type { ModelSlots } from "@/lib/modules/model-gateway/ports";
-import type { AgentSpec, ResolvedCredentials, RunContext } from "@/lib/shared";
+import type { AgentSpec, ModelAlias, ResolvedCredentials, RunContext } from "@/lib/shared";
 import { ESCAPE_HATCH_PROTECTED } from "@/lib/shared/escape-hatch";
 
 /**
  * agent 子进程的 ANTHROPIC_* 环境。
  *
- * 别名槽当"角色槽":options.model 传别名(如 "sonnet"),SDK 通过 ANTHROPIC_DEFAULT_*_MODEL
- * 把它换成真实 modelId 再发给网关 —— 平台只认别名,真实模型由 ModelGatewayPort 决定。
+ * 主模型与子代理直接传真实 modelId(scripts/sdk-probe/raw-model-id.mjs 实测可行);
+ * 别名槽只服务 SDK 内部按别名发起的辅助调用,全部指向本次运行所属提供者的模型。
  * ANTHROPIC_AUTH_TOKEN 置空:防宿主环境残留的 token 抢占 API_KEY。
+ * CLAUDE_CODE_SUBPROCESS_ENV_SCRUB:Bash / hook / stdio MCP 子进程读不到 Key
+ * (同一探针实测:不开时 printenv 与 Python 都能读到;开了读到空值,命令与模型调用照常)。
  */
-export function aliasEnv(creds: ResolvedCredentials, slots: ModelSlots): Record<string, string> {
+export function aliasEnv(
+  creds: ResolvedCredentials,
+  slots: Record<ModelAlias, string>,
+): Record<string, string> {
   return {
+    CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
     ANTHROPIC_BASE_URL: creds.baseUrl,
     ANTHROPIC_API_KEY: creds.key,
     ANTHROPIC_AUTH_TOKEN: "",
@@ -31,6 +36,10 @@ export function aliasEnv(creds: ResolvedCredentials, slots: ModelSlots): Record<
     ANTHROPIC_DEFAULT_HAIKU_MODEL: slots.haiku,
     ANTHROPIC_SMALL_FAST_MODEL: slots.haiku,
   };
+}
+
+function slotsOf(modelId: string): Record<ModelAlias, string> {
+  return { fable: modelId, opus: modelId, sonnet: modelId, haiku: modelId };
 }
 
 /**
@@ -87,8 +96,8 @@ function toAgents(spec: AgentSpec): Record<string, unknown> | undefined {
     out[s.name] = {
       description: s.description?.trim() || `处理与「${s.name}」相关的子任务`,
       prompt: s.prompt,
-      // 别名由 SDK 经 ANTHROPIC_DEFAULT_<别名>_MODEL 换成真实模型,与主 agent 走同一套映射
-      ...(s.model ? { model: s.model } : {}),
+      // 运行时已解析成同一提供者下的真实模型标识;没配的子代理跟主模型一样
+      ...(spec.subagentModels?.[s.name] ? { model: spec.subagentModels[s.name] } : {}),
       // 平台强制同步执行:后台跑的子代理没法纳入过程监控
       background: false,
     };
@@ -183,8 +192,6 @@ export interface SdkOptionsDeps {
    */
   platform?: NodeJS.Platform;
   abort: AbortController;
-  /** 别名槽 → 真实 modelId。 */
-  slots: ModelSlots;
   /**
    * 是否启用 OS 内核沙箱。
    *
@@ -253,7 +260,7 @@ export function buildSdkOptions(
     abortController: deps.abort,
 
     // ② spec 一等公民字段
-    model: spec.model.alias,
+    model: spec.model.modelId,
     systemPrompt: spec.systemPrompt,
     mcpServers: toMcpServers(spec, deps.allowStdioMcp),
     agents: toAgents(spec),
@@ -282,7 +289,7 @@ export function buildSdkOptions(
       : {}),
     env: {
       ...ctx.env,
-      ...aliasEnv(ctx.credentials, deps.slots),
+      ...aliasEnv(ctx.credentials, ctx.modelSlots ?? slotsOf(spec.model.modelId)),
 
       /**
        * HOME 与 CLAUDE_CONFIG_DIR 是两件事,分开设。

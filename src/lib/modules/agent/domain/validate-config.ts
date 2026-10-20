@@ -4,7 +4,6 @@
 // 起不来或静默少能力 —— 那时候排查成本高得多。宁可在构建器里当场拦住。
 
 import {
-  MODEL_ALIASES,
   PERMISSION_MODES,
   isModelAlias,
   protectedEscapeHatchKeys,
@@ -18,9 +17,56 @@ export interface ConfigIssue {
   message: string;
 }
 
+/** 模型引用解析出的信息。group 是模型所属来源的不透明标识,同一次运行只能用同一来源的模型。 */
+export interface ModelRefInfo {
+  name: string;
+  kind: string;
+  /** 模型与其来源都处于启用状态 */
+  enabled: boolean;
+  group: string;
+}
+
+/** 平台模型目录的只读视图(别名按当前映射解析)。 */
+export interface ModelCatalogView {
+  resolve(ref: string): ModelRefInfo | null;
+}
+
 export interface ConfigValidationPolicy {
   /** stdio MCP 会在宿主机启动进程,默认禁止。 */
   allowStdioMcp?: boolean;
+  /** 给了就检查模型是否存在、可用、子代理与主模型同一来源;不给只检查格式。 */
+  models?: ModelCatalogView;
+}
+
+/** 别名,或模型目录里的模型 id(与模型 id 的格式规则一致)。 */
+const MODEL_REF = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+function checkModelRef(
+  ref: string,
+  field: string,
+  label: string,
+  models: ModelCatalogView | undefined,
+  issues: ConfigIssue[],
+): ModelRefInfo | null {
+  if (!isModelAlias(ref) && !MODEL_REF.test(ref)) {
+    issues.push({ field, message: `${label}须从平台模型中选择` });
+    return null;
+  }
+  if (!models) return null;
+  const info = models.resolve(ref);
+  if (!info) {
+    issues.push({ field, message: `${label}不存在,请重新选择` });
+    return null;
+  }
+  if (info.kind !== "llm") {
+    issues.push({ field, message: `${label}只能选择文本模型` });
+    return null;
+  }
+  if (!info.enabled) {
+    issues.push({ field, message: `${label}「${info.name}」已停用,请选择其他模型` });
+    return null;
+  }
+  return info;
 }
 
 const EFFORTS = new Set(["low", "medium", "high"]);
@@ -39,9 +85,10 @@ export function validateAgentConfig(
     issues.push({ field: "systemPrompt", message: "系统提示词不能为空" });
   }
 
-  if (cfg.model !== undefined && !isModelAlias(cfg.model)) {
-    issues.push({ field: "model", message: `模型别名须是 ${MODEL_ALIASES.join("/")}` });
-  }
+  const mainModel =
+    cfg.model !== undefined
+      ? checkModelRef(String(cfg.model), "model", "模型", policy.models, issues)
+      : null;
 
   if (cfg.effort !== undefined && !EFFORTS.has(cfg.effort)) {
     issues.push({ field: "effort", message: `effort 须是 ${[...EFFORTS].join("/")}` });
@@ -125,11 +172,21 @@ export function validateAgentConfig(
     } else seenSub.add(sa.name);
 
     if (!sa.prompt?.trim()) issues.push({ field: `${at}.prompt`, message: "子代理提示词不能为空" });
-    if (sa.model !== undefined && !isModelAlias(sa.model)) {
-      issues.push({
-        field: `${at}.model`,
-        message: "子代理模型只能是别名(fable / opus / sonnet / haiku),不填则与主 agent 相同",
-      });
+    if (sa.model !== undefined) {
+      const sub = checkModelRef(
+        String(sa.model),
+        `${at}.model`,
+        "子代理模型",
+        policy.models,
+        issues,
+      );
+      // 一次运行只有一套凭证:子代理只能用与主模型同一来源的模型
+      if (sub && mainModel && sub.group !== mainModel.group) {
+        issues.push({
+          field: `${at}.model`,
+          message: `子代理「${sa.name}」的模型不能与主模型同时使用,请重新选择`,
+        });
+      }
     }
   }
 

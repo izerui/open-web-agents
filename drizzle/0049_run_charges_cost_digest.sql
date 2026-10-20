@@ -1,0 +1,1 @@
+ALTER TABLE `run_charges` ADD `settled_cost_digest` varchar(64);

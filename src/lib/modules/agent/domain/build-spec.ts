@@ -1,7 +1,7 @@
 // Builder：智能体配置 + 运行上下文 → AgentSpec。纯逻辑，零框架/SDK 依赖。
 // 组装优先级：框架默认 < 智能体配置；凭证与模型别名的三级覆盖在 resolve-credentials 里完成。
 
-import type { AgentSpec, McpDef, ModelAlias, RunContext } from "@/lib/shared";
+import type { AgentSpec, McpDef, ModelSelection, RunContext } from "@/lib/shared";
 import type { AgentConfig, VariableDef } from "./config";
 
 const VAR_PATTERN = /\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}/g;
@@ -79,7 +79,9 @@ export function buildSpec(
   cfg: AgentConfig,
   _ctx: RunContext,
   overrides?: {
-    model?: ModelAlias;
+    /** 运行时解析出的主模型;不给时按配置原样(仅测试用) */
+    model?: ModelSelection;
+    subagentModels?: Record<string, string>;
     knowledgeContext?: string;
     resolvedVariables?: Record<string, string>;
   },
@@ -100,7 +102,10 @@ export function buildSpec(
     mcpServers: hasAnyMcpVars ? substituteMcpEnv(cfg.mcpServers, allMcpVars) : cfg.mcpServers,
     tools: cfg.tools,
     subagents: cfg.subagents?.map((s) => ({ ...s, background: false as const })),
-    model: { alias: overrides?.model ?? cfg.model },
+    model: overrides?.model ?? { ref: cfg.model, modelId: cfg.model },
+    ...(overrides?.subagentModels && Object.keys(overrides.subagentModels).length > 0
+      ? { subagentModels: overrides.subagentModels }
+      : {}),
     outputSchema: cfg.outputSchema,
     approvalRules: cfg.approvalRules,
     permissionMode: cfg.permissionMode,

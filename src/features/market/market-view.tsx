@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ModelPrice } from "@/features/models/model-price";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { MARKET_CATEGORIES, type MarketAgent } from "@/lib/modules/market/domain/catalog";
 import { isAdminView, useMe } from "@/lib/use-me";
@@ -164,7 +165,7 @@ export function MarketView() {
                     {MARKET_CATEGORIES.find((c) => c.id === item.category)?.name ?? "通用助手"}
                     {" · "}v{item.publishedVersion}
                     {" · "}
-                    {item.config.model}
+                    <ModelPrice model={item.config.model} />
                     {managing ? ` · ${item.marketListed ? "已上架" : "未上架"}` : ""}
                   </p>
                 </div>

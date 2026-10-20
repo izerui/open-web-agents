@@ -36,6 +36,8 @@ export const users = mysqlTable("users", {
    * 也避免浮点误差 —— 本文件开头就定了"金额一律整数"。
    */
   monthlyQuotaMicroUsd: bigint("monthly_quota_micro_usd", { mode: "number" }),
+  /** 每月最多消耗的积分(微积分)。null = 不限。取代按美元的上限(美元列不再参与判断) */
+  monthlyLimitMicroCredits: decimal("monthly_limit_micro_credits", { precision: 30, scale: 0 }),
   /**
    * Webhook 签名密钥,加密入库(与 anthropicKeyEnc 同一把主密钥)。
    * 该用户名下所有智能体的回调都用它做 HMAC 签名;没配置则回调不带签名头。
@@ -264,6 +266,8 @@ export const runs = mysqlTable(
      */
     finalText: mediumtext("final_text"),
     cost: json("cost"),
+    /** 受理时锁定的模型绑定与价目版本;执行与结算只读它(旧运行为空) */
+    pricing: json("pricing"),
     errorInfo: json("error_info"),
     startedAt: timestamp("started_at"),
     endedAt: timestamp("ended_at"),
@@ -318,6 +322,8 @@ export const apiKeys = mysqlTable(
     name: varchar("name", { length: 255 }),
     /** 这把 Key 每分钟的新调用上限;NULL = 用平台默认(OWA_INVOKE_RATE_LIMIT_PER_KEY) */
     rateLimitPerMinute: int("rate_limit_per_minute"),
+    /** 这把 Key 每月最多消耗的积分(微积分);NULL = 不限 */
+    monthlyLimitMicroCredits: decimal("monthly_limit_micro_credits", { precision: 30, scale: 0 }),
     /** 到期时刻;NULL = 不过期。轮换时旧 Key 被设成"再用一段时间就失效" */
     // 毫秒精度:秒精度下 MySQL 会把小数秒四舍五入,"立即失效"可能晚半秒才生效
     expiresAt: timestamp("expires_at", { fsp: 3 }),
@@ -532,14 +538,50 @@ export const evalResults = mysqlTable(
   (t) => ({ pk: primaryKey({ columns: [t.evalRunId, t.caseId] }) }),
 );
 
-/** 平台模型能力目录。计价配置用整数字符串,历史版本只追加。 */
-export const capabilityCatalog = mysqlTable("capability_catalog", {
+/** 平台模型目录(每个模型归属一个提供者)。计价配置用整数字符串,历史版本只追加。 */
+export const capabilityCatalog = mysqlTable(
+  "capability_catalog",
+  {
+    id: varchar("id", { length: 64 }).primaryKey(),
+    kind: varchar("kind", { length: 24 }).notNull(),
+    modelId: varchar("model_id", { length: 200 }).notNull(),
+    /** 所属提供者;启动收编前的旧数据为空 */
+    providerId: varchar("provider_id", { length: 64 }),
+    enabled: int("enabled").notNull().default(0),
+    version: int("version").notNull(),
+    definition: json("definition").notNull(),
+    updatedAt: timestamp("updated_at", { fsp: 3 }).notNull(),
+  },
+  (t) => ({ byProvider: index("idx_capability_provider").on(t.providerId, t.kind) }),
+);
+
+/** 模型提供者:凭证加密存放,接入地址按模型类型分别配置。价格版本挂在模型上,这里只做乐观并发。 */
+export const modelProviders = mysqlTable("model_providers", {
   id: varchar("id", { length: 64 }).primaryKey(),
-  kind: varchar("kind", { length: 24 }).notNull(),
-  modelId: varchar("model_id", { length: 200 }).notNull(),
-  enabled: int("enabled").notNull().default(0),
+  name: varchar("name", { length: 120 }).notNull().unique(),
+  enabled: int("enabled").notNull().default(1),
+  /** SecretBox 密文;只能替换,不回显 */
+  apiKeyEnc: varchar("api_key_enc", { length: 2048 }),
+  /** 掩码,列表展示用,免解密 */
+  keyHint: varchar("key_hint", { length: 32 }),
+  /** { llm?: {protocol, baseUrl}, image?: ..., ... } */
+  endpoints: json("endpoints").notNull(),
   version: int("version").notNull(),
-  definition: json("definition").notNull(),
+  updatedBy: varchar("updated_by", { length: 36 }).notNull(),
+  createdAt: timestamp("created_at", { fsp: 3 }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { fsp: 3 }).notNull(),
+});
+
+/** 智能体配置中的模型别名 → 具体模型。单行;四个别名必须属于同一提供者。 */
+export const modelAliases = mysqlTable("model_aliases", {
+  id: varchar("id", { length: 16 }).primaryKey(),
+  providerId: varchar("provider_id", { length: 64 }).notNull(),
+  fable: varchar("fable", { length: 64 }).notNull(),
+  opus: varchar("opus", { length: 64 }).notNull(),
+  sonnet: varchar("sonnet", { length: 64 }).notNull(),
+  haiku: varchar("haiku", { length: 64 }).notNull(),
+  version: int("version").notNull(),
+  updatedBy: varchar("updated_by", { length: 36 }).notNull(),
   updatedAt: timestamp("updated_at", { fsp: 3 }).notNull(),
 });
 
@@ -566,6 +608,39 @@ export const billingWallets = mysqlTable("billing_wallets", {
     .notNull()
     .default("0"),
 });
+
+/**
+ * 每次运行的计费记录,与运行同一事务插入。受理时锁定计费模式:试算不动钱包,只记试算冻结与预计消耗;
+ * 正式按 reservation_ids 在钱包里冻结,结束按锁定版本结算。月度额度按它汇总。
+ */
+export const runCharges = mysqlTable(
+  "run_charges",
+  {
+    runId: varchar("run_id", { length: 36 }).primaryKey(),
+    accountId: varchar("account_id", { length: 36 }).notNull(),
+    apiKeyId: varchar("api_key_id", { length: 36 }),
+    mode: varchar("mode", { length: 8 }).notNull(),
+    reservedMicro: decimal("reserved_micro", { precision: 30, scale: 0 }).notNull(),
+    reservationIds: json("reservation_ids").notNull(),
+    estimatedMicro: decimal("estimated_micro", { precision: 30, scale: 0 }),
+    chargedMicro: decimal("charged_micro", { precision: 30, scale: 0 }),
+    /** 正式模式补扣不成的欠额 */
+    owedMicro: decimal("owed_micro", { precision: 30, scale: 0 }),
+    state: varchar("state", { length: 16 }).notNull(),
+    /** 试算下本应拒绝的原因(余额不足 / 账号超额 / Key 超额) */
+    wouldReject: varchar("would_reject", { length: 32 }),
+    incomplete: int("incomplete").notNull().default(0),
+    /** 上次结算时运行花费的指纹(SHA-256);暂记的记录花费变了才再结算 */
+    settledCostDigest: varchar("settled_cost_digest", { length: 64 }),
+    createdAt: timestamp("created_at", { fsp: 3 }).notNull(),
+    settledAt: timestamp("settled_at", { fsp: 3 }),
+  },
+  (t) => ({
+    byAccount: index("idx_run_charges_account").on(t.accountId, t.createdAt),
+    byKey: index("idx_run_charges_key").on(t.apiKeyId, t.createdAt),
+    byState: index("idx_run_charges_state").on(t.state, t.createdAt),
+  }),
+);
 
 /** 全局唯一预占;已结算记录保留以处理重复回调。 */
 export const billingReservations = mysqlTable("billing_reservations", {

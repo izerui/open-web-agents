@@ -1,4 +1,5 @@
 /** 能力目录与积分价目。积分使用百万分之一单位,JSON/数据库使用十进制整数字符串。 */
+import { deriveSaleRates, markupBpOf } from "./pricing";
 export const CAPABILITY_KINDS = ["llm", "image", "video", "speech", "transcription"] as const;
 export type CapabilityKind = (typeof CAPABILITY_KINDS)[number];
 
@@ -39,8 +40,23 @@ export interface CapabilityDefinition {
   enabled: boolean;
   /** LLM 的图片理解仍属于 llm,不混进生图类别。 */
   acceptsImages: boolean;
+  /** 售价:用户实际被扣的积分价。有 costRates 时由成本与加价派生,不接受直接传入。 */
   rates: CreditRate[];
+  /** 所属提供者。旧数据在迁移收编前为空。 */
+  providerId?: string;
+  /** 加价比例(万分比)。与 costRates 同时出现。 */
+  markupBp?: number;
+  /** 成本积分价(成本单价 × 100),计量项与单位同 rates。 */
+  costRates?: CreditRate[];
+  /** 旧记录已被这条新模型替代(只由迁移写入,停用后保留价目历史) */
+  replacedBy?: string;
+  /** 文本模型单次运行的冻结额(微积分);不配用平台默认 */
+  reserveMicroCredits?: string;
 }
+
+/** 智能体配置里的模型别名,作为保留字不得用作模型 ID。 */
+export const RESERVED_IDS = new Set(["fable", "opus", "sonnet", "haiku"]);
+const SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 export interface Capability extends CapabilityDefinition {
   version: number;
@@ -60,12 +76,15 @@ export function unitsOf(raw: unknown, field: string): bigint {
 export function validateCapability(raw: unknown): CapabilityDefinition {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("能力定义必须是对象");
   const v = raw as Record<string, unknown>;
-  if (
-    typeof v.id !== "string" ||
-    v.id.trim() !== v.id ||
-    !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(v.id)
-  ) {
+  if (typeof v.id !== "string" || v.id.trim() !== v.id || !SLUG.test(v.id)) {
     throw new Error("ID 须为最多 64 个小写字母、数字、下划线或连字符");
+  }
+  if (RESERVED_IDS.has(v.id)) throw new Error("ID 不能使用模型别名 fable/opus/sonnet/haiku");
+  if (
+    v.providerId !== undefined &&
+    (typeof v.providerId !== "string" || !SLUG.test(v.providerId))
+  ) {
+    throw new Error("提供者 ID 格式不正确");
   }
   if (typeof v.name !== "string" || !v.name.trim() || v.name.length > 120)
     throw new Error("名称须为 1~120 个字符");
@@ -75,14 +94,49 @@ export function validateCapability(raw: unknown): CapabilityDefinition {
   if (typeof v.enabled !== "boolean" || typeof v.acceptsImages !== "boolean")
     throw new Error("启用与图片理解标志必须是布尔值");
   if (v.acceptsImages && v.kind !== "llm") throw new Error("图片理解标志只适用于 LLM");
-  if (!Array.isArray(v.rates) || v.rates.length > METERS.length)
-    throw new Error("价目须为计量项列表");
+  const kind = v.kind as CapabilityKind;
+  let rates: CreditRate[];
+  let pricing: Pick<CapabilityDefinition, "markupBp" | "costRates"> = {};
+  if (v.costRates !== undefined) {
+    const costRates = validateRates(v.costRates, kind, "成本价");
+    const markupBp = markupBpOf(v.markupBp);
+    rates = deriveSaleRates(costRates, markupBp);
+    pricing = { markupBp, costRates };
+  } else {
+    if (v.markupBp !== undefined) throw new Error("加价比例须与成本价一起提供");
+    rates = validateRates(v.rates, kind, "价目");
+  }
+  if (v.enabled && rates.length === 0) throw new Error("启用能力前须明确配置价目");
+  return {
+    id: v.id,
+    name: v.name.trim(),
+    kind,
+    modelId: v.modelId.trim(),
+    enabled: v.enabled,
+    acceptsImages: v.acceptsImages,
+    rates,
+    ...(typeof v.providerId === "string" ? { providerId: v.providerId } : {}),
+    ...(v.reserveMicroCredits !== undefined && v.reserveMicroCredits !== null
+      ? { reserveMicroCredits: reserveOf(v.reserveMicroCredits, kind) }
+      : {}),
+    ...pricing,
+  };
+}
+
+function reserveOf(raw: unknown, kind: CapabilityKind): string {
+  if (kind !== "llm") throw new Error("单次运行冻结额只适用于文本模型");
+  if (unitsOf(raw, "reserveMicroCredits") === 0n) throw new Error("单次运行冻结额必须大于零");
+  return raw as string;
+}
+
+function validateRates(raw: unknown, kind: CapabilityKind, label: string): CreditRate[] {
+  if (!Array.isArray(raw) || raw.length > METERS.length) throw new Error(`${label}须为计量项列表`);
   const meters = new Set<string>();
-  const rates: CreditRate[] = v.rates.map((rawRate: unknown) => {
+  return raw.map((rawRate: unknown) => {
     if (!rawRate || typeof rawRate !== "object" || Array.isArray(rawRate))
       throw new Error("计量项格式不正确");
     const rate = rawRate as Record<string, unknown>;
-    if (!KIND_METERS[v.kind as CapabilityKind].includes(rate.meter as Meter))
+    if (!KIND_METERS[kind].includes(rate.meter as Meter))
       throw new Error("计量单位与能力类型不匹配");
     if (meters.has(rate.meter as string)) throw new Error("计量项不能重复");
     meters.add(rate.meter as string);
@@ -94,16 +148,6 @@ export function validateCapability(raw: unknown): CapabilityDefinition {
       microCredits: rate.microCredits as string,
     };
   });
-  if (v.enabled && rates.length === 0) throw new Error("启用能力前须明确配置价目");
-  return {
-    id: v.id,
-    name: v.name.trim(),
-    kind: v.kind as CapabilityKind,
-    modelId: v.modelId.trim(),
-    enabled: v.enabled,
-    acceptsImages: v.acceptsImages,
-    rates,
-  };
 }
 
 export type MeteredUsage = Partial<Record<Meter, string>>;

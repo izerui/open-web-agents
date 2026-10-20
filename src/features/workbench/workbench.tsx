@@ -103,6 +103,8 @@ import {
   usePromptInputAttachments,
 } from "@/components/ai-elements/prompt-input";
 import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion";
+import { refreshModelCatalog } from "@/features/builder/model-select";
+import { ModelPrice } from "@/features/models/model-price";
 
 interface SlashCommand {
   name: string;
@@ -304,6 +306,26 @@ export function Workbench() {
       setSessionsError(e instanceof Error ? e.message : String(e));
     } finally {
       setSessionsLoaded(true);
+    }
+  }, []);
+
+  /**
+   * 同步一个会话当前实际运行的模型。跟随草稿的会话,作者可能在别处改了模型:
+   * 列表里的是加载时的快照,发送前与重新获得焦点时按服务端当前解析更新。
+   */
+  const syncSessionModel = useCallback(async (id: string) => {
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(id)}`, { cache: "no-store" });
+      if (!res.ok) return;
+      const { session } = (await res.json()) as { session?: { id: string; model?: string } };
+      if (!session) return;
+      setSessions((all) =>
+        all.map((s) =>
+          s.id === session.id && s.model !== session.model ? { ...s, model: session.model } : s,
+        ),
+      );
+    } catch {
+      // 同步不到就沿用快照,不影响发送
     }
   }, []);
 
@@ -550,6 +572,9 @@ export function Workbench() {
     const prompt = (text ?? input).trim();
     if (!prompt || running || historyLoading || historyError !== null) return;
     setRunning(true);
+    // 这一轮按服务端当前的模型与价格运行:顺便刷新标题栏显示
+    void refreshModelCatalog();
+    if (sessionId) void syncSessionModel(sessionId);
 
     const localId = crypto.randomUUID();
     const seq = openSeqRef.current;
@@ -720,7 +745,18 @@ export function Workbench() {
     }
   }
 
+  useEffect(() => {
+    if (!sessionId) return;
+    const onFocus = () => void syncSessionModel(sessionId);
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [sessionId, syncSessionModel]);
+
   const current = agents.find((a) => a.id === agentId);
+  // 已有会话按它实际运行的版本显示模型(锁定的发布版可能与草稿不同);
+  // 还没有会话时,列表给的配置正是新会话会用的那一版(能编辑的人是草稿,其他人是发布版)
+  const activeSession = sessionId ? sessions.find((s) => s.id === sessionId) : undefined;
+  const shownModel = activeSession ? activeSession.model : current?.config.model;
   // 开场建议按智能体配置;曾经写死成编程示例,对"发票抽取"之类的智能体毫无意义
   const starters =
     current?.config.starters ?? (current?.id === "default" ? DEFAULT_AGENT_STARTERS : []);
@@ -1161,6 +1197,10 @@ export function Workbench() {
                     结构化输出
                   </Badge>
                 )}
+                <ModelPrice
+                  model={shownModel}
+                  className="hidden min-w-0 truncate text-xs text-muted-foreground lg:block"
+                />
                 <Separator orientation="vertical" className="hidden h-3 sm:block" />
                 <span className="hidden truncate font-mono text-muted-foreground sm:block">
                   {sessionId ? `${sessionId.slice(0, 8)}…` : "尚未创建会话"}

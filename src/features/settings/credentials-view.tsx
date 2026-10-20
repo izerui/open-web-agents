@@ -1,9 +1,8 @@
 import { SpaceShell } from "@/components/space-shell";
 import { PriceList } from "@/features/capabilities/price-list";
-import { MODEL_ALIASES } from "@/lib/shared";
 import Link from "next/link";
 
-/** 仅接收公开状态,平台地址、模型 ID 与密钥不进入页面数据。 */
+/** 仅接收公开状态,提供者、平台地址、模型 ID 与密钥不进入页面数据。 */
 export function CredentialsView({ configured }: { configured: boolean }) {
   return (
     <SpaceShell title="平台算力" width="narrow">
@@ -19,16 +18,6 @@ export function CredentialsView({ configured }: { configured: boolean }) {
         <div className="grid gap-2 py-4 sm:grid-cols-[9rem_1fr]">
           <dt className="text-muted-foreground">AI 智能体设计</dt>
           <dd>使用平台算力</dd>
-        </div>
-        <div className="grid gap-2 py-4 sm:grid-cols-[9rem_1fr]">
-          <dt className="text-muted-foreground">模型别名</dt>
-          <dd>
-            <ul className="flex flex-wrap gap-x-5 gap-y-2 font-mono">
-              {MODEL_ALIASES.map((alias) => (
-                <li key={alias}>{alias}</li>
-              ))}
-            </ul>
-          </dd>
         </div>
       </dl>
       <nav aria-label="算力相关页面" className="flex flex-wrap gap-x-6 gap-y-3 text-sm">

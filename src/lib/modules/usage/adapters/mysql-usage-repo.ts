@@ -3,6 +3,8 @@ import { agents, runs, sessions } from "@/lib/db/schema";
 import type { ModelMetering } from "@/lib/modules/agent-engine/domain/model-usage";
 import { type RunUsageRecord, toMicroUsd } from "@/lib/modules/usage/domain/aggregate";
 import type { RunCreditEstimate } from "@/lib/modules/usage/domain/estimate";
+import type { PublicCreditEstimate } from "@/lib/modules/usage/domain/public-estimate";
+import type { RunPricing } from "@/lib/shared";
 import { and, desc, eq, gte, isNotNull, sql } from "drizzle-orm";
 
 export interface UsageQuery {
@@ -78,6 +80,8 @@ export class MysqlUsageRepo {
         output?: number;
         metering?: ModelMetering;
         creditEstimate?: RunCreditEstimate;
+        pricing?: RunPricing;
+        publicEstimate?: PublicCreditEstimate;
       };
       return {
         runId: r.runId,
@@ -90,6 +94,8 @@ export class MysqlUsageRepo {
         outputTokens: Number(cost.output ?? 0),
         metering: cost.metering,
         creditEstimate: cost.creditEstimate,
+        pricing: cost.pricing,
+        publicEstimate: cost.publicEstimate,
         at: (r.endedAt ?? r.createdAt).getTime(),
       };
     });

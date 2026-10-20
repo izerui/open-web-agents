@@ -21,7 +21,6 @@ import { SharePanel } from "@/features/builder/share-panel";
 import { InvokeSnippetTabs } from "@/features/integration/invoke-snippet";
 import type { AgentSummary } from "@/features/workbench/types";
 import { errorText, fetchJson } from "@/lib/fetch-json";
-import type { ModelAlias } from "@/lib/shared";
 import { PERMISSION_MODES, type PermissionMode } from "@/lib/shared";
 import { findPathConflict, isSafeSkillPath } from "@/lib/shared/skill-package";
 import { cn } from "@/lib/utils";
@@ -40,6 +39,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { ModelSelect, modelOf, useModelCatalog } from "./model-select";
 
 const SCHEMA_EXAMPLE = `{
   "type": "object",
@@ -242,6 +242,7 @@ function parseSkills(text: string): string[] {
 const BUILT_IN_AGENT_IDS = ["default", "agent-architect"];
 
 export function Builder() {
+  const modelCatalog = useModelCatalog();
   const [list, setList] = useState<AgentSummary[]>([]);
   const [allowStdioMcp, setAllowStdioMcp] = useState(false);
   const [draft, setDraft] = useState<Draft>(EMPTY);
@@ -477,7 +478,7 @@ export function Builder() {
                 name: s.name.trim(),
                 description: s.description.trim() || undefined,
                 prompt: s.prompt.trim(),
-                ...(s.model ? { model: s.model as ModelAlias } : {}),
+                ...(s.model ? { model: s.model } : {}),
                 background: false,
               })),
             variables: draft.variables
@@ -868,19 +869,15 @@ export function Builder() {
       </label>
 
       <div className="grid grid-cols-2 gap-3">
-        <label className="space-y-1">
-          <span className="text-xs text-muted-foreground">模型别名</span>
-          <Select
+        <div className="space-y-1">
+          <span className="text-xs text-muted-foreground">模型</span>
+          <ModelSelect
+            ariaLabel="模型"
+            catalog={modelCatalog}
             value={draft.model}
-            onChange={(e) => setDraft({ ...draft, model: e.target.value })}
-          >
-            {["fable", "opus", "sonnet", "haiku"].map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </Select>
-        </label>
+            onChange={(model) => setDraft({ ...draft, model })}
+          />
+        </div>
         <label className="space-y-1">
           <span className="text-xs text-muted-foreground">最大轮次</span>
           <Input
@@ -1111,23 +1108,19 @@ export function Builder() {
                     }}
                     placeholder="【何时】用它,如:需要审阅代码质量时"
                   />
-                  <Select
-                    className="max-w-[9rem]"
-                    aria-label={`子代理 ${s.name || i + 1} 的模型`}
+                  <ModelSelect
+                    className="max-w-[16rem]"
+                    ariaLabel={`子代理 ${s.name || i + 1} 的模型`}
+                    catalog={modelCatalog}
+                    group={modelOf(modelCatalog, draft.model)?.group}
+                    inheritLabel="同主 agent"
                     value={s.model}
-                    onChange={(e) => {
+                    onChange={(model) => {
                       const next = [...draft.subagents];
-                      next[i] = { ...s, model: e.target.value };
+                      next[i] = { ...s, model };
                       setDraft({ ...draft, subagents: next });
                     }}
-                  >
-                    <option value="">同主 agent</option>
-                    {["fable", "opus", "sonnet", "haiku"].map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </Select>
+                  />
                 </div>
                 <Textarea
                   className="min-h-[3rem]"

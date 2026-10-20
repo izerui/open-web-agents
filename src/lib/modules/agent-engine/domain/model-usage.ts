@@ -12,6 +12,8 @@ export interface ModelTokenUsage {
 export interface ModelMetering {
   source: "sdk_model_usage";
   complete: boolean;
+  /** 含按消息累计、没等到 SDK 结算消息的用量(取消、失败、多轮中断) */
+  partial?: boolean;
   models: ModelTokenUsage[];
 }
 

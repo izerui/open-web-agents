@@ -3,6 +3,7 @@
 import type { EnginePort, RunResult } from "@/lib/modules/agent-engine/ports";
 import { InMemoryAgentRepo } from "@/lib/modules/agent/adapters/in-memory-agent-repo";
 import { InMemoryBus } from "@/lib/modules/events/adapters/in-memory-bus";
+import { platformModels } from "@/lib/modules/model-gateway/application/__tests__/platform-models";
 import { InMemorySteerChannel } from "@/lib/modules/run/adapters/in-memory-steer-channel";
 import { RunOrchestrator, topicOf } from "@/lib/modules/run/application/orchestrator";
 import { InMemorySessionRepo } from "@/lib/modules/session/adapters/in-memory-session-repo";
@@ -26,7 +27,7 @@ async function setup(
     agents,
     engine,
     bus,
-    platformCredentials: { baseUrl: "x", key: "k" },
+    resolveModels: platformModels({ baseUrl: "https://x.example", key: "k" }),
     steerChannel: channel,
   });
   return { orch, bus, channel };

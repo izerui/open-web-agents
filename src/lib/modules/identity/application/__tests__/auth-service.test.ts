@@ -67,14 +67,16 @@ class InMemoryUserRepo implements UserRepo {
   }
   async adminUpdate(
     id: string,
-    v: { role?: "admin" | "user"; disabled?: boolean; monthlyQuotaMicroUsd?: number | null },
+    v: { role?: "admin" | "user"; disabled?: boolean; monthlyLimitMicroCredits?: string | null },
   ): Promise<void> {
     const r = this.byId.get(id);
     if (!r) return;
     if (v.role !== undefined) r.role = v.role;
     if (v.disabled !== undefined) r.disabled = v.disabled;
-    if (v.monthlyQuotaMicroUsd !== undefined)
-      r.monthlyQuotaMicroUsd = v.monthlyQuotaMicroUsd ?? undefined;
+    if (v.monthlyLimitMicroCredits !== undefined) {
+      r.monthlyLimitMicroCredits = v.monthlyLimitMicroCredits ?? undefined;
+      r.legacyMonthlyLimitMicroUsd = undefined;
+    }
   }
   async countAdmins(): Promise<number> {
     return [...this.byId.values()].filter((u) => u.role === "admin").length;

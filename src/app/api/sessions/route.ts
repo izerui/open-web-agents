@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 
 /** 列出调用方有权访问的会话。 */
 export async function GET(req: Request) {
-  const { sessions, auth, runs } = getContainer();
+  const { sessions, auth, runs, releases } = getContainer();
   try {
     const principal = await auth.resolveWeb(req);
 
@@ -59,12 +59,15 @@ export async function GET(req: Request) {
     const stats = await runs
       .statsBySessions(visible.map((s) => s.id))
       .catch(() => new Map<string, { runs: number; lastRunAt: number }>());
+    // 会话实际运行的模型(锁定版本或草稿):工作台据此显示名称与售价,不按智能体当前草稿猜
+    const models = await releases.modelsOf(visible).catch(() => new Map<string, string>());
 
     return NextResponse.json({
       sessions: visible.map((s) => {
         const st = stats.get(s.id);
         return {
           ...s,
+          model: models.get(s.id),
           runCount: st?.runs ?? 0,
           // 没跑过就退回创建时间 —— 列表要按"最近动过"排序,不能有空洞
           lastActiveAt: st?.lastRunAt ?? s.createdAt,
@@ -165,5 +168,8 @@ export async function POST(req: Request) {
     agentVersion,
   });
 
-  return NextResponse.json({ session }, { status: 201 });
+  const model = (await releases.modelsOf([session]).catch(() => new Map<string, string>())).get(
+    session.id,
+  );
+  return NextResponse.json({ session: { ...session, model } }, { status: 201 });
 }

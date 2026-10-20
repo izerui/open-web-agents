@@ -11,6 +11,31 @@ export const dynamic = "force-dynamic";
 const MAX_TITLE = 120;
 
 /**
+ * 单个会话,附它当前实际运行的模型引用(锁定版本或草稿)。工作台在发送前、重新获得焦点时
+ * 用它同步标题栏 —— 跟随草稿的会话,作者在别处改了模型,下一轮就会用新模型。
+ */
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const { sessions, auth, releases } = getContainer();
+  try {
+    await auth.assertSessionAccess(await auth.resolveWeb(req), id);
+  } catch (err) {
+    const res = authErrorResponse(err);
+    if (res) return res;
+    throw err;
+  }
+  const session = await sessions.get(id);
+  if (!session || session.status === "deleted") {
+    return Response.json({ error: "session not found" }, { status: 404 });
+  }
+  const model = (await releases.modelsOf([session])).get(session.id);
+  return Response.json(
+    { session: { ...session, model } },
+    { headers: { "Cache-Control": "no-store" } },
+  );
+}
+
+/**
  * 改标题 / 归档 / 取消归档。
  * 曾经会话只能建不能管:标题永远是第一句话或 "invoke",用久了侧栏只能靠搜索找。
  */

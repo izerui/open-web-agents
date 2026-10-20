@@ -197,8 +197,8 @@ const bus = new RedisBus(env.redisUrl); // 曾是 InMemoryBus
 | `OWA_DATABASE_URL`                                  | MySQL 连接串                                  |
 | `OWA_REDIS_URL`                                     | Redis 连接串                                  |
 | `OWA_DATA_DIR`                                      | 会话工作空间根目录(**会被解析成绝对路径**)                   |
-| `OWA_ANTHROPIC_BASE_URL` / `_API_KEY`               | 全平台统一模型凭证                              |
-| `OWA_MODEL` 与 `OWA_MODEL_{OPUS,SONNET,HAIKU,FABLE}` | 别名槽 → 真实 modelId。优先级:单独配置的槽 > `OWA_MODEL` > 各别名的官方模型 id;都不填即用官方模型。`/api/health` 显示每个别名实际用哪个模型 |
+| `OWA_ANTHROPIC_BASE_URL` / `_API_KEY`               | **仅首次启动时**用来生成"平台默认"模型提供者(Key 加密入库;之后若该提供者还没有 Key 会补写一次)。之后模型凭证在「平台管理 → 模型提供者」维护,改环境变量不再影响运行 |
+| `OWA_MODEL` 与 `OWA_MODEL_{OPUS,SONNET,HAIKU,FABLE}` | **仅首次启动时**用来生成"平台默认"下的模型与别名映射(单独配置的槽 > `OWA_MODEL` > 官方模型 id)。之后在「模型提供者」页维护(别名当前指向哪个模型也在那里看,`/api/health` 不再列出模型) |
 | `OWA_SESSION_SECRET`                                | 登录会话签名。**生产未设置会拒绝启动**                      |
 | `OWA_SECRET_KEY`                                    | 签名密钥等敏感配置的加密主密钥。**生产未设置会拒绝启动**                   |
 | `OWA_AUTH_REQUIRED`                                 | 是否要求登录,默认 1;仅本地开发可设 0                      |

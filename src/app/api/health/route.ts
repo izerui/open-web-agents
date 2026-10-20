@@ -1,7 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { getContainer } from "@/lib/container";
-import { EnvModelGateway } from "@/lib/modules/model-gateway/adapters/env-gateway";
 
 const execFileAsync = promisify(execFile);
 
@@ -136,8 +135,7 @@ export async function GET(req: Request) {
         authRequired: env.authRequired,
         sandbox: env.sandbox,
         allowStdioMcp: env.allowStdioMcp,
-        // 每个别名实际用哪个模型 —— 只看 OWA_MODEL 看不出单独配置的槽与官方默认
-        models: new EnvModelGateway(env.models).slots(),
+        // 不列模型:这个接口不需要登录,上游模型标识与提供者只给管理员看(「模型提供者」页)
       },
     },
     // 未就绪返回 503,编排系统据此把流量摘走

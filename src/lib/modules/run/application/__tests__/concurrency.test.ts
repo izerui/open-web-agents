@@ -12,6 +12,7 @@ import { createDb } from "@/lib/db/client";
 import type { EnginePort, RunResult } from "@/lib/modules/agent-engine/ports";
 import { InMemoryAgentRepo } from "@/lib/modules/agent/adapters/in-memory-agent-repo";
 import { InMemoryBus } from "@/lib/modules/events/adapters/in-memory-bus";
+import { platformModels } from "@/lib/modules/model-gateway/application/__tests__/platform-models";
 import { MysqlRunRepo } from "@/lib/modules/run/adapters/mysql-run-repo";
 import { RunOrchestrator } from "@/lib/modules/run/application/orchestrator";
 import { RunWorker } from "@/lib/modules/run/application/worker";
@@ -121,7 +122,7 @@ if (!TEST_DB_URL) {
       agents,
       engine: new RecordingEngine(workerId, engineDelayMs),
       bus: new InMemoryBus(),
-      platformCredentials: { baseUrl: "b", key: "k" },
+      resolveModels: platformModels({ baseUrl: "https://b.example", key: "k" }),
     });
     return new RunWorker(opts.runRepo ?? repo, orchestrator, {
       leaseMs: 30_000,

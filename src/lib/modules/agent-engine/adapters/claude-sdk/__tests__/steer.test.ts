@@ -58,12 +58,15 @@ const engine = (q: QueryFn) =>
   new ClaudeSdkEngine(q, {
     sharedHome: "/data/.agent-home",
     hostHome: "/Users/operator",
-    gateway: { slots: () => ({ fable: "m", opus: "m", sonnet: "m", haiku: "m" }) },
     sandboxEnabled: false,
     allowStdioMcp: false,
   });
 
-const spec: AgentSpec = { systemPrompt: "p", model: { alias: "sonnet" }, limits: {} };
+const spec: AgentSpec = {
+  systemPrompt: "p",
+  model: { ref: "sonnet", modelId: "model-sonnet" },
+  limits: {},
+};
 const ctx = (steer: RunContext["steer"]): RunContext => ({
   sessionId: "s1",
   workspaceDir: "/ws",

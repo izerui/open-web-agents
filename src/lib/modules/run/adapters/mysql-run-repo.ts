@@ -17,6 +17,7 @@ import {
   WORKER_LOST,
 } from "@/lib/modules/run/ports";
 import type { RunState } from "@/lib/shared";
+import type { PinnedPricing } from "@/lib/shared";
 import { and, count, eq, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 
 interface RunRow {
@@ -89,6 +90,7 @@ export class MysqlRunRepo implements RunRepo {
         agentConfig: r.agentConfig ?? null,
         agentVersion: r.agentVersion ?? null,
         overrideEnc: r.overrideEnc,
+        pricing: r.pricing ?? null,
         callbackSource: r.callback?.source,
         callbackUrl: r.callback && r.callback.source !== "none" ? r.callback.url : undefined,
         idempotencyKey: r.idempotencyKey,
@@ -320,14 +322,18 @@ export class MysqlRunRepo implements RunRepo {
   }
 
   /** 取待执行的载荷(worker 认领后需要):输入、配置快照、加密的请求级覆盖。 */
-  async getPayload(
-    id: string,
-  ): Promise<{ prompt: string; agentConfig?: unknown; overrideEnc?: string } | null> {
+  async getPayload(id: string): Promise<{
+    prompt: string;
+    agentConfig?: unknown;
+    overrideEnc?: string;
+    pricing?: PinnedPricing;
+  } | null> {
     const rows = await this.db
       .select({
         prompt: runs.prompt,
         agentConfig: runs.agentConfig,
         overrideEnc: runs.overrideEnc,
+        pricing: runs.pricing,
       })
       .from(runs)
       .where(eq(runs.id, id))
@@ -338,6 +344,7 @@ export class MysqlRunRepo implements RunRepo {
       prompt: row.prompt,
       agentConfig: row.agentConfig ?? undefined,
       overrideEnc: row.overrideEnc ?? undefined,
+      pricing: (row.pricing as PinnedPricing | null) ?? undefined,
     };
   }
 

@@ -13,7 +13,7 @@ it("platform design can only edit its draft, not skill scripts, secrets, MCP or 
     await fs.writeFile(path.join(root, DRAFT_FILE), "{}");
     const spec: AgentSpec = {
       systemPrompt: ARCHITECT_CONFIG.systemPrompt,
-      model: { alias: "opus" },
+      model: { ref: "opus", modelId: "model-opus" },
       limits: { maxTurns: 30 },
       tools: ARCHITECT_CONFIG.tools,
     };
@@ -31,7 +31,6 @@ it("platform design can only edit its draft, not skill scripts, secrets, MCP or 
       abort: new AbortController(),
       sandboxEnabled: false,
       allowStdioMcp: false,
-      slots: { fable: "f", opus: "o", sonnet: "s", haiku: "h" },
     });
     type Hook = (
       input: Record<string, unknown>,

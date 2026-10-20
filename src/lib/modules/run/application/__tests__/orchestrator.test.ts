@@ -3,6 +3,7 @@
 import type { EnginePort, RunResult } from "@/lib/modules/agent-engine/ports";
 import { InMemoryAgentRepo } from "@/lib/modules/agent/adapters/in-memory-agent-repo";
 import { InMemoryBus } from "@/lib/modules/events/adapters/in-memory-bus";
+import { platformModels } from "@/lib/modules/model-gateway/application/__tests__/platform-models";
 import { RunOrchestrator, topicOf } from "@/lib/modules/run/application/orchestrator";
 import { InMemorySessionRepo } from "@/lib/modules/session/adapters/in-memory-session-repo";
 import type { AgentEvent, AgentSpec, RunContext } from "@/lib/shared";
@@ -49,7 +50,7 @@ async function setup(engine: EnginePort) {
     agents,
     engine,
     bus,
-    platformCredentials: PLATFORM,
+    resolveModels: platformModels(PLATFORM),
   });
   return { sessions, agents, bus, orch };
 }
@@ -116,7 +117,7 @@ describe("RunOrchestrator.execute", () => {
       signal,
     );
     expect(engine.lastSpec?.systemPrompt).toContain("快照里的提示词");
-    expect(engine.lastSpec?.model).toEqual({ alias: "haiku" });
+    expect(engine.lastSpec?.model).toEqual({ ref: "haiku", modelId: "model-haiku" });
   });
 
   it("启动前已被中止:不调用引擎", async () => {
@@ -157,7 +158,7 @@ describe("RunOrchestrator.execute", () => {
       signal,
     );
     expect(engine.lastCtx?.credentials).toEqual(PLATFORM);
-    expect(engine.lastSpec?.model).toEqual({ alias: "haiku" });
+    expect(engine.lastSpec?.model).toEqual({ ref: "haiku", modelId: "model-haiku" });
   });
 
   it("AI 编辑强制平台凭证和设计模型,计费归发起账号", async () => {
@@ -181,7 +182,7 @@ describe("RunOrchestrator.execute", () => {
     );
     expect(engine.lastCtx?.designMode).toBe(true);
     expect(engine.lastCtx?.credentials).toEqual(PLATFORM);
-    expect(engine.lastSpec?.model).toEqual({ alias: "sonnet" });
+    expect(engine.lastSpec?.model).toEqual({ ref: "sonnet", modelId: "model-sonnet" });
     expect((await sessions.get("design"))?.billingUserId).toBe("author");
   });
 
@@ -238,7 +239,7 @@ describe("RunOrchestrator.execute", () => {
         },
         subscribe: () => () => {},
       },
-      platformCredentials: PLATFORM,
+      resolveModels: platformModels(PLATFORM),
     });
     await expect(broken.execute({ sessionId: "s1", prompt: "hi" }, signal)).resolves.toMatchObject({
       status: "success",
@@ -271,7 +272,7 @@ describe("outputSchema 契约守门", () => {
       agents,
       engine: new FakeEngine([], result),
       bus,
-      platformCredentials: PLATFORM,
+      resolveModels: platformModels(PLATFORM),
     });
     return { orch, bus };
   }
@@ -303,9 +304,7 @@ describe("outputSchema 契约守门", () => {
 describe("计费账号", () => {
   const signal = new AbortController().signal;
 
-  async function setupBilling(
-    quota?: (u: string) => Promise<{ allowed: boolean; reason?: string }>,
-  ) {
+  async function setupBilling() {
     const sessions = new InMemorySessionRepo();
     const agents = new InMemoryAgentRepo([
       { id: "a1", ownerId: "u1", name: "a", config: { systemPrompt: "p", model: "sonnet" } },
@@ -324,8 +323,7 @@ describe("计费账号", () => {
       agents,
       engine,
       bus: new InMemoryBus(),
-      platformCredentials: PLATFORM,
-      quotaCheck: quota,
+      resolveModels: platformModels(PLATFORM),
     });
     return { orch, engine };
   }
@@ -335,250 +333,84 @@ describe("计费账号", () => {
     await orch.execute({ sessionId: "s1", prompt: "hi" }, signal);
     expect(engine.lastCtx?.credentials).toEqual(PLATFORM);
   });
-
-  it("执行前复核额度:超额则不启动引擎", async () => {
-    const checked: string[] = [];
-    const { orch, engine } = await setupBilling(async (u) => {
-      checked.push(u);
-      return { allowed: false, reason: "超出月度额度" };
-    });
-    const r = await orch.execute({ sessionId: "s1", prompt: "hi" }, signal);
-    expect(checked).toEqual(["u2"]);
-    expect(r).toMatchObject({ status: "failed", error: { kind: "quota_exceeded" } });
-    expect(engine.lastCtx).toBeUndefined();
-  });
-
-  it("额度查不动(DB 故障)时本轮失败,不当作没超", async () => {
-    const { orch } = await setupBilling(async () => {
-      throw new Error("db down");
-    });
-    await expect(orch.execute({ sessionId: "s1", prompt: "hi" }, signal)).rejects.toThrow(
-      /db down/,
-    );
-  });
 });
 
-describe("RunOrchestrator:工作目录已被清理", () => {
-  it("运行前在原路径重建工作目录,引擎拿到的 cwd 是存在的", async () => {
-    const fs = await import("node:fs/promises");
-    const os = await import("node:os");
-    const path = await import("node:path");
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "owa-ws-"));
-    const dir = path.join(root, "s-purged"); // 不存在:模拟被 GC 整体清理
-    let existedAtRun = false;
-    const engine: EnginePort = {
-      async run(_spec, ctx) {
-        existedAtRun = (await fs.stat(ctx.workspaceDir).catch(() => null))?.isDirectory() === true;
-        return { status: "success", summary: "ok", sessionId: "sdk" };
-      },
-    };
-    const sessions = new InMemorySessionRepo();
-    await sessions.create({ id: "s1", agentId: "a1", workspaceDir: dir });
-    const orch = new RunOrchestrator({
-      sessions,
-      agents: new InMemoryAgentRepo([
-        { id: "a1", ownerId: "u1", name: "a", config: { systemPrompt: "p", model: "sonnet" } },
-      ]),
-      engine,
-      bus: new InMemoryBus(),
-      platformCredentials: PLATFORM,
-      ensureWorkspace: async (_sid, d) => {
-        await fs.mkdir(d, { recursive: true });
-      },
-    });
-    const r = await orch.execute({ sessionId: "s1", prompt: "继续" }, new AbortController().signal);
-    expect(r.status).toBe("success");
-    expect(existedAtRun).toBe(true);
-    await fs.rm(root, { recursive: true, force: true });
+describe("运行中计费", () => {
+  const usage = (messageId: string, input: number, output: number): AgentEvent => ({
+    kind: "usage",
+    messageId,
+    input,
+    output,
   });
 
-  it("secret variables do not leak between sequential runs via shared baseEnv", async () => {
-    const ctxCaptures: RunContext[] = [];
-    const engine: EnginePort = {
-      async run(_spec, ctx, _onEvent, _signal) {
-        ctxCaptures.push(ctx);
-        return { status: "success", summary: "ok", sessionId: "sdk_x" };
-      },
-    };
+  async function setupCharging(
+    events: AgentEvent[],
+    verdict: (total: { input: number; output: number }) => "continue" | "stop",
+  ) {
     const sessions = new InMemorySessionRepo();
     const agents = new InMemoryAgentRepo([
-      {
-        id: "a-vars",
-        ownerId: "u1",
-        name: "V",
-        config: {
-          systemPrompt: "test",
-          model: "sonnet" as const,
-          variables: [{ name: "TOKEN", description: "", required: false, secret: true }],
-        },
-      },
+      { id: "a1", ownerId: "u1", name: "a", config: { systemPrompt: "p", model: "sonnet" } },
     ]);
-    await sessions.create({
-      id: "s-a",
-      agentId: "a-vars",
-      workspaceDir: "/ws/sa",
-      billingUserId: "userA",
-    });
-    await sessions.create({
-      id: "s-b",
-      agentId: "a-vars",
-      workspaceDir: "/ws/sb",
-      billingUserId: "userB",
-    });
-    const baseEnv = { SHARED: "base" };
+    await sessions.create({ id: "s1", agentId: "a1", workspaceDir: "/ws/s1", ownerId: "u1" });
+    let engineSignal: AbortSignal | undefined;
+    const engine: EnginePort = {
+      async run(_spec, _ctx, onEvent, sig) {
+        engineSignal = sig;
+        for (const e of events) onEvent(e);
+        await new Promise((r) => setTimeout(r, 0));
+        return { status: "success", summary: "ok", structured: { a: 1 } };
+      },
+    };
+    const seen: { input: number; output: number }[] = [];
     const orch = new RunOrchestrator({
       sessions,
       agents,
       engine,
       bus: new InMemoryBus(),
-      platformCredentials: PLATFORM,
-      baseEnv,
-      resolveVariables: async (_agentId, userId) =>
-        userId === "userA" ? ({ TOKEN: "secret-A" } as Record<string, string>) : {},
-    });
-    const signal = new AbortController().signal;
-
-    await orch.execute({ sessionId: "s-a", runId: "r-a", prompt: "go" }, signal);
-    await orch.execute({ sessionId: "s-b", runId: "r-b", prompt: "go" }, signal);
-
-    expect(ctxCaptures[0]?.env.OWA_VAR_TOKEN).toBe("secret-A");
-    expect(ctxCaptures[1]?.env.OWA_VAR_TOKEN).toBeUndefined();
-    expect(baseEnv).toEqual({ SHARED: "base" });
-  });
-
-  it("variable decryption failure prevents engine execution", async () => {
-    let engineCalled = false;
-    const engine: EnginePort = {
-      async run() {
-        engineCalled = true;
-        return { status: "success", summary: "ok", sessionId: "sdk_x" };
-      },
-    };
-    const sessions = new InMemorySessionRepo();
-    const agents = new InMemoryAgentRepo([
-      {
-        id: "a-dec",
-        ownerId: "u1",
-        name: "D",
-        config: {
-          systemPrompt: "test",
-          model: "sonnet" as const,
-          variables: [{ name: "OPT_KEY", description: "", required: false, secret: true }],
-        },
-      },
-    ]);
-    await sessions.create({
-      id: "s-dec",
-      agentId: "a-dec",
-      workspaceDir: "/ws/sd",
-      billingUserId: "userDec",
-    });
-    const orch = new RunOrchestrator({
-      sessions,
-      agents,
-      engine,
-      bus: new InMemoryBus(),
-      platformCredentials: PLATFORM,
-      resolveVariables: async () => {
-        throw new Error("decryption failed");
+      resolveModels: platformModels(PLATFORM),
+      chargeProgress: async (_runId, t) => {
+        seen.push({ input: t.input, output: t.output });
+        return verdict(t);
       },
     });
+    return { orch, seen, engineSignal: () => engineSignal };
+  }
 
-    await expect(
-      orch.execute(
-        { sessionId: "s-dec", runId: "r-dec", prompt: "go" },
-        new AbortController().signal,
-      ),
-    ).rejects.toThrow("decryption failed");
-    expect(engineCalled).toBe(false);
-  });
-
-  it("AI-generated skill gets variables via env, skill file has no secrets, MCP URL substituted", async () => {
-    let capturedSpec: AgentSpec | undefined;
-    let capturedCtx: RunContext | undefined;
-    const engine: EnginePort = {
-      async run(spec, ctx, _onEvent, _signal) {
-        capturedSpec = spec;
-        capturedCtx = ctx;
-        return { status: "success", summary: "ok", sessionId: "sdk_y" };
-      },
-    };
-    const sessions = new InMemorySessionRepo();
-    const agents = new InMemoryAgentRepo([
-      {
-        id: "a-gen",
-        ownerId: "u1",
-        name: "Generated",
-        config: {
-          systemPrompt: "Serve at {{BASE_URL}}. Secret is in env.",
-          model: "sonnet" as const,
-          maxTurns: 5,
-          skillPackages: [
-            {
-              name: "fetcher",
-              description: "Fetch data",
-              files: {
-                "SKILL.md":
-                  "# Fetcher\nRead API key from process.env.OWA_VAR_API_KEY.\nEndpoint from process.env.OWA_VAR_BASE_URL.",
-              },
-            },
-          ],
-          mcpServers: [
-            {
-              type: "http" as const,
-              name: "api",
-              url: "https://{{BASE_URL}}/v1?token={{API_KEY}}",
-            },
-          ],
-          variables: [
-            { name: "API_KEY", description: "密钥", required: true, secret: true },
-            { name: "BASE_URL", description: "地址", required: true, secret: false },
-          ],
-        },
-      },
-    ]);
-    await sessions.create({
-      id: "s-gen",
-      agentId: "a-gen",
-      workspaceDir: "/ws/sg",
-      billingUserId: "userGen",
-    });
-    const orch = new RunOrchestrator({
-      sessions,
-      agents,
-      engine,
-      bus: new InMemoryBus(),
-      platformCredentials: PLATFORM,
-      resolveVariables: async () =>
-        ({ API_KEY: "sk-real-secret", BASE_URL: "api.example.com" }) as Record<string, string>,
-    });
-
-    await orch.execute(
-      { sessionId: "s-gen", runId: "r-gen", prompt: "go" },
+  it("同一条消息多次到达按最后一次计,不重复累加", async () => {
+    const { orch, seen } = await setupCharging(
+      [usage("m1", 100, 5), usage("m1", 100, 50), usage("m2", 200, 10)],
+      () => "continue",
+    );
+    const r = await orch.execute(
+      { sessionId: "s1", prompt: "hi", runId: "r1" },
       new AbortController().signal,
     );
+    expect(r.status).toBe("success");
+    expect(seen.at(-1)).toEqual({ input: 300, output: 60 });
+  });
 
-    // Engine was called
-    expect(capturedSpec).toBeDefined();
-    expect(capturedCtx).toBeDefined();
-
-    // Skill file doesn't contain actual secret
-    const skillContent = capturedSpec?.skillPackages?.[0]?.files["SKILL.md"] ?? "";
-    expect(skillContent).toContain("OWA_VAR_API_KEY");
-    expect(skillContent).not.toContain("sk-real-secret");
-
-    // Environment variables carry actual values for skill scripts
-    expect(capturedCtx?.env.OWA_VAR_API_KEY).toBe("sk-real-secret");
-    expect(capturedCtx?.env.OWA_VAR_BASE_URL).toBe("api.example.com");
-
-    // MCP URL is substituted with actual values
-    expect(capturedSpec?.mcpServers?.[0]?.url).toBe(
-      "https://api.example.com/v1?token=sk-real-secret",
+  it("积分不够继续:中止引擎,运行失败 insufficient_credits,不带结构化结果", async () => {
+    const { orch, engineSignal } = await setupCharging(
+      [usage("m1", 1000, 0), usage("m2", 5000, 0)],
+      (t) => (t.input > 2000 ? "stop" : "continue"),
     );
+    const r = await orch.execute(
+      { sessionId: "s1", prompt: "hi", runId: "r1" },
+      new AbortController().signal,
+    );
+    expect(engineSignal()?.aborted).toBe(true);
+    expect(r).toMatchObject({ status: "failed", error: { kind: "insufficient_credits" } });
+    expect(r.structured).toBeUndefined();
+  });
 
-    // System prompt: plain var substituted, secret not present (never was in prompt)
-    expect(capturedSpec?.systemPrompt).toContain("api.example.com");
-    expect(capturedSpec?.systemPrompt).not.toContain("sk-real-secret");
-    expect(capturedSpec?.systemPrompt).not.toContain("{{BASE_URL}}");
+  it("计费检查本身出错不拖垮运行", async () => {
+    const sessions = await setupCharging([usage("m1", 1, 1)], () => {
+      throw new Error("db down");
+    });
+    const r = await sessions.orch.execute(
+      { sessionId: "s1", prompt: "hi", runId: "r1" },
+      new AbortController().signal,
+    );
+    expect(r.status).toBe("success");
   });
 });

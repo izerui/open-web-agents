@@ -4,6 +4,7 @@ import type { GrantRepo } from "@/lib/modules/access/ports";
 import { InMemoryAgentRepo } from "@/lib/modules/agent/adapters/in-memory-agent-repo";
 import { InMemoryAgentVersionRepo } from "@/lib/modules/agent/adapters/in-memory-agent-version-repo";
 import { AgentReleases } from "@/lib/modules/agent/application/releases";
+import { catalogView } from "@/lib/modules/agent/domain/__tests__/model-catalog";
 import type { Agent } from "@/lib/modules/agent/ports";
 import type { ApiKeyRepo, NewApiKey } from "@/lib/modules/identity/ports";
 import { InMemorySessionRepo } from "@/lib/modules/session/adapters/in-memory-session-repo";
@@ -77,6 +78,7 @@ export async function fixture() {
       keys.delete(id);
     },
     setRateLimit: async () => {},
+    setMonthlyLimit: async () => {},
     setExpiry: async (id, at) => {
       const key = keys.get(id);
       if (key) key.expiresAt = at ?? undefined;
@@ -107,5 +109,6 @@ export async function fixture() {
       record: vi.fn(async () => {}),
     },
     env: { dataDir: "/unused-market-test", allowStdioMcp: false, invokeRateLimitPerKey: 60 },
+    modelCatalogView: async () => catalogView(),
   };
 }

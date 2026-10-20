@@ -14,15 +14,34 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { errorText, fetchJson } from "@/lib/fetch-json";
+import {
+  creditsAmount,
+  creditsBalance,
+  creditsExact,
+} from "@/lib/modules/billing/domain/credits-display";
+import type { BillingMode } from "@/lib/modules/billing/domain/run-charge";
 import type { LedgerEntry, WalletBalance } from "@/lib/modules/billing/ports";
 import { formatCredits, parseCredits } from "@/lib/modules/capabilities/domain/catalog";
 import { ArrowDownToLine, RefreshCw, Wallet } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { BillingModeCard } from "./billing-mode-card";
+import { RunChargeList } from "./run-charge-list";
 
-type Statement = { balance: WalletBalance; items: LedgerEntry[]; nextCursor?: string };
+type Statement = {
+  balance: WalletBalance;
+  items: LedgerEntry[];
+  nextCursor?: string;
+  mode?: BillingMode;
+  month?: {
+    since: number;
+    usedMicroCredits: string;
+    limitMicroCredits: string | null;
+    limitPending?: boolean;
+  };
+};
 type Account = { id: string; email: string; disabled?: boolean };
-const KIND = { credit: "人工入账", reserve: "预占", settle: "结算" } as const;
+const KIND = { credit: "人工入账", reserve: "冻结", settle: "结算" } as const;
 
 export function BillingView({ admin = false }: { admin?: boolean }) {
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -65,6 +84,8 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
         if (seq !== requestSeq.current) return;
         setStatement((previous) => ({
           ...result,
+          mode: result.mode ?? previous?.mode,
+          month: result.month ?? previous?.month,
           items:
             cursor && previous?.balance.accountId === result.balance.accountId
               ? [...previous.items, ...result.items]
@@ -128,7 +149,11 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
       setConfirm(false);
       creditAttempt.current = null;
       toast.success(result.replayed ? "原请求已处理,未重复入账" : "积分已入账");
-      setStatement((previous) => ({ balance: result.balance, items: previous?.items ?? [] }));
+      setStatement((previous) => ({
+        ...previous,
+        balance: result.balance,
+        items: previous?.items ?? [],
+      }));
       await load();
     } catch (err) {
       setError(`${errorText(err)}。相同内容重试会沿用原请求编号。`);
@@ -141,9 +166,20 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
   const selected = accounts.find((account) => account.id === accountId);
   return (
     <SpaceShell area={admin ? "admin" : "personal"} title={admin ? "积分管理" : "积分账户"}>
-      <div className="mb-5 border-b pb-4 text-sm text-muted-foreground">
-        积分账户基础已启用。模型自动扣费和在线支付尚未接通。
-      </div>
+      {admin && <BillingModeCard onChanged={() => load()} />}
+      {statement?.mode === "trial" && (
+        <div
+          data-testid="trial-banner"
+          className="mb-5 border-b pb-4 text-sm text-muted-foreground"
+        >
+          试算中:运行照常进行,下面显示的是按售价计算的预计消耗,不扣积分。
+        </div>
+      )}
+      {statement?.mode === "live" && (
+        <div className="mb-5 border-b pb-4 text-sm text-muted-foreground">
+          每次运行发起时先冻结积分,结束后按实际用量扣除,多余的退回可用余额。
+        </div>
+      )}
       {admin && (
         <div className="mb-5 flex flex-wrap items-end gap-3">
           <label className="min-w-0 flex-1 space-y-1 text-sm" htmlFor="billing-account">
@@ -191,17 +227,35 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
       {statement ? (
         <dl className="mb-6 grid grid-cols-2 gap-6 border-y py-5">
           <div className="min-w-0">
-            <dt className="text-xs text-muted-foreground">可用积分</dt>
-            <dd className="mt-2 break-all font-mono text-2xl">
-              {formatCredits(statement.balance.availableMicroCredits)}
+            <dt className="text-xs text-muted-foreground">可用</dt>
+            <dd
+              data-testid="balance-available"
+              className="mt-2 break-all font-mono text-2xl"
+              title={`${creditsExact(statement.balance.availableMicroCredits)} 积分`}
+            >
+              {creditsBalance(statement.balance.availableMicroCredits)}
             </dd>
           </div>
           <div className="min-w-0">
-            <dt className="text-xs text-muted-foreground">预占积分</dt>
-            <dd className="mt-2 break-all font-mono text-2xl">
-              {formatCredits(statement.balance.reservedMicroCredits)}
+            <dt className="text-xs text-muted-foreground">冻结中</dt>
+            <dd
+              data-testid="balance-reserved"
+              className="mt-2 break-all font-mono text-2xl"
+              title={`${creditsExact(statement.balance.reservedMicroCredits)} 积分`}
+            >
+              {creditsAmount(statement.balance.reservedMicroCredits)}
             </dd>
           </div>
+          {statement.month && (
+            <p className="col-span-2 text-xs text-muted-foreground">
+              本月{statement.mode === "trial" ? "预计消耗" : "已用"}{" "}
+              {creditsAmount(statement.month.usedMicroCredits)} 积分
+              {statement.month.limitMicroCredits !== null &&
+                ` / 月度上限 ${creditsAmount(statement.month.limitMicroCredits)} 积分`}
+              {statement.month.limitPending &&
+                " · 原月度上限待管理员按积分重新设置,设置前正式扣费下不能发起运行"}
+            </p>
+          )}
         </dl>
       ) : loading ? (
         <p className="py-5 text-sm text-muted-foreground">载入中…</p>
@@ -253,6 +307,7 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
           </fieldset>
         </form>
       )}
+      {statement && <RunChargeList accountId={admin ? accountId : undefined} />}
       {statement && (
         <section>
           <div className="mb-3 flex items-center justify-between">
@@ -290,7 +345,7 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
                       </td>
                       <td className="whitespace-nowrap px-2 py-3">
                         {entry.kind === "settle" && entry.amountMicroCredits === "0"
-                          ? "释放预占"
+                          ? "释放冻结"
                           : KIND[entry.kind]}
                       </td>
                       <td className="whitespace-nowrap px-2 py-3 font-mono">
@@ -299,12 +354,12 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
                           : entry.kind === "settle" && entry.amountMicroCredits !== "0"
                             ? "-"
                             : ""}
-                        {formatCredits(entry.amountMicroCredits)}
+                        {creditsExact(entry.amountMicroCredits)}
                       </td>
                       <td className="whitespace-nowrap px-2 py-3 font-mono">
-                        {formatCredits(entry.availableAfter)}
+                        {creditsExact(entry.availableAfter)}
                         <p className="mt-1 text-muted-foreground">
-                          预占 {formatCredits(entry.reservedAfter)}
+                          冻结 {creditsExact(entry.reservedAfter)}
                         </p>
                       </td>
                       <td className="min-w-40 max-w-sm break-words px-2 py-3">

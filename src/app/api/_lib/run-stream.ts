@@ -14,7 +14,7 @@ export interface StreamRunOptions {
   results: TerminalSource;
   sessionId: string;
   runId: string;
-  /** 入队。在订阅建立之后调用,保证不漏掉最早的事件。 */
+  /** 入队(或报告已经发生的入队错误)。在订阅建立之后调用;订阅从 Stream 起点补读,先入队也不漏事件。 */
   enqueue: () => Promise<unknown>;
 }
 

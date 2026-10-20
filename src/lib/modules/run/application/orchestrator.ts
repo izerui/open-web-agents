@@ -1,10 +1,6 @@
 // 运行编排(Application 层):人用对话与系统 invoke 共用的【同一个运行内核】。
 // 只依赖端口接口,不碰框架与 IO 细节 —— 用内存 fake 即可完整单测。
 
-import {
-  resolveCredentials,
-  resolveModelAlias,
-} from "@/lib/modules/agent-engine/domain/resolve-credentials";
 import type { EnginePort, RunResult, TranscriptRange } from "@/lib/modules/agent-engine/ports";
 import {
   MissingRequiredVariables,
@@ -15,10 +11,16 @@ import {
 import type { AgentConfig } from "@/lib/modules/agent/domain/config";
 import { validateStructured } from "@/lib/modules/agent/domain/validate-output";
 import type { AgentRepo } from "@/lib/modules/agent/ports";
+import type { UsageTokens } from "@/lib/modules/billing/application/run-charging";
 import type { BusPort } from "@/lib/modules/events/ports";
+import type {
+  ResolveRequest,
+  ResolvedRun,
+} from "@/lib/modules/model-gateway/application/model-resolver";
+import { ModelUnavailable } from "@/lib/modules/model-gateway/domain/resolve-run-models";
 import type { SteerChannel } from "@/lib/modules/run/ports";
 import type { SessionRepo } from "@/lib/modules/session/ports";
-import type { AgentEvent, CredentialChain, ModelAlias } from "@/lib/shared";
+import { type AgentEvent, BrandedError, type ModelRef, type PinnedPricing } from "@/lib/shared";
 import { EventCoalescer } from "./event-coalescer";
 import { ChannelSteerInbox } from "./steer-inbox";
 
@@ -29,7 +31,12 @@ export interface RunCommand {
   /** 队列里的 run id(worker 执行时带上;内联执行可不传)。 */
   runId?: string;
   /** 请求级覆盖(三级链最高优先)。 */
-  override?: { model?: ModelAlias };
+  override?: { model?: ModelRef };
+  /**
+   * 受理时锁定的模型绑定与价目版本;有就按它执行。受理时模型就不可用的,是"不可执行"标记,照此失败。
+   * 只有没有快照的旧任务才按配置现解析。
+   */
+  pricing?: PinnedPricing;
   /**
    * 入队时的智能体配置快照。有就按它跑,而不是读执行时的"当前配置" ——
    * 排队期间配置被改,不该改变已经受理的任务。迁移前的旧任务没有快照,回退到当前配置。
@@ -42,8 +49,13 @@ export interface OrchestratorDeps {
   agents: AgentRepo;
   engine: EnginePort;
   bus: BusPort;
-  /** 所有账号统一使用的平台凭证。 */
-  platformCredentials: { baseUrl: string; key: string };
+  /** 按智能体配置解析本次运行的提供者、真实模型与凭证(凭证只在这里解密)。 */
+  resolveModels: (req: ResolveRequest & { pinned?: PinnedPricing | null }) => Promise<ResolvedRun>;
+  /**
+   * 运行中每次模型请求返回后报告累计 token;返回 "stop" 表示积分不够继续(正式模式),
+   * 编排在这一步之后中止引擎。不给则不做运行中计费检查。
+   */
+  chargeProgress?: (runId: string, tokens: UsageTokens) => Promise<"continue" | "stop">;
   /** 传给 agent 子进程的基础环境。 */
   baseEnv?: Record<string, string>;
   /**
@@ -78,14 +90,18 @@ export interface OrchestratorDeps {
   retrieveKnowledge?: (agentId: string, query: string) => Promise<string>;
   /** 按智能体+计费账号读取变量值,运行前注入配置。 */
   resolveVariables?: (agentId: string, userId: string) => Promise<Record<string, string>>;
-  /**
-   * 执行前的额度复核(按会话的计费账号)。
-   *
-   * 入口处已经查过一次,这里再查是因为两者之间隔着队列:额度内一口气入队 1000 个
-   * 任务,入口会全部放行,真正花钱的是之后逐个执行的时候。查不动(DB 故障)就抛错,
-   * 让本轮失败 —— 额度是计费边界,不能"查不了就当没超"。
-   */
-  quotaCheck?: (userId: string) => Promise<{ allowed: boolean; reason?: string }>;
+}
+
+/**
+ * 引擎已经启动、却没有正常返回结果(抛错)。此时模型可能已经被调用、花了钱,但用量不得而知 ——
+ * 计费不能把它当成"没有用量"结清,只能暂记待核对。引擎启动前的失败不用它,那些确认没有调用模型。
+ */
+export class EngineRunFailed extends BrandedError {
+  static readonly brand = Symbol.for("owa.error.EngineRunFailed");
+  constructor(readonly cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = "EngineRunFailed";
+  }
 }
 
 /** 每个运行一条 Stream,避免并发运行的事件和游标相互污染。 */
@@ -111,28 +127,23 @@ export class RunOrchestrator {
       config = agent.config;
     }
 
-    // 计费账号:花费记给谁,就用谁的额度、谁自带的凭证。
-    // 曾经只看 ownerId,于是 API Key 会话(没有人用归属)既不受额度约束,
-    // 也永远用不上签发人自己的 key,一律落到平台默认凭证上。
-    const billingUserId = session.billingUserId ?? session.ownerId;
-
-    if (billingUserId && this.deps.quotaCheck) {
-      const verdict = await this.deps.quotaCheck(billingUserId);
-      if (!verdict.allowed) {
-        return {
-          status: "failed",
-          error: { kind: "quota_exceeded", message: verdict.reason ?? "超出月度额度" },
-        };
+    // 模型在执行时解析:排队期间模型或提供者被停用的,这里如实失败,不去调用。
+    // 设计会话不接受调用方覆盖模型。
+    let resolved: ResolvedRun;
+    try {
+      resolved = await this.deps.resolveModels({
+        main: config.model,
+        override: session.source === "design" ? undefined : cmd.override?.model,
+        subagents: config.subagents?.map((s) => ({ name: s.name, model: s.model })),
+        pinned: cmd.pricing ?? null,
+      });
+    } catch (err) {
+      if (err instanceof ModelUnavailable) {
+        return { status: "failed", error: { kind: "model_unavailable", message: err.message } };
       }
+      throw err;
     }
-
-    const chain: CredentialChain = {
-      platform: this.deps.platformCredentials,
-      // 旧任务里可能仍有用户凭证覆盖,只取模型选择,凭证始终由平台提供。
-      request: session.source === "design" ? undefined : { model: cmd.override?.model },
-    };
-    const credentials = resolveCredentials(chain);
-    const model = resolveModelAlias(chain, config.model);
+    const { binding, credentials } = resolved;
 
     // 分支重跑:优先用该运行自己的锚点。只有它没有明确意图时才回退到会话最新状态
     let resumeSessionId = session.sdkSessionId;
@@ -172,6 +183,7 @@ export class RunOrchestrator {
           ? (config.unattendedApproval ?? "allow")
           : ("ask" as const),
       credentials,
+      modelSlots: binding.slots,
       env: { ...(this.deps.baseEnv ?? {}) },
     };
     // 知识检索:命中才注入。检索挂了就当没有知识库,不牵连整轮运行
@@ -192,7 +204,14 @@ export class RunOrchestrator {
       Object.assign(ctx.env, secretEnv);
     }
 
-    const spec = buildSpec(config, ctx, { model, knowledgeContext, resolvedVariables });
+    const spec = buildSpec(config, ctx, {
+      model: { ref: binding.main.ref, modelId: binding.main.modelId },
+      subagentModels: Object.fromEntries(
+        Object.entries(binding.subagents).map(([name, m]) => [name, m.modelId]),
+      ),
+      knowledgeContext,
+      resolvedVariables,
+    });
 
     const topic = topicOf(cmd.sessionId, cmd.runId);
 
@@ -200,7 +219,56 @@ export class RunOrchestrator {
     const coalescer = new EventCoalescer((e) => {
       void this.deps.bus.publish(topic, e).catch(() => {});
     });
-    const publish = (e: AgentEvent) => coalescer.push(e);
+    // 运行中计费:按消息去重累计用量(同一条消息会分几次到达,取最后一次),
+    // 交给计费判断是否追加冻结;积分不够继续就在这一步之后中止引擎。
+    const engineAbort = new AbortController();
+    const onOuterAbort = () => engineAbort.abort(signal.reason);
+    if (signal.aborted) engineAbort.abort(signal.reason);
+    else signal.addEventListener("abort", onOuterAbort, { once: true });
+    let stoppedForCredits = false;
+    const usageByMessage = new Map<string, UsageTokens>();
+    let anonymousUsage: UsageTokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    let chargeChain: Promise<void> = Promise.resolve();
+    const trackCharge = (e: AgentEvent) => {
+      if (e.kind !== "usage" || !cmd.runId || !this.deps.chargeProgress) return;
+      const u = {
+        input: e.input,
+        output: e.output,
+        cacheRead: e.cacheRead ?? 0,
+        cacheWrite: e.cacheCreation ?? 0,
+      };
+      if (e.messageId) usageByMessage.set(e.messageId, u);
+      else {
+        anonymousUsage = {
+          input: anonymousUsage.input + u.input,
+          output: anonymousUsage.output + u.output,
+          cacheRead: anonymousUsage.cacheRead + u.cacheRead,
+          cacheWrite: anonymousUsage.cacheWrite + u.cacheWrite,
+        };
+      }
+      const total = { ...anonymousUsage };
+      for (const v of usageByMessage.values()) {
+        total.input += v.input;
+        total.output += v.output;
+        total.cacheRead += v.cacheRead;
+        total.cacheWrite += v.cacheWrite;
+      }
+      const runId = cmd.runId;
+      const progress = this.deps.chargeProgress;
+      chargeChain = chargeChain.then(async () => {
+        if (stoppedForCredits) return;
+        // 计费检查失败不能拖垮运行:结束时照常按实际用量结算
+        const verdict = await progress(runId, total).catch(() => "continue" as const);
+        if (verdict === "stop") {
+          stoppedForCredits = true;
+          engineAbort.abort("insufficient_credits");
+        }
+      });
+    };
+    const publish = (e: AgentEvent) => {
+      trackCharge(e);
+      coalescer.push(e);
+    };
 
     publish({ kind: "status", label: "运行中", state: "running" });
     // 让用户看得到"这次回答参考了知识库",而不是凭空多出一些内容
@@ -222,17 +290,52 @@ export class RunOrchestrator {
 
     let result: RunResult;
     try {
-      result = await this.deps.engine.run(spec, steer ? { ...ctx, steer } : ctx, publish, signal);
+      try {
+        result = await this.deps.engine.run(
+          spec,
+          steer ? { ...ctx, steer } : ctx,
+          publish,
+          engineAbort.signal,
+        );
+      } catch (err) {
+        throw new EngineRunFailed(err);
+      }
+      await chargeChain;
+      if (stoppedForCredits) {
+        result = {
+          ...result,
+          status: "failed",
+          structured: undefined,
+          error: { kind: "insufficient_credits", message: "积分不足,已停止" },
+        };
+      }
     } finally {
-      // 引擎正常会自己收尾;它中途抛出时这里兜底:还没交出去的追加消息记为未送达
+      signal.removeEventListener("abort", onOuterAbort);
+      // 引擎正常会自己收尾;它中途抛出时这里兜底:还没交出去的追加消息记为未送达。
+      // 【收尾出错不能往外抛】引擎此时可能已经交回了结果与花费,从 finally 里抛出会把它们整个丢掉,
+      // 一次真实花过钱的运行就变成"没有用量"。追加消息的结局记不上,代价小得多
       if (steer) {
-        for (const m of await steer.abandon()) {
-          publish({ kind: "steer", id: m.id, text: m.text, outcome: "dropped" });
+        try {
+          for (const m of await steer.abandon()) {
+            publish({ kind: "steer", id: m.id, text: m.text, outcome: "dropped" });
+          }
+        } catch (err) {
+          console.warn(
+            `[owa] 运行收尾时处理追加消息失败(run=${cmd.runId}),结果照常保留:`,
+            err instanceof Error ? err.message : err,
+          );
         }
       }
       // 最后一段攒着的文本必须冲出去,否则回答会少个尾巴
-      coalescer.flush();
+      try {
+        coalescer.flush();
+      } catch {
+        // 事件投递是辅助能力,不影响结果
+      }
     }
+
+    // 记下本次运行所属提供者与价目版本:积分按当时的价格算,不受之后调价影响
+    if (result.cost) result = { ...result, cost: { ...result.cost, pricing: binding.pricing } };
 
     if (result.sessionId) {
       // 会话的"当前位置"跟着最新一次运行走。

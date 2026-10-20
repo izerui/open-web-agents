@@ -1,5 +1,5 @@
 import { runFinishedPayload } from "@/lib/modules/integration/application/webhook";
-import { type RunRecord, toRunResult } from "@/lib/modules/run/domain/run-result";
+import { type RunRecord, publicCost, toRunResult } from "@/lib/modules/run/domain/run-result";
 import { describe, expect, it } from "vitest";
 
 const record = (over: Partial<RunRecord> = {}): RunRecord => ({
@@ -87,6 +87,95 @@ describe("webhook 回调载荷与 /result 同一份契约", () => {
       sessionId: "s1",
       agentId: "a1",
       summary: "通过",
+    });
+  });
+
+  describe("对外费用不含提供者与上游模型标识", () => {
+    const stored = {
+      usd: 0.02,
+      input: 1200,
+      output: 80,
+      partial: true,
+      metering: {
+        source: "sdk_model_usage",
+        complete: true,
+        models: [
+          {
+            modelId: "upstream-x",
+            inputTokens: 1200,
+            outputTokens: 80,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+          },
+        ],
+      },
+      // 原始估算(带上游标识)只留在库里
+      creditEstimate: {
+        totalMicroCredits: "3696000",
+        complete: true,
+        source: "sdk_model_usage",
+        models: [
+          {
+            modelId: "upstream-x",
+            inputTokens: 1200,
+            outputTokens: 80,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            microCredits: "3696000",
+            unpriced: false,
+          },
+        ],
+      },
+      // 只给结算与对账:所属提供者、模型目录 id ↔ 上游标识
+      pricing: {
+        providerId: "secret-provider-id",
+        models: [{ capabilityId: "m-public", modelId: "upstream-x", version: 4 }],
+      },
+      // 结算时生成的对外版本:公开模型 id、名称、价目版本
+      publicEstimate: {
+        totalMicroCredits: "3696000",
+        complete: true,
+        models: [
+          {
+            model: "m-public",
+            name: "主力模型",
+            version: 4,
+            inputTokens: 1200,
+            outputTokens: 80,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            microCredits: "3696000",
+            unpriced: false,
+          },
+        ],
+      },
+    };
+
+    it("结果轮询 / 阻塞响应 / webhook:无提供者与上游模型标识,按模型给公开 id、名称、版本、token 与积分", () => {
+      const rec = record({ cost: stored });
+      for (const out of [toRunResult(rec), runFinishedPayload(rec, { sessionId: "s1" })]) {
+        const text = JSON.stringify(out);
+        expect(text).not.toContain("pricing");
+        expect(text).not.toContain("secret-provider-id");
+        expect(text).not.toContain("upstream-x");
+        expect(text).not.toContain("metering");
+        expect(out.cost).toEqual({
+          usd: 0.02,
+          input: 1200,
+          output: 80,
+          partial: true,
+          creditEstimate: stored.publicEstimate,
+        });
+      }
+    });
+
+    it("没有费用或费用不是对象时为 null;未知字段一律不带出", () => {
+      expect(toRunResult(record({ cost: null })).cost).toBeNull();
+      expect(toRunResult(record({ cost: "x" })).cost).toBeNull();
+      expect(publicCost({ input: 1, output: 2, anything: "leak" })).toEqual({
+        input: 1,
+        output: 2,
+      });
     });
   });
 });

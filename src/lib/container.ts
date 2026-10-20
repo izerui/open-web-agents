@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { type Db, createDb, databaseProbe } from "@/lib/db/client";
-import { designTransaction } from "@/lib/design-transaction";
+import { chargedCreate, designTransaction } from "@/lib/design-transaction";
 import { type Env, loadEnv } from "@/lib/env";
 import { MysqlGrantRepo } from "@/lib/modules/access/adapters/mysql-grant-repo";
 import { MysqlGroupRepo } from "@/lib/modules/access/adapters/mysql-group-repo";
@@ -20,6 +20,7 @@ import type { EngineDeps } from "@/lib/modules/agent-engine/adapters/claude-sdk/
 import type { ModelMetering } from "@/lib/modules/agent-engine/domain/model-usage";
 import type { EnginePort, TranscriptPort } from "@/lib/modules/agent-engine/ports";
 import { readBundle, writeBundle } from "@/lib/modules/agent/adapters/fs-bundle-store";
+import { MysqlAgentModelRefs } from "@/lib/modules/agent/adapters/mysql-agent-model-refs";
 import { MysqlAgentRepo } from "@/lib/modules/agent/adapters/mysql-agent-repo";
 import { MysqlAgentVersionRepo } from "@/lib/modules/agent/adapters/mysql-agent-version-repo";
 import {
@@ -31,6 +32,7 @@ import { AgentDesigner } from "@/lib/modules/agent/application/designer";
 import { AgentReleases } from "@/lib/modules/agent/application/releases";
 import { seedBuiltin } from "@/lib/modules/agent/application/seed-builtin";
 import { ARCHITECT_AGENT_ID, ARCHITECT_CONFIG } from "@/lib/modules/agent/domain/architect";
+import type { ModelCatalogView } from "@/lib/modules/agent/domain/validate-config";
 import { validateInput } from "@/lib/modules/agent/domain/validate-output";
 import type { Agent } from "@/lib/modules/agent/ports";
 import type { AgentRepo } from "@/lib/modules/agent/ports";
@@ -44,11 +46,17 @@ import { taskFilesForResult } from "@/lib/modules/artifacts/application/task-fil
 import type { StoragePort } from "@/lib/modules/artifacts/ports";
 import { MysqlAuditRepo } from "@/lib/modules/audit/adapters/mysql-audit-repo";
 import { AuditLog } from "@/lib/modules/audit/application/audit-log";
+import { MysqlBillingModeStore } from "@/lib/modules/billing/adapters/billing-mode-store";
 import { MysqlBillingRepo } from "@/lib/modules/billing/adapters/mysql-billing-repo";
 import { MysqlPackageRepo } from "@/lib/modules/billing/adapters/mysql-package-repo";
+import { MysqlRunChargeQuery } from "@/lib/modules/billing/adapters/mysql-run-charge-query";
+import { MysqlRunChargeStore } from "@/lib/modules/billing/adapters/mysql-run-charge-store";
+import { RunCharging } from "@/lib/modules/billing/application/run-charging";
 import type { PackageRepo } from "@/lib/modules/billing/package-ports";
 import type { BillingRepo } from "@/lib/modules/billing/ports";
+import type { BillingModeStore, RunChargeQuery } from "@/lib/modules/billing/run-charge-ports";
 import { MysqlCapabilityRepo } from "@/lib/modules/capabilities/adapters/mysql-capability-repo";
+import { PricedModels } from "@/lib/modules/capabilities/application/priced-models";
 import type { CapabilityRepo } from "@/lib/modules/capabilities/ports";
 import { MysqlEvalRepo } from "@/lib/modules/eval/adapters/mysql-eval-repo";
 import type { EvalDeps } from "@/lib/modules/eval/application/eval-runner";
@@ -63,7 +71,7 @@ import {
 } from "@/lib/modules/identity/adapters/redis-rate-limiter";
 import { AuthService } from "@/lib/modules/identity/application/auth-service";
 import { checkInvokeRate } from "@/lib/modules/identity/application/invoke-rate-limit";
-import { SecretBox } from "@/lib/modules/identity/domain/secret-box";
+import { SecretBox, maskSecret } from "@/lib/modules/identity/domain/secret-box";
 import type { ApiKeyRepo } from "@/lib/modules/identity/ports";
 import type { UserRepo } from "@/lib/modules/identity/user-ports";
 import { createGuardedSender } from "@/lib/modules/integration/adapters/guarded-http-sender";
@@ -77,7 +85,18 @@ import { isAddressAllowed } from "@/lib/modules/integration/domain/webhook-polic
 import { MysqlKnowledgeRepo } from "@/lib/modules/knowledge/adapters/mysql-knowledge-repo";
 import { ChunkCache } from "@/lib/modules/knowledge/application/chunk-cache";
 import { formatContext, retrieve } from "@/lib/modules/knowledge/domain/retrieval";
+import { AnthropicHttpProbe } from "@/lib/modules/model-gateway/adapters/anthropic-probe";
 import { EnvModelGateway } from "@/lib/modules/model-gateway/adapters/env-gateway";
+import {
+  MysqlBootstrapMarker,
+  MysqlModelAliasRepo,
+  MysqlProviderRepo,
+} from "@/lib/modules/model-gateway/adapters/mysql-provider-repo";
+import { bootstrapProviders } from "@/lib/modules/model-gateway/application/bootstrap";
+import { loadModelCatalogView } from "@/lib/modules/model-gateway/application/catalog-view";
+import { ModelAdmin } from "@/lib/modules/model-gateway/application/model-admin";
+import { ModelResolver } from "@/lib/modules/model-gateway/application/model-resolver";
+import type { ModelAliasRepo, ProviderRepo } from "@/lib/modules/model-gateway/ports";
 import type { ModelGatewayPort } from "@/lib/modules/model-gateway/ports";
 import { MysqlRunQuery } from "@/lib/modules/run/adapters/mysql-run-query";
 import { MysqlRunRepo } from "@/lib/modules/run/adapters/mysql-run-repo";
@@ -96,9 +115,10 @@ import { MysqlSessionRepo } from "@/lib/modules/session/adapters/mysql-session-r
 import { workspacePathFor } from "@/lib/modules/session/domain/workspace";
 import type { SessionRepo } from "@/lib/modules/session/ports";
 import { MysqlUsageRepo } from "@/lib/modules/usage/adapters/mysql-usage-repo";
-import { QuotaExceeded, assertWithinQuota } from "@/lib/modules/usage/application/quota-guard";
 import { estimateRunCredits } from "@/lib/modules/usage/domain/estimate";
+import { toPublicEstimate } from "@/lib/modules/usage/domain/public-estimate";
 import { mysqlSeedInRowLock } from "@/lib/seed-in-row-lock";
+import type { RunPricing } from "@/lib/shared";
 
 export interface Container {
   env: Env;
@@ -156,7 +176,21 @@ export interface Container {
   };
   designer: AgentDesigner;
   capabilities: CapabilityRepo;
+  /** 模型提供者(凭证密文只经 keyEnc 读出) */
+  providers: ProviderRepo;
+  modelAliases: ModelAliasRepo;
+  /** 管理员维护提供者、模型与别名映射 */
+  modelAdmin: ModelAdmin;
+  /** 模型目录只读视图:保存智能体配置、受理调用覆盖时校验模型 */
+  modelCatalogView: () => Promise<ModelCatalogView>;
+  /** 按运行记录的价目版本取当时的价格(版本不可变,带缓存) */
+  pricedModels: PricedModels;
+  /** 等环境变量收编为"平台默认"提供者完成;失败时下次调用重试。读模型配置前先 await。 */
+  ensureModels: () => Promise<void>;
   billing: BillingRepo;
+  billingMode: BillingModeStore;
+  runCharging: RunCharging;
+  runCharges: RunChargeQuery;
   packages: PackageRepo;
   variables: VariableRepo;
   knowledgeWriterFactory: (txDb: Db) => KnowledgeWriter;
@@ -275,11 +309,69 @@ function build(): Container {
   const knowledge = new MysqlKnowledgeRepo(db);
   const knowledgeChunks = new ChunkCache(knowledge);
   const capabilities = new MysqlCapabilityRepo(db);
+  const pricedModels = new PricedModels(capabilities);
+  const providers = new MysqlProviderRepo(db);
+  const modelAliases = new MysqlModelAliasRepo(db);
   const apiKeys = new MysqlApiKeyRepo(db);
   const grants = new MysqlGrantRepo(db);
   const groupRepo = new MysqlGroupRepo(db);
   const users = new MysqlUserRepo(db);
   const secrets = new SecretBox(env.secretKey);
+  let modelsReady: Promise<void> | null = null;
+  const ensureModels = () => {
+    modelsReady ??= bootstrapProviders({
+      providers,
+      aliases: modelAliases,
+      capabilities,
+      marker: new MysqlBootstrapMarker(db),
+      encrypt: (plain) => secrets.encrypt(plain),
+      mask: (plain) => maskSecret(plain),
+      env: { baseUrl: env.defaultBaseUrl, apiKey: env.defaultApiKey, slots: gateway.slots() },
+      warn: (message) => console.warn(`[models] ${message}`),
+    }).catch((err) => {
+      modelsReady = null;
+      throw err;
+    });
+    return modelsReady;
+  };
+  const modelCatalogView = () =>
+    loadModelCatalogView({ ensureModels, capabilities, providers, aliases: modelAliases });
+  const modelAdmin = new ModelAdmin({
+    ensureModels,
+    capabilities,
+    providers,
+    aliases: modelAliases,
+    agentRefs: new MysqlAgentModelRefs(db),
+    probe: new AnthropicHttpProbe(),
+    encrypt: (plain) => secrets.encrypt(plain),
+    decrypt: (stored) => secrets.decrypt(stored),
+    mask: (plain) => maskSecret(plain),
+  });
+  const modelResolver = new ModelResolver({
+    ensureModels,
+    capabilities,
+    providers,
+    aliases: modelAliases,
+    decrypt: (stored) => secrets.decrypt(stored),
+  });
+  // 运行计费:受理冻结、运行中追加、结束结算(模式与价目在受理时锁定,见 run-charging.ts)
+  const billingMode = new MysqlBillingModeStore(db);
+  const runCharging = new RunCharging({
+    mode: () => billingMode.get(),
+    bind: (req) => modelResolver.bind(req),
+    reserveTargetOf: async (id) => {
+      const c = await capabilities.get(id);
+      return c?.reserveMicroCredits ? BigInt(c.reserveMicroCredits) : null;
+    },
+    pricedModels: (p) => pricedModels.forRun(p),
+    transaction: (fn) =>
+      db.transaction((tx) => fn(new MysqlRunChargeStore(tx as unknown as Db)), {
+        isolationLevel: "read committed",
+      }),
+  });
+  void ensureModels().catch((err) =>
+    console.error("[models] 平台默认提供者初始化失败,首次使用模型时会重试:", err),
+  );
   const variableRepo = new MysqlVariableRepo(db, secrets);
   const authService = new AuthService({
     users,
@@ -318,7 +410,6 @@ function build(): Container {
     );
   const engine = createClaudeSdkEngine(
     env.dataDir,
-    gateway,
     env.sandbox,
     env.allowStdioMcp,
     requestApproval,
@@ -332,7 +423,7 @@ function build(): Container {
     agents,
     engine,
     bus,
-    platformCredentials: { baseUrl: env.defaultBaseUrl, key: env.defaultApiKey },
+    resolveModels: (req) => modelResolver.resolve(req),
     // agent 子进程需要继承宿主环境(PATH 等),否则 Bash 里连 ls 都找不到。
     // 凭证与 HOME 会在 buildSdkOptions 里覆盖掉这里的同名项。
     baseEnv: inheritedEnv(),
@@ -354,15 +445,7 @@ function build(): Container {
     resolveVariables: async (agentId, userId) => {
       return variableRepo.get(agentId, userId);
     },
-    quotaCheck: async (userId) => {
-      try {
-        await assertWithinQuota({ users, usage }, userId);
-        return { allowed: true };
-      } catch (err) {
-        if (err instanceof QuotaExceeded) return { allowed: false, reason: err.message };
-        throw err;
-      }
-    },
+    chargeProgress: (runId, tokens) => runCharging.progress(runId, tokens),
   });
 
   // 同进程内起 worker。拆成独立进程时,web 侧用 OWA_EMBEDDED_WORKER=0 关掉,
@@ -374,6 +457,7 @@ function build(): Container {
     agents,
     releases,
     encryptOverride: (o) => secrets.encrypt(JSON.stringify(o)),
+    charged: chargedCreate(db, runCharging),
   });
 
   const worker = new RunWorker(
@@ -387,13 +471,24 @@ function build(): Container {
         if (plain === null) throw new Error("请求级凭证覆盖无法解密(主密钥可能已更换)");
         return JSON.parse(plain) as RunCommand["override"];
       },
+      // 终态落库后立即结算;取消、回收孤儿等不经 worker 的结束路径由清扫补上
+      // final 由 worker 判断:只有花费确认落库(或本轮确实没有花费)才是最终结算
+      settleCharge: (runId, opts) => runCharging.settle(runId, opts),
+      sweepCharges: () => runCharging.sweep(),
       enrichCost: async (raw) => {
         const cost = raw as Record<string, unknown> | null;
         if (!cost?.metering) return raw;
-        const catalog = await capabilities.list();
+        // 按运行当时的提供者与价目版本;旧运行没有计价上下文,回落到当前价目
+        const catalog =
+          (await pricedModels.forRun(cost.pricing as RunPricing | undefined)) ??
+          (await capabilities.list());
+        const pricing = cost.pricing as RunPricing | undefined;
+        const creditEstimate = estimateRunCredits(cost.metering as ModelMetering, catalog);
         return {
           ...cost,
-          creditEstimate: estimateRunCredits(cost.metering as ModelMetering, catalog),
+          creditEstimate,
+          // 对外版本:上游标识换成公开模型 id 与名称;原始估算只留在库里
+          publicEstimate: toPublicEstimate(creditEstimate, catalog, pricing?.providerId),
         };
       },
       // 终态已落库,再发布 result 事件:SSE 看到的结局与数据库一致
@@ -557,19 +652,26 @@ function build(): Container {
     rateLimiter,
     bundles: { read: readBundle, write: writeBundle },
     designer: new AgentDesigner({
-      inSession: designTransaction(db),
+      inSession: designTransaction(db, runCharging),
       storage,
       allowStdioMcp: env.allowStdioMcp,
+      modelCatalogView,
     }),
     capabilities,
+    providers,
+    modelAliases,
+    pricedModels,
+    modelAdmin,
+    modelCatalogView,
+    ensureModels,
     billing: new MysqlBillingRepo(db),
+    billingMode,
+    runCharging,
+    runCharges: new MysqlRunChargeQuery(db),
     packages: new MysqlPackageRepo(db),
     variables: variableRepo,
     admission: new RunAdmission({
       sessions,
-      checkQuota: async (userId) => {
-        await assertWithinQuota({ users, usage }, userId);
-      },
       checkRate: (i) =>
         checkInvokeRate(rateLimiter, {
           ...i,
@@ -582,15 +684,6 @@ function build(): Container {
         return (await releases.at(agent, s.agentVersion)).config.inputSchema;
       },
       validateInput,
-      quotaRejection: (err) =>
-        err instanceof QuotaExceeded
-          ? new AdmissionRejected(402, "quota_exceeded", err.message, {
-              quota: {
-                usedMicroUsd: err.verdict.usedMicroUsd,
-                limitMicroUsd: err.verdict.limitMicroUsd,
-              },
-            })
-          : null,
     }),
     audit: new AuditLog({
       repo: new MysqlAuditRepo(db),

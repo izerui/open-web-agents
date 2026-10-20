@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { admissionErrorResponse, callerOf } from "@/app/api/_lib/admission";
-import { apiError } from "@/lib/api-error";
+import { apiError, chargeErrorResponse } from "@/lib/api-error";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import type { Principal } from "@/lib/modules/access/domain/principal";
@@ -100,6 +100,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     });
   } catch (err) {
     if (err instanceof PromptTooLarge) return apiError(413, "prompt_too_large", err.message);
+    const charge = chargeErrorResponse(err);
+    if (charge) return charge;
     throw err;
   }
 
