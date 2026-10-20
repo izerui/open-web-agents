@@ -924,6 +924,43 @@ describe("combineResults:多条 result 的计量", () => {
     });
   });
 
+  it("后到的累计快照全是 0、或只有读不出的计数:不覆盖前一份已确认的明细,缺失标记保留", () => {
+    const zeroSnapshot: RunResult = {
+      status: "failed",
+      cost: {
+        input: 0,
+        output: 0,
+        metering: {
+          source: "sdk_model_usage",
+          complete: true,
+          models: [
+            {
+              modelId: "up-main",
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+            },
+          ],
+        },
+      },
+    };
+    const unreadable: RunResult = {
+      status: "failed",
+      cost: {
+        input: 0,
+        output: 0,
+        metering: { source: "sdk_model_usage", complete: false, models: [], missing: 1 },
+      },
+    };
+    expect(combineResults([withModels(100), zeroSnapshot])?.cost?.metering).toMatchObject({
+      complete: false,
+      models: [{ modelId: "up-main", inputTokens: 100 }],
+    });
+    const m = combineResults([withModels(100), unreadable])?.cost?.metering;
+    expect(m).toMatchObject({ models: [{ modelId: "up-main", inputTokens: 100 }], missing: 1 });
+  });
+
   it("都没有明细:未归属用量全部相加", () => {
     expect(combineResults([noModels(10), noModels(20)])?.cost?.metering?.unattributed).toEqual({
       inputTokens: 0,

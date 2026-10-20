@@ -1266,6 +1266,88 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
       });
     });
 
+    describe("多条 result:后到的结果没有可用计数,不能覆盖前一条已确认的用量", () => {
+      const counts = (input: number) => ({
+        inputTokens: input,
+        outputTokens: 0,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 0,
+      });
+      const result1 = {
+        type: "result",
+        subtype: "success",
+        result: "第一轮",
+        total_cost_usd: 0.02,
+        usage: { input_tokens: 10000, output_tokens: 0 },
+        modelUsage: { "up-main": counts(10000) },
+      };
+      const errorResult2 = (extra: Record<string, unknown>) => ({
+        type: "result",
+        subtype: "error_during_execution",
+        result: "追加轮出错",
+        total_cost_usd: 0,
+        ...extra,
+      });
+      const run = (between: unknown[], second: unknown) =>
+        scenario(0, {
+          engine: sdk(() =>
+            (async function* () {
+              yield { type: "system", subtype: "init", session_id: "s" };
+              yield assistant("m1", 10000, 0);
+              yield result1;
+              for (const m of between) yield m; // 追加轮
+              yield second;
+            })(),
+          ),
+          cancel: false,
+        });
+
+      it("非零完整 result₁ → 无新用量 → error result₂ 带全零 modelUsage:第一轮费用保住、只扣一次;重复结算、清扫不多扣", async () => {
+        const { world, repo, settleAgain, sweepAgain } = await run(
+          [],
+          errorResult2({
+            usage: { input_tokens: 0, output_tokens: 0 },
+            modelUsage: { "up-main": counts(0) },
+          }),
+        );
+        expect((await repo.get("r1"))?.state).toBe("failed");
+        expect(world.charge("r1")).toMatchObject({
+          state: "settled",
+          estimatedMicro: SECOND.toString(),
+          chargedMicro: SECOND.toString(),
+        });
+        expect(await settleAgain()).toBe("none");
+        expect(await sweepAgain()).toBe(0);
+        expect(world.balance("u1")).toEqual({ available: 1000n * C - SECOND, reserved: 0n });
+      });
+
+      it("非零完整 result₁ → 无新用量 → error result₂ 的 modelUsage 读不出:第一轮费用保住,带着计量缺失保持暂记", async () => {
+        const { world, settleAgain } = await run([], errorResult2({ modelUsage: null }));
+        expect(world.charge("r1")).toMatchObject({
+          state: "provisional",
+          incomplete: true,
+          chargedMicro: SECOND.toString(),
+        });
+        expect(await settleAgain()).toBe("none");
+        expect(world.balance("u1")).toEqual({ available: 1000n * C - SECOND, reserved: 0n });
+      });
+
+      it("对照:追加轮有新用量、result₂ 带完整累计明细:由它覆盖,两轮合计只扣一次", async () => {
+        const { world } = await run(
+          [assistant("m2", 5000, 0)],
+          errorResult2({
+            usage: { input_tokens: 5000, output_tokens: 0 },
+            modelUsage: { "up-main": counts(15000) },
+          }),
+        );
+        // 1.5 万输入 = 34.65 积分
+        expect(world.charge("r1")).toMatchObject({
+          state: "settled",
+          chargedMicro: "34650000",
+        });
+      });
+    });
+
     describe("计数明确给出却读不出", () => {
       const resultOnly = (usage: Record<string, unknown>) =>
         scenario(0, {
