@@ -60,16 +60,65 @@ describe("知识库上传:总时长、断开、并发", () => {
     expect(createMany).toHaveBeenCalledTimes(1);
   });
 
-  it("客户端断开:之后的文件不再处理", async () => {
+  it("解析当前文件时客户端断开:当前文件解析成功也不入库,之后的文件不再处理;取消信号传给了解析层", async () => {
     const ac = new AbortController();
-    extractText.mockImplementation(async () => {
+    let passed: AbortSignal | undefined;
+    extractText.mockImplementation(async (...args: unknown[]) => {
+      passed = args[3] as AbortSignal;
       ac.abort();
       return okText;
     });
     const res = await call(request(["一.txt", "二.txt"], ac.signal));
     const body = (await res.json()) as { results: { ok: boolean; reason?: string }[] };
+    expect(body.results[0]).toMatchObject({ ok: false });
+    expect(body.results[0]?.reason).toContain("没有入库");
     expect(body.results[1]?.reason).toContain("连接已断开");
     expect(extractText).toHaveBeenCalledTimes(1);
+    expect(createMany).not.toHaveBeenCalled();
+    expect(passed?.aborted).toBe(true);
+  });
+
+  it("解析结束时总时长已用完:解析成功也不入库", async () => {
+    UPLOAD_LIMITS.budgetMs = 1_200;
+    extractText.mockImplementation(async () => {
+      await sleep(1_300);
+      return okText;
+    });
+    const res = await call(request(["慢.txt"]));
+    const body = (await res.json()) as { results: { ok: boolean; reason?: string }[] };
+    expect(body.results[0]?.reason).toContain("没有入库");
+    expect(createMany).not.toHaveBeenCalled();
+  });
+
+  it("请求体发一点后不再结束:到点停止接收、返回 408,不解析不入库;名额释放,之后的上传照常", async () => {
+    UPLOAD_LIMITS.budgetMs = 400;
+    UPLOAD_LIMITS.maxInflight = 1;
+    const stalled = new ReadableStream({
+      start(c) {
+        c.enqueue(
+          new TextEncoder().encode(
+            '--x\r\nContent-Disposition: form-data; name="files"; filename="a.txt"\r\n\r\n半截',
+          ),
+        );
+        // 之后既不发数据也不结束
+      },
+    });
+    const start = Date.now();
+    const res = await call(
+      new Request("http://x/api/agents/a1/knowledge/upload", {
+        method: "POST",
+        body: stalled,
+        duplex: "half",
+        headers: { "content-type": "multipart/form-data; boundary=x" },
+      } as RequestInit),
+    );
+    expect(res.status).toBe(408);
+    expect(Date.now() - start).toBeLessThan(1_500);
+    expect(extractText).not.toHaveBeenCalled();
+    expect(createMany).not.toHaveBeenCalled();
+    UPLOAD_LIMITS.budgetMs = saved.budgetMs;
+    extractText.mockResolvedValue(okText);
+    expect((await call(request(["之后.txt"]))).status).toBe(201);
   });
 
   it("同时处理的上传有上限:超了在读请求体之前就 503,处理完名额归还", async () => {

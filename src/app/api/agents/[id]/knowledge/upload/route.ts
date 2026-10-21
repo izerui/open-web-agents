@@ -14,23 +14,49 @@ export const dynamic = "force-dynamic";
 let inflight = 0;
 
 /**
- * 边读边数请求体,超过上限立刻停止读取。返回读到的全部字节,超限返回 null。
- * 【不能只看 Content-Length】分块传输的请求不带这个头,按 0 放过后 formData() 会把整份请求读进内存
+ * 边读边数请求体,超过上限立刻停止读取;到点(deadline)或客户端断开也立刻停止。
+ * 【不能只看 Content-Length】分块传输的请求不带这个头,按 0 放过后 formData() 会把整份请求读进内存。
+ * 【读取本身也要有时限】客户端慢慢传、始终不结束,reader.read() 会一直等,上传名额就一直被占着
  */
-async function readBounded(req: Request, max: number): Promise<Uint8Array<ArrayBuffer> | null> {
-  if (!req.body) return new Uint8Array(new ArrayBuffer(0));
+async function readBounded(
+  req: Request,
+  max: number,
+  deadline: number,
+): Promise<
+  | { ok: true; bytes: Uint8Array<ArrayBuffer> }
+  | { ok: false; why: "too_large" | "timeout" | "aborted" }
+> {
+  if (!req.body) return { ok: true, bytes: new Uint8Array(new ArrayBuffer(0)) };
   const reader = req.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > max) {
-      await reader.cancel().catch(() => {});
-      return null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  // 到点或断开时让正在等的 read() 立刻有结果
+  const stop = new Promise<"timeout" | "aborted">((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), Math.max(0, deadline - Date.now()));
+    onAbort = () => resolve("aborted");
+    if (req.signal.aborted) onAbort();
+    else req.signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    for (;;) {
+      const next = await Promise.race([reader.read(), stop]);
+      if (next === "timeout" || next === "aborted") {
+        await reader.cancel().catch(() => {});
+        return { ok: false, why: next };
+      }
+      if (next.done) break;
+      total += next.value.byteLength;
+      if (total > max) {
+        await reader.cancel().catch(() => {});
+        return { ok: false, why: "too_large" };
+      }
+      chunks.push(next.value);
     }
-    chunks.push(value);
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) req.signal.removeEventListener("abort", onAbort);
   }
   const out = new Uint8Array(new ArrayBuffer(total));
   let at = 0;
@@ -38,7 +64,7 @@ async function readBounded(req: Request, max: number): Promise<Uint8Array<ArrayB
     out.set(c, at);
     at += c.byteLength;
   }
-  return out;
+  return { ok: true, bytes: out };
 }
 
 type FileResult =
@@ -83,12 +109,23 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       );
     // 声明了长度且已超:一个字节都不读
     if (Number(req.headers.get("content-length") ?? 0) > MAX_REQUEST_BYTES) return tooLarge();
-    // 没声明长度(分块传输)或声明的不可信:边读边数,超了立刻停
-    const body = await readBounded(req, MAX_REQUEST_BYTES);
-    if (!body) return tooLarge();
+    // 没声明长度(分块传输)或声明的不可信:边读边数,超了、到点、断开都立刻停
+    const read = await readBounded(req, MAX_REQUEST_BYTES, deadline);
+    if (!read.ok) {
+      if (read.why === "too_large") return tooLarge();
+      return Response.json(
+        {
+          error:
+            read.why === "timeout"
+              ? `上传在 ${Math.round(budgetMs / 1000)} 秒内没有传完,已停止接收;请检查网络或分批上传`
+              : "上传连接已断开",
+        },
+        { status: 408 },
+      );
+    }
     let form: FormData;
     try {
-      form = await new Response(body, {
+      form = await new Response(read.bytes, {
         headers: { "content-type": req.headers.get("content-type") ?? "" },
       }).formData();
     } catch {
@@ -128,11 +165,25 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         });
         continue;
       }
-      const got = await extractText(name, new Uint8Array(await f.arrayBuffer()), {
-        ...EXTRACT_LIMITS,
+      const got = await extractText(
+        name,
+        new Uint8Array(await f.arrayBuffer()),
         // 单个文件的解析时限不超过本次上传剩下的时间
-        timeoutMs: Math.min(EXTRACT_LIMITS.timeoutMs, remaining),
-      });
+        { ...EXTRACT_LIMITS, timeoutMs: Math.min(EXTRACT_LIMITS.timeoutMs, remaining) },
+        // 客户端断开:排队的撤出、正在跑的解析子进程立刻杀掉
+        req.signal,
+      );
+      // 解析期间断开或时间用完:解析成功了也不入库 —— 否则用户看到失败,服务端却存进去了
+      if (req.signal.aborted || Date.now() > deadline) {
+        results.push({
+          file: name,
+          ok: false,
+          reason: req.signal.aborted
+            ? "上传连接已断开,这个文件没有入库"
+            : `本次上传处理时间已用完(上限 ${Math.round(budgetMs / 1000)} 秒),这个文件没有入库;请分批上传`,
+        });
+        continue;
+      }
       if (!got.ok) {
         results.push({ file: name, ok: false, reason: got.reason });
         continue;

@@ -241,6 +241,29 @@ describe("extractText:时限与内存真的停下解析(独立子进程)", { tim
     expect((await ok("之后.docx", docx(["照常"]))).text).toBe("照常");
   });
 
+  it("取消:正在跑的解析子进程立刻被杀掉,返回已取消;排队中的撤出队列", async () => {
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 200);
+    const start = Date.now();
+    const running = await extractText(
+      "很大.docx",
+      heavyDocx(),
+      { ...EXTRACT_LIMITS, timeoutMs: 30_000 },
+      ac.signal,
+    );
+    expect(Date.now() - start).toBeLessThan(2_000);
+    expect(running).toMatchObject({ ok: false });
+    expect(running.ok === false && running.reason).toContain("已取消");
+    await settle();
+    expect(liveExtractionWorkers()).toBe(0);
+    const done = new AbortController();
+    done.abort();
+    expect(
+      await extractText("已取消.docx", docx(["x"]), EXTRACT_LIMITS, done.signal),
+    ).toMatchObject({ ok: false });
+    expect((await ok("之后.docx", docx(["照常"]))).text).toBe("照常");
+  });
+
   it("内存超限:只有解析子进程退出,给出原因;当前进程不受影响", async () => {
     const r = await extractText("大.docx", heavyDocx(), { ...EXTRACT_LIMITS, maxHeapMb: 16 });
     expect(r).toMatchObject({ ok: false });

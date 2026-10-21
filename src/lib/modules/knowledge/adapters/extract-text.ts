@@ -55,8 +55,12 @@ export function liveExtractionWorkers(): number {
   return alive;
 }
 
-/** 等一个解析名额,最多等 timeoutMs;等不到返回 false(并从队列里撤下,不占后面的名额) */
-function acquire(timeoutMs: number): Promise<boolean> {
+/**
+ * 等一个解析名额,最多等 timeoutMs、或等到取消;等不到返回 false
+ * (并从队列里撤下,不占后面的名额)
+ */
+function acquire(timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted) return Promise.resolve(false);
   if (running < MAX_PARALLEL) {
     running++;
     return Promise.resolve(true);
@@ -64,14 +68,19 @@ function acquire(timeoutMs: number): Promise<boolean> {
   return new Promise((resolve) => {
     const take = () => {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", giveUp);
       running++;
       resolve(true);
     };
-    const timer = setTimeout(() => {
+    const giveUp = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", giveUp);
       const at = waiting.indexOf(take);
       if (at >= 0) waiting.splice(at, 1);
       resolve(false);
-    }, timeoutMs);
+    };
+    const timer = setTimeout(giveUp, timeoutMs);
+    signal?.addEventListener("abort", giveUp, { once: true });
     waiting.push(take);
   });
 }
@@ -85,9 +94,18 @@ type Format = Extract<ExtractResult, { ok: true }>["format"];
 type ChildReply =
   | { ok: true; format: Format; text: string; pages?: number }
   | { ok: false; rejected: boolean; reason: string };
-type RunOutcome = ChildReply | { ok: false; timeout: true } | { ok: false; crashed: string };
+type RunOutcome =
+  | ChildReply
+  | { ok: false; timeout: true }
+  | { ok: false; aborted: true }
+  | { ok: false; crashed: string };
 
-function runChild(fileName: string, bytes: Uint8Array, limits: ExtractLimits): Promise<RunOutcome> {
+function runChild(
+  fileName: string,
+  bytes: Uint8Array,
+  limits: ExtractLimits,
+  signal?: AbortSignal,
+): Promise<RunOutcome> {
   return new Promise((resolve) => {
     const child = fork(childFile(), [], {
       execArgv: [`--max-old-space-size=${limits.maxHeapMb}`],
@@ -102,15 +120,19 @@ function runChild(fileName: string, bytes: Uint8Array, limits: ExtractLimits): P
       stderr = (stderr + d.toString()).slice(-4000);
     });
     let settled = false;
+    // 调用方取消(上传连接断开):立刻杀掉子进程,不让解析在后台跑完
+    const onAbort = () => finish({ ok: false, aborted: true });
     const finish = (r: RunOutcome) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
       resolve(r);
       // 结果已拿到或已超时:无论如何都把子进程收掉
       if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
     };
     const timer = setTimeout(() => finish({ ok: false, timeout: true }), limits.timeoutMs);
+    signal?.addEventListener("abort", onAbort, { once: true });
     child.once("message", (m) => finish(m as ChildReply));
     child.once("error", (err) => finish({ ok: false, crashed: err.message }));
     // close 在输出流读完之后才触发(exit 时错误输出可能还没读到):据此判断是不是内存耗尽。
@@ -128,10 +150,14 @@ function runChild(fileName: string, bytes: Uint8Array, limits: ExtractLimits): P
   });
 }
 
+/**
+ * signal:调用方取消(如上传连接断开)时,排队的撤出队列、正在跑的子进程立刻杀掉,返回"已取消"
+ */
 export async function extractText(
   fileName: string,
   bytes: Uint8Array,
   limits: ExtractLimits = EXTRACT_LIMITS,
+  signal?: AbortSignal,
 ): Promise<ExtractResult> {
   if (bytes.length === 0) return { ok: false, reason: "文件是空的" };
   if (bytes.length > limits.maxBytes) {
@@ -140,18 +166,21 @@ export async function extractText(
   // 排队等解析名额的时间也算在时限里:时限是这个文件从交来到出结果的总时长
   const started = Date.now();
   let r: RunOutcome;
-  if (!(await acquire(limits.timeoutMs))) {
-    r = { ok: false, timeout: true };
+  if (!(await acquire(limits.timeoutMs, signal))) {
+    r = signal?.aborted ? { ok: false, aborted: true } : { ok: false, timeout: true };
   } else {
     try {
-      r = await runChild(fileName, bytes, {
-        ...limits,
-        timeoutMs: Math.max(1, limits.timeoutMs - (Date.now() - started)),
-      });
+      r = await runChild(
+        fileName,
+        bytes,
+        { ...limits, timeoutMs: Math.max(1, limits.timeoutMs - (Date.now() - started)) },
+        signal,
+      );
     } finally {
       release();
     }
   }
+  if ("aborted" in r) return { ok: false, reason: "已取消,没有解析" };
   if ("timeout" in r) {
     return {
       ok: false,
