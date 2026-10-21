@@ -4,7 +4,7 @@ import { strToU8, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import { columnOf } from "../extract-child.mjs";
 import { EXTRACT_LIMITS, extractText, liveExtractionWorkers } from "../extract-text";
-import { docx, heavyDocx, pdf, pptx, xlsx, xlsxWithGaps } from "./fixtures/make";
+import { docx, heavyDocx, pdf, pptx, pptxOrdered, xlsx, xlsxWithGaps } from "./fixtures/make";
 
 const ok = async (name: string, bytes: Uint8Array) => {
   const r = await extractText(name, bytes);
@@ -29,6 +29,26 @@ describe("extractText", () => {
     expect(r.format).toBe("pptx");
     expect(r.pages).toBe(10);
     expect(r.text.indexOf("第 2 页\n标题2")).toBeLessThan(r.text.indexOf("第 10 页\n标题10"));
+  });
+
+  it("PPT 拖动过页面:按 presentation.xml 的展示顺序提取,页码跟着展示顺序,不按文件编号", async () => {
+    // 文件 slide1 = 甲,slide2 = 乙;用户把乙拖到最前面:展示顺序是 slide2、slide1
+    const swapped = pptxOrdered(
+      [
+        ["甲页标题", "甲页内容"],
+        ["乙页标题", "乙页内容"],
+      ],
+      [2, 1],
+    );
+    const r = await ok("拖动过.pptx", swapped);
+    expect(r).toMatchObject({ format: "pptx", pages: 2 });
+    expect(r.text).toBe("第 1 页\n乙页标题\n乙页内容\n\n第 2 页\n甲页标题\n甲页内容");
+    // 对照:没拖动过的照文件顺序
+    const kept = await ok("没动过.pptx", pptxOrdered([["甲"], ["乙"]], [1, 2]));
+    expect(kept.text).toBe("第 1 页\n甲\n\n第 2 页\n乙");
+    // 留在压缩包里、但不在顺序表里的页(已从演示里删掉)不导入
+    const dropped = await ok("删过页.pptx", pptxOrdered([["甲"], ["已删除"], ["丙"]], [3, 1]));
+    expect(dropped).toMatchObject({ pages: 2, text: "第 1 页\n丙\n\n第 2 页\n甲" });
   });
 
   it("Excel:按工作表,每行一行、单元格用制表符;共享字符串、内联字符串与数字", async () => {

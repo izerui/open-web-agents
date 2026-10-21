@@ -15,6 +15,38 @@ export function docx(paragraphs: string[]): Uint8Array {
   });
 }
 
+/**
+ * 带 presentation.xml 顺序表的 PPT:order 是展示顺序里各页对应的文件编号(从 1 起)。
+ * 用户在 PowerPoint 里拖动页面后,文件 slideN.xml 不改名,只有 sldIdLst 的顺序变;
+ * 关系表的 Target 混用相对与绝对路径,与真实文件一致
+ */
+export function pptxOrdered(slides: string[][], order: number[]): Uint8Array {
+  const files: Record<string, Uint8Array> = {
+    "[Content_Types].xml": enc(
+      '<Types><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/></Types>',
+    ),
+    "ppt/presentation.xml": enc(
+      `<p:presentation><p:sldIdLst>${order
+        .map((n, i) => `<p:sldId id="${256 + i}" r:id="rIdS${n}"/>`)
+        .join("")}</p:sldIdLst></p:presentation>`,
+    ),
+    "ppt/_rels/presentation.xml.rels": enc(
+      `<Relationships><Relationship Id="rIdM" Type="slideMaster" Target="slideMasters/slideMaster1.xml"/>${slides
+        .map(
+          (_, i) =>
+            `<Relationship Id="rIdS${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="${i % 2 ? "/ppt/" : ""}slides/slide${i + 1}.xml"/>`,
+        )
+        .join("")}</Relationships>`,
+    ),
+  };
+  slides.forEach((lines, i) => {
+    files[`ppt/slides/slide${i + 1}.xml`] = enc(
+      `<p:sld><p:cSld><p:spTree>${lines.map((l) => `<a:p><a:r><a:t>${l}</a:t></a:r></a:p>`).join("")}</p:spTree></p:cSld></p:sld>`,
+    );
+  });
+  return zipSync(files);
+}
+
 export function pptx(slides: string[][]): Uint8Array {
   const files: Record<string, Uint8Array> = {
     "[Content_Types].xml": enc(

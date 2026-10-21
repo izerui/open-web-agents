@@ -86,7 +86,7 @@ curl localhost:5678/api/agents/<taskId>/result -H "X-Api-Key: <key>"
 应用只保存草稿,不发布。尚未发布过的智能体沿用原有“调用草稿”的兼容规则。
 
 **知识库上传文件**:知识库面板可一次上传多个文件(或拖进来),提取文字后存成文档,只存文字不存原文件。
-支持 PDF(含不嵌入字体、靠 CMap 编码的中文 PDF)、Word(.docx)、PPT(.pptx,按页)、Excel(.xlsx,按工作表)、
+支持 PDF(含不嵌入字体、靠 CMap 编码的中文 PDF)、Word(.docx)、PPT(.pptx,按演示里的实际页序,拖动过页面也不会错)、Excel(.xlsx,按工作表)、
 纯文本(UTF-8 / GBK)。Excel 按单元格坐标对齐列,空单元格不会让后面的值往前挤。旧版 .doc / .ppt / .xls、
 扫描版 PDF、加密文件给出原因拒绝。解析在独立子进程里跑(最多同时 2 个):超过 60 秒或 512MB 内存就杀掉子进程,
 web 进程照常响应;单个文件 20MB、PDF 500 页、解压后大小也有上限。生产镜像靠 Dockerfile 拷入的完整 src 与

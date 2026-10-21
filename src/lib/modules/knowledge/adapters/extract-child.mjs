@@ -138,7 +138,14 @@ function extractOoxml(bytes, limits) {
     return { format: "docx", text: docxText(parts) };
   }
   if (types.includes("presentationml.presentation.main")) {
-    const parts = unzipParts(bytes, (n) => /^ppt\/slides\/slide\d+\.xml$/.test(n), limits);
+    const parts = unzipParts(
+      bytes,
+      (n) =>
+        n === "ppt/presentation.xml" ||
+        n === "ppt/_rels/presentation.xml.rels" ||
+        /^ppt\/slides\/slide\d+\.xml$/.test(n),
+      limits,
+    );
     return { format: "pptx", ...pptxText(parts) };
   }
   if (types.includes("spreadsheetml.sheet.main")) {
@@ -188,12 +195,43 @@ function docxText(parts) {
     .join("\n");
 }
 
+/**
+ * 页面的展示顺序。【不能按文件编号】用户在 PowerPoint 里拖动页面后,slideN.xml 不改名,
+ * 只有 presentation.xml 的 sldIdLst 顺序变;按编号读会悄悄把资料顺序读错,页码也跟着错。
+ * 顺序取 sldIdLst 里各页的 r:id,经 presentation.xml.rels 对到文件;不在顺序表里的页(已从演示里删掉,
+ * 文件还留在包里)不导入。缺顺序表时才退回按文件编号排
+ */
+function slideOrder(parts) {
+  const files = Object.keys(parts).filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n));
+  const byNumber = () =>
+    files
+      .map((n) => ({ n, i: Number(/slide(\d+)\.xml$/.exec(n)?.[1]) }))
+      .sort((a, b) => a.i - b.i)
+      .map((x) => x.n);
+  const list = /<p:sldIdLst\b[^>]*>([\s\S]*?)<\/p:sldIdLst>/.exec(
+    parts["ppt/presentation.xml"] ?? "",
+  )?.[1];
+  const relsXml = parts["ppt/_rels/presentation.xml.rels"];
+  if (!list || !relsXml) return byNumber();
+  const rels = new Map(
+    [...relsXml.matchAll(/<Relationship\b[^>]*>/g)].map((m) => [
+      /\bId="([^"]+)"/.exec(m[0])?.[1] ?? "",
+      /\bTarget="([^"]+)"/.exec(m[0])?.[1] ?? "",
+    ]),
+  );
+  const ordered = [...list.matchAll(/<p:sldId\b[^>]*>/g)]
+    .map((m) => rels.get(/\br:id="([^"]+)"/.exec(m[0])?.[1] ?? ""))
+    .filter(Boolean)
+    // Target 相对 ppt/ 目录,也可能写成以 / 开头的包内绝对路径
+    .map((t) => (t.startsWith("/") ? t.slice(1) : path.posix.normalize(`ppt/${t}`)))
+    .filter((n) => n in parts);
+  return ordered.length > 0 ? ordered : byNumber();
+}
+
 function pptxText(parts) {
-  const slides = Object.keys(parts)
-    .map((n) => ({ n, i: Number(/slide(\d+)\.xml$/.exec(n)?.[1]) }))
-    .sort((a, b) => a.i - b.i);
+  const slides = slideOrder(parts);
   const text = slides
-    .map(({ n }, idx) => {
+    .map((n, idx) => {
       const body = (parts[n] ?? "")
         .split(/<\/a:p>/)
         .map((p) => runs(p, "a:t"))

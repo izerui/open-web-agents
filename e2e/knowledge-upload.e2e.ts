@@ -6,6 +6,7 @@ import {
   docx,
   heavyDocx,
   pdf,
+  pptxOrdered,
   xlsxWithGaps,
 } from "../src/lib/modules/knowledge/adapters/__tests__/fixtures/make";
 import { BASE, type Client, newUser, serverUp } from "./client";
@@ -117,6 +118,20 @@ describe("知识库上传文件", () => {
       (await upload(stranger, agentId, [{ name: "a.txt", bytes: new TextEncoder().encode("x") }]))
         .status,
     ).toBe(403);
+  });
+
+  it("PPT 拖动过页面:入库正文与页码按展示顺序,不按文件编号", async () => {
+    const r = await upload(owner, agentId, [
+      {
+        name: "调整过顺序的课件.pptx",
+        bytes: pptxOrdered([["第一讲 绪论"], ["第二讲 方法"]], [2, 1]),
+      },
+    ]);
+    expect(r.status, JSON.stringify(r.body)).toBe(201);
+    const saved = r.body.results[0];
+    const docId = saved?.ok ? saved.docs[0]?.id : undefined;
+    const doc = await owner.get<{ content: string }>(`/api/agents/${agentId}/knowledge/${docId}`);
+    expect(doc.body.content).toBe("第 1 页\n第二讲 方法\n\n第 2 页\n第一讲 绪论");
   });
 
   it("Excel 空单元格按列对齐:缺 B2 时 C2 仍在第 3 列(数学)", async () => {
