@@ -7,6 +7,7 @@
 import type { AgentEvent, AskedQuestion } from "@/lib/shared";
 
 export type QuestionEvent = Extract<AgentEvent, { kind: "question" }>;
+export type AnswerEvent = Extract<AgentEvent, { kind: "answer" }>;
 
 /** 待回答的提问(审批通道里带 questions 的那条) */
 export interface PendingAsk {
@@ -26,12 +27,16 @@ export type QuestionState =
   | { kind: "answered"; answers: (string | null)[]; raw: string }
   /** 选择了不回答 */
   | { kind: "declined" }
+  /** 提问本身没送到用户面前(如 SDK 判定提问格式不合规),智能体已继续 */
+  | { kind: "invalid" }
   /** 没有回答(超时、运行被停止),智能体已自行判断 */
   | { kind: "unanswered" }
   /** 没有结果的旧记录(以前提问不等人,靠下一条消息回答) */
   | { kind: "legacy" };
 
 const ANSWERED_PREFIX = "The user answered:";
+/** 用户选择不回答时平台给模型的拒绝说明(见 claude-sdk/options.ts 的 askInTurn) */
+export const DECLINED_MARK = "用户选择不回答这些问题";
 const ANSWERED_TAIL = ". Read the answers";
 
 /**
@@ -64,14 +69,32 @@ export function parseAnswered(text: string, questions: string[]): (string | null
   return out.every((a) => a === null) ? null : out;
 }
 
+/**
+ * answer:SDK 给出的结构化回答(每题完整、有界),优先用它。
+ * 工具结果文本整段截到 4000 字,多题长回答会丢掉后面的题,只在没有结构化回答的旧记录上才解析它
+ */
 export function questionState(
   q: QuestionEvent,
   result: { text: string; isError: boolean } | undefined,
   pending: PendingAsk | undefined,
   running: boolean,
+  answer?: AnswerEvent,
 ): QuestionState {
+  if (answer && answer.answers.length > 0) {
+    const byQuestion = new Map(answer.answers.map((a) => [a.question, a.answer]));
+    return {
+      kind: "answered",
+      answers: q.questions.map(
+        (x, i) => byQuestion.get(x.question) ?? answer.answers[i]?.answer ?? null,
+      ),
+      raw: result?.text ?? "",
+    };
+  }
   if (result) {
-    if (result.isError) return { kind: "declined" };
+    if (result.isError) {
+      // 只有平台给出的"用户选择不回答"才是不回答;其余错误(SDK 校验提问格式失败等)用户什么都没做
+      return result.text.includes(DECLINED_MARK) ? { kind: "declined" } : { kind: "invalid" };
+    }
     const answers = parseAnswered(
       result.text,
       q.questions.map((x) => x.question),

@@ -181,6 +181,12 @@ export interface RunContext {
    * 不传时按 unattended 推断(无人值守放行,否则等人)。
    */
   approvalPolicy?: "ask" | "allow" | "deny";
+  /**
+   * 智能体提问时能不能在同一轮里等人回答。只有界面上有人对着提问卡片的入口(网页对话、AI 编辑)才为 true;
+   * 接口调用、API Key 建的多轮会话、评测都没人在卡片前,不等 —— 等也只会白等到超时。
+   * 不传 = 不等(显式白名单,新入口默认不等)
+   */
+  canAskUser?: boolean;
   credentials: ResolvedCredentials;
   /**
    * 本次运行的别名槽(SDK 内部按别名发起的辅助调用会用到)。全部指向本次运行所属提供者的模型;
@@ -260,6 +266,12 @@ export type AgentEvent =
       toolUseId?: string;
       questions: AskedQuestion[];
     }
+  /**
+   * 提问的回答(结构化,来自 SDK 随工具结果给出的 tool_use_result)。
+   * 【为什么不从工具结果文本里解析】工具结果是通用文本,整段截到 4000 字;多题长回答会把后面的题截掉。
+   * 这里每题单独有界(与提交接口的单题上限一致),刷新、翻历史都完整
+   */
+  | { kind: "answer"; toolUseId?: string; answers: { question: string; answer: string }[] }
   | { kind: "status"; label: string; state?: string }
   /**
    * 运行中途用户追加的消息。delivered = 已交给模型(会插进当前这一轮,或在本轮回答后再答一轮);

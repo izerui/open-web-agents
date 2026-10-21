@@ -214,6 +214,9 @@ export class RunOrchestrator {
         session.source === "invoke" || session.source === "eval"
           ? (config.unattendedApproval ?? "allow")
           : ("ask" as const),
+      // 提问等人回答只在界面上有人看着提问卡片的入口:网页对话与 AI 编辑。
+      // API Key 建的多轮会话(source=api)审批仍可由调用方用 Key 裁决,但没人对着卡片作答,不等
+      canAskUser: session.source === "web" || session.source === "design",
       credentials,
       modelSlots: binding.slots,
       // 每份快照都记在内存里(无论写库成没成):引擎之后出错时随错误带给 worker,

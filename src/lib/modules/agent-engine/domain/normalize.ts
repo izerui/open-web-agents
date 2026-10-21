@@ -233,6 +233,7 @@ export function normalizeSdkMessage(msg: unknown, opts?: { skipStreamed?: boolea
   if (m.type === "user") {
     const blocks = message?.content;
     if (!Array.isArray(blocks)) return out;
+    const answered = parseAnswers(m.tool_use_result ?? m.toolUseResult);
     for (const b of blocks) {
       const blk = b as {
         type?: string;
@@ -248,10 +249,42 @@ export function normalizeSdkMessage(msg: unknown, opts?: { skipStreamed?: boolea
           isError: blk.is_error === true,
           subagent: sub,
         });
+        if (answered) out.push({ kind: "answer", toolUseId: blk.tool_use_id, answers: answered });
       }
     }
     return out;
   }
 
   return out;
+}
+
+/** 单题回答的上限,与提交接口(approvals 路由)的单题上限一致 */
+const MAX_ANSWER_LEN = 2000;
+/** SDK 一次最多问 4 题;多给些余量,但有界 */
+const MAX_ANSWERS = 10;
+
+/**
+ * 提问的结构化回答:SDK 在工具结果所在的消息上给出 `{ questions, answers }`
+ * (实时流里叫 tool_use_result,transcript 文件里叫 toolUseResult)。按问题顺序列出;形状不认识返回 null
+ */
+function parseAnswers(raw: unknown): { question: string; answer: string }[] | null {
+  const r = raw as { questions?: unknown; answers?: unknown } | null | undefined;
+  if (!r || !Array.isArray(r.questions) || !r.answers || typeof r.answers !== "object") return null;
+  const answers = r.answers as Record<string, unknown>;
+  const out: { question: string; answer: string }[] = [];
+  for (const q of r.questions.slice(0, MAX_ANSWERS)) {
+    const question = (q as { question?: unknown })?.question;
+    if (typeof question !== "string") continue;
+    const a = answers[question];
+    if (typeof a !== "string") continue;
+    out.push({
+      question: clipTo(question, MAX_LEN),
+      answer: redactSecrets(clipTo(a, MAX_ANSWER_LEN)),
+    });
+  }
+  return out.length > 0 ? out : null;
+}
+
+function clipTo(s: string, max: number): string {
+  return s.length <= max ? s : `${s.slice(0, max)}…`;
 }

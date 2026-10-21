@@ -57,6 +57,56 @@ async function asFundedAdmin(ctx: BrowserContext) {
   };
 }
 
+/** 用假网关建一个提供者、模型与智能体,返回智能体 id */
+async function agentOn(
+  api: BrowserContext["request"],
+  gatewayUrl: string,
+  tag: number,
+): Promise<string> {
+  const p = await (
+    await api.post(`${BASE}/api/admin/providers`, {
+      data: {
+        definition: {
+          name: `PW提问-${tag}`,
+          enabled: true,
+          endpoints: { llm: { protocol: "anthropic", baseUrl: gatewayUrl } },
+        },
+        apiKey: `sk-pw-ask-${tag}`,
+      },
+    })
+  ).json();
+  const m = await (
+    await api.post(`${BASE}/api/admin/models`, {
+      data: {
+        expectedVersion: null,
+        definition: {
+          name: `PW提问模型-${tag}`,
+          kind: "llm",
+          modelId: `pw-ask-${tag}`,
+          enabled: true,
+          acceptsImages: false,
+          providerId: p.provider.id,
+          markupBp: 0,
+          costRates: [
+            { meter: "input_token", units: "1000000", microCredits: "100000000" },
+            { meter: "output_token", units: "1000000", microCredits: "100000000" },
+            { meter: "cache_read_token", units: "1000000", microCredits: "0" },
+            { meter: "cache_write_token", units: "1000000", microCredits: "0" },
+          ],
+          rates: [],
+        },
+      },
+    })
+  ).json();
+  const agent = await (
+    await api.post(`${BASE}/api/agents`, {
+      data: { name: `PW提问-${tag}`, config: { systemPrompt: "先问", model: m.model.id } },
+    })
+  ).json();
+
+  return agent.agent.id as string;
+}
+
 test.describe("智能体提问", () => {
   test.skip(!DB || !/test/i.test(new URL(DB).pathname), "需要专用测试库来设置管理员");
 
@@ -69,48 +119,8 @@ test.describe("智能体提问", () => {
     const api = context.request;
     const tag = Date.now() % 1_000_000;
     try {
-      const p = await (
-        await api.post(`${BASE}/api/admin/providers`, {
-          data: {
-            definition: {
-              name: `PW提问-${tag}`,
-              enabled: true,
-              endpoints: { llm: { protocol: "anthropic", baseUrl: gw.baseUrl } },
-            },
-            apiKey: `sk-pw-ask-${tag}`,
-          },
-        })
-      ).json();
-      const m = await (
-        await api.post(`${BASE}/api/admin/models`, {
-          data: {
-            expectedVersion: null,
-            definition: {
-              name: `PW提问模型-${tag}`,
-              kind: "llm",
-              modelId: `pw-ask-${tag}`,
-              enabled: true,
-              acceptsImages: false,
-              providerId: p.provider.id,
-              markupBp: 0,
-              costRates: [
-                { meter: "input_token", units: "1000000", microCredits: "100000000" },
-                { meter: "output_token", units: "1000000", microCredits: "100000000" },
-                { meter: "cache_read_token", units: "1000000", microCredits: "0" },
-                { meter: "cache_write_token", units: "1000000", microCredits: "0" },
-              ],
-              rates: [],
-            },
-          },
-        })
-      ).json();
-      const agent = await (
-        await api.post(`${BASE}/api/agents`, {
-          data: { name: `PW提问-${tag}`, config: { systemPrompt: "先问", model: m.model.id } },
-        })
-      ).json();
-
-      await page.goto(`${BASE}/?agent=${agent.agent.id}`);
+      const agent = await agentOn(api, gw.baseUrl, tag);
+      await page.goto(`${BASE}/?agent=${agent}`);
       const box = page.getByPlaceholder("说点什么,或输入 /");
       await box.fill("帮我写份报告");
       await box.press("Enter");
@@ -137,6 +147,62 @@ test.describe("智能体提问", () => {
       await expect(again.getByTestId("question-answer")).toContainText("Word、另外要带目录");
       // 提问的工具结果并进卡片,不再单独列出 SDK 的原文
       await expect(page.getByText("The user answered")).toHaveCount(0);
+    } finally {
+      gw.close();
+      await restore();
+    }
+  });
+
+  test("三题各自己填写 1500 字:提交后刷新,逐题回答完整(不受工具结果截断影响)", async ({
+    page,
+    context,
+  }) => {
+    const three = {
+      tool: {
+        id: "toolu_long",
+        name: "AskUserQuestion",
+        input: {
+          questions: ["背景?", "目标?", "约束?"].map((question) => ({
+            question,
+            header: question,
+            multiSelect: false,
+            options: [
+              { label: "跳过", description: "这题先不管" },
+              { label: "稍后", description: "之后再补" },
+            ],
+          })),
+        },
+      },
+    };
+    const gw = await startFakeGateway([three, { text: "三题都收到了。" }]);
+    const restore = await asFundedAdmin(context);
+    const tag = Date.now() % 1_000_000;
+    const long = (c: string) => `${c}开头${c.repeat(1494)}结尾${c}`;
+    const answers = { "背景?": long("甲"), "目标?": long("乙"), "约束?": long("丙") };
+    try {
+      const agent = await agentOn(context.request, gw.baseUrl, tag);
+      await page.goto(`${BASE}/?agent=${agent}`);
+      const box = page.getByPlaceholder("说点什么,或输入 /");
+      await box.fill("帮我写计划");
+      await box.press("Enter");
+      const card = page.getByTestId("question-card");
+      await expect(card.getByTestId("question-state")).toHaveText("待回答", { timeout: 30_000 });
+      for (const [q, a] of Object.entries(answers)) {
+        expect(a.length).toBe(1500);
+        await card.getByLabel(`其他回答:${q}`).fill(a);
+      }
+      await card.getByRole("button", { name: "提交回答" }).click();
+      await expect(page.getByText("三题都收到了。")).toBeVisible({ timeout: 30_000 });
+
+      const check = async () => {
+        const c = page.getByTestId("question-card");
+        await expect(c.getByTestId("question-state")).toHaveText("已回答", { timeout: 15_000 });
+        const shown = await c.getByTestId("question-answer").allTextContents();
+        expect(shown).toEqual(Object.values(answers).map((a) => `你的回答:${a}`));
+      };
+      await check();
+      await page.reload();
+      await check();
     } finally {
       gw.close();
       await restore();

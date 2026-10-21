@@ -513,3 +513,60 @@ describe("normalizeSdkMessage / skipStreamed", () => {
     ]);
   });
 });
+
+describe("提问的结构化回答(tool_use_result / toolUseResult)", () => {
+  const questions = ["格式?", "语言?", "篇幅?"].map((question) => ({
+    question,
+    options: [{ label: "A" }],
+  }));
+  const long = (c: string) => c.repeat(1500);
+  const answers = { "格式?": long("甲"), "语言?": long("乙"), "篇幅?": long("丙") };
+  const text = `The user answered: ${Object.entries(answers)
+    .map(([k, v]) => `"${k}"="${v}"`)
+    .join(", ")}. Read the answers carefully.`;
+  const msg = (field: "tool_use_result" | "toolUseResult") => ({
+    type: "user",
+    message: {
+      content: [{ type: "tool_result", tool_use_id: "toolu_q", content: text }],
+    },
+    [field]: { questions, answers },
+  });
+
+  it.each(["tool_use_result", "toolUseResult"] as const)(
+    "%s:每题完整(三题各 1500 字),不受工具结果文本 4000 字截断影响",
+    (field) => {
+      const events = normalizeSdkMessage(msg(field));
+      const result = events.find((e) => e.kind === "tool_result");
+      expect(result?.kind === "tool_result" && result.text.length).toBeLessThan(4100);
+      expect(events.find((e) => e.kind === "answer")).toEqual({
+        kind: "answer",
+        toolUseId: "toolu_q",
+        answers: [
+          { question: "格式?", answer: long("甲") },
+          { question: "语言?", answer: long("乙") },
+          { question: "篇幅?", answer: long("丙") },
+        ],
+      });
+    },
+  );
+
+  it("单题有界(2000 字);形状不认识不出回答事件", () => {
+    const over = normalizeSdkMessage({
+      ...msg("tool_use_result"),
+      tool_use_result: { questions: [questions[0]], answers: { "格式?": "x".repeat(5000) } },
+    }).find((e) => e.kind === "answer");
+    expect(over?.kind === "answer" && over.answers[0]?.answer.length).toBe(2001);
+    for (const bad of [
+      null,
+      { answers: {} },
+      { questions: "x", answers: {} },
+      { questions, answers: {} },
+    ]) {
+      expect(
+        normalizeSdkMessage({ ...msg("tool_use_result"), tool_use_result: bad }).some(
+          (e) => e.kind === "answer",
+        ),
+      ).toBe(false);
+    }
+  });
+});

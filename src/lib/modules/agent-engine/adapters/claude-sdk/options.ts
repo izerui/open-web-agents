@@ -516,9 +516,10 @@ export function buildSdkOptions(
    * 【为什么在 hook 里做】SDK 的同轮作答靠"放行时改写入参、带上 answers"。canUseTool 在配了
    * 工具白名单时会被跳过(见下),而 PreToolUse hook 一定会跑,且同样能返回改写后的入参 ——
    * 两条路模型收到的都是"The user answered: …"(scripts/sdk-probe/ask-user-question.mjs 实测)。
-   * 没人可问(接口调用、评测)、入参形状不认识、没等到回答:不表态,SDK 照旧告诉模型"用户没有回答"。
+   * 没人可问(接口调用、API Key 会话、评测)、入参形状不认识、没等到回答:不表态,SDK 照旧告诉模型"用户没有回答"。
    */
-  const humanPresent = (ctx.approvalPolicy ?? (ctx.unattended ? "allow" : "ask")) === "ask";
+  // 显式白名单:只有入口声明了有人对着提问卡片才等(见 RunContext.canAskUser)
+  const humanPresent = ctx.canAskUser === true && !ctx.unattended;
   const askInTurn = async (
     hookEventName: string,
     toolUseId: string | undefined,

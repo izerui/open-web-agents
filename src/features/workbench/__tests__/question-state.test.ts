@@ -30,8 +30,22 @@ describe("questionState", () => {
       questionState(q("x"), { text: sdkAnswered([["x", "A"]]), isError: false }, undefined, false),
     ).toMatchObject({ kind: "answered", answers: ["A"] });
     expect(
-      questionState(q("x"), { text: "用户选择不回答", isError: true }, undefined, false).kind,
+      questionState(
+        q("x"),
+        { text: "用户选择不回答这些问题。请按你的判断继续", isError: true },
+        undefined,
+        false,
+      ).kind,
     ).toBe("declined");
+    // SDK 校验提问格式失败:用户什么都没做,不能显示成"你选择了不回答"
+    expect(
+      questionState(
+        q("x"),
+        { text: "<tool_use_error>InputValidationError: AskUserQuestion failed", isError: true },
+        undefined,
+        false,
+      ).kind,
+    ).toBe("invalid");
     expect(
       questionState(
         q("x"),
@@ -56,5 +70,20 @@ describe("answerText", () => {
     expect(answerText(["PDF", "Word"], " 带目录 ")).toBe("PDF、Word、带目录");
     expect(answerText([], "只用自填")).toBe("只用自填");
     expect(answerText(["PDF"], "  ")).toBe("PDF");
+  });
+});
+
+describe("questionState:结构化回答优先", () => {
+  it("有结构化回答时按题目对上,不靠被截断的工具结果文本", () => {
+    const truncated = { text: 'The user answered: "a?"="xx…(已截断)', isError: false };
+    const s = questionState(q("a?", "b?"), truncated, undefined, false, {
+      kind: "answer",
+      toolUseId: "t1",
+      answers: [
+        { question: "a?", answer: "完整的甲" },
+        { question: "b?", answer: "完整的乙" },
+      ],
+    });
+    expect(s).toMatchObject({ kind: "answered", answers: ["完整的甲", "完整的乙"] });
   });
 });

@@ -54,6 +54,8 @@ describe.skipIf(!databaseUrl)("提问在同一轮里等人回答", () => {
       { text: "那我自己决定。" },
       ask("toolu_api"),
       { text: "没人回答,我按 PDF 做。" },
+      ask("toolu_apisession"),
+      { text: "API 会话没人回答,我按 PDF 做。" },
     ]);
     admin = await newUser("ask-admin");
     const me = await admin.get<{ user: { id: string; role: string } }>("/api/auth");
@@ -229,4 +231,47 @@ describe.skipIf(!databaseUrl)("提问在同一轮里等人回答", () => {
     }
     expect(toolResultFor("toolu_api")?.text).toContain("did not answer");
   });
+
+  it(
+    "API Key 建的多轮会话:/run 遇到提问不等(没人对着提问卡片),不产生待回答,直接继续",
+    { timeout: 60_000 },
+    async () => {
+      const key = (
+        await user.post<{ plaintext: string }>("/api/keys", { name: "ask-session", agentId })
+      ).body.plaintext;
+      const api = new Client("ask-api-session");
+      const created = await api.post<{ session: { id: string } }>(
+        "/api/sessions",
+        { agentId },
+        { "X-Api-Key": key },
+      );
+      expect(created.status, JSON.stringify(created.body)).toBe(201);
+      const sessionId = created.body.session.id;
+      const started = Date.now();
+      const run = api.post<{ status?: string }>(
+        `/api/sessions/${sessionId}/run`,
+        { prompt: "写报告", stream: false },
+        { "X-Api-Key": key },
+      );
+      // 运行期间一直没有待回答
+      let sawPending = false;
+      let finished = false;
+      void run.finally(() => {
+        finished = true;
+      });
+      while (!finished && Date.now() - started < 30_000) {
+        const p = await api.get<{ pending: Pending[] }>(`/api/sessions/${sessionId}/approvals`, {
+          "X-Api-Key": key,
+        });
+        if (p.body.pending?.some((x) => x.questions?.length)) sawPending = true;
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      const res = await run;
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body.status).toBe("success");
+      expect(Date.now() - started).toBeLessThan(30_000);
+      expect(sawPending).toBe(false);
+      expect(toolResultFor("toolu_apisession")?.text).toContain("did not answer");
+    },
+  );
 });

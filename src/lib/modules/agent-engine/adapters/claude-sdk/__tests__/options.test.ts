@@ -830,12 +830,22 @@ describe("提问在同一轮里等人回答(AskUserQuestion)", () => {
   };
   async function ask(
     reply: { answers?: Record<string, string>; declined?: string },
-    over: { policy?: "ask" | "allow" | "deny"; tools?: string[]; input?: unknown } = {},
+    over: {
+      canAskUser?: boolean;
+      policy?: "ask" | "allow" | "deny";
+      tools?: string[];
+      input?: unknown;
+    } = {},
   ) {
     const calls: unknown[] = [];
     const o = buildSdkOptions(
       specOf(over.tools ? { tools: over.tools.map((name) => ({ name })) } : {}),
-      { ...ctx, approvalPolicy: over.policy ?? "ask", runId: "r1" },
+      {
+        ...ctx,
+        approvalPolicy: over.policy ?? "ask",
+        canAskUser: over.canAskUser ?? true,
+        runId: "r1",
+      },
       {
         ...deps(),
         askUser: async (r) => {
@@ -880,10 +890,14 @@ describe("提问在同一轮里等人回答(AskUserQuestion)", () => {
     expect((await ask({})).out).toBeUndefined();
   });
 
-  it("没人可问(接口调用、评测)或入参形状不认识:不等,也不表态", async () => {
-    const unattended = await ask({ answers: { x: "y" } }, { policy: "allow" });
+  it("没人对着提问卡片(接口调用、API Key 会话、评测)或入参形状不认识:不等,也不表态", async () => {
+    const unattended = await ask({ answers: { x: "y" } }, { canAskUser: false, policy: "allow" });
     expect(unattended.calls).toEqual([]);
     expect(unattended.out).toBeUndefined();
+    // API Key 建的多轮会话:审批策略仍是 ask(调用方可用 Key 裁决),但没人对着卡片,不等
+    const apiSession = await ask({ answers: { x: "y" } }, { canAskUser: false, policy: "ask" });
+    expect(apiSession.calls).toEqual([]);
+    expect(apiSession.out).toBeUndefined();
     const odd = await ask({ answers: { x: "y" } }, { input: { questions: "坏的" } });
     expect(odd.calls).toEqual([]);
     expect(odd.out).toBeUndefined();

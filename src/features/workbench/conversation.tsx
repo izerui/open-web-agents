@@ -16,6 +16,7 @@ import {
   transitionScrollMode,
 } from "./conversation.logic";
 import {
+  type AnswerEvent,
   type PendingAsk,
   type QuestionEvent,
   type QuestionState,
@@ -670,6 +671,7 @@ const STATE_BADGE: Record<
   waiting: { text: "等待中", variant: "outline" },
   answered: { text: "已回答", variant: "success" },
   declined: { text: "未回答(你选择了不回答)", variant: "secondary" },
+  invalid: { text: "提问无效", variant: "secondary" },
   unanswered: { text: "未回答", variant: "secondary" },
   legacy: { text: "历史提问", variant: "outline" },
 };
@@ -873,7 +875,9 @@ function QuestionBlock({
                   ? "没等到回答,智能体已自行判断"
                   : state.kind === "declined"
                     ? "智能体已按自己的判断继续"
-                    : "历史提问"}
+                    : state.kind === "invalid"
+                      ? "这次提问的格式不合规,没有送到你面前,智能体已继续"
+                      : "历史提问"}
             </p>
           )
         )}
@@ -905,52 +909,58 @@ const TurnView = memo(function TurnView({
   pendingQuestions?: readonly PendingAsk[];
   submitAnswer?: SubmitAnswer;
 }) {
-  const { usage, blocks, questions, questionResults, resultEvent, allText } = useMemo(() => {
-    const folded = foldEvents(turn.events);
-    // 提问的工具结果(回答 / 没回答)并进提问卡片显示,不再单独列成一块
-    const questionIds = new Set(
-      turn.events.flatMap((e) => (e.kind === "question" && e.toolUseId ? [e.toolUseId] : [])),
-    );
-    const results = new Map<string, { text: string; isError: boolean }>();
-    for (const e of turn.events) {
-      if (e.kind === "tool_result" && e.toolUseId && questionIds.has(e.toolUseId)) {
-        results.set(e.toolUseId, { text: e.text, isError: e.isError === true });
+  const { usage, blocks, questions, questionResults, questionAnswers, resultEvent, allText } =
+    useMemo(() => {
+      const folded = foldEvents(turn.events);
+      // 提问的工具结果(回答 / 没回答)并进提问卡片显示,不再单独列成一块
+      const questionIds = new Set(
+        turn.events.flatMap((e) => (e.kind === "question" && e.toolUseId ? [e.toolUseId] : [])),
+      );
+      const results = new Map<string, { text: string; isError: boolean }>();
+      const answersById = new Map<string, AnswerEvent>();
+      for (const e of turn.events) {
+        if (e.kind === "tool_result" && e.toolUseId && questionIds.has(e.toolUseId)) {
+          results.set(e.toolUseId, { text: e.text, isError: e.isError === true });
+        }
+        if (e.kind === "answer" && e.toolUseId) answersById.set(e.toolUseId, e);
       }
-    }
-    const items = folded.filter(
-      (i) =>
-        !(
-          i.kind === "event" &&
-          i.event.kind === "tool_result" &&
-          i.event.toolUseId &&
-          questionIds.has(i.event.toolUseId)
-        ),
-    );
-    const nextBlocks = processBlocks(items);
-    const nextQuestions: QuestionEvent[] = [];
-    let nextResultEvent: Extract<AgentEvent, { kind: "result" }> | null = null;
+      const items = folded.filter(
+        (i) =>
+          !(
+            i.kind === "event" &&
+            i.event.kind === "tool_result" &&
+            i.event.toolUseId &&
+            questionIds.has(i.event.toolUseId)
+          ),
+      );
+      const nextBlocks = processBlocks(items);
+      const nextQuestions: QuestionEvent[] = [];
+      let nextResultEvent: Extract<AgentEvent, { kind: "result" }> | null = null;
 
-    for (const item of items) {
-      if (item.kind !== "event") continue;
-      const event = item.event;
-      if (event.kind === "question") nextQuestions.push(event);
-      if (event.kind === "result" && (event.status !== "success" || event.structured != null)) {
-        nextResultEvent = event;
+      for (const item of items) {
+        if (item.kind !== "event") continue;
+        const event = item.event;
+        if (event.kind === "question") nextQuestions.push(event);
+        if (event.kind === "result" && (event.status !== "success" || event.structured != null)) {
+          nextResultEvent = event;
+        }
       }
-    }
 
-    return {
-      usage: sumUsage(turn.events),
-      blocks: nextBlocks,
-      questions: nextQuestions,
-      questionResults: results,
-      resultEvent: nextResultEvent,
-      allText: nextBlocks
-        .filter((block): block is Extract<ProcessBlock, { kind: "text" }> => block.kind === "text")
-        .map((block) => block.text)
-        .join(""),
-    };
-  }, [turn.events]);
+      return {
+        usage: sumUsage(turn.events),
+        blocks: nextBlocks,
+        questions: nextQuestions,
+        questionResults: results,
+        questionAnswers: answersById,
+        resultEvent: nextResultEvent,
+        allText: nextBlocks
+          .filter(
+            (block): block is Extract<ProcessBlock, { kind: "text" }> => block.kind === "text",
+          )
+          .map((block) => block.text)
+          .join(""),
+      };
+    }, [turn.events]);
 
   return (
     <div className="space-y-1">
@@ -1126,6 +1136,7 @@ const TurnView = memo(function TurnView({
               q.toolUseId ? questionResults.get(q.toolUseId) : undefined,
               pendingQuestions?.find((p) => q.toolUseId && p.toolUseId === q.toolUseId),
               turn.running,
+              q.toolUseId ? questionAnswers.get(q.toolUseId) : undefined,
             )}
             canSendAsMessage={isLastTurn && !turn.running && !!onAnswerAction}
             onAnswer={onAnswerAction}
