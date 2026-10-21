@@ -1738,6 +1738,67 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
         });
       });
 
+      describe("被后来的累计明细覆盖数量的单轮结果:缺失标记一并带过去", () => {
+        // result₁ 的 modelUsage 里子模型输入 0、输出读不出,没有可用计数 → 退回整份 usage(单轮计量);
+        // result₂ 是累计明细,数量以它为准
+        const coveredLater = (second: Record<string, unknown>) =>
+          scenario(0, {
+            engine: sdk(() =>
+              (async function* () {
+                yield { type: "system", subtype: "init", session_id: "s" };
+                yield assistant("m1", 10000, 1000);
+                yield {
+                  type: "result",
+                  subtype: "success",
+                  result: "第一轮",
+                  total_cost_usd: 0.02,
+                  usage: { input_tokens: 10000, output_tokens: 1000 },
+                  modelUsage: { "up-sub": usage(0, "unreadable") },
+                };
+                yield assistant("m2", 10000, 500); // 追加轮
+                yield {
+                  type: "result",
+                  subtype: "success",
+                  result: "追加轮",
+                  total_cost_usd: 0.03,
+                  modelUsage: second,
+                };
+              })(),
+            ),
+            cancel: false,
+          });
+        // 累计 2 万输入 46.2 + 1500 输出 17.325 = 63.525
+        const TOTAL = 63_525_000n;
+
+        it("result₁ 退回 usage 且子模型输出缺失 → result₂ 只有主模型完整累计明细:按新累计数量收一次,仍保持暂记;重复结算、清扫不多扣", async () => {
+          const { world, settleAgain, sweepAgain } = await coveredLater({
+            "up-main": usage(20000, 1500),
+          });
+          expect(world.charge("r1")).toMatchObject({
+            state: "provisional",
+            incomplete: true,
+            estimatedMicro: TOTAL.toString(),
+            chargedMicro: TOTAL.toString(),
+          });
+          expect(await settleAgain()).toBe("none");
+          expect(await sweepAgain()).toBe(0);
+          expect(world.balance("u1")).toEqual({ available: 1000n * C - TOTAL, reserved: 0n });
+        });
+
+        it("对照:result₂ 明确给出子模型的合法输出 → 解除缺失,结清;数量仍只按累计明细收一次", async () => {
+          const { world } = await coveredLater({
+            "up-main": usage(10000, 500),
+            "up-sub": usage(10000, 1000),
+          });
+          expect(world.charge("r1")).toMatchObject({
+            state: "settled",
+            incomplete: false,
+            chargedMicro: TOTAL.toString(),
+          });
+          expect(world.balance("u1")).toEqual({ available: 1000n * C - TOTAL, reserved: 0n });
+        });
+      });
+
       it("对照:完整的 result₂(累计 2 万输入 + 1000 输出)按它收一次,不与 result₁ 相加", async () => {
         const { world, settleAgain } = await run({ modelUsage: { "up-main": usage(20000, 1000) } });
         expect(world.charge("r1")).toMatchObject({

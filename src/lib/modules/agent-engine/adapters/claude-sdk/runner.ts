@@ -14,6 +14,7 @@ import {
   mergeCumulative,
   missingOf,
   unattributedOf,
+  withMissingMarks,
 } from "@/lib/modules/agent-engine/domain/model-usage";
 import {
   createSubagentLabeler,
@@ -72,15 +73,26 @@ export function combineResults(rs: RunResult[]): RunResult | undefined {
 function combinedMetering(rs: RunResult[]): { metering?: ModelMetering } {
   let k = -1;
   let base: ModelMetering | undefined;
+  // 排在累计快照之前、数量被它覆盖的单轮结果(取自 usage、按消息观察到的、没有可用计数的)留下的缺失状态
+  let marks: ModelMetering | undefined;
   rs.forEach((r, i) => {
     const m = r.cost?.metering;
     // 只有带可用非零计数的累计快照才能覆盖前面已确认的用量:后到的空的、全零的、只有读不出计数的
     // 结果(常见于追加轮没产生新用量就失败的 error result)不能把它们抹成 0 —— 这些结果排在后面,
     // 按下面的逐条相加处理,它们记下的计量缺失照样带上
     if (m && !m.fromResultUsage && hasMeteringBasis(m)) {
+      // 被覆盖的单轮结果:数量已含在新快照里,缺失状态先叠上去,再按同样的规则合并 ——
+      // 只有新快照对同一模型明确给出对应字段的合法值才解除,"没再提到"不算补齐
+      const prev = base && marks ? withMissingMarks(base, marks) : (base ?? marks);
       // 累计快照之间按字段合并(不相加):新快照读不出的字段保留此前已确认的值
-      base = base ? mergeCumulative(base, m) : m;
+      base = prev ? mergeCumulative(prev, m) : m;
+      marks = undefined;
       k = i;
+    } else if (m) {
+      marks = withMissingMarks(marks ?? { source: m.source, complete: true, models: [] }, {
+        ...m,
+        models: m.models.filter((u) => u.missingFields?.length),
+      });
     }
   });
   // 最后一条就是 modelUsage 的累计快照:用合并后的(只有它一份时就是它本身)

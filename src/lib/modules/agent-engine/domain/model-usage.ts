@@ -98,11 +98,50 @@ export function addModels(a: ModelTokenUsage[], b: ModelTokenUsage[]): ModelToke
             outputTokens: cur.outputTokens + m.outputTokens,
             cacheReadTokens: cur.cacheReadTokens + m.cacheReadTokens,
             cacheWriteTokens: cur.cacheWriteTokens + m.cacheWriteTokens,
+            ...unionFields(cur.missingFields, m.missingFields),
           }
         : { ...m },
     );
   }
   return [...out.values()];
+}
+
+const unionFields = (a?: readonly TokenField[], b?: readonly TokenField[]) => {
+  const fields = [...new Set([...(a ?? []), ...(b ?? [])])];
+  return fields.length > 0 ? { missingFields: fields } : {};
+};
+
+/** 已记下读不出字段的项数(按模型的 + 未归属的);计量缺失里超出它的是没有身份可追的 */
+const trackedMissing = (m: ModelMetering) =>
+  m.models.reduce((n, u) => n + (u.missingFields?.length ?? 0), 0) +
+  (m.unattributedMissing?.length ?? 0);
+
+/**
+ * 把一份计量的缺失状态叠到另一份上,数量不动:按模型的读不出字段并到同一模型(没有就留一条数量为 0 的记录),
+ * 未归属的标记取并集,没有身份可追的缺失项数相加。用于被后来的累计快照覆盖了数量的单轮结果 ——
+ * 数量已含在新快照里,缺失状态却不能随之消失。
+ */
+export function withMissingMarks(base: ModelMetering, marks: ModelMetering): ModelMetering {
+  const models = base.models.map((m) => ({ ...m }));
+  for (const u of marks.models) {
+    if (!u.missingFields?.length) continue;
+    const cur = models.find((m) => m.modelId === u.modelId);
+    if (cur) Object.assign(cur, unionFields(cur.missingFields, u.missingFields));
+    else models.push({ ...u, ...ZERO, missingFields: [...u.missingFields] });
+  }
+  const unattributedMissing = [
+    ...new Set([...(base.unattributedMissing ?? []), ...(marks.unattributedMissing ?? [])]),
+  ];
+  const out: ModelMetering = {
+    ...base,
+    models,
+    ...(unattributedMissing.length ? { unattributedMissing } : {}),
+  };
+  const untracked =
+    Math.max(0, missingOf(base) - trackedMissing(base)) +
+    Math.max(0, missingOf(marks) - trackedMissing(marks));
+  const missing = trackedMissing(out) + untracked;
+  return { ...out, complete: base.complete && missing === 0, ...(missing > 0 ? { missing } : {}) };
 }
 
 /** 两份未归属用量相加;都没有返回 undefined */

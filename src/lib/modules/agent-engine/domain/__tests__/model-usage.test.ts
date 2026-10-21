@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { combineResults } from "../../adapters/claude-sdk/runner";
 import { extractRunResult } from "../extract-result";
-import { extractModelUsage, mergeCumulative } from "../model-usage";
+import { addModels, extractModelUsage, mergeCumulative, withMissingMarks } from "../model-usage";
 
 const tokens = (inputTokens: number) => ({
   inputTokens,
@@ -240,5 +240,75 @@ describe("SDK model metering", () => {
   it("preserves the SDK label and uses its explicit canonical model for prices", () => {
     const result = extractModelUsage({ "model[1m]": { ...tokens(2), canonicalModel: "model" } });
     expect(result.models[0]).toMatchObject({ modelId: "model", reportedModelId: "model[1m]" });
+  });
+});
+
+describe("withMissingMarks", () => {
+  const m = (modelId: string, input: number, output: number, missingFields?: ["outputTokens"]) => ({
+    modelId,
+    inputTokens: input,
+    outputTokens: output,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    ...(missingFields ? { missingFields } : {}),
+  });
+
+  it("叠加缺失状态、不动数量:同模型并标记,没有的留数量为 0 的记录,未归属标记取并集,无身份的项数相加", () => {
+    const out = withMissingMarks(
+      { source: "sdk_model_usage", complete: true, models: [m("a", 100, 10)] },
+      {
+        source: "sdk_model_usage",
+        complete: false,
+        models: [m("a", 999, 999, ["outputTokens"]), m("b", 50, 0, ["outputTokens"])],
+        unattributed: { inputTokens: 7, outputTokens: 7, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        unattributedMissing: ["inputTokens"],
+        missing: 4, // 3 项有身份可追 + 1 项无身份
+      },
+    );
+    expect(out.models).toEqual([m("a", 100, 10, ["outputTokens"]), m("b", 0, 0, ["outputTokens"])]);
+    expect(out.unattributed).toBeUndefined();
+    expect(out.unattributedMissing).toEqual(["inputTokens"]);
+    expect(out.missing).toBe(4);
+    expect(out.complete).toBe(false);
+  });
+
+  it("再与累计快照合并:明确给出合法值才解除,没提到的照样沿用", () => {
+    const marked = withMissingMarks(
+      { source: "sdk_model_usage", complete: true, models: [] },
+      {
+        source: "sdk_model_usage",
+        complete: false,
+        models: [m("a", 0, 0, ["outputTokens"])],
+        missing: 1,
+      },
+    );
+    const silent = mergeCumulative(marked, {
+      source: "sdk_model_usage",
+      complete: true,
+      models: [m("b", 20, 2)],
+    });
+    expect(silent.missing).toBe(1);
+    expect(silent.models.find((u) => u.modelId === "a")?.missingFields).toEqual(["outputTokens"]);
+    const filled = mergeCumulative(marked, {
+      source: "sdk_model_usage",
+      complete: true,
+      models: [m("a", 10, 1), m("b", 20, 2)],
+    });
+    expect(filled.missing).toBeUndefined();
+    expect(filled.complete).toBe(true);
+  });
+});
+
+describe("addModels", () => {
+  it("同模型相加时读不出字段取并集", () => {
+    const row = (missingFields?: ("outputTokens" | "inputTokens")[]) => ({
+      modelId: "a",
+      inputTokens: 1,
+      outputTokens: 1,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      ...(missingFields ? { missingFields } : {}),
+    });
+    expect(addModels([row()], [row(["outputTokens"])])[0]?.missingFields).toEqual(["outputTokens"]);
   });
 });
