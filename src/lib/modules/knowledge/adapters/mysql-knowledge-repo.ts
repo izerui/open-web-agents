@@ -4,6 +4,7 @@ import {
   KNOWLEDGE_LIMITS,
   KnowledgeLimitExceeded,
   type KnowledgeLimits,
+  KnowledgeWriteAborted,
   batchLimitViolation,
 } from "@/lib/modules/knowledge/domain/limits";
 import { type Chunk, chunkText } from "@/lib/modules/knowledge/domain/retrieval";
@@ -56,32 +57,76 @@ export class MysqlKnowledgeRepo {
   /**
    * 一次新增多篇(上传的长文件切成的几篇):全部进库或全部不进,上限按这几篇合计判定。
    * 计数与插入在同一事务里、先锁住智能体那一行 —— 并发上传不能各自看到"还差一篇"而一起越过上限。
+   *
+   * opts.deadline / opts.signal:调用方的期限与取消(上传请求)。【不能只在外面计时】等行锁期间
+   * 调用方超时或断开,锁一释放这里照样会插入并提交 —— 用户看到失败,文档却进了库。所以:
+   * 本事务的等锁时间不超过剩余时间(到点 MySQL 报等锁超时、回滚);拿到锁后、插入后提交前各复查一次,
+   * 已取消或已超时就抛 KnowledgeWriteAborted,事务回滚,一篇都不写
    */
-  async createMany(agentId: string, docs: NewKnowledgeDoc[]): Promise<KnowledgeDoc[]> {
+  async createMany(
+    agentId: string,
+    docs: NewKnowledgeDoc[],
+    opts: { deadline?: number; signal?: AbortSignal } = {},
+  ): Promise<KnowledgeDoc[]> {
     if (docs.some((d) => d.agentId !== agentId)) throw new Error("docs 必须属于同一个智能体");
     if (docs.length === 0) return [];
-    await this.db.transaction(async (tx) => {
-      const locked = await tx.execute(
-        sql`SELECT id FROM agents WHERE id = ${agentId} LIMIT 1 FOR UPDATE`,
-      );
-      const lockedRows = (locked as unknown as [unknown[]])[0];
-      if (!Array.isArray(lockedRows) || lockedRows.length === 0) {
-        throw new Error(`agent not found: ${agentId}`);
+    const check = () => {
+      if (opts.signal?.aborted) throw new KnowledgeWriteAborted("aborted");
+      if (opts.deadline !== undefined && Date.now() > opts.deadline) {
+        throw new KnowledgeWriteAborted("timeout");
       }
-      const [u] = await tx
-        .select({
-          docs: sql<number>`COUNT(*)`,
-          chars: sql<number>`COALESCE(SUM(CHAR_LENGTH(${knowledgeDocs.content})), 0)`,
-        })
-        .from(knowledgeDocs)
-        .where(eq(knowledgeDocs.agentId, agentId));
-      const reason = batchLimitViolation(
-        { docs: Number(u?.docs ?? 0), chars: Number(u?.chars ?? 0) },
-        docs.map((d) => [...d.content].length),
-        this.limits,
-      );
-      if (reason) throw new KnowledgeLimitExceeded(reason);
-      await tx.insert(knowledgeDocs).values(docs);
+    };
+    check();
+    await this.db.transaction(async (tx) => {
+      let restoreLockWait: number | null = null;
+      try {
+        if (opts.deadline !== undefined) {
+          // innodb_lock_wait_timeout 只能按整秒设,向上取整:多出的不到一秒由下面拿到锁后的复查兜住
+          const seconds = Math.max(1, Math.ceil((opts.deadline - Date.now()) / 1000));
+          const prev = await tx.execute(sql`SELECT @@SESSION.innodb_lock_wait_timeout AS v`);
+          restoreLockWait = Number(((prev as unknown as [{ v: number }[]])[0] ?? [])[0]?.v ?? 50);
+          await tx.execute(sql.raw(`SET SESSION innodb_lock_wait_timeout = ${seconds}`));
+        }
+        let locked: unknown;
+        try {
+          locked = await tx.execute(
+            sql`SELECT id FROM agents WHERE id = ${agentId} LIMIT 1 FOR UPDATE`,
+          );
+        } catch (err) {
+          // 1205 = ER_LOCK_WAIT_TIMEOUT:等锁到了期限
+          if ((err as { errno?: number }).errno === 1205)
+            throw new KnowledgeWriteAborted("timeout");
+          throw err;
+        }
+        const lockedRows = (locked as unknown as [unknown[]])[0];
+        if (!Array.isArray(lockedRows) || lockedRows.length === 0) {
+          throw new Error(`agent not found: ${agentId}`);
+        }
+        // 等锁期间可能已经断开或到点
+        check();
+        const [u] = await tx
+          .select({
+            docs: sql<number>`COUNT(*)`,
+            chars: sql<number>`COALESCE(SUM(CHAR_LENGTH(${knowledgeDocs.content})), 0)`,
+          })
+          .from(knowledgeDocs)
+          .where(eq(knowledgeDocs.agentId, agentId));
+        const reason = batchLimitViolation(
+          { docs: Number(u?.docs ?? 0), chars: Number(u?.chars ?? 0) },
+          docs.map((d) => [...d.content].length),
+          this.limits,
+        );
+        if (reason) throw new KnowledgeLimitExceeded(reason);
+        await tx.insert(knowledgeDocs).values(docs);
+        // 提交前最后一次:此刻放弃,事务回滚
+        check();
+      } finally {
+        if (restoreLockWait !== null) {
+          await tx
+            .execute(sql.raw(`SET SESSION innodb_lock_wait_timeout = ${restoreLockWait}`))
+            .catch(() => {});
+        }
+      }
     });
     const out: KnowledgeDoc[] = [];
     for (const d of docs) {

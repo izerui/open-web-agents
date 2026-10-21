@@ -3,7 +3,11 @@ import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { EXTRACT_LIMITS, extractText } from "@/lib/modules/knowledge/adapters/extract-text";
 import { UPLOAD_LIMITS } from "@/lib/modules/knowledge/application/upload-limits";
-import { KNOWLEDGE_LIMITS, KnowledgeLimitExceeded } from "@/lib/modules/knowledge/domain/limits";
+import {
+  KNOWLEDGE_LIMITS,
+  KnowledgeLimitExceeded,
+  KnowledgeWriteAborted,
+} from "@/lib/modules/knowledge/domain/limits";
 import { splitDoc, titleOf } from "@/lib/modules/knowledge/domain/split-doc";
 import { requirePermission } from "../_lib/access";
 
@@ -12,6 +16,18 @@ export const dynamic = "force-dynamic";
 
 /** 本进程里正在处理的上传请求数(见 UPLOAD_LIMITS.maxInflight) */
 let inflight = 0;
+
+/**
+ * 取消读取:发起后不等它结束。底层流的 cancel() 可能永远不返回(实测 Node 的 ReadableStream 会这样),
+ * 等它的话路由卡在这里,上传名额也就释放不了;取消里的异常也接住,不影响返回
+ */
+function stopReading(reader: ReadableStreamDefaultReader<Uint8Array>) {
+  try {
+    void reader.cancel().catch(() => {});
+  } catch {
+    // 取消本身同步抛错:读取已经停了,不影响返回
+  }
+}
 
 /**
  * 边读边数请求体,超过上限立刻停止读取;到点(deadline)或客户端断开也立刻停止。
@@ -43,13 +59,13 @@ async function readBounded(
     for (;;) {
       const next = await Promise.race([reader.read(), stop]);
       if (next === "timeout" || next === "aborted") {
-        await reader.cancel().catch(() => {});
+        stopReading(reader);
         return { ok: false, why: next };
       }
       if (next.done) break;
       total += next.value.byteLength;
       if (total > max) {
-        await reader.cancel().catch(() => {});
+        stopReading(reader);
         return { ok: false, why: "too_large" };
       }
       chunks.push(next.value);
@@ -198,6 +214,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
             title: p.title,
             content: p.content,
           })),
+          // 期限与取消一直传进事务:等锁期间超时或断开,锁释放后也不会插入提交
+          { deadline, signal: req.signal },
         );
         const saved = docs.map((d, i) => ({
           id: d.id,
@@ -228,6 +246,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       } catch (err) {
         if (err instanceof KnowledgeLimitExceeded) {
           results.push({ file: name, ok: false, reason: err.message });
+          continue;
+        }
+        if (err instanceof KnowledgeWriteAborted) {
+          results.push({
+            file: name,
+            ok: false,
+            reason:
+              err.why === "aborted"
+                ? "上传连接已断开,这个文件没有入库"
+                : `本次上传处理时间已用完(上限 ${Math.round(budgetMs / 1000)} 秒),这个文件没有入库;请分批上传`,
+          });
           continue;
         }
         throw err;

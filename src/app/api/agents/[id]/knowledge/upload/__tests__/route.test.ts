@@ -4,7 +4,9 @@
 import { UPLOAD_LIMITS } from "@/lib/modules/knowledge/application/upload-limits";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const createMany = vi.fn(async (_agentId: string, docs: { id: string; title: string }[]) => docs);
+const createMany = vi.fn(
+  async (_agentId: string, docs: { id: string; title: string }[], _opts?: unknown) => docs,
+);
 const extractText = vi.fn();
 vi.mock("@/lib/container", () => ({
   getContainer: () => ({ knowledge: { createMany }, audit: { record: async () => {} } }),
@@ -78,6 +80,20 @@ describe("知识库上传:总时长、断开、并发", () => {
     expect(passed?.aborted).toBe(true);
   });
 
+  it("期限与取消一直传进入库;入库时被放弃(等锁超时或断开)标为没有入库", async () => {
+    const { KnowledgeWriteAborted } = await import("@/lib/modules/knowledge/domain/limits");
+    extractText.mockResolvedValue(okText);
+    createMany.mockImplementationOnce(async () => {
+      throw new KnowledgeWriteAborted("timeout");
+    });
+    const res = await call(request(["一.txt"]));
+    const body = (await res.json()) as { results: { ok: boolean; reason?: string }[] };
+    expect(body.results[0]?.reason).toContain("没有入库");
+    const opts = createMany.mock.calls[0]?.[2] as { deadline: number; signal: AbortSignal };
+    expect(opts.deadline).toBeGreaterThan(Date.now());
+    expect(opts.signal).toBeInstanceOf(AbortSignal);
+  });
+
   it("解析结束时总时长已用完:解析成功也不入库", async () => {
     UPLOAD_LIMITS.budgetMs = 1_200;
     extractText.mockImplementation(async () => {
@@ -93,7 +109,9 @@ describe("知识库上传:总时长、断开、并发", () => {
   it("请求体发一点后不再结束:到点停止接收、返回 408,不解析不入库;名额释放,之后的上传照常", async () => {
     UPLOAD_LIMITS.budgetMs = 400;
     UPLOAD_LIMITS.maxInflight = 1;
+    // 取消读取时底层 cancel() 永远不返回:路由不能等它,否则名额释放不了
     const stalled = new ReadableStream({
+      cancel: () => new Promise<void>(() => {}),
       start(c) {
         c.enqueue(
           new TextEncoder().encode(

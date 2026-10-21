@@ -27,6 +27,17 @@ export class KnowledgeLimitExceeded extends BrandedError {
   static readonly brand = Symbol.for("owa.error.KnowledgeLimitExceeded");
 }
 
+/**
+ * 写入在提交前被放弃:到了调用方的期限(含等锁超时),或调用方已取消(如上传连接断开)。
+ * 事务已回滚,一篇都没有写进去
+ */
+export class KnowledgeWriteAborted extends BrandedError {
+  static readonly brand = Symbol.for("owa.error.KnowledgeWriteAborted");
+  constructor(readonly why: "timeout" | "aborted") {
+    super(why === "timeout" ? "写入知识库超过时限,已放弃" : "调用方已取消,已放弃写入知识库");
+  }
+}
+
 /** 新增一篇是否超限;返回人话原因,不超限返回 null。 */
 export function limitViolation(
   current: { docs: number; chars: number },

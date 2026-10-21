@@ -4,11 +4,17 @@
 
 import { randomUUID } from "node:crypto";
 import { createDb } from "@/lib/db/client";
+import * as schema from "@/lib/db/schema";
 import { knowledgeDocs } from "@/lib/db/schema";
 import { MysqlAgentRepo } from "@/lib/modules/agent/adapters/mysql-agent-repo";
 import { MysqlKnowledgeRepo } from "@/lib/modules/knowledge/adapters/mysql-knowledge-repo";
 import { ChunkCache } from "@/lib/modules/knowledge/application/chunk-cache";
-import { KnowledgeLimitExceeded } from "@/lib/modules/knowledge/domain/limits";
+import {
+  KnowledgeLimitExceeded,
+  KnowledgeWriteAborted,
+} from "@/lib/modules/knowledge/domain/limits";
+import { drizzle } from "drizzle-orm/mysql2";
+import mysql from "mysql2/promise";
 import { afterAll, describe, expect, it } from "vitest";
 
 const TEST_DB_URL = process.env.OWA_TEST_DATABASE_URL;
@@ -48,6 +54,104 @@ if (!TEST_DB_URL) {
   });
 
   describe("MysqlKnowledgeRepo(真实 MySQL)", () => {
+    describe("createMany 等智能体行锁期间被放弃:锁释放后也不写入", { timeout: 30_000 }, () => {
+      /** 另一个连接占住智能体那一行的锁,ms 毫秒后提交释放 */
+      async function holdLock(agentId: string, ms: number) {
+        const conn = await pool.getConnection();
+        await conn.query("BEGIN");
+        await conn.query("SELECT id FROM agents WHERE id = ? FOR UPDATE", [agentId]);
+        return new Promise<void>((resolve) => {
+          setTimeout(async () => {
+            await conn.query("COMMIT");
+            conn.release();
+            resolve();
+          }, ms);
+        });
+      }
+      const count = async (agentId: string) => (await repo.list(agentId)).docs.length;
+
+      it("等锁期间调用方取消:锁释放后回滚,一篇都不写", async () => {
+        const agentId = await newAgent();
+        const held = holdLock(agentId, 1_200);
+        await new Promise((r) => setTimeout(r, 50));
+        const ac = new AbortController();
+        setTimeout(() => ac.abort(), 300);
+        const writing = repo.createMany(agentId, [doc(agentId, "取消")], {
+          deadline: Date.now() + 10_000,
+          signal: ac.signal,
+        });
+        await expect(writing).rejects.toMatchObject({ why: "aborted" });
+        await held;
+        expect(await count(agentId)).toBe(0);
+      });
+
+      it("等锁超过期限:MySQL 等锁超时、回滚,一篇都不写;锁之后才释放", async () => {
+        const agentId = await newAgent();
+        const held = holdLock(agentId, 3_000);
+        await new Promise((r) => setTimeout(r, 50));
+        const start = Date.now();
+        const writing = repo.createMany(agentId, [doc(agentId, "超时")], {
+          deadline: Date.now() + 800,
+        });
+        await expect(writing).rejects.toBeInstanceOf(KnowledgeWriteAborted);
+        // 等锁时间被限制在剩余时间内(整秒向上取整),不是默认的 50 秒
+        expect(Date.now() - start).toBeLessThan(2_500);
+        await held;
+        expect(await count(agentId)).toBe(0);
+      });
+
+      it("等锁期间到点、但锁在等锁超时前释放:拿到锁后复查期限,回滚不写", async () => {
+        const agentId = await newAgent();
+        // 期限 400ms,等锁时间按整秒取到 1 秒;锁在 700ms 释放 —— 拿到锁时已经过了期限
+        const held = holdLock(agentId, 700);
+        await new Promise((r) => setTimeout(r, 50));
+        const writing = repo.createMany(agentId, [doc(agentId, "过期")], {
+          deadline: Date.now() + 400,
+        });
+        await expect(writing).rejects.toMatchObject({ why: "timeout" });
+        await held;
+        expect(await count(agentId)).toBe(0);
+      });
+
+      it("对照:没取消、没到期,锁释放后照常写入;会话的等锁超时恢复原值", async () => {
+        const agentId = await newAgent();
+        const held = holdLock(agentId, 300);
+        await new Promise((r) => setTimeout(r, 50));
+        const saved = await repo.createMany(agentId, [doc(agentId, "照常")], {
+          deadline: Date.now() + 10_000,
+          signal: new AbortController().signal,
+        });
+        await held;
+        expect(saved).toHaveLength(1);
+        expect(await count(agentId)).toBe(1);
+      });
+
+      it("写入后连接上的等锁超时恢复原值(连接会被别的查询复用)", async () => {
+        // 只有一个连接的池:检查的就是刚才执行写入的那个连接
+        const single = mysql.createPool({ uri: TEST_DB_URL as string, connectionLimit: 1 });
+        try {
+          const singleRepo = new MysqlKnowledgeRepo(
+            drizzle(single, { schema, mode: "default" }),
+            limits,
+          );
+          const [before] = await single.query("SELECT @@SESSION.innodb_lock_wait_timeout AS v");
+          const agentId = await newAgent();
+          await singleRepo.createMany(agentId, [doc(agentId, "一")], {
+            deadline: Date.now() + 2_000,
+          });
+          await expect(
+            singleRepo.createMany(agentId, [doc(agentId, "x".repeat(60))], {
+              deadline: Date.now() + 2_000,
+            }),
+          ).rejects.toBeInstanceOf(KnowledgeLimitExceeded);
+          const [after] = await single.query("SELECT @@SESSION.innodb_lock_wait_timeout AS v");
+          expect((after as { v: number }[])[0]?.v).toBe((before as { v: number }[])[0]?.v);
+        } finally {
+          await single.end();
+        }
+      });
+    });
+
     it("createMany:一个文件切成的几篇要么都进、要么都不进,上限按合计判定", async () => {
       const agentId = await newAgent();
       await repo.create(doc(agentId, "x".repeat(40)));
