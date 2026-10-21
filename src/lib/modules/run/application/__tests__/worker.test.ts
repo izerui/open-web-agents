@@ -1576,6 +1576,63 @@ describe("RunWorker 花费写库失败(故障注入)", () => {
           expect(await settleAgain()).toBe("none");
           expect(world.balance("u1")).toEqual({ available: 1000n * C - 63_525_000n, reserved: 0n });
         });
+
+        describe("modelUsage 没有可用计数、改用整份 result.usage 的单轮计量:不再给模型补下界", () => {
+          // modelUsage 主模型输入 0、输出读不出;usage 完整报了这一轮的用量
+          const withUsage = (input: number, output: number, subtype = "success") => ({
+            ...resultWith({ "up-main": usage(0, "unreadable") }, subtype),
+            usage: { input_tokens: input, output_tokens: output },
+          });
+
+          it("assistant 报 1 万输入、1000 输出 → result 的 modelUsage 输出读不出、usage 完整:按 usage 收一次(34.65),不另给主模型补 1000 输出;保持暂记", async () => {
+            const { world, settleAgain, sweepAgain } = await scenario(0, {
+              engine: sdk(() =>
+                (async function* () {
+                  yield { type: "system", subtype: "init", session_id: "s" };
+                  yield assistant("m1", 10000, 1000);
+                  yield withUsage(10000, 1000);
+                })(),
+              ),
+              cancel: false,
+            });
+            expect(world.charge("r1")).toMatchObject({
+              state: "provisional",
+              incomplete: true,
+              estimatedMicro: FIRST.toString(),
+              chargedMicro: FIRST.toString(),
+            });
+            expect(await settleAgain()).toBe("none");
+            expect(await sweepAgain()).toBe(0);
+            expect(world.balance("u1")).toEqual({ available: 1000n * C - FIRST, reserved: 0n });
+          });
+
+          it("追加轮:result₁ 完整 → 观察到 1 万输入、500 输出 → result₂ 同样只能用 usage:单轮用量不混入此前累计值,合计 63.525,保持暂记", async () => {
+            const { world, settleAgain, sweepAgain } = await scenario(0, {
+              engine: sdk(() =>
+                (async function* () {
+                  yield { type: "system", subtype: "init", session_id: "s" };
+                  yield assistant("m1", 10000, 1000);
+                  yield resultWith({ "up-main": usage(10000, 1000) });
+                  yield assistant("m2", 10000, 500);
+                  yield withUsage(10000, 500, "error_during_execution");
+                })(),
+              ),
+              cancel: false,
+            });
+            // 第一轮 34.65 + 追加轮 1 万输入 23.1 + 500 输出 5.775 = 63.525
+            expect(world.charge("r1")).toMatchObject({
+              state: "provisional",
+              incomplete: true,
+              chargedMicro: "63525000",
+            });
+            expect(await settleAgain()).toBe("none");
+            expect(await sweepAgain()).toBe(0);
+            expect(world.balance("u1")).toEqual({
+              available: 1000n * C - 63_525_000n,
+              reserved: 0n,
+            });
+          });
+        });
       });
 
       it("部分归属已修正、仍有另一项未归属且缺字段:那 1000 输出只收一次,保持暂记;重复结算、清扫不多扣", async () => {

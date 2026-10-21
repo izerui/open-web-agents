@@ -1031,4 +1031,22 @@ describe("floorMissingFields", () => {
       r,
     );
   });
+
+  it("单轮计量(fromResultUsage,整份 result.usage 已记为未归属):不补下界,缺失标记照旧", () => {
+    const r = result(
+      meter([{ id: "up-main", input: 0, output: 0, missing: ["outputTokens"] }], {
+        unattributed: {
+          inputTokens: 10000,
+          outputTokens: 1000,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+        missing: 1,
+        fromResultUsage: true,
+      }),
+    );
+    expect(
+      floorMissingFields(r, undefined, meter([{ id: "up-main", input: 10000, output: 1000 }])),
+    ).toBe(r);
+  });
 });

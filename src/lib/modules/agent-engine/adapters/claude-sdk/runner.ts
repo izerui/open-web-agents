@@ -111,6 +111,8 @@ function combinedMetering(rs: RunResult[]): { metering?: ModelMetering } {
  * 下界 = 此前各条 result 合并出的同模型累计值 + 自上一条 result 以来按消息观察到的同模型增量
  * (消息计量每到一条 result 就清空,两者不重叠)。读不出的字段取 max(result 里读得出的部分, 下界),
  * 继续标为读不出;读得出的字段仍以 result 为准;未归属部分对不上身份,不跨身份补值。
+ * 只用于 modelUsage 的累计快照:单轮计量(fromResultUsage,取自整份 result.usage 或按消息观察到的)
+ * 已经把这一轮的用量完整记下,再给模型补下界就重复收费;它的缺失标记照旧保留,运行仍保持暂记。
  */
 export function floorMissingFields(
   r: RunResult,
@@ -118,7 +120,14 @@ export function floorMissingFields(
   observed: ModelMetering | undefined,
 ): RunResult {
   const metering = r.cost?.metering;
-  if (!r.cost || !metering?.models.some((m) => m.missingFields?.length)) return r;
+  if (
+    !r.cost ||
+    !metering ||
+    metering.fromResultUsage ||
+    !metering.models.some((m) => m.missingFields?.length)
+  ) {
+    return r;
+  }
   const find = (list: ModelMetering["models"] | undefined, m: ModelMetering["models"][number]) =>
     list?.find(
       (u) =>
