@@ -46,8 +46,9 @@ test.describe("积分与计费界面", () => {
     );
     try {
       await page.goto(`${BASE}/settings/billing`);
-      await expect(page.getByText("可用", { exact: true })).toBeVisible();
-      await expect(page.getByText("冻结中", { exact: true })).toBeVisible();
+      await expect(page.getByRole("term").filter({ hasText: /^可用$/ })).toBeVisible();
+      // 余额区的标签;消耗汇总表也有"冻结中"一列,不能只按文字找
+      await expect(page.getByRole("term").filter({ hasText: /^冻结中$/ })).toBeVisible();
       await expect(page.getByTestId("balance-available")).toHaveText("0.00");
       await expect(page.getByTestId("balance-reserved")).toHaveText("0");
       await expect(page.getByText("结束后按实际用量扣除")).toBeVisible();

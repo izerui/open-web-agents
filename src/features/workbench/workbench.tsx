@@ -2,6 +2,7 @@
 
 import { WorkbenchSidebar } from "@/components/workbench-sidebar";
 import { followRun } from "@/features/chat/follow-run";
+import { fetchJson } from "@/lib/fetch-json";
 import { cn } from "@/lib/utils";
 import type { FileUIPart } from "ai";
 import {
@@ -20,10 +21,16 @@ import {
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ApprovalBar } from "./approval-bar";
+import { ApprovalBar, type PendingQuestion } from "./approval-bar";
 import { CommandPalette } from "./command-palette";
 import { ContextWindowMeter } from "./context-window-meter";
-import { ChatThread, contextTokens, sumUsage, totalUsageTokens } from "./conversation";
+import {
+  ChatThread,
+  type SubmitAnswer,
+  contextTokens,
+  sumUsage,
+  totalUsageTokens,
+} from "./conversation";
 import { createEventBatcher } from "./event-batcher";
 import { FilePanel } from "./file-panel";
 import { SessionActions } from "./session-actions";
@@ -895,6 +902,26 @@ export function Workbench() {
     (text: string) => void sendRef.current(text).catch(() => {}),
     [],
   );
+  /** 运行在等回答的提问(审批条轮询带回,在对话里的提问卡片上作答) */
+  const [pendingQuestions, setPendingQuestions] = useState<PendingQuestion[]>([]);
+  /** 作答后让审批条立刻重新拉取,卡片马上从"待回答"变过来 */
+  const [approvalRefresh, setApprovalRefresh] = useState(0);
+  const submitAnswerAction = useCallback<SubmitAnswer>(
+    async (approvalId, body) => {
+      if (!sessionId) return;
+      await fetchJson(`/api/sessions/${sessionId}/approvals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          "decline" in body
+            ? { approvalId, decision: "denied" }
+            : { approvalId, decision: "approved", answers: body.answers },
+        ),
+      });
+      setApprovalRefresh((n) => n + 1);
+    },
+    [sessionId],
+  );
   const stableRerunAction = useCallback(
     (runId: string, prompt: string) => void rerunRef.current(runId, prompt),
     [],
@@ -1354,11 +1381,18 @@ export function Workbench() {
                       turns={turns}
                       onRerunAction={stableRerunAction}
                       onAnswerAction={stableAnswerAction}
+                      pendingQuestions={pendingQuestions}
+                      submitAnswerAction={submitAnswerAction}
                     />
                   )}
                 </div>
 
-                <ApprovalBar sessionId={sessionId} running={running} />
+                <ApprovalBar
+                  sessionId={sessionId}
+                  running={running}
+                  onQuestionsChange={setPendingQuestions}
+                  refreshKey={approvalRefresh}
+                />
 
                 {/* 输入区 — absolute 底部浮动（t3code 风格） */}
                 <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20">

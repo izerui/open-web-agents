@@ -2,13 +2,13 @@
 // 这是 SDK 变更的唯一缓冲 —— 由录制回放测试守护,SDK 升级先跑这里的测试。
 // 入参一律 unknown,不 import 任何 SDK 类型。
 
-import type { AgentEvent } from "@/lib/shared";
+import type { AgentEvent, AskedQuestion } from "@/lib/shared";
 import { redactInput, redactSecrets } from "./redact";
 
 /** 单条文本最大保留长度,超出截断(避免撑爆 SSE 与 UI;完整产物在工作区磁盘上)。 */
 const MAX_LEN = 4000;
 
-type Asked = Extract<AgentEvent, { kind: "question" }>["questions"];
+type Asked = AskedQuestion[];
 
 /**
  * 解析 AskUserQuestion 的入参。
@@ -17,7 +17,7 @@ type Asked = Extract<AgentEvent, { kind: "question" }>["questions"];
  * 宁可退化成"显示一坨 JSON"(难看但信息没丢),也不要抛异常或渲染出一个空按钮组:
  * 那会让用户对着一个点不动的提问干等。ACL 的本分是隔离变化,不是假设变化不会发生。
  */
-function parseQuestions(input: unknown): Asked | null {
+export function parseQuestions(input: unknown): Asked | null {
   const qs = (input as { questions?: unknown })?.questions;
   if (!Array.isArray(qs) || qs.length === 0) return null;
 

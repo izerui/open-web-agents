@@ -85,6 +85,11 @@ curl localhost:5678/api/agents/<taskId>/result -H "X-Api-Key: <key>"
 工作副本只包含资源引用,不复制 MCP 凭证或技能脚本。目标的归属、回调、图标与逃生舱保留。
 应用只保存草稿,不发布。尚未发布过的智能体沿用原有“调用草稿”的兼容规则。
 
+**智能体提问**:网页对话与 AI 编辑里,智能体提问(AskUserQuestion)时运行停在原地等回答 —— 复用审批的跨进程通道,
+上限 10 分钟,期间照常冻结积分。每题可点选项,也可自己填写;提交后模型在同一轮继续。也可以选择不回答。
+超时或运行被停止时模型得到"用户没有回答",按自己的判断继续;接口调用、评测没人可问,不等。
+卡片显示待回答 / 已回答 / 未回答,回答从运行记录里读出,刷新后仍在。审计只记"答了 / 没答",不记回答内容。
+
 **MCP 测试连接**:构建器与 AI 编辑里每个 MCP 都可"测试连接" —— 服务端按运行时的方式换入本人保存的变量值,
 握手(initialize)并列出工具(tools/list),**不调用任何工具**;失败时说明原因(地址不通、超时、认证失败、
 需要 OAuth、不是 MCP 服务、缺变量值),结果里的密钥抹掉。http 地址规则同 webhook(回环、云元数据始终禁止,
@@ -338,7 +343,7 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 | POST            | `/api/sessions/{id}/run`                   | cookie / key           | 发起一轮,SSE 流式返回;用 Key 建的会话里,声明了 inputSchema 的智能体须传符合它的 `input` |
 | GET             | `/api/sessions/{id}/events`                | cookie / key           | joinStream 断线重连     |
 | GET             | `/api/sessions/{id}/files`                 | cookie / key           | 文件树 / 预览 / 下载       |
-| GET/POST/DELETE | `/api/sessions/{id}/approvals`             | cookie / key           | 待审与同类授权列表 / 裁决(`remember:"session"` 授权同类,`message` 拒绝说明)/ 撤销同类授权(`?grant=`) |
+| GET/POST/DELETE | `/api/sessions/{id}/approvals`             | cookie / key           | 待审与同类授权列表 / 裁决(`remember:"session"` 授权同类,`message` 拒绝说明;回答提问用 `answers` 按题目顺序)/ 撤销同类授权(`?grant=`) |
 | GET/POST        | `/api/sessions/{id}/branch`                | cookie / key           | 运行列表 / 重跑           |
 | POST            | `/api/sessions/{id}/cancel`                | cookie / key           | 取消未完成的运行(见下方延迟说明)   |
 | POST            | `/api/sessions/{id}/steer`                 | cookie / key           | 运行中途追加一条消息(见下方)     |

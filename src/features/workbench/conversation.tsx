@@ -15,6 +15,13 @@ import {
   totalUsageTokens,
   transitionScrollMode,
 } from "./conversation.logic";
+import {
+  type PendingAsk,
+  type QuestionEvent,
+  type QuestionState,
+  answerText,
+  questionState,
+} from "./question-state";
 import type { Turn } from "./types";
 
 export {
@@ -643,18 +650,66 @@ const ActivitySection = memo(function ActivitySection({
   );
 });
 
-type QuestionEvent = Extract<AgentEvent, { kind: "question" }>;
+/** 提交回答:回答按题目顺序;decline = 不回答。失败抛错 */
+export type SubmitAnswer = (
+  approvalId: string,
+  body: { answers: string[] } | { decline: true },
+) => Promise<void>;
 
+function formatLeft(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000));
+  if (total < 60) return `${total} 秒`;
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+const STATE_BADGE: Record<
+  QuestionState["kind"],
+  { text: string; variant: "warning" | "success" | "secondary" | "outline" }
+> = {
+  pending: { text: "待回答", variant: "warning" },
+  waiting: { text: "等待中", variant: "outline" },
+  answered: { text: "已回答", variant: "success" },
+  declined: { text: "未回答(你选择了不回答)", variant: "secondary" },
+  unanswered: { text: "未回答", variant: "secondary" },
+  legacy: { text: "历史提问", variant: "outline" },
+};
+
+/**
+ * 智能体的提问卡片。
+ *
+ * 待回答:运行在原地等你(上限 10 分钟),每题可点选项,也可在"其他"里自己填写;提交后智能体在同一轮里继续。
+ * 已回答 / 未回答:从运行记录里读出,刷新、翻历史都在。
+ * 没等到回答(超时、停止)或旧记录、且这是最后一轮:还可以把回答当成下一条消息发出去。
+ */
 function QuestionBlock({
   e,
-  answerable,
+  state,
+  canSendAsMessage,
   onAnswer,
+  submitAnswer,
 }: {
   e: QuestionEvent;
-  answerable: boolean;
+  state: QuestionState;
+  /** 最后一轮、运行已结束:可以把回答当作下一条消息发出 */
+  canSendAsMessage: boolean;
   onAnswer?: (text: string) => void;
+  submitAnswer?: SubmitAnswer;
 }) {
   const [picked, setPicked] = useState<Record<number, Set<string>>>({});
+  const [other, setOther] = useState<Record<number, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  const pending = state.kind === "pending" ? state.request : null;
+  useEffect(() => {
+    if (!pending) return;
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [pending]);
+
+  const interactive =
+    (pending && submitAnswer) ||
+    ((state.kind === "unanswered" || state.kind === "legacy") && canSendAsMessage && onAnswer);
 
   const toggle = (qi: number, label: string, multi: boolean) => {
     setPicked((prev) => {
@@ -663,37 +718,73 @@ function QuestionBlock({
         if (cur.has(label)) cur.delete(label);
         else cur.add(label);
       } else {
-        if (cur.has(label)) cur.clear();
-        else {
-          cur.clear();
-          cur.add(label);
-        }
+        const had = cur.has(label);
+        cur.clear();
+        if (!had) cur.add(label);
+        // 单选:点了选项就不再用自己填写的
+        setOther((o) => ({ ...o, [qi]: "" }));
       }
       return { ...prev, [qi]: cur };
     });
   };
-
-  const answered = e.questions.map((_, i) => [...(picked[i] ?? [])]);
-  const complete = answered.every((a) => a.length > 0);
-
-  const submit = () => {
-    if (!complete || !onAnswer) return;
-    const text = e.questions
-      .map((q, i) => {
-        const ans = answered[i]?.join("、") ?? "";
-        return e.questions.length > 1 ? `${q.header ?? q.question}:${ans}` : ans;
-      })
-      .join("\n");
-    onAnswer(text);
+  const typeOther = (qi: number, text: string, multi: boolean) => {
+    setOther((o) => ({ ...o, [qi]: text }));
+    // 单选:自己填写就取消选中的选项
+    if (!multi && text.trim()) setPicked((prev) => ({ ...prev, [qi]: new Set() }));
   };
 
+  const answers = e.questions.map((_, i) => answerText([...(picked[i] ?? [])], other[i] ?? ""));
+  const complete = answers.every((a) => a.length > 0);
+
+  const submit = async () => {
+    if (!complete) return;
+    if (pending && submitAnswer) {
+      setBusy(true);
+      try {
+        await submitAnswer(pending.id, { answers });
+      } catch (err) {
+        toast.error(`提交回答失败:${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+    onAnswer?.(
+      e.questions
+        .map((q, i) =>
+          e.questions.length > 1 ? `${q.header ?? q.question}:${answers[i]}` : answers[i],
+        )
+        .join("\n"),
+    );
+  };
+  const decline = async () => {
+    if (!pending || !submitAnswer) return;
+    setBusy(true);
+    try {
+      await submitAnswer(pending.id, { decline: true });
+    } catch (err) {
+      toast.error(`提交失败:${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const badge = STATE_BADGE[state.kind];
   return (
-    <Card className="border-blue-500/25 bg-blue-500/[0.04]">
+    <Card className="border-blue-500/25 bg-blue-500/[0.04]" data-testid="question-card">
       <CardContent className="space-y-3 p-3">
-        <p className="text-xs text-muted-foreground">
-          <HelpCircle className="mr-1 inline-block h-3 w-3" />
-          智能体在等你选择
-        </p>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <HelpCircle className="h-3 w-3" />
+          <span>智能体的提问</span>
+          <Badge variant={badge.variant} className="text-[10px]" data-testid="question-state">
+            {badge.text}
+          </Badge>
+          {pending && (
+            <span className="tabular-nums">
+              剩余 {formatLeft(pending.expiresAt - now)},超时后智能体会自行判断
+            </span>
+          )}
+        </div>
         {e.questions.map((q, qi) => (
           <div key={`${q.question}-${qi}`} className="space-y-2">
             <p className="text-sm font-medium">
@@ -702,33 +793,89 @@ function QuestionBlock({
                 <span className="ml-2 text-xs text-muted-foreground">(可多选)</span>
               )}
             </p>
-            <div className="flex flex-wrap gap-2">
-              {q.options.map((o) => {
-                const on = (picked[qi] ?? new Set()).has(o.label);
-                return (
-                  <Button
-                    key={o.label}
-                    type="button"
-                    variant={on ? "default" : "outline"}
-                    size="sm"
-                    disabled={!answerable}
-                    title={o.description}
-                    onClick={() => toggle(qi, o.label, q.multiSelect === true)}
-                    className="rounded-full"
-                  >
-                    {o.label}
-                  </Button>
-                );
-              })}
-            </div>
+            {state.kind === "answered" ? (
+              <p className="whitespace-pre-wrap break-words text-sm" data-testid="question-answer">
+                <span className="text-muted-foreground">你的回答:</span>
+                {state.answers[qi] ?? state.raw}
+              </p>
+            ) : (
+              <>
+                <div className="flex flex-wrap gap-2">
+                  {q.options.map((o) => {
+                    const on = (picked[qi] ?? new Set()).has(o.label);
+                    return (
+                      <Button
+                        key={o.label}
+                        type="button"
+                        variant={on ? "default" : "outline"}
+                        size="sm"
+                        disabled={!interactive || busy}
+                        title={o.description}
+                        onClick={() => toggle(qi, o.label, q.multiSelect === true)}
+                        className="rounded-full"
+                      >
+                        {o.label}
+                      </Button>
+                    );
+                  })}
+                </div>
+                {interactive && (
+                  <input
+                    type="text"
+                    className="h-8 w-full rounded-md border bg-background px-2 text-sm"
+                    placeholder={q.multiSelect ? "其他(可补充,自己填写)" : "其他(自己填写)"}
+                    aria-label={`其他回答:${q.question}`}
+                    maxLength={2000}
+                    disabled={busy}
+                    value={other[qi] ?? ""}
+                    onChange={(ev) => typeOther(qi, ev.target.value, q.multiSelect === true)}
+                  />
+                )}
+              </>
+            )}
           </div>
         ))}
-        {answerable ? (
-          <Button type="button" onClick={submit} disabled={!complete} size="sm">
-            {complete ? "发送选择" : "请先选择"}
-          </Button>
+        {interactive ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              onClick={() => void submit()}
+              disabled={!complete || busy}
+              size="sm"
+            >
+              {!complete ? "请先回答每个问题" : pending ? "提交回答" : "作为新消息发送"}
+            </Button>
+            {pending && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={busy}
+                onClick={() => void decline()}
+              >
+                不回答
+              </Button>
+            )}
+            {!pending && (
+              <span className="text-xs text-muted-foreground">
+                {state.kind === "unanswered"
+                  ? "这次没等到回答,智能体已自行判断;可以把回答作为新消息发出"
+                  : ""}
+              </span>
+            )}
+          </div>
         ) : (
-          <p className="text-xs text-muted-foreground">历史提问,已由后续对话回答</p>
+          state.kind !== "answered" && (
+            <p className="text-xs text-muted-foreground">
+              {state.kind === "waiting"
+                ? "正在等待…"
+                : state.kind === "unanswered"
+                  ? "没等到回答,智能体已自行判断"
+                  : state.kind === "declined"
+                    ? "智能体已按自己的判断继续"
+                    : "历史提问"}
+            </p>
+          )
         )}
       </CardContent>
     </Card>
@@ -745,6 +892,8 @@ const TurnView = memo(function TurnView({
   onToggleBlock,
   onRerunAction,
   onAnswerAction,
+  pendingQuestions,
+  submitAnswer,
 }: {
   turn: Turn;
   turnKey: string;
@@ -753,9 +902,30 @@ const TurnView = memo(function TurnView({
   onToggleBlock(blockId: string): void;
   onRerunAction?: (runId: string, prompt: string) => void;
   onAnswerAction?: (text: string) => void;
+  pendingQuestions?: readonly PendingAsk[];
+  submitAnswer?: SubmitAnswer;
 }) {
-  const { usage, blocks, questions, resultEvent, allText } = useMemo(() => {
-    const items = foldEvents(turn.events);
+  const { usage, blocks, questions, questionResults, resultEvent, allText } = useMemo(() => {
+    const folded = foldEvents(turn.events);
+    // 提问的工具结果(回答 / 没回答)并进提问卡片显示,不再单独列成一块
+    const questionIds = new Set(
+      turn.events.flatMap((e) => (e.kind === "question" && e.toolUseId ? [e.toolUseId] : [])),
+    );
+    const results = new Map<string, { text: string; isError: boolean }>();
+    for (const e of turn.events) {
+      if (e.kind === "tool_result" && e.toolUseId && questionIds.has(e.toolUseId)) {
+        results.set(e.toolUseId, { text: e.text, isError: e.isError === true });
+      }
+    }
+    const items = folded.filter(
+      (i) =>
+        !(
+          i.kind === "event" &&
+          i.event.kind === "tool_result" &&
+          i.event.toolUseId &&
+          questionIds.has(i.event.toolUseId)
+        ),
+    );
     const nextBlocks = processBlocks(items);
     const nextQuestions: QuestionEvent[] = [];
     let nextResultEvent: Extract<AgentEvent, { kind: "result" }> | null = null;
@@ -773,6 +943,7 @@ const TurnView = memo(function TurnView({
       usage: sumUsage(turn.events),
       blocks: nextBlocks,
       questions: nextQuestions,
+      questionResults: results,
       resultEvent: nextResultEvent,
       allText: nextBlocks
         .filter((block): block is Extract<ProcessBlock, { kind: "text" }> => block.kind === "text")
@@ -950,8 +1121,15 @@ const TurnView = memo(function TurnView({
         <div key={q.toolUseId ?? `q-${qi}`} className="pb-4">
           <QuestionBlock
             e={q}
-            answerable={isLastTurn && !turn.running && !!onAnswerAction}
+            state={questionState(
+              q,
+              q.toolUseId ? questionResults.get(q.toolUseId) : undefined,
+              pendingQuestions?.find((p) => q.toolUseId && p.toolUseId === q.toolUseId),
+              turn.running,
+            )}
+            canSendAsMessage={isLastTurn && !turn.running && !!onAnswerAction}
             onAnswer={onAnswerAction}
+            submitAnswer={submitAnswer}
           />
         </div>
       ))}
@@ -1029,10 +1207,15 @@ export function ChatThread({
   turns,
   onRerunAction,
   onAnswerAction,
+  pendingQuestions,
+  submitAnswerAction,
 }: {
   turns: Turn[];
   onRerunAction?: (runId: string, prompt: string) => void;
   onAnswerAction?: (text: string) => void;
+  /** 运行在等回答的提问(按 toolUseId 对到卡片上) */
+  pendingQuestions?: readonly PendingAsk[];
+  submitAnswerAction?: SubmitAnswer;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollMode, setScrollMode] = useState<ScrollMode>("following");
@@ -1183,6 +1366,8 @@ export function ChatThread({
                   onToggleBlock={onToggleBlock}
                   onRerunAction={onRerunAction}
                   onAnswerAction={onAnswerAction}
+                  pendingQuestions={pendingQuestions}
+                  submitAnswer={submitAnswerAction}
                 />
               </div>
             );

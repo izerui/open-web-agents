@@ -24,7 +24,7 @@ import {
 import { UnsettledUsage, mergeCost } from "@/lib/modules/agent-engine/domain/partial-usage";
 import type { EnginePort, RunResult, TranscriptRange } from "@/lib/modules/agent-engine/ports";
 import type { AgentEvent, AgentSpec, RunContext } from "@/lib/shared";
-import { buildSdkOptions } from "./options";
+import { type SdkOptionsDeps, buildSdkOptions } from "./options";
 import { materializeSkillPlugin } from "./skill-plugin";
 
 export type QueryFn = (args: {
@@ -186,6 +186,8 @@ export interface EngineDeps {
     },
     signal?: AbortSignal,
   ) => Promise<{ approved: boolean; message?: string }>;
+  /** 提问在同一轮里等人回答(见 options.ts 的 askUser) */
+  askUser?: SdkOptionsDeps["askUser"];
 }
 
 export class ClaudeSdkEngine implements EnginePort {
@@ -273,6 +275,7 @@ export class ClaudeSdkEngine implements EnginePort {
           sandboxEnabled: this.deps.sandboxEnabled,
           allowStdioMcp: this.deps.allowStdioMcp,
           requestApproval: this.deps.requestApproval,
+          askUser: this.deps.askUser,
           skillPluginPath,
         }),
       });

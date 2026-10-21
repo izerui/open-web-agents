@@ -229,6 +229,14 @@ export interface SteerInbox {
  * 归一后的域事件。SSE 传输与 jsonl 回放共用同一套。
  * 这是 SDK 消息经 ACL 翻译后的唯一对外形状 —— SDK 升级不外溢到业务层。
  */
+/** 智能体向用户提的一个问题(SDK 的 AskUserQuestion 入参里的一项) */
+export interface AskedQuestion {
+  question: string;
+  header?: string;
+  multiSelect?: boolean;
+  options: { label: string; description?: string }[];
+}
+
 export type AgentEvent =
   | { kind: "text"; text: string; subagent?: string }
   | { kind: "thinking"; text: string; subagent?: string }
@@ -242,21 +250,15 @@ export type AgentEvent =
    * 而这恰恰是"网页对话"这条入口最该做好的交互:agent 已经把选项都列好了,
    * 白白退化成让用户自己打字。
    *
-   * 【为什么当前走多轮作答】SDK 本身支持同轮作答:它把 AskUserQuestion 送到 canUseTool,
-   * 宿主收集答案后经 `updatedInput: { questions, answers }` 回传即可(见 sdk-docs/user-input.md)。
-   * 但平台目前把 canUseTool 写成了无条件放行(围栏改挂在 PreToolUse hook 上,而 hook 只能
-   * allow/deny、给不了 updatedInput),于是提问被直接放过。界面把选项渲染成按钮,
-   * 用户点了就作为下一轮消息发出去 —— agent 侧看到的是一次正常的多轮对话。
+   * 【同一轮作答】有人在场(网页对话、AI 编辑)时,运行停在提问上等回答:PreToolUse hook 经审批通道
+   * 登记待回答,用户在提问卡片上作答后,以 `updatedInput: { questions, answers }` 交回 SDK,模型在同一轮
+   * 继续(见 approval/application/ask-user.ts)。没人可问(接口调用、评测)、超时、运行被停止时,
+   * SDK 告诉模型"用户没有回答"。曾经一律直接放行,模型立刻按猜测做完,而界面还挂着"等你选择"。
    */
   | {
       kind: "question";
       toolUseId?: string;
-      questions: {
-        question: string;
-        header?: string;
-        multiSelect?: boolean;
-        options: { label: string; description?: string }[];
-      }[];
+      questions: AskedQuestion[];
     }
   | { kind: "status"; label: string; state?: string }
   /**

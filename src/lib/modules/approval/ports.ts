@@ -1,4 +1,4 @@
-import { BrandedError } from "@/lib/shared";
+import { type AskedQuestion, BrandedError } from "@/lib/shared";
 
 export interface ApprovalRequest {
   id: string;
@@ -13,6 +13,12 @@ export interface ApprovalRequest {
    * 之后只有每一类都已授权才自动放行。规则没给就没有。
    */
   scopes?: { key: string; label: string }[];
+  /**
+   * 有这项就不是审批,而是智能体在问用户(AskUserQuestion):界面在对话里的提问卡片上作答,
+   * 裁决带回答案。toolUseId 用来把这条待回答和对话里的那张卡片对上
+   */
+  questions?: AskedQuestion[];
+  toolUseId?: string;
   createdAt: number;
   /** 到点自动拒绝的时刻。 */
   expiresAt: number;
@@ -31,7 +37,8 @@ export interface SessionGrant {
 }
 
 export type ApprovalOutcome =
-  | { decision: "approved"; by?: string }
+  /** answers:提问的回答,键是问题原文,值是选中的选项或自己填写的内容(多个用"、"连接) */
+  | { decision: "approved"; by?: string; answers?: Record<string, string> }
   | { decision: "denied"; by?: string; message?: string }
   | { decision: "expired" };
 

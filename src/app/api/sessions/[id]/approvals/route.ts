@@ -42,6 +42,35 @@ interface Body {
   message?: string;
   /** 批准并授权本会话内同类调用不再询问 */
   remember?: "session";
+  /**
+   * 回答智能体的提问(待审带 questions 时):按题目顺序,每题一段文字 —— 选中的选项或自己填写的内容。
+   * 回答用 decision "approved";decision "denied" 表示不回答(message 可说明原因)
+   */
+  answers?: unknown;
+}
+
+/** 单题回答的上限:它会原样交给模型 */
+const MAX_ANSWER_CHARS = 2_000;
+
+/** 把按题目顺序的回答对到问题原文上;不合规返回说明 */
+function answersFor(
+  target: ApprovalRequest,
+  raw: unknown,
+): Record<string, string> | { error: string } {
+  const questions = target.questions ?? [];
+  if (!Array.isArray(raw) || raw.length !== questions.length) {
+    return { error: `answers 须是与问题一一对应的数组(共 ${questions.length} 题)` };
+  }
+  const out: Record<string, string> = {};
+  for (const [i, q] of questions.entries()) {
+    const a = raw[i];
+    if (typeof a !== "string" || !a.trim()) return { error: `第 ${i + 1} 题还没有回答` };
+    if (a.length > MAX_ANSWER_CHARS) {
+      return { error: `第 ${i + 1} 题的回答不能超过 ${MAX_ANSWER_CHARS} 字` };
+    }
+    out[q.question] = a.trim();
+  }
+  return out;
 }
 
 /** 拒绝说明的上限:它会原样交给模型 */
@@ -92,6 +121,18 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (!target) {
       return Response.json({ error: "该待审请求不存在或已失效" }, { status: 404 });
     }
+    let answers: Record<string, string> | undefined;
+    if (target.questions?.length) {
+      // 提问:回答用 approved 带 answers,不回答用 denied;不涉及同类授权
+      if (body.remember) return Response.json({ error: "提问不能授权同类" }, { status: 400 });
+      if (body.decision === "approved") {
+        const got = answersFor(target, body.answers);
+        if ("error" in got) return Response.json({ error: got.error }, { status: 400 });
+        answers = got;
+      }
+    } else if (body.answers !== undefined) {
+      return Response.json({ error: "这条待审不是提问,不能提交回答" }, { status: 400 });
+    }
     const scopes = target.scopes ?? [];
     if (body.remember && scopes.length === 0) {
       return Response.json({ error: "这类调用不支持授权同类,只能逐次审批" }, { status: 400 });
@@ -100,7 +141,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     ok = await approval.resolve(
       body.approvalId,
       body.decision === "approved"
-        ? { decision: "approved", by }
+        ? { decision: "approved", by, ...(answers ? { answers } : {}) }
         : { decision: "denied", by, ...(message ? { message } : {}) },
       // 授权的是这次调用命中的【全部】类别 —— 界面上也是把它们都列出来让人确认的
       body.remember
@@ -141,6 +182,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         runId: target?.runId,
         tool: target?.toolName,
         decision: body.decision,
+        // 提问只记"答了 / 没答",不记回答内容:自由填写的内容里可能有密码、令牌
+        ...(target?.questions?.length ? { question: true } : {}),
         ...(body.remember && target?.scopes?.length
           ? {
               remember: true,

@@ -27,6 +27,7 @@ export function createClaudeSdkEngine(
   sandboxEnabled: boolean,
   allowStdioMcp: boolean,
   requestApproval?: EngineDeps["requestApproval"],
+  askUser?: EngineDeps["askUser"],
 ): ClaudeSdkEngine {
   return new ClaudeSdkEngine(sdkQuery, {
     sharedHome: path.join(dataDir, ".agent-home"),
@@ -37,6 +38,7 @@ export function createClaudeSdkEngine(
     sandboxEnabled,
     allowStdioMcp,
     requestApproval,
+    askUser,
     // 技能插件写在这里:不在任何会话工作目录之下,agent 写不进去,GC 也不会扫到
     skillsRoot: path.join(dataDir, ".skills"),
   });

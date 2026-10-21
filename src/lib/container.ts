@@ -39,6 +39,7 @@ import { validateInput } from "@/lib/modules/agent/domain/validate-output";
 import type { Agent } from "@/lib/modules/agent/ports";
 import type { AgentRepo } from "@/lib/modules/agent/ports";
 import { RedisApproval } from "@/lib/modules/approval/adapters/redis-approval";
+import { askUser as askUserInTurn } from "@/lib/modules/approval/application/ask-user";
 import { requestApproval as requestApprovalWithGrants } from "@/lib/modules/approval/application/request-approval";
 import { type ApprovalPort, ApprovalUnavailable } from "@/lib/modules/approval/ports";
 import { LocalFsStorage } from "@/lib/modules/artifacts/adapters/local-fs-storage";
@@ -416,11 +417,25 @@ function build(): Container {
       r,
       signal,
     );
+  // 提问在同一轮里等人回答:复用审批通道,上限与审批相同(见 approval/application/ask-user.ts)
+  const askUser: NonNullable<EngineDeps["askUser"]> = (r, signal) =>
+    askUserInTurn(
+      {
+        approval,
+        publish: (sessionId, runId, e) => bus.publish(topicOf(sessionId, runId), e).then(() => {}),
+        newId: () => randomUUID().replace(/-/g, "").slice(0, 24),
+        now: () => Date.now(),
+        timeoutMs: APPROVAL_TIMEOUT_MS,
+      },
+      r,
+      signal,
+    );
   const engine = createClaudeSdkEngine(
     env.dataDir,
     env.sandbox,
     env.allowStdioMcp,
     requestApproval,
+    askUser,
   );
 
   // 运行中途追加消息:web 进程受理、worker 交给模型,经 Redis 交接(见 run/ports.ts 的 SteerChannel)

@@ -14,7 +14,8 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { followRun } from "@/features/chat/follow-run";
-import { ChatThread } from "@/features/workbench/conversation";
+import { ApprovalBar, type PendingQuestion } from "@/features/workbench/approval-bar";
+import { ChatThread, type SubmitAnswer } from "@/features/workbench/conversation";
 import { createEventBatcher } from "@/features/workbench/event-batcher";
 import type { Turn } from "@/features/workbench/types";
 import { errorText, fetchJson } from "@/lib/fetch-json";
@@ -74,6 +75,25 @@ export function DesignWorkspace({ initialSessionId }: { initialSessionId?: strin
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
+  /** AI 编辑提问时在等的回答(同工作台:提问卡片上作答,智能体在同一轮里继续) */
+  const [pendingQuestions, setPendingQuestions] = useState<PendingQuestion[]>([]);
+  const [approvalRefresh, setApprovalRefresh] = useState(0);
+  const submitAnswer = useCallback<SubmitAnswer>(
+    async (approvalId, body) => {
+      if (!id) return;
+      await fetchJson(`/api/sessions/${id}/approvals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          "decline" in body
+            ? { approvalId, decision: "denied" }
+            : { approvalId, decision: "approved", answers: body.answers },
+        ),
+      });
+      setApprovalRefresh((n) => n + 1);
+    },
+    [id],
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState<"preview" | "reset" | null>(null);
@@ -406,13 +426,24 @@ export function DesignWorkspace({ initialSessionId }: { initialSessionId?: strin
               >
                 <div className="min-h-0 flex-1">
                   {turns.length ? (
-                    <ChatThread turns={turns} onAnswerAction={(text) => void send(text)} />
+                    <ChatThread
+                      turns={turns}
+                      onAnswerAction={(text) => void send(text)}
+                      pendingQuestions={pendingQuestions}
+                      submitAnswerAction={submitAnswer}
+                    />
                   ) : (
                     <div className="flex h-full items-center justify-center px-8 text-center text-sm text-muted-foreground">
                       你想创建或调整怎样的智能体？
                     </div>
                   )}
                 </div>
+                <ApprovalBar
+                  sessionId={id || null}
+                  running={running}
+                  onQuestionsChange={setPendingQuestions}
+                  refreshKey={approvalRefresh}
+                />
                 <form
                   className="space-y-2 border-t p-3"
                   onSubmit={(event) => {

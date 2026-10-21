@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { errorText, fetchJson } from "@/lib/fetch-json";
+import type { AskedQuestion } from "@/lib/shared";
 import { cn } from "@/lib/utils";
 import { CheckCircle2, Clock, ShieldAlert, Terminal, XCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -20,7 +21,13 @@ interface Pending {
   scopes?: { key: string; label: string }[];
   createdAt?: number;
   expiresAt: number;
+  /** 有这项是智能体在提问(在对话里的提问卡片上作答),不是审批 */
+  questions?: AskedQuestion[];
+  toolUseId?: string;
 }
+
+/** 待回答的提问:交给对话里的提问卡片作答 */
+export type PendingQuestion = Pending & { questions: AskedQuestion[] };
 
 /** 本会话的同类授权 */
 interface Grant {
@@ -45,9 +52,15 @@ function formatLeft(ms: number): string {
 export function ApprovalBar({
   sessionId,
   running,
+  onQuestionsChange,
+  refreshKey,
 }: {
   sessionId: string | null;
   running: boolean;
+  /** 待回答的提问(与审批同一个通道,但在对话里的提问卡片上作答) */
+  onQuestionsChange?: (questions: PendingQuestion[]) => void;
+  /** 变化时立刻重新拉取(提问卡片作答后) */
+  refreshKey?: number;
 }) {
   const [pending, setPending] = useState<Pending[]>([]);
   const [grants, setGrants] = useState<Grant[]>([]);
@@ -77,6 +90,20 @@ export function ApprovalBar({
       setPollError(errorText(error));
     }
   }, [sessionId]);
+
+  const approvals = pending.filter((p) => !p.questions?.length);
+  const questionsKey = pending
+    .filter((p) => p.questions?.length)
+    .map((p) => p.id)
+    .join(",");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 只在待回答的集合变化时通知
+  useEffect(() => {
+    onQuestionsChange?.(pending.filter((p): p is PendingQuestion => Boolean(p.questions?.length)));
+  }, [questionsKey, onQuestionsChange]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey 只用来触发重新拉取
+  useEffect(() => {
+    if (refreshKey) void poll();
+  }, [refreshKey]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -147,6 +174,15 @@ export function ApprovalBar({
     for (const p of pending) {
       if (notifiedRef.current.has(p.id)) continue;
       notifiedRef.current.add(p.id);
+      if (p.questions?.length) {
+        // 提问在对话里的卡片上作答;这里只提醒有人在等,不给批准 / 拒绝按钮
+        toast.info("智能体在问你问题", {
+          id: p.id,
+          description: `${p.summary}(在对话里的提问卡片上回答)`,
+          duration: Number.POSITIVE_INFINITY,
+        });
+        continue;
+      }
       toast.warning(`agent 在等你确认:${p.toolName}`, {
         id: p.id,
         description: p.summary,
@@ -203,7 +239,7 @@ export function ApprovalBar({
       </div>
     ) : null;
 
-  if (pending.length === 0 && pollError === null) return grantStrip;
+  if (approvals.length === 0 && pollError === null) return grantStrip;
 
   return (
     <>
@@ -218,7 +254,7 @@ export function ApprovalBar({
               </Button>
             </div>
           )}
-          {pending.map((p, idx) => {
+          {approvals.map((p, idx) => {
             const leftMs = Math.max(0, p.expiresAt - now);
             const windowMs = p.createdAt ? p.expiresAt - p.createdAt : FALLBACK_WINDOW_MS;
             const leftPct = windowMs > 0 ? (leftMs / windowMs) * 100 : 0;

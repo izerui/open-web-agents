@@ -77,6 +77,35 @@ if (!URL) {
   // 这些用例做真实 Redis 往返 + 轮询,与构建等任务并发时会明显变慢。
   // 曾观察到一次未能复现的失败,故给足超时预算而非让它偶发地红。
   describe("RedisApproval", { timeout: 20_000 }, () => {
+    it("提问:待回答带着题目与 toolUseId 列出;回答随裁决跨进程带回等待方", async () => {
+      const worker = new RedisApproval(URL as string);
+      const web = new RedisApproval(URL as string);
+      try {
+        const q = req({
+          toolName: "AskUserQuestion",
+          toolUseId: "toolu_q",
+          questions: [{ question: "格式?", options: [{ label: "PDF" }] }],
+        });
+        const waiting = worker.request(q);
+        await waitFor(async () => (await web.listPending(q.sessionId)).length === 1);
+        expect((await web.listPending(q.sessionId))[0]).toMatchObject({
+          toolUseId: "toolu_q",
+          questions: [{ question: "格式?" }],
+        });
+        expect(
+          await web.resolve(q.id, { decision: "approved", by: "u1", answers: { "格式?": "Word" } }),
+        ).toBe(true);
+        expect(await waiting).toEqual({
+          decision: "approved",
+          by: "u1",
+          answers: { "格式?": "Word" },
+        });
+      } finally {
+        await worker.close();
+        await web.close();
+      }
+    });
+
     it("【裁决不丢】审批方的连接在第一条命令之后就断了:裁决照样送达等待方", async () => {
       // 故障模型与实现无关:审批方发出的第一条 Redis 命令成功,之后的全部失败
       // (进程退出 / 网络中断)。曾经的实现第一条是 GETDEL —— 待审被删,

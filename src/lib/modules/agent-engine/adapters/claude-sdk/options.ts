@@ -4,10 +4,17 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { describeToolCall, needsApproval } from "@/lib/modules/agent-engine/domain/approval-rules";
+import { parseQuestions } from "@/lib/modules/agent-engine/domain/normalize";
 import { materializeSandbox } from "@/lib/modules/agent-engine/domain/sandbox";
 import { guardToolUse } from "@/lib/modules/agent-engine/domain/tool-guard";
 import { DRAFT_FILE } from "@/lib/modules/agent/domain/design";
-import type { AgentSpec, ModelAlias, ResolvedCredentials, RunContext } from "@/lib/shared";
+import type {
+  AgentSpec,
+  AskedQuestion,
+  ModelAlias,
+  ResolvedCredentials,
+  RunContext,
+} from "@/lib/shared";
 import { ESCAPE_HATCH_PROTECTED } from "@/lib/shared/escape-hatch";
 
 /**
@@ -225,6 +232,20 @@ export interface SdkOptionsDeps {
     },
     signal?: AbortSignal,
   ) => Promise<{ approved: boolean; message?: string }>;
+  /**
+   * 智能体提问(AskUserQuestion)时在同一轮里等人回答。给了且这次运行有人在(审批策略为 ask)才启用;
+   * 返回答案(键为问题原文)、不回答的说明,或都没有(超时 / 停止 / 通道不可用)。
+   * 实现方负责有界等待;signal 必须透传,运行被停止时待回答要立刻收场
+   */
+  askUser?: (
+    req: {
+      sessionId: string;
+      runId?: string;
+      toolUseId?: string;
+      questions: AskedQuestion[];
+    },
+    signal?: AbortSignal,
+  ) => Promise<{ answers?: Record<string, string>; declined?: string }>;
 }
 
 /**
@@ -489,6 +510,50 @@ export function buildSdkOptions(
    * 【timeout 必须显式设】默认只有 60 秒,而人工审批要等真人,上限是 10 分钟。
    * 不放宽的话,等人的审批会先被 hook 超时打断,表现成"还没点就失败了"。
    */
+  /**
+   * 提问在同一轮里等人回答(见 approval/application/ask-user.ts)。
+   *
+   * 【为什么在 hook 里做】SDK 的同轮作答靠"放行时改写入参、带上 answers"。canUseTool 在配了
+   * 工具白名单时会被跳过(见下),而 PreToolUse hook 一定会跑,且同样能返回改写后的入参 ——
+   * 两条路模型收到的都是"The user answered: …"(scripts/sdk-probe/ask-user-question.mjs 实测)。
+   * 没人可问(接口调用、评测)、入参形状不认识、没等到回答:不表态,SDK 照旧告诉模型"用户没有回答"。
+   */
+  const humanPresent = (ctx.approvalPolicy ?? (ctx.unattended ? "allow" : "ask")) === "ask";
+  const askInTurn = async (
+    hookEventName: string,
+    toolUseId: string | undefined,
+    input: Record<string, unknown>,
+  ) => {
+    const questions = deps.askUser && humanPresent ? parseQuestions(input) : null;
+    if (!deps.askUser || !questions) return {};
+    // 答案的键必须是模型给的问题原文(界面看到的可能被截断过)
+    const raw = (input.questions as { question: string }[]).map((q) => q.question);
+    const asked = questions.map((q, i) => ({ ...q, question: raw[i] ?? q.question }));
+    const got = await deps.askUser(
+      { sessionId: ctx.sessionId, runId: ctx.runId, toolUseId, questions: asked },
+      deps.abort.signal,
+    );
+    if (got.answers) {
+      return {
+        hookSpecificOutput: {
+          hookEventName,
+          permissionDecision: "allow",
+          updatedInput: { ...input, answers: got.answers },
+        },
+      };
+    }
+    if (got.declined !== undefined) {
+      return {
+        hookSpecificOutput: {
+          hookEventName,
+          permissionDecision: "deny",
+          permissionDecisionReason: `用户选择不回答这些问题${got.declined ? `:${got.declined}` : ""}。请按你的判断继续,或换个方式说明`,
+        },
+      };
+    }
+    return {};
+  };
+
   options.hooks = {
     PreToolUse: [
       {
@@ -499,10 +564,14 @@ export function buildSdkOptions(
               hook_event_name?: string;
               tool_name?: string;
               tool_input?: unknown;
+              tool_use_id?: string;
             };
             const toolName = h.tool_name ?? "";
             const input = (h.tool_input ?? {}) as Record<string, unknown>;
             const d = await decide(toolName, input);
+            if (d.allow && toolName === "AskUserQuestion") {
+              return askInTurn(h.hook_event_name ?? "PreToolUse", h.tool_use_id, input);
+            }
             if (d.allow) return {}; // 空对象 = 不表态,继续后续权限评估
             return {
               hookSpecificOutput: {

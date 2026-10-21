@@ -816,3 +816,82 @@ describe("技能插件进入 SDK options", () => {
     expect(o.plugins).toBeUndefined();
   });
 });
+
+describe("提问在同一轮里等人回答(AskUserQuestion)", () => {
+  const asked = {
+    questions: [
+      {
+        question: "报告用哪种格式?",
+        header: "格式",
+        multiSelect: false,
+        options: [{ label: "PDF" }, { label: "Word" }],
+      },
+    ],
+  };
+  async function ask(
+    reply: { answers?: Record<string, string>; declined?: string },
+    over: { policy?: "ask" | "allow" | "deny"; tools?: string[]; input?: unknown } = {},
+  ) {
+    const calls: unknown[] = [];
+    const o = buildSdkOptions(
+      specOf(over.tools ? { tools: over.tools.map((name) => ({ name })) } : {}),
+      { ...ctx, approvalPolicy: over.policy ?? "ask", runId: "r1" },
+      {
+        ...deps(),
+        askUser: async (r) => {
+          calls.push(r);
+          return reply;
+        },
+      },
+    );
+    const hook = (o.hooks as { PreToolUse: { hooks: ((i: unknown) => Promise<unknown>)[] }[] })
+      .PreToolUse[0]?.hooks[0];
+    const out = (await hook?.({
+      hook_event_name: "PreToolUse",
+      tool_name: "AskUserQuestion",
+      tool_use_id: "toolu_q",
+      tool_input: over.input ?? asked,
+    })) as {
+      hookSpecificOutput?: {
+        permissionDecision?: string;
+        permissionDecisionReason?: string;
+        updatedInput?: Record<string, unknown>;
+      };
+    };
+    return { out: out?.hookSpecificOutput, calls };
+  }
+
+  it("有人在:等回答,带着答案放行(模型收到 The user answered)", async () => {
+    const r = await ask({ answers: { "报告用哪种格式?": "Word、带目录" } });
+    expect(r.calls).toEqual([
+      expect.objectContaining({ sessionId: ctx.sessionId, runId: "r1", toolUseId: "toolu_q" }),
+    ]);
+    expect(r.out).toEqual({
+      hookEventName: "PreToolUse",
+      permissionDecision: "allow",
+      updatedInput: { ...asked, answers: { "报告用哪种格式?": "Word、带目录" } },
+    });
+  });
+
+  it("选择不回答:拒绝并说明,让模型自行判断;没等到回答:不表态(SDK 告诉模型没有回答)", async () => {
+    const declined = await ask({ declined: "先别问了" });
+    expect(declined.out?.permissionDecision).toBe("deny");
+    expect(declined.out?.permissionDecisionReason).toContain("用户选择不回答这些问题:先别问了");
+    expect((await ask({})).out).toBeUndefined();
+  });
+
+  it("没人可问(接口调用、评测)或入参形状不认识:不等,也不表态", async () => {
+    const unattended = await ask({ answers: { x: "y" } }, { policy: "allow" });
+    expect(unattended.calls).toEqual([]);
+    expect(unattended.out).toBeUndefined();
+    const odd = await ask({ answers: { x: "y" } }, { input: { questions: "坏的" } });
+    expect(odd.calls).toEqual([]);
+    expect(odd.out).toBeUndefined();
+  });
+
+  it("工具白名单里没有它:照常拒绝,不去问人", async () => {
+    const r = await ask({ answers: { x: "y" } }, { tools: ["Read"] });
+    expect(r.calls).toEqual([]);
+    expect(r.out?.permissionDecision).toBe("deny");
+  });
+});
