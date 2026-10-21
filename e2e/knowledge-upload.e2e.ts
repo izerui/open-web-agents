@@ -1,5 +1,6 @@
 // 知识库上传文件与检索测试(端到端):真实 multipart 上传 → 提取文字入库(过长自动切篇)→
 // 检索测试命中 → 运行时确实把命中的片段带进了给模型的请求(假网关核对)。
+import http from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startFakeGateway } from "../scripts/sdk-probe/fake-gateway.mjs";
 import {
@@ -189,6 +190,81 @@ describe("知识库上传文件", () => {
       { name: "之后.docx", bytes: docx(["解析重文件之后照常"]) },
     ]);
     expect(after.body.results[0]).toMatchObject({ ok: true });
+  });
+
+  it(
+    "不带 Content-Length 的分块上传、实际超过 100MB:读到上限就停止读取、返回 413,不入库",
+    { timeout: 120_000 },
+    async () => {
+      const before = await owner.get<{ docs: unknown[] }>(`/api/agents/${agentId}/knowledge`);
+      const boundary = "----owa-stream-test";
+      const head = Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="巨大.txt"\r\nContent-Type: text/plain\r\n\r\n`,
+      );
+      const chunk = Buffer.alloc(1024 * 1024, "a");
+      const LIMIT = 300 * 1024 * 1024;
+      const url = new URL(`/api/agents/${agentId}/knowledge/upload`, BASE);
+      const outcome = await new Promise<{ status: number; written: number; body: string }>(
+        (resolve, reject) => {
+          let written = 0;
+          let responded = false;
+          const req = http.request(url, {
+            method: "POST",
+            headers: {
+              Cookie: owner.cookieHeader(),
+              "Content-Type": `multipart/form-data; boundary=${boundary}`,
+              // 不设 Content-Length:node:http 用分块传输
+              "Transfer-Encoding": "chunked",
+            },
+          });
+          req.on("response", (res) => {
+            responded = true;
+            const at = written;
+            let body = "";
+            res.on("data", (d) => {
+              body += d;
+            });
+            res.on("end", () => {
+              resolve({ status: res.statusCode ?? 0, written: at, body });
+              req.destroy();
+            });
+          });
+          req.on("error", (err) => {
+            if (!responded) reject(err);
+          });
+          req.write(head);
+          const pump = () => {
+            while (!responded && written < LIMIT) {
+              written += chunk.length;
+              if (!req.write(chunk)) {
+                req.once("drain", pump);
+                return;
+              }
+            }
+            if (!responded) req.end(`\r\n--${boundary}--\r\n`);
+          };
+          pump();
+        },
+      );
+      expect(outcome.status, outcome.body).toBe(413);
+      expect(outcome.body).toContain("100MB");
+      // 服务端读到上限就停了:回应时客户端远没写完 300MB(写不进去只能停在缓冲区)
+      expect(outcome.written).toBeLessThan(160 * 1024 * 1024);
+      const after = await owner.get<{ docs: unknown[] }>(`/api/agents/${agentId}/knowledge`);
+      expect(after.body.docs).toHaveLength(before.body.docs.length);
+    },
+  );
+
+  it("单个文件超过 20MB:不读内容就判失败,同批其他文件照常", async () => {
+    const r = await upload(owner, agentId, [
+      { name: "超大.txt", bytes: new Uint8Array(21 * 1024 * 1024).fill(97) },
+      { name: "正常.txt", bytes: new TextEncoder().encode("同批的小文件") },
+    ]);
+    expect(r.status).toBe(201);
+    expect(r.body.results[0]).toMatchObject({ ok: false });
+    const big = r.body.results[0];
+    expect(big?.ok === false && big.reason).toContain("20MB");
+    expect(r.body.results[1]).toMatchObject({ ok: true });
   });
 
   it("参数:没有文件、超过 20 个文件 400", async () => {

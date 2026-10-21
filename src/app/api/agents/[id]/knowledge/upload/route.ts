@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
-import { extractText } from "@/lib/modules/knowledge/adapters/extract-text";
+import { EXTRACT_LIMITS, extractText } from "@/lib/modules/knowledge/adapters/extract-text";
 import { KNOWLEDGE_LIMITS, KnowledgeLimitExceeded } from "@/lib/modules/knowledge/domain/limits";
 import { splitDoc, titleOf } from "@/lib/modules/knowledge/domain/split-doc";
 import { requirePermission } from "../_lib/access";
@@ -12,6 +12,34 @@ export const dynamic = "force-dynamic";
 /** 一次最多传几个文件、整个请求最大多少:解析在 web 进程里做,要有界 */
 const MAX_FILES = 20;
 const MAX_REQUEST_BYTES = 100 * 1024 * 1024;
+
+/**
+ * 边读边数请求体,超过上限立刻停止读取。返回读到的全部字节,超限返回 null。
+ * 【不能只看 Content-Length】分块传输的请求不带这个头,按 0 放过后 formData() 会把整份请求读进内存
+ */
+async function readBounded(req: Request, max: number): Promise<Uint8Array<ArrayBuffer> | null> {
+  if (!req.body) return new Uint8Array(new ArrayBuffer(0));
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(new ArrayBuffer(total));
+  let at = 0;
+  for (const c of chunks) {
+    out.set(c, at);
+    at += c.byteLength;
+  }
+  return out;
+}
 
 type FileResult =
   | {
@@ -35,16 +63,21 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const r = await requirePermission(req, id, "write");
     if (r.error) return r.error;
 
-    const declared = Number(req.headers.get("content-length") ?? 0);
-    if (declared > MAX_REQUEST_BYTES) {
-      return Response.json(
+    const tooLarge = () =>
+      Response.json(
         { error: `一次上传合计不能超过 ${MAX_REQUEST_BYTES / 1024 / 1024}MB,请分批上传` },
         { status: 413 },
       );
-    }
+    // 声明了长度且已超:一个字节都不读
+    if (Number(req.headers.get("content-length") ?? 0) > MAX_REQUEST_BYTES) return tooLarge();
+    // 没声明长度(分块传输)或声明的不可信:边读边数,超了立刻停
+    const body = await readBounded(req, MAX_REQUEST_BYTES);
+    if (!body) return tooLarge();
     let form: FormData;
     try {
-      form = await req.formData();
+      form = await new Response(body, {
+        headers: { "content-type": req.headers.get("content-type") ?? "" },
+      }).formData();
     } catch {
       return Response.json(
         { error: "请用 multipart/form-data 上传,字段名 files" },
@@ -61,6 +94,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     // 逐个处理:解析占 CPU,并发只会让每个都更慢;也让容量上限按顺序判定
     for (const f of files) {
       const name = f.name || "未命名文件";
+      // 先看大小再读内容:超过单文件上限的不转成数组
+      if (f.size > EXTRACT_LIMITS.maxBytes) {
+        results.push({
+          file: name,
+          ok: false,
+          reason: `文件超过 ${Math.round(EXTRACT_LIMITS.maxBytes / 1024 / 1024)}MB 上限`,
+        });
+        continue;
+      }
       const got = await extractText(name, new Uint8Array(await f.arrayBuffer()));
       if (!got.ok) {
         results.push({ file: name, ok: false, reason: got.reason });

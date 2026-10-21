@@ -160,7 +160,10 @@ test.describe("消耗汇总", () => {
       // 第一次:本月点 A
       await row.getByRole("button", { name: target.email }).click();
       const own = page.getByRole("region", { name: "消耗汇总", exact: true });
-      await expect(own.getByTestId("charge-summary-total")).toContainText("7.00");
+      // 账号区域要先载入余额流水再载入汇总,同页还在载入全平台汇总与对账:全量跑时会超过默认的 5 秒
+      await expect(own.getByTestId("charge-summary-total")).toContainText("7.00", {
+        timeout: 15_000,
+      });
       await expect(page.getByTestId("balance-available")).toBeVisible();
 
       // 全平台切到上月,再点同一个 A
@@ -172,7 +175,9 @@ test.describe("消耗汇总", () => {
       await expect(page.locator("#billing-account")).toHaveValue(target.id);
       await expect(page.getByTestId("balance-available")).toBeVisible();
       await expect(own.getByLabel("时间范围")).toHaveValue("last_month");
-      await expect(own.getByTestId("charge-summary-total")).toContainText("100.00");
+      await expect(own.getByTestId("charge-summary-total")).toContainText("100.00", {
+        timeout: 15_000,
+      });
       await expect(page.getByTestId("run-charge-drill")).toContainText("上月");
       const charges = page.getByTestId("run-charge");
       await expect(charges).toHaveCount(1);
