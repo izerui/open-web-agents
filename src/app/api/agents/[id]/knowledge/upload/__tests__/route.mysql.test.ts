@@ -94,14 +94,19 @@ if (!URL_) {
       /**
        * 单连接池 + 仓储,注入延迟:
        * after —— COMMIT 先真的在数据库执行,再拖 ms 毫秒才返回(提交已执行、响应延迟);
-       * before —— 提交前的最后一步(恢复会话等锁超时)拖 ms 毫秒,期间到期,COMMIT 从未发出
+       * before —— 提交前的最后一步(恢复会话等锁超时)拖 ms 毫秒,期间到期,COMMIT 从未发出;
+       * error —— 第一次 COMMIT 不发给数据库、直接报错:连接仍活着,事务仍开着。
+       * threads 记下每次借出的连接的服务端线程号
        */
-      function injected(where: "after" | "before", ms: number) {
+      function injected(where: "after" | "before" | "error", ms = 0) {
+        const threads: number[] = [];
+        let failed = false;
         const p = mysql.createPool({ uri: URL_ as string, connectionLimit: 1 });
         const getConnection = p.getConnection.bind(p);
         const sleep = () => new Promise((ok) => setTimeout(ok, ms));
         p.getConnection = async () => {
           const c = await getConnection();
+          threads.push(c.threadId);
           const query = c.query.bind(c) as (...a: unknown[]) => Promise<unknown>;
           let sets = 0;
           (c as unknown as { query: unknown }).query = async (...a: unknown[]) => {
@@ -110,6 +115,10 @@ if (!URL_) {
               const r = await query(...a);
               await sleep();
               return r;
+            }
+            if (where === "error" && !failed && /^commit$/i.test(text)) {
+              failed = true;
+              throw Object.assign(new Error("COMMIT 出错(注入)"), { errno: 1180 });
             }
             // 第二次设置等锁超时 = 写入、回读之后的恢复,紧接着就是 COMMIT
             if (where === "before" && text.startsWith("SET SESSION innodb_lock_wait_timeout")) {
@@ -121,6 +130,7 @@ if (!URL_) {
         };
         return {
           p,
+          threads,
           repo: new MysqlKnowledgeRepo(
             drizzle(p, { schema, mode: "default" }),
             KNOWLEDGE_LIMITS,
@@ -128,9 +138,9 @@ if (!URL_) {
           ),
         };
       }
-      async function upload(agentId: string) {
+      async function upload(agentId: string, file = "a.txt") {
         const form = new FormData();
-        form.append("files", new Blob(["正文"]), "a.txt");
+        form.append("files", new Blob(["正文"]), file);
         const res = await POST(
           new Request(`http://x/api/agents/${agentId}/knowledge/upload`, {
             method: "POST",
@@ -194,6 +204,48 @@ if (!URL_) {
           expect(await stored(agentId)).toBe(0);
         } finally {
           UPLOAD_LIMITS.budgetMs = saved.budgetMs;
+          await p.end().catch(() => {});
+        }
+      });
+
+      it("COMMIT 报错但连接仍活着、事务仍开着:报结果未知,连接被丢弃;下一次上传用新连接,不会把上一笔一起提交", async () => {
+        const { p, repo, threads } = injected("error");
+        holder.repo = repo;
+        try {
+          const agentId = await newAgent();
+          const first = await upload(agentId, "a.txt");
+          expect(first.results[0]).toMatchObject({ ok: false, uncertain: true });
+          expect(first.results[0]?.reason).not.toContain("没有入库");
+          // 上一笔没提交:别的连接看不到
+          expect(await stored(agentId)).toBe(0);
+
+          const second = await upload(agentId, "b.txt");
+          expect(second.results[0]).toMatchObject({ ok: true });
+          // 单连接池:第二次拿到的是新连接,不是那条挂着事务的
+          expect(threads).toHaveLength(2);
+          expect(threads[1]).not.toBe(threads[0]);
+          // 只有第二个文件入库;第一笔没有被后来的事务顺带提交
+          await new Promise((ok) => setTimeout(ok, 300));
+          const [rows] = await pool.query(
+            "SELECT title FROM knowledge_docs WHERE agent_id = ? ORDER BY title",
+            [agentId],
+          );
+          expect((rows as { title: string }[]).map((x) => x.title)).toEqual(["b"]);
+          // 被丢弃连接的服务端会话随后结束(后台 KILL,轮询等它生效)
+          const alive = async () => {
+            const [ps] = await pool.query(
+              "SELECT COUNT(*) AS n FROM information_schema.processlist WHERE id = ?",
+              [threads[0]],
+            );
+            return Number((ps as { n: number }[])[0]?.n);
+          };
+          let left = await alive();
+          for (let i = 0; i < 40 && left > 0; i++) {
+            await new Promise((ok) => setTimeout(ok, 50));
+            left = await alive();
+          }
+          expect(left).toBe(0);
+        } finally {
           await p.end().catch(() => {});
         }
       });

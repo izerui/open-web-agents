@@ -222,6 +222,21 @@ export class MysqlKnowledgeRepo {
     // 服务端会话不可能再提交)。COMMIT 发出之前终止:确认没有入库;发出之后终止或失联:结果未知
     let terminated: "timeout" | "aborted" | null = null;
     let committing = false;
+    // 事务已确定结束(COMMIT 或 ROLLBACK 成功返回)才是干净的连接,才能还给池子。否则(COMMIT/ROLLBACK
+    // 报错、开事务失败……)连接上可能还挂着未结束的事务:还回去,下一个借用者的 START TRANSACTION
+    // 会把它隐式提交。这种连接一律销毁、结束服务端会话,不再复用
+    let clean = false;
+    /** 销毁连接,并在后台发起 KILL 结束服务端会话(不等 KILL 完成) */
+    const discard = () => {
+      const threadId = (conn as unknown as { connection?: { threadId?: number } }).connection
+        ?.threadId;
+      try {
+        conn.destroy();
+      } catch {
+        // 已经断了
+      }
+      if (threadId) void this.killSession(threadId);
+    };
     let killTimer: ReturnType<typeof setTimeout> | undefined;
     // mysql2 的 destroy() 之后,正在执行的查询的回调再也不会被调用(实测会一直挂着):终止时由这里给出结论
     let stopped: (err: Error) => void = () => {};
@@ -233,14 +248,7 @@ export class MysqlKnowledgeRepo {
       if (terminated) return;
       terminated = why;
       stopped(committing ? new KnowledgeWriteUncertain() : new KnowledgeWriteAborted(why));
-      const threadId = (conn as unknown as { connection?: { threadId?: number } }).connection
-        ?.threadId;
-      try {
-        conn.destroy();
-      } catch {
-        // 已经断了
-      }
-      if (threadId) void this.killSession(threadId);
+      discard();
     };
     const onAbort = () => terminate("aborted");
     if (opts.deadline !== undefined) {
@@ -256,16 +264,24 @@ export class MysqlKnowledgeRepo {
         // 提交前最后一次:此刻放弃,回滚
         check();
       } catch (err) {
-        if (!terminated) await conn.query("ROLLBACK").catch(() => {});
+        if (!terminated) {
+          await conn.query("ROLLBACK").then(
+            () => {
+              clean = true;
+            },
+            () => {},
+          );
+        }
         throw err;
       }
       committing = true;
       try {
         await conn.query("COMMIT");
       } catch {
-        // COMMIT 发出后出错(连接断开等):服务端可能已经提交
+        // COMMIT 发出后出错:服务端可能已经提交,也可能连接还活着、事务仍开着(连接随后丢弃,见 finally)
         throw new KnowledgeWriteUncertain();
       }
+      clean = true;
       // 已提交:立刻撤掉终止计时,之后不再有任何会失败的步骤
       clearTimeout(killTimer);
       committing = false;
@@ -283,7 +299,11 @@ export class MysqlKnowledgeRepo {
     } finally {
       clearTimeout(killTimer);
       opts.signal?.removeEventListener("abort", onAbort);
-      if (!terminated) conn.release();
+      // 终止时已销毁;事务没确定结束的连接也销毁,只有干净的才归还
+      if (!terminated) {
+        if (clean) conn.release();
+        else discard();
+      }
     }
   }
 
