@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { errorText, fetchJson } from "@/lib/fetch-json";
+import type { SummaryWindow } from "@/lib/modules/billing/domain/charge-summary";
 import {
   creditsAmount,
   creditsBalance,
@@ -25,7 +26,7 @@ import { ArrowDownToLine, RefreshCw, Wallet } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { BatchCreditForm } from "./batch-credit-form";
-import { type ChargeDrill, ChargeSummary } from "./charge-summary";
+import { type ChargeDrill, ChargeSummary, WINDOW_LABEL } from "./charge-summary";
 import { PendingCharges } from "./pending-charges";
 import { ReconciliationView } from "./reconciliation-view";
 import { RunChargeList } from "./run-charge-list";
@@ -60,6 +61,8 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
   const creditAttempt = useRef<{ payload: string; key: string } | null>(null);
   /** 从消耗汇总点进来的运行明细筛选;换账号时清掉 */
   const [drill, setDrill] = useState<ChargeDrill | null>(null);
+  /** 账号汇总的初始时间范围:从全平台汇总点账号进来时沿用那边的,其余默认本月 */
+  const [accountRange, setAccountRange] = useState<SummaryWindow>("this_month");
 
   const loadAccounts = useCallback(async () => {
     try {
@@ -172,11 +175,16 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
       {admin && (
         <ChargeSummary
           platform
-          onSelectAccount={(id) => {
+          onSelectAccount={(id, range) => {
             requestSeq.current++;
             setStatement(null);
             setAccountId(id);
-            setDrill(null);
+            setAccountRange(range);
+            // 明细也只看这段时间,和刚才那笔汇总对得上
+            setDrill({
+              label: `${WINDOW_LABEL[range]} · 该账号全部运行`,
+              params: { window: range },
+            });
             setReceipt("");
             creditAttempt.current = null;
           }}
@@ -189,6 +197,7 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
             requestSeq.current++;
             setStatement(null);
             setAccountId(id);
+            setAccountRange("this_month");
             setDrill(null);
             setReceipt("");
             creditAttempt.current = null;
@@ -212,6 +221,7 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
                 requestSeq.current++;
                 setStatement(null);
                 setAccountId(event.target.value);
+                setAccountRange("this_month");
                 setDrill(null);
                 setReceipt("");
                 creditAttempt.current = null;
@@ -329,8 +339,9 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
       )}
       {statement && (
         <ChargeSummary
-          key={admin ? accountId : "self"}
+          key={admin ? `${accountId}:${accountRange}` : "self"}
           accountId={admin ? accountId : undefined}
+          initialRange={accountRange}
           onDrill={setDrill}
         />
       )}

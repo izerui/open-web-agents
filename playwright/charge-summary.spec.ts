@@ -39,6 +39,8 @@ async function seedRun(
   source: string,
   apiKeyId: string | null,
   credits: number,
+  /** 受理时间的 SQL 表达式;默认现在 */
+  at = "NOW(3)",
 ) {
   const sessionId = id();
   const runId = id();
@@ -55,7 +57,7 @@ async function seedRun(
     `INSERT INTO run_charges (run_id, account_id, api_key_id, mode, reserved_micro, reservation_ids,
        estimated_micro, charged_micro, owed_micro, state, would_reject, incomplete, settled_cost_digest,
        created_at, settled_at)
-     VALUES (?, ?, ?, 'live', 0, '[]', ?, ?, NULL, 'settled', NULL, 0, 'd', NOW(3), NOW(3))`,
+     VALUES (?, ?, ?, 'live', 0, '[]', ?, ?, NULL, 'settled', NULL, 0, 'd', ${at}, ${at})`,
     [runId, accountId, apiKeyId, micro, micro],
   );
   return runId;
@@ -63,6 +65,67 @@ async function seedRun(
 
 test.describe("消耗汇总", () => {
   test.skip(!DB || !/test/i.test(new URL(DB).pathname), "需要专用测试库");
+
+  test("全平台选上月 → 点账号 → 账号汇总与运行明细仍只看上月", async ({
+    page,
+    context,
+    browser,
+  }) => {
+    const admin = await register(context, "summary-range-admin");
+    const promoted = admin.role !== "admin";
+    if (promoted) await sql("UPDATE users SET role = 'admin' WHERE id = ?", [admin.id]);
+    const other = await browser.newContext();
+    const target = await register(other, "summary-range-target");
+    await other.close();
+    const agentId = id();
+    await sql(
+      "INSERT INTO agents (id, owner_id, name, config) VALUES (?, ?, 'PW 上月核对', '{}')",
+      [agentId, target.id],
+    );
+    // 上月中旬一笔 100(离月界 10 天,不受时区影响),本月一笔 7
+    const lastMonth = await seedRun(
+      target.id,
+      agentId,
+      "web",
+      null,
+      100,
+      "DATE_SUB(DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-01'), INTERVAL 10 DAY)",
+    );
+    const thisMonth = await seedRun(target.id, agentId, "web", null, 7);
+    try {
+      await page.goto(`${BASE}/admin/billing`);
+      const platform = page.getByRole("region", { name: "全平台消耗汇总" });
+      await platform.getByLabel("时间范围").selectOption("last_month");
+      await platform.getByRole("button", { name: "按账号" }).click();
+      const row = platform.getByTestId("charge-summary-row").filter({ hasText: target.email });
+      await expect(row).toContainText("100.00");
+      await row.getByRole("button", { name: target.email }).click();
+      await expect(page.locator("#billing-account")).toHaveValue(target.id);
+
+      // 账号汇总沿用"上月":只有那 100
+      const own = page.getByRole("region", { name: "消耗汇总", exact: true });
+      await expect(own.getByLabel("时间范围")).toHaveValue("last_month");
+      await expect(own.getByTestId("charge-summary-total")).toContainText("100.00");
+      await expect(own.getByTestId("charge-summary-total")).not.toContainText("107.00");
+      // 运行明细也只看上月
+      await expect(page.getByTestId("run-charge-drill")).toContainText("上月");
+      const charges = page.getByTestId("run-charge");
+      await expect(charges).toHaveCount(1);
+      await expect(charges.first()).toContainText(lastMonth);
+
+      // 对照:看全部时两笔都在;从下拉换账号再换回来,回到默认本月
+      await page.getByRole("button", { name: "看全部" }).click();
+      await expect(charges).toHaveCount(2);
+      await expect(charges.filter({ hasText: thisMonth })).toHaveCount(1);
+      await page.locator("#billing-account").selectOption("");
+      await page.locator("#billing-account").selectOption(target.id);
+      await expect(own.getByLabel("时间范围")).toHaveValue("this_month");
+      await expect(own.getByTestId("charge-summary-total")).toContainText("7.00");
+      await expect(page.getByTestId("run-charge-drill")).toHaveCount(0);
+    } finally {
+      if (promoted) await sql("UPDATE users SET role = 'user' WHERE id = ?", [admin.id]);
+    }
+  });
 
   test("积分页:按来源 / 智能体 / Key 汇总,点一行筛出明细;token 用量页说明以积分页为准", async ({
     page,

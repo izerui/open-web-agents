@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 import { RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const WINDOW_LABEL: Record<SummaryWindow, string> = {
+export const WINDOW_LABEL: Record<SummaryWindow, string> = {
   this_month: "本月",
   last_month: "上月",
   "30d": "近 30 天",
@@ -69,17 +69,21 @@ export function ChargeSummary({
   platform = false,
   onDrill,
   onSelectAccount,
+  initialRange = "this_month",
 }: {
   accountId?: string;
   platform?: boolean;
   onDrill?: (drill: ChargeDrill) => void;
-  onSelectAccount?: (id: string) => void;
+  /** 点账号时把当前时间范围一起带过去,账号汇总与明细沿用它,才能核对刚才那笔 */
+  onSelectAccount?: (id: string, range: SummaryWindow) => void;
+  /** 打开时的时间范围(从全平台汇总点账号进来时沿用那边的) */
+  initialRange?: SummaryWindow;
 }) {
   const dimensions: SummaryDimension[] = platform
     ? ["source", "agent", "account"]
     : ["source", "agent", "key"];
   const [by, setBy] = useState<SummaryDimension>("source");
-  const [range, setRange] = useState<SummaryWindow>("this_month");
+  const [range, setRange] = useState<SummaryWindow>(initialRange);
   const [rows, setRows] = useState<ChargeSummaryRow[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -112,7 +116,7 @@ export function ChargeSummary({
     by === "account" ? Boolean(r.key && onSelectAccount) : Boolean(onDrill);
   const open = (r: ChargeSummaryRow) => {
     if (by === "account") {
-      if (r.key) onSelectAccount?.(r.key);
+      if (r.key) onSelectAccount?.(r.key, range);
       return;
     }
     const params = drillParams(by, r);
