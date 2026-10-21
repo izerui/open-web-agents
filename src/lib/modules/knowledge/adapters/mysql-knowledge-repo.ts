@@ -12,6 +12,7 @@ import { type Chunk, chunkText } from "@/lib/modules/knowledge/domain/retrieval"
 import { asc, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import type mysql from "mysql2/promise";
+import mysqlPromise from "mysql2/promise";
 
 export interface KnowledgeDoc {
   id: string;
@@ -131,8 +132,39 @@ export class MysqlKnowledgeRepo {
         : null;
     const db = conn ? (drizzle(conn, { schema, mode: "default" }) as unknown as Db) : this.db;
     let saved: KnowledgeDoc[] = [];
+    // 【独占连接上主动终止】只靠事务里的两次 check() 是被动的:正在等锁(或执行任何一条查询)时断开或到点,
+    // 查询会一直等下去,连接与上传名额都被占着。所以取消或到期时直接销毁这个连接,并在服务端 KILL 掉它的会话
+    // —— 未提交的事务随之回滚,不可能再提交。等锁、计数、插入、回读、恢复会话设置都在同一个期限里
+    let terminated: "timeout" | "aborted" | null = null;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    // mysql2 的 destroy() 之后,正在执行的查询的回调再也不会被调用(实测会一直挂着):
+    // 终止时由这里给出结论。连接已销毁、服务端会话已 KILL,事务不可能再继续或提交
+    let stopped: (err: Error) => void = () => {};
+    const stoppedPromise = new Promise<never>((_, reject) => {
+      stopped = reject;
+    });
+    stoppedPromise.catch(() => {});
+    const terminate = (why: "timeout" | "aborted") => {
+      if (!conn || terminated) return;
+      terminated = why;
+      stopped(new KnowledgeWriteAborted(why));
+      const threadId = (conn as unknown as { connection?: { threadId?: number } }).connection
+        ?.threadId;
+      try {
+        conn.destroy();
+      } catch {
+        // 已经断了
+      }
+      if (threadId) void this.killSession(threadId);
+    };
+    const onAbort = () => terminate("aborted");
+    if (conn && opts.deadline !== undefined) {
+      killTimer = setTimeout(() => terminate("timeout"), Math.max(0, opts.deadline - Date.now()));
+      opts.signal?.addEventListener("abort", onAbort, { once: true });
+      if (opts.signal?.aborted) onAbort();
+    }
     try {
-      await db.transaction(async (tx) => {
+      const writing = db.transaction(async (tx) => {
         let restoreLockWait: number | null = null;
         try {
           if (opts.deadline !== undefined) {
@@ -205,10 +237,40 @@ export class MysqlKnowledgeRepo {
           }
         }
       });
+      writing.catch(() => {});
+      await (conn ? Promise.race([writing, stoppedPromise]) : writing);
+    } catch (err) {
+      // 连接是我们终止的:按终止原因报,不报底层的"连接已断开"
+      if (terminated) throw new KnowledgeWriteAborted(terminated);
+      throw err;
     } finally {
-      conn?.release();
+      clearTimeout(killTimer);
+      opts.signal?.removeEventListener("abort", onAbort);
+      if (conn && !terminated) conn.release();
     }
     return saved;
+  }
+
+  /**
+   * 在服务端结束一个会话(另开一条临时连接执行 KILL,不占连接池)。只销毁本地连接时,服务端那条
+   * 会话可能还在等锁,直到等锁超时才发现客户端没了。尽力而为、有界:失败不影响结果(事务未提交,
+   * 连接已断,本来就提交不了)
+   */
+  private async killSession(threadId: number): Promise<void> {
+    const config = (this.pool as unknown as { pool?: { config?: { connectionConfig?: object } } })
+      ?.pool?.config?.connectionConfig;
+    if (!config) return;
+    let killer: mysql.Connection | undefined;
+    const timer = setTimeout(() => killer?.destroy(), 5_000);
+    try {
+      killer = await mysqlPromise.createConnection({ ...config, connectTimeout: 3_000 });
+      await killer.query("KILL ?", [threadId]);
+    } catch {
+      // 会话可能已经自己结束了
+    } finally {
+      clearTimeout(timer);
+      await killer?.end().catch(() => killer?.destroy());
+    }
   }
 
   async get(id: string): Promise<KnowledgeDoc | null> {

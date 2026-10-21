@@ -110,6 +110,79 @@ if (!TEST_DB_URL) {
           }
         });
 
+        it("拿到连接、进入锁等待后取消,锁一直不放:及时返回,连接被终止不再占用,服务端会话也已结束;之后放锁也不落库", async () => {
+          const { p, r } = singlePool();
+          const lockConn = await pool.getConnection();
+          try {
+            const agentId = await newAgent();
+            await lockConn.query("BEGIN");
+            await lockConn.query("SELECT id FROM agents WHERE id = ? FOR UPDATE", [agentId]);
+            // 服务端有没有这次写入的会话还停在锁上(按语句与智能体 id 找;innodb_trx 在等锁的瞬间不一定列出它)
+            const waiting = async () => {
+              const [rows] = await pool.query(
+                "SELECT COUNT(*) AS n FROM information_schema.processlist WHERE info LIKE ?",
+                [`SELECT id FROM agents WHERE id = '${agentId}' LIMIT 1 FOR UPDATE%`],
+              );
+              return Number((rows as { n: number }[])[0]?.n);
+            };
+            const ac = new AbortController();
+            const writing = r.createMany(agentId, [doc(agentId, "断开")], {
+              deadline: Date.now() + 50_000,
+              signal: ac.signal,
+            });
+            // 确认它确实进入了锁等待,再取消
+            for (let i = 0; i < 50 && (await waiting()) === 0; i++) {
+              await new Promise((res) => setTimeout(res, 50));
+            }
+            expect(await waiting()).toBeGreaterThan(0);
+            const start = Date.now();
+            ac.abort();
+            await expect(writing).rejects.toMatchObject({ why: "aborted" });
+            expect(Date.now() - start).toBeLessThan(1_000);
+            // 服务端那个等锁的会话已被终止(不是等到 50 秒的等锁超时)
+            let left = await waiting();
+            for (let i = 0; i < 20 && left > 0; i++) {
+              await new Promise((res) => setTimeout(res, 50));
+              left = await waiting();
+            }
+            expect(left).toBe(0);
+            // 单连接池仍可用:被终止的连接没有占着名额
+            const t = Date.now();
+            await p.query("SELECT 1");
+            expect(Date.now() - t).toBeLessThan(1_000);
+            await lockConn.query("COMMIT");
+            await new Promise((res) => setTimeout(res, 200));
+            expect(await count(agentId)).toBe(0);
+          } finally {
+            await lockConn.query("ROLLBACK").catch(() => {});
+            lockConn.release();
+            await p.end();
+          }
+        });
+
+        it("期限在锁等待中到达、锁一直不放:按期限结束,不等到等锁超时", async () => {
+          const { p, r } = singlePool();
+          const lockConn = await pool.getConnection();
+          try {
+            const agentId = await newAgent();
+            await lockConn.query("BEGIN");
+            await lockConn.query("SELECT id FROM agents WHERE id = ? FOR UPDATE", [agentId]);
+            const start = Date.now();
+            // 期限 1.3 秒:等锁时间按整秒取到 2 秒,应按期限而不是 2 秒结束
+            await expect(
+              r.createMany(agentId, [doc(agentId, "到期")], { deadline: Date.now() + 1_300 }),
+            ).rejects.toMatchObject({ why: "timeout" });
+            expect(Date.now() - start).toBeLessThan(1_800);
+            await lockConn.query("COMMIT");
+            await new Promise((res) => setTimeout(res, 200));
+            expect(await count(agentId)).toBe(0);
+          } finally {
+            await lockConn.query("ROLLBACK").catch(() => {});
+            lockConn.release();
+            await p.end();
+          }
+        });
+
         it("对照:没有争用时照常写入,返回的是事务内回读的完整记录", async () => {
           const { p, r } = singlePool();
           try {
