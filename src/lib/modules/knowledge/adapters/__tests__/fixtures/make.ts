@@ -1,0 +1,83 @@
+// 测试用的最小真实文件:docx / pptx / xlsx 按 OOXML 结构现场打包,PDF 手写对象与交叉引用表。
+import { strToU8, zipSync } from "fflate";
+
+const enc = (s: string) => strToU8(s);
+
+export function docx(paragraphs: string[]): Uint8Array {
+  const body = paragraphs
+    .map((p) => `<w:p><w:r><w:t xml:space="preserve">${p}</w:t></w:r></w:p>`)
+    .join("");
+  return zipSync({
+    "[Content_Types].xml": enc(
+      '<Types><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>',
+    ),
+    "word/document.xml": enc(`<w:document><w:body>${body}</w:body></w:document>`),
+  });
+}
+
+export function pptx(slides: string[][]): Uint8Array {
+  const files: Record<string, Uint8Array> = {
+    "[Content_Types].xml": enc(
+      '<Types><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/></Types>',
+    ),
+  };
+  slides.forEach((lines, i) => {
+    files[`ppt/slides/slide${i + 1}.xml`] = enc(
+      `<p:sld><p:cSld><p:spTree>${lines.map((l) => `<a:p><a:r><a:t>${l}</a:t></a:r></a:p>`).join("")}</p:spTree></p:cSld></p:sld>`,
+    );
+  });
+  return zipSync(files);
+}
+
+export function xlsx(): Uint8Array {
+  return zipSync({
+    "[Content_Types].xml": enc(
+      '<Types><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/></Types>',
+    ),
+    "xl/workbook.xml": enc(
+      '<workbook><sheets><sheet name="成绩" sheetId="1" r:id="rId1"/><sheet name="说明&amp;备注" sheetId="2" r:id="rId2"/></sheets></workbook>',
+    ),
+    "xl/_rels/workbook.xml.rels": enc(
+      '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Target="worksheets/sheet2.xml"/></Relationships>',
+    ),
+    "xl/sharedStrings.xml": enc(
+      "<sst><si><t>姓名</t></si><si><t>分数</t></si><si><t>张三</t></si></sst>",
+    ),
+    "xl/worksheets/sheet1.xml": enc(
+      '<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row><row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2"><v>95.5</v></c></row></sheetData></worksheet>',
+    ),
+    "xl/worksheets/sheet2.xml": enc(
+      '<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>满分 100</t></is></c></row></sheetData></worksheet>',
+    ),
+  });
+}
+
+/** 手写一个单页 PDF。cjk=true 时用 STSong-Light + UniGB-UCS2-H(不嵌入字体,靠 CMap 才能取出文字) */
+export function pdf(text: string, opts: { cjk?: boolean; empty?: boolean } = {}): Uint8Array {
+  const font = opts.cjk
+    ? "<< /Type /Font /Subtype /Type0 /BaseFont /STSong-Light /Encoding /UniGB-UCS2-H /DescendantFonts [6 0 R] >>"
+    : "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
+  const shown = opts.cjk
+    ? `<${[...text].map((c) => c.charCodeAt(0).toString(16).padStart(4, "0")).join("")}>`
+    : `(${text})`;
+  const stream = opts.empty ? "0 0 m 100 100 l S" : `BT /F1 20 Tf 20 100 Td ${shown} Tj ET`;
+  const objs = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    font,
+    "<< /Type /Font /Subtype /CIDFontType0 /BaseFont /STSong-Light /CIDSystemInfo << /Registry (Adobe) /Ordering (GB1) /Supplement 2 >> /FontDescriptor 7 0 R >>",
+    "<< /Type /FontDescriptor /FontName /STSong-Light /Flags 6 /FontBBox [0 -200 1000 900] /ItalicAngle 0 /Ascent 880 /Descent -120 /CapHeight 880 /StemV 93 >>",
+  ];
+  let out = "%PDF-1.4\n";
+  const offs: number[] = [];
+  objs.forEach((o, i) => {
+    offs.push(out.length);
+    out += `${i + 1} 0 obj\n${o}\nendobj\n`;
+  });
+  const xref = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offs.map((o) => `${String(o).padStart(10, "0")} 00000 n \n`).join("")}`;
+  out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Uint8Array.from(out, (c) => c.charCodeAt(0));
+}

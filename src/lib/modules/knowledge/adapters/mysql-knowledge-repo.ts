@@ -4,7 +4,7 @@ import {
   KNOWLEDGE_LIMITS,
   KnowledgeLimitExceeded,
   type KnowledgeLimits,
-  limitViolation,
+  batchLimitViolation,
 } from "@/lib/modules/knowledge/domain/limits";
 import { type Chunk, chunkText } from "@/lib/modules/knowledge/domain/retrieval";
 import { asc, eq, sql } from "drizzle-orm";
@@ -48,13 +48,25 @@ export class MysqlKnowledgeRepo {
    * 计数与插入在同一事务里、先锁住智能体那一行:并发上传不能各自看到"还差一篇"而一起越过上限。
    */
   async create(d: NewKnowledgeDoc): Promise<KnowledgeDoc> {
+    const [got] = await this.createMany(d.agentId, [d]);
+    if (!got) throw new Error(`knowledge doc insert failed: ${d.id}`);
+    return got;
+  }
+
+  /**
+   * 一次新增多篇(上传的长文件切成的几篇):全部进库或全部不进,上限按这几篇合计判定。
+   * 计数与插入在同一事务里、先锁住智能体那一行 —— 并发上传不能各自看到"还差一篇"而一起越过上限。
+   */
+  async createMany(agentId: string, docs: NewKnowledgeDoc[]): Promise<KnowledgeDoc[]> {
+    if (docs.some((d) => d.agentId !== agentId)) throw new Error("docs 必须属于同一个智能体");
+    if (docs.length === 0) return [];
     await this.db.transaction(async (tx) => {
       const locked = await tx.execute(
-        sql`SELECT id FROM agents WHERE id = ${d.agentId} LIMIT 1 FOR UPDATE`,
+        sql`SELECT id FROM agents WHERE id = ${agentId} LIMIT 1 FOR UPDATE`,
       );
       const lockedRows = (locked as unknown as [unknown[]])[0];
       if (!Array.isArray(lockedRows) || lockedRows.length === 0) {
-        throw new Error(`agent not found: ${d.agentId}`);
+        throw new Error(`agent not found: ${agentId}`);
       }
       const [u] = await tx
         .select({
@@ -62,18 +74,22 @@ export class MysqlKnowledgeRepo {
           chars: sql<number>`COALESCE(SUM(CHAR_LENGTH(${knowledgeDocs.content})), 0)`,
         })
         .from(knowledgeDocs)
-        .where(eq(knowledgeDocs.agentId, d.agentId));
-      const reason = limitViolation(
+        .where(eq(knowledgeDocs.agentId, agentId));
+      const reason = batchLimitViolation(
         { docs: Number(u?.docs ?? 0), chars: Number(u?.chars ?? 0) },
-        [...d.content].length,
+        docs.map((d) => [...d.content].length),
         this.limits,
       );
       if (reason) throw new KnowledgeLimitExceeded(reason);
-      await tx.insert(knowledgeDocs).values(d);
+      await tx.insert(knowledgeDocs).values(docs);
     });
-    const got = await this.get(d.id);
-    if (!got) throw new Error(`knowledge doc insert failed: ${d.id}`);
-    return got;
+    const out: KnowledgeDoc[] = [];
+    for (const d of docs) {
+      const got = await this.get(d.id);
+      if (!got) throw new Error(`knowledge doc insert failed: ${d.id}`);
+      out.push(got);
+    }
+    return out;
   }
 
   async get(id: string): Promise<KnowledgeDoc | null> {

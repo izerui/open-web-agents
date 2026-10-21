@@ -33,13 +33,27 @@ export function limitViolation(
   addChars: number,
   limits: KnowledgeLimits = KNOWLEDGE_LIMITS,
 ): string | null {
-  if (addChars > limits.maxDocChars) {
+  return batchLimitViolation(current, [addChars], limits);
+}
+
+/** 一次新增多篇(一个文件切成的几篇要么都进、要么都不进)是否超限 */
+export function batchLimitViolation(
+  current: { docs: number; chars: number },
+  addChars: number[],
+  limits: KnowledgeLimits = KNOWLEDGE_LIMITS,
+): string | null {
+  if (addChars.some((n) => n > limits.maxDocChars)) {
     return `单篇文档过长(上限 ${limits.maxDocChars.toLocaleString()} 字),请拆分`;
   }
-  if (current.docs + 1 > limits.maxDocs) {
+  const docs = addChars.length;
+  const chars = addChars.reduce((a, b) => a + b, 0);
+  if (current.docs + docs > limits.maxDocs) {
+    if (docs > 1) {
+      return `该智能体已有 ${current.docs} 篇文档,再加这 ${docs} 篇会超过上限 ${limits.maxDocs} 篇;请先删除不用的文档`;
+    }
     return `该智能体已有 ${current.docs} 篇文档,达到上限 ${limits.maxDocs} 篇;请先删除不用的文档`;
   }
-  if (current.chars + addChars > limits.maxTotalChars) {
+  if (current.chars + chars > limits.maxTotalChars) {
     return `该智能体的知识库合计将超过 ${limits.maxTotalChars.toLocaleString()} 字的上限;请先删除不用的文档`;
   }
   return null;

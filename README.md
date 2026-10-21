@@ -85,6 +85,12 @@ curl localhost:5678/api/agents/<taskId>/result -H "X-Api-Key: <key>"
 工作副本只包含资源引用,不复制 MCP 凭证或技能脚本。目标的归属、回调、图标与逃生舱保留。
 应用只保存草稿,不发布。尚未发布过的智能体沿用原有“调用草稿”的兼容规则。
 
+**知识库上传文件**:知识库面板可一次上传多个文件(或拖进来),提取文字后存成文档,只存文字不存原文件。
+支持 PDF(含不嵌入字体、靠 CMap 编码的中文 PDF)、Word(.docx)、PPT(.pptx,按页)、Excel(.xlsx,按工作表)、
+纯文本(UTF-8 / GBK)。旧版 .doc / .ppt / .xls、扫描版 PDF、加密文件给出原因拒绝。单个文件 20MB、PDF 500 页、
+解压后大小、解析时长都有上限。超过单篇上限的文件按顺序切成「文件名(1/3)」几篇,要么都进要么都不进。
+**检索测试**:输入问题,按运行时同一份检索逻辑显示会命中哪些片段与实际注入给模型的文本,不调用模型。
+
 **智能体提问**:网页对话与 AI 编辑里,智能体提问(AskUserQuestion)时运行停在原地等回答 —— 复用审批的跨进程通道,
 上限 10 分钟,期间照常冻结积分。每题可点选项,也可自己填写;提交后模型在同一轮继续。也可以选择不回答。
 超时或运行被停止时模型得到"用户没有回答",按自己的判断继续;接口调用、API Key 建的多轮会话、评测
@@ -354,6 +360,8 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 | GET             | `/api/agents/{id}/webhook/deliveries`      | cookie(所有者)          | 回调投递记录              |
 | POST            | `/api/agents/{id}/webhook/test`            | cookie(所有者)          | 测试投递                |
 | POST            | `/api/runs/{id}/webhook/redeliver`         | cookie(所有者)          | 手动重发回调              |
+| POST            | `/api/agents/{id}/knowledge/upload`        | cookie(write)          | 上传文件到知识库(multipart,字段 `files`,可多个),逐个返回结果 |
+| POST            | `/api/agents/{id}/knowledge/search`        | cookie / key(read)     | 检索测试:`{ query }` → 命中片段与实际注入文本 |
 | POST            | `/api/agents/mcp-check`                    | cookie(write)          | MCP 测试连接(构建器):`{ agentId?, server, variables? }`,握手并列出工具,不调用工具 |
 | POST            | `/api/agents/design/{id}/mcp-check`        | cookie                 | MCP 测试连接(AI 编辑):`{ name }`,按已保存草稿里还原后的真实配置测试 |
 | GET             | `/api/audit`                               | cookie                 | 审计日志(与自己相关的;管理员 `scope=all` 看全部) |

@@ -88,7 +88,11 @@ import { signingSecretsOf } from "@/lib/modules/integration/domain/signing-secre
 import { isAddressAllowed } from "@/lib/modules/integration/domain/webhook-policy";
 import { MysqlKnowledgeRepo } from "@/lib/modules/knowledge/adapters/mysql-knowledge-repo";
 import { ChunkCache } from "@/lib/modules/knowledge/application/chunk-cache";
-import { formatContext, retrieve } from "@/lib/modules/knowledge/domain/retrieval";
+import {
+  type ScoredChunk,
+  formatContext,
+  retrieve,
+} from "@/lib/modules/knowledge/domain/retrieval";
 import { AnthropicHttpProbe } from "@/lib/modules/model-gateway/adapters/anthropic-probe";
 import { EnvModelGateway } from "@/lib/modules/model-gateway/adapters/env-gateway";
 import {
@@ -154,6 +158,14 @@ export interface Container {
   runQuery: MysqlRunQuery;
   usage: MysqlUsageRepo;
   knowledge: MysqlKnowledgeRepo;
+  /**
+   * 知识库检索测试:与运行时同一份检索逻辑与缓存 —— 命中哪些片段、实际会注入给模型的文本。
+   * 运行时的 retrieveKnowledge 也走它,两边不会各算各的
+   */
+  searchKnowledge(
+    agentId: string,
+    query: string,
+  ): Promise<{ hits: ScoredChunk[]; context: string }>;
   orchestrator: RunOrchestrator;
   /** 所有发起运行的入口都经它入队(限长、配置快照、加密覆盖、幂等)。 */
   enqueuer: RunEnqueuer;
@@ -314,6 +326,12 @@ function build(): Container {
   const usage = new MysqlUsageRepo(db);
   const knowledge = new MysqlKnowledgeRepo(db);
   const knowledgeChunks = new ChunkCache(knowledge);
+  const searchKnowledge = async (agentId: string, query: string) => {
+    const chunks = await knowledgeChunks.chunksOf(agentId);
+    if (chunks.length === 0) return { hits: [], context: "" };
+    const hits = retrieve(query, chunks);
+    return { hits, context: formatContext(hits) };
+  };
   const capabilities = new MysqlCapabilityRepo(db);
   const pricedModels = new PricedModels(capabilities);
   const providers = new MysqlProviderRepo(db);
@@ -462,11 +480,7 @@ function build(): Container {
         await fs.mkdir(dir, { recursive: true });
       }),
     // 知识检索:没有文档或没命中都返回空串,上层据此决定不注入
-    retrieveKnowledge: async (agentId, query) => {
-      const chunks = await knowledgeChunks.chunksOf(agentId);
-      if (chunks.length === 0) return "";
-      return formatContext(retrieve(query, chunks));
-    },
+    retrieveKnowledge: async (agentId, query) => (await searchKnowledge(agentId, query)).context,
     resolveVariables: async (agentId, userId) => {
       return variableRepo.get(agentId, userId);
     },
@@ -669,6 +683,7 @@ function build(): Container {
     runQuery: new MysqlRunQuery(db),
     usage,
     knowledge,
+    searchKnowledge,
     knowledgeWriterFactory: (txDb: Db) => new MysqlKnowledgeRepo(txDb),
     orchestrator,
     enqueuer,

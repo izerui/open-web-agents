@@ -48,6 +48,28 @@ if (!TEST_DB_URL) {
   });
 
   describe("MysqlKnowledgeRepo(真实 MySQL)", () => {
+    it("createMany:一个文件切成的几篇要么都进、要么都不进,上限按合计判定", async () => {
+      const agentId = await newAgent();
+      await repo.create(doc(agentId, "x".repeat(40)));
+      // 再加 3 篇会超 3 篇上限:一篇都不进
+      await expect(
+        repo.createMany(agentId, [doc(agentId, "a"), doc(agentId, "b"), doc(agentId, "c")]),
+      ).rejects.toBeInstanceOf(KnowledgeLimitExceeded);
+      expect((await repo.list(agentId)).docs).toHaveLength(1);
+      // 合计字数超 100:一篇都不进
+      await expect(
+        repo.createMany(agentId, [doc(agentId, "y".repeat(40)), doc(agentId, "z".repeat(30))]),
+      ).rejects.toBeInstanceOf(KnowledgeLimitExceeded);
+      expect((await repo.list(agentId)).docs).toHaveLength(1);
+      // 两篇、合计 60 字:都进
+      const saved = await repo.createMany(agentId, [
+        doc(agentId, "y".repeat(30)),
+        doc(agentId, "z".repeat(30)),
+      ]);
+      expect(saved).toHaveLength(2);
+      expect((await repo.list(agentId)).docs).toHaveLength(3);
+    });
+
     it("超额旧数据:列表标出的可检索集合与检索实际取到的完全一致(含同一秒写入的文档)", async () => {
       const agentId = await newAgent();
       // 绕过上限直接写入 5 篇,模拟上限设立之前的数据;同一秒写入,只按时间排序是不确定的

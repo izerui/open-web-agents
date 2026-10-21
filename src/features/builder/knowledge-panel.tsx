@@ -7,6 +7,8 @@ import { errorText, fetchJson } from "@/lib/fetch-json";
 import { cn } from "@/lib/utils";
 import { ChevronDown, ChevronRight, FileText, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { KnowledgeSearch } from "./knowledge-search";
+import { KnowledgeUpload } from "./knowledge-upload";
 
 interface Doc {
   id: string;
@@ -246,6 +248,8 @@ export function KnowledgePanel({
         </p>
       )}
 
+      {canWrite && <KnowledgeUpload agentId={agentId} onUploaded={reload} />}
+
       {canWrite && (
         <>
           <Input
@@ -373,6 +377,8 @@ export function KnowledgePanel({
           )}
         </div>
       ))}
+
+      {loaded && docs.length > 0 && <KnowledgeSearch agentId={agentId} />}
     </div>
   );
 }
