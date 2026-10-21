@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { errorText } from "@/lib/fetch-json";
 import { cn } from "@/lib/utils";
-import { CheckCircle2, Loader2, Upload, XCircle } from "lucide-react";
+import { CheckCircle2, HelpCircle, Loader2, Upload, XCircle } from "lucide-react";
 import { useRef, useState } from "react";
 
 type FileResult =
@@ -14,7 +14,7 @@ type FileResult =
       pages?: number;
       docs: { title: string; chars: number }[];
     }
-  | { file: string; ok: false; reason: string };
+  | { file: string; ok: false; reason: string; uncertain?: true };
 
 const ACCEPT = ".pdf,.docx,.pptx,.xlsx,.txt,.md,.markdown,.csv";
 const FORMAT_LABEL: Record<string, string> = {
@@ -60,7 +60,8 @@ export function KnowledgeUpload({
       };
       if (data.results) setResults(data.results);
       else setError(data.error ?? `上传失败(HTTP ${res.status})`);
-      if (data.results?.some((r) => r.ok)) await onUploaded();
+      // 结果未知的也刷新列表:用户要据此核对是否已入库
+      if (data.results?.some((r) => r.ok || r.uncertain)) await onUploaded();
     } catch (err) {
       setError(`上传失败:${errorText(err)}`);
     } finally {
@@ -111,6 +112,8 @@ export function KnowledgeUpload({
             <li key={`${r.file}-${i}`} className="flex items-start gap-1.5">
               {r.ok ? (
                 <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
+              ) : r.uncertain ? (
+                <HelpCircle className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
               ) : (
                 <XCircle className="mt-0.5 size-3.5 shrink-0 text-destructive" />
               )}
@@ -125,7 +128,10 @@ export function KnowledgeUpload({
                     {r.docs.length > 1 ? `,较长,已切成 ${r.docs.length} 篇` : ""}
                   </span>
                 ) : (
-                  <span className="text-destructive"> — {r.reason}</span>
+                  <span className={r.uncertain ? "text-amber-700" : "text-destructive"}>
+                    {" "}
+                    — {r.reason}
+                  </span>
                 )}
               </span>
             </li>

@@ -28,6 +28,17 @@ export class KnowledgeLimitExceeded extends BrandedError {
 }
 
 /**
+ * 提交结果未知:COMMIT 已经发出,之后到期、取消或失联,没有拿到提交的结果 —— 可能已经入库。
+ * 不能说"没有入库"(用户据此重传就会重复导入),只能请用户刷新核对
+ */
+export class KnowledgeWriteUncertain extends BrandedError {
+  static readonly brand = Symbol.for("owa.error.KnowledgeWriteUncertain");
+  constructor() {
+    super("提交结果未知,可能已经写入知识库");
+  }
+}
+
+/**
  * 写入在提交前被放弃:到了调用方的期限(含等锁超时),或调用方已取消(如上传连接断开)。
  * 事务已回滚,一篇都没有写进去
  */

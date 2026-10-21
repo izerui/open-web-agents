@@ -110,7 +110,7 @@ if (!TEST_DB_URL) {
           }
         });
 
-        it("拿到连接、进入锁等待后取消,锁一直不放:及时返回,连接被终止不再占用,服务端会话也已结束;之后放锁也不落库", async () => {
+        it("拿到连接、进入锁等待后取消,锁一直不放:及时返回(不等 KILL),连接被终止不再占用,服务端会话随后被后台 KILL 结束;之后放锁也不落库", async () => {
           const { p, r } = singlePool();
           const lockConn = await pool.getConnection();
           try {
@@ -139,7 +139,7 @@ if (!TEST_DB_URL) {
             ac.abort();
             await expect(writing).rejects.toMatchObject({ why: "aborted" });
             expect(Date.now() - start).toBeLessThan(1_000);
-            // 服务端那个等锁的会话已被终止(不是等到 50 秒的等锁超时)
+            // 返回时 KILL 只是已发起:轮询等它生效,服务端那个等锁的会话随即被终止(不是等到 50 秒的等锁超时)
             let left = await waiting();
             for (let i = 0; i < 20 && left > 0; i++) {
               await new Promise((res) => setTimeout(res, 50));

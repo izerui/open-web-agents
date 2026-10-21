@@ -1,5 +1,6 @@
 // 上传入库在连接池占满时有界(真实 MySQL 仓储):连接被占住 → 上传进入入库 → 总时长到期 →
 // 之后才释放连接。请求必须按时结束、标为没有入库,连接释放后核对确实没有落库,上传名额已归还。
+// 另有提交阶段的故障注入:COMMIT 已在数据库执行、响应迟迟不回 → 接口不能声称"没有入库"。
 import { randomUUID } from "node:crypto";
 import * as schema from "@/lib/db/schema";
 import { MysqlKnowledgeRepo } from "@/lib/modules/knowledge/adapters/mysql-knowledge-repo";
@@ -87,6 +88,115 @@ if (!URL_) {
         { params: Promise.resolve({ id: agentId }) },
       );
       expect(ok.status).toBe(201);
+    });
+
+    describe("上传入库:提交阶段失联", { timeout: 30_000 }, () => {
+      /**
+       * 单连接池 + 仓储,注入延迟:
+       * after —— COMMIT 先真的在数据库执行,再拖 ms 毫秒才返回(提交已执行、响应延迟);
+       * before —— 提交前的最后一步(恢复会话等锁超时)拖 ms 毫秒,期间到期,COMMIT 从未发出
+       */
+      function injected(where: "after" | "before", ms: number) {
+        const p = mysql.createPool({ uri: URL_ as string, connectionLimit: 1 });
+        const getConnection = p.getConnection.bind(p);
+        const sleep = () => new Promise((ok) => setTimeout(ok, ms));
+        p.getConnection = async () => {
+          const c = await getConnection();
+          const query = c.query.bind(c) as (...a: unknown[]) => Promise<unknown>;
+          let sets = 0;
+          (c as unknown as { query: unknown }).query = async (...a: unknown[]) => {
+            const text = typeof a[0] === "string" ? a[0] : ((a[0] as { sql?: string }).sql ?? "");
+            if (where === "after" && /^commit$/i.test(text)) {
+              const r = await query(...a);
+              await sleep();
+              return r;
+            }
+            // 第二次设置等锁超时 = 写入、回读之后的恢复,紧接着就是 COMMIT
+            if (where === "before" && text.startsWith("SET SESSION innodb_lock_wait_timeout")) {
+              if (++sets === 2) await sleep();
+            }
+            return query(...a);
+          };
+          return c;
+        };
+        return {
+          p,
+          repo: new MysqlKnowledgeRepo(
+            drizzle(p, { schema, mode: "default" }),
+            KNOWLEDGE_LIMITS,
+            p,
+          ),
+        };
+      }
+      async function upload(agentId: string) {
+        const form = new FormData();
+        form.append("files", new Blob(["正文"]), "a.txt");
+        const res = await POST(
+          new Request(`http://x/api/agents/${agentId}/knowledge/upload`, {
+            method: "POST",
+            body: form,
+          }),
+          { params: Promise.resolve({ id: agentId }) },
+        );
+        return (await res.json()) as {
+          results: { ok: boolean; reason?: string; uncertain?: boolean }[];
+        };
+      }
+      async function newAgent() {
+        const agentId = randomUUID().replace(/-/g, "").slice(0, 24);
+        await pool.query(
+          "INSERT INTO agents (id, owner_id, name, config) VALUES (?, 'u1', '上传测试', '{}')",
+          [agentId],
+        );
+        return agentId;
+      }
+      const stored = async (agentId: string) => {
+        const [rows] = await pool.query(
+          "SELECT COUNT(*) AS n FROM knowledge_docs WHERE agent_id = ?",
+          [agentId],
+        );
+        return Number((rows as { n: number }[])[0]?.n);
+      };
+      const original = holder.repo;
+      afterAll(() => {
+        holder.repo = original;
+      });
+
+      it("COMMIT 已执行、响应拖过期限:数据库里已有文档,接口报结果未知,不说没有入库", async () => {
+        const { p, repo } = injected("after", 3_000);
+        holder.repo = repo;
+        UPLOAD_LIMITS.budgetMs = 1_500;
+        try {
+          const agentId = await newAgent();
+          const start = Date.now();
+          const body = await upload(agentId);
+          expect(Date.now() - start).toBeLessThan(2_500);
+          expect(await stored(agentId)).toBe(1);
+          expect(body.results[0]).toMatchObject({ ok: false, uncertain: true });
+          expect(body.results[0]?.reason).toContain("无法确认是否入库");
+          expect(body.results[0]?.reason).not.toContain("没有入库");
+        } finally {
+          UPLOAD_LIMITS.budgetMs = saved.budgetMs;
+          await p.end().catch(() => {});
+        }
+      });
+
+      it("对照:COMMIT 发出之前到期:确认没有入库,数据库里也确实没有", async () => {
+        const { p, repo } = injected("before", 3_000);
+        holder.repo = repo;
+        UPLOAD_LIMITS.budgetMs = 1_500;
+        try {
+          const agentId = await newAgent();
+          const body = await upload(agentId);
+          expect(body.results[0]?.uncertain).toBeUndefined();
+          expect(body.results[0]?.reason).toContain("没有入库");
+          await new Promise((ok) => setTimeout(ok, 300));
+          expect(await stored(agentId)).toBe(0);
+        } finally {
+          UPLOAD_LIMITS.budgetMs = saved.budgetMs;
+          await p.end().catch(() => {});
+        }
+      });
     });
   });
 }

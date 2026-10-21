@@ -7,6 +7,7 @@ import {
   KNOWLEDGE_LIMITS,
   KnowledgeLimitExceeded,
   KnowledgeWriteAborted,
+  KnowledgeWriteUncertain,
 } from "@/lib/modules/knowledge/domain/limits";
 import { splitDoc, titleOf } from "@/lib/modules/knowledge/domain/split-doc";
 import { requirePermission } from "../_lib/access";
@@ -91,7 +92,7 @@ type FileResult =
       pages?: number;
       docs: { id: string; title: string; chars: number }[];
     }
-  | { file: string; ok: false; reason: string };
+  | { file: string; ok: false; reason: string; uncertain?: true };
 
 /**
  * 上传文件到知识库(multipart,字段名 files,可多个)。
@@ -246,6 +247,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       } catch (err) {
         if (err instanceof KnowledgeLimitExceeded) {
           results.push({ file: name, ok: false, reason: err.message });
+          continue;
+        }
+        if (err instanceof KnowledgeWriteUncertain) {
+          // 提交已经发出,结果没拿到:可能已入库。不能说"没有入库"(据此重传会重复导入)
+          results.push({
+            file: name,
+            ok: false,
+            uncertain: true,
+            reason: "无法确认是否入库,请刷新知识库核对后再决定是否重传",
+          });
           continue;
         }
         if (err instanceof KnowledgeWriteAborted) {

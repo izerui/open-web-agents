@@ -6,6 +6,7 @@ import {
   KnowledgeLimitExceeded,
   type KnowledgeLimits,
   KnowledgeWriteAborted,
+  KnowledgeWriteUncertain,
   batchLimitViolation,
 } from "@/lib/modules/knowledge/domain/limits";
 import { type Chunk, chunkText } from "@/lib/modules/knowledge/domain/retrieval";
@@ -131,23 +132,107 @@ export class MysqlKnowledgeRepo {
         ? await this.acquire(this.pool, opts.deadline, opts.signal)
         : null;
     const db = conn ? (drizzle(conn, { schema, mode: "default" }) as unknown as Db) : this.db;
-    let saved: KnowledgeDoc[] = [];
-    // 【独占连接上主动终止】只靠事务里的两次 check() 是被动的:正在等锁(或执行任何一条查询)时断开或到点,
-    // 查询会一直等下去,连接与上传名额都被占着。所以取消或到期时直接销毁这个连接,并在服务端 KILL 掉它的会话
-    // —— 未提交的事务随之回滚,不可能再提交。等锁、计数、插入、回读、恢复会话设置都在同一个期限里
+
+    /** 提交前的全部工作:限制等锁时间、锁行、计数、插入、事务内回读、恢复会话设置。返回回读的记录 */
+    const work = async (q: Pick<Db, "execute" | "select" | "insert">): Promise<KnowledgeDoc[]> => {
+      let restoreLockWait: number | null = null;
+      try {
+        if (opts.deadline !== undefined) {
+          // innodb_lock_wait_timeout 只能按整秒设,向上取整:多出的不到一秒由下面拿到锁后的复查兜住
+          const seconds = Math.max(1, Math.ceil((opts.deadline - Date.now()) / 1000));
+          const prev = await q.execute(sql`SELECT @@SESSION.innodb_lock_wait_timeout AS v`);
+          restoreLockWait = Number(((prev as unknown as [{ v: number }[]])[0] ?? [])[0]?.v ?? 50);
+          await q.execute(sql.raw(`SET SESSION innodb_lock_wait_timeout = ${seconds}`));
+        }
+        let locked: unknown;
+        try {
+          locked = await q.execute(
+            sql`SELECT id FROM agents WHERE id = ${agentId} LIMIT 1 FOR UPDATE`,
+          );
+        } catch (err) {
+          // 1205 = ER_LOCK_WAIT_TIMEOUT:等锁到了期限
+          if ((err as { errno?: number }).errno === 1205)
+            throw new KnowledgeWriteAborted("timeout");
+          throw err;
+        }
+        const lockedRows = (locked as unknown as [unknown[]])[0];
+        if (!Array.isArray(lockedRows) || lockedRows.length === 0) {
+          throw new Error(`agent not found: ${agentId}`);
+        }
+        // 等锁期间可能已经断开或到点
+        check();
+        const [u] = await q
+          .select({
+            docs: sql<number>`COUNT(*)`,
+            chars: sql<number>`COALESCE(SUM(CHAR_LENGTH(${knowledgeDocs.content})), 0)`,
+          })
+          .from(knowledgeDocs)
+          .where(eq(knowledgeDocs.agentId, agentId));
+        const reason = batchLimitViolation(
+          { docs: Number(u?.docs ?? 0), chars: Number(u?.chars ?? 0) },
+          docs.map((d) => [...d.content].length),
+          this.limits,
+        );
+        if (reason) throw new KnowledgeLimitExceeded(reason);
+        await q.insert(knowledgeDocs).values(docs);
+        // 回读在事务内、同一个连接上做:提交后再去池里排队拿连接,又是一段不限时的等待
+        const rows = await q
+          .select()
+          .from(knowledgeDocs)
+          .where(
+            inArray(
+              knowledgeDocs.id,
+              docs.map((d) => d.id),
+            ),
+          );
+        const byId = new Map(rows.map((r) => [r.id, r]));
+        return docs.map((d) => {
+          const r = byId.get(d.id);
+          if (!r) throw new Error(`knowledge doc insert failed: ${d.id}`);
+          return {
+            id: r.id,
+            agentId: r.agentId,
+            title: r.title,
+            content: r.content,
+            createdAt: r.createdAt.getTime(),
+          };
+        });
+      } finally {
+        // 会话设置不受事务影响,提交前就恢复:提交之后这个连接上不再有任何查询
+        if (restoreLockWait !== null) {
+          await q
+            .execute(sql.raw(`SET SESSION innodb_lock_wait_timeout = ${restoreLockWait}`))
+            .catch(() => {});
+        }
+      }
+    };
+
+    // 嵌在别的事务里用(没有独占连接):照旧用事务包装,提交由外层决定
+    if (!conn) {
+      let saved: KnowledgeDoc[] = [];
+      await db.transaction(async (tx) => {
+        saved = await work(tx);
+        check();
+      });
+      return saved;
+    }
+
+    // 【独占连接:自己控制事务,分清"确认没提交"与"提交结果未知"】
+    // 取消或到期时直接销毁这个连接,并发起后台 KILL 结束服务端会话(不等 KILL 完成;连接已断,
+    // 服务端会话不可能再提交)。COMMIT 发出之前终止:确认没有入库;发出之后终止或失联:结果未知
     let terminated: "timeout" | "aborted" | null = null;
+    let committing = false;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
-    // mysql2 的 destroy() 之后,正在执行的查询的回调再也不会被调用(实测会一直挂着):
-    // 终止时由这里给出结论。连接已销毁、服务端会话已 KILL,事务不可能再继续或提交
+    // mysql2 的 destroy() 之后,正在执行的查询的回调再也不会被调用(实测会一直挂着):终止时由这里给出结论
     let stopped: (err: Error) => void = () => {};
     const stoppedPromise = new Promise<never>((_, reject) => {
       stopped = reject;
     });
     stoppedPromise.catch(() => {});
     const terminate = (why: "timeout" | "aborted") => {
-      if (!conn || terminated) return;
+      if (terminated) return;
       terminated = why;
-      stopped(new KnowledgeWriteAborted(why));
+      stopped(committing ? new KnowledgeWriteUncertain() : new KnowledgeWriteAborted(why));
       const threadId = (conn as unknown as { connection?: { threadId?: number } }).connection
         ?.threadId;
       try {
@@ -158,97 +243,48 @@ export class MysqlKnowledgeRepo {
       if (threadId) void this.killSession(threadId);
     };
     const onAbort = () => terminate("aborted");
-    if (conn && opts.deadline !== undefined) {
+    if (opts.deadline !== undefined) {
       killTimer = setTimeout(() => terminate("timeout"), Math.max(0, opts.deadline - Date.now()));
-      opts.signal?.addEventListener("abort", onAbort, { once: true });
-      if (opts.signal?.aborted) onAbort();
     }
+    opts.signal?.addEventListener("abort", onAbort, { once: true });
+    if (opts.signal?.aborted) onAbort();
+    const run = async (): Promise<KnowledgeDoc[]> => {
+      await conn.query("START TRANSACTION");
+      let saved: KnowledgeDoc[];
+      try {
+        saved = await work(db);
+        // 提交前最后一次:此刻放弃,回滚
+        check();
+      } catch (err) {
+        if (!terminated) await conn.query("ROLLBACK").catch(() => {});
+        throw err;
+      }
+      committing = true;
+      try {
+        await conn.query("COMMIT");
+      } catch {
+        // COMMIT 发出后出错(连接断开等):服务端可能已经提交
+        throw new KnowledgeWriteUncertain();
+      }
+      // 已提交:立刻撤掉终止计时,之后不再有任何会失败的步骤
+      clearTimeout(killTimer);
+      committing = false;
+      return saved;
+    };
     try {
-      const writing = db.transaction(async (tx) => {
-        let restoreLockWait: number | null = null;
-        try {
-          if (opts.deadline !== undefined) {
-            // innodb_lock_wait_timeout 只能按整秒设,向上取整:多出的不到一秒由下面拿到锁后的复查兜住
-            const seconds = Math.max(1, Math.ceil((opts.deadline - Date.now()) / 1000));
-            const prev = await tx.execute(sql`SELECT @@SESSION.innodb_lock_wait_timeout AS v`);
-            restoreLockWait = Number(((prev as unknown as [{ v: number }[]])[0] ?? [])[0]?.v ?? 50);
-            await tx.execute(sql.raw(`SET SESSION innodb_lock_wait_timeout = ${seconds}`));
-          }
-          let locked: unknown;
-          try {
-            locked = await tx.execute(
-              sql`SELECT id FROM agents WHERE id = ${agentId} LIMIT 1 FOR UPDATE`,
-            );
-          } catch (err) {
-            // 1205 = ER_LOCK_WAIT_TIMEOUT:等锁到了期限
-            if ((err as { errno?: number }).errno === 1205)
-              throw new KnowledgeWriteAborted("timeout");
-            throw err;
-          }
-          const lockedRows = (locked as unknown as [unknown[]])[0];
-          if (!Array.isArray(lockedRows) || lockedRows.length === 0) {
-            throw new Error(`agent not found: ${agentId}`);
-          }
-          // 等锁期间可能已经断开或到点
-          check();
-          const [u] = await tx
-            .select({
-              docs: sql<number>`COUNT(*)`,
-              chars: sql<number>`COALESCE(SUM(CHAR_LENGTH(${knowledgeDocs.content})), 0)`,
-            })
-            .from(knowledgeDocs)
-            .where(eq(knowledgeDocs.agentId, agentId));
-          const reason = batchLimitViolation(
-            { docs: Number(u?.docs ?? 0), chars: Number(u?.chars ?? 0) },
-            docs.map((d) => [...d.content].length),
-            this.limits,
-          );
-          if (reason) throw new KnowledgeLimitExceeded(reason);
-          await tx.insert(knowledgeDocs).values(docs);
-          // 回读在事务内、同一个连接上做:提交后再去池里排队拿连接,又是一段不限时的等待
-          const rows = await tx
-            .select()
-            .from(knowledgeDocs)
-            .where(
-              inArray(
-                knowledgeDocs.id,
-                docs.map((d) => d.id),
-              ),
-            );
-          const byId = new Map(rows.map((r) => [r.id, r]));
-          saved = docs.map((d) => {
-            const r = byId.get(d.id);
-            if (!r) throw new Error(`knowledge doc insert failed: ${d.id}`);
-            return {
-              id: r.id,
-              agentId: r.agentId,
-              title: r.title,
-              content: r.content,
-              createdAt: r.createdAt.getTime(),
-            };
-          });
-          // 提交前最后一次:此刻放弃,事务回滚
-          check();
-        } finally {
-          if (restoreLockWait !== null) {
-            await tx
-              .execute(sql.raw(`SET SESSION innodb_lock_wait_timeout = ${restoreLockWait}`))
-              .catch(() => {});
-          }
-        }
-      });
+      const writing = run();
       writing.catch(() => {});
-      await (conn ? Promise.race([writing, stoppedPromise]) : writing);
+      return await Promise.race([writing, stoppedPromise]);
     } catch (err) {
+      if (err instanceof KnowledgeWriteUncertain) throw err;
       // 连接是我们终止的:按终止原因报,不报底层的"连接已断开"
       if (terminated) throw new KnowledgeWriteAborted(terminated);
       throw err;
     } finally {
       clearTimeout(killTimer);
       opts.signal?.removeEventListener("abort", onAbort);
-      if (conn && !terminated) conn.release();
+      if (!terminated) conn.release();
     }
-    return saved;
   }
 
   /**
