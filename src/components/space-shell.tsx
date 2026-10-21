@@ -48,7 +48,7 @@ export const PERSONAL_NAV = [
   { href: "/settings/runs", label: "运行记录", icon: History },
   { href: "/settings/keys", label: "接入中心", icon: Terminal },
   { href: "/settings/audit", label: "审计日志", icon: ScrollText },
-  { href: "/settings/usage", label: "用量与成本", icon: BarChart3 },
+  { href: "/settings/usage", label: "token 用量", icon: BarChart3 },
   { href: "/settings/billing", label: "积分账户", icon: Wallet },
   { href: "/settings/packages", label: "积分套餐", icon: Package },
   { href: "/settings/credentials", label: "平台算力", icon: Cpu },
@@ -67,7 +67,7 @@ export const ADMIN_NAV = [
   { href: "/admin/models", label: "模型总览", icon: Cpu },
   { href: "/admin/billing", label: "积分管理", icon: Wallet },
   { href: "/admin/packages", label: "套餐与订单", icon: Package },
-  { href: "/admin/usage", label: "全平台用量", icon: BarChart3 },
+  { href: "/admin/usage", label: "全平台 token 用量", icon: BarChart3 },
 ] as const;
 
 export type SpaceArea = "agents" | "personal" | "admin" | "market";

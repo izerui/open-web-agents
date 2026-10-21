@@ -1,4 +1,5 @@
 import type { RunPricing } from "@/lib/shared";
+import type { ChargeSource, ChargeSummaryRow, SummaryDimension } from "./domain/charge-summary";
 import type { ReconRow } from "./domain/reconciliation";
 import type { BillingMode, HoldRejection, HoldSlice } from "./domain/run-charge";
 import type { WalletBalance } from "./ports";
@@ -146,11 +147,32 @@ export interface ReconRawRow extends Omit<ReconRow, "models"> {
 }
 
 /** 只读查询:积分页、账号与 Key 的本月用量、待核对列表、对账 */
+/** 运行计费明细的筛选(从消耗汇总点进来):受理时间窗口 + 一个维度的取值 */
+export interface RunChargeFilter {
+  since?: number;
+  until?: number;
+  source?: ChargeSource;
+  /** null = 智能体已不存在 */
+  agentId?: string | null;
+  /** null = 网页发起、没有 Key */
+  apiKeyId?: string | null;
+}
+
 export interface RunChargeQuery {
   listByAccount(
     accountId: string,
-    opts: { limit: number; cursor?: string },
+    opts: { limit: number; cursor?: string; filter?: RunChargeFilter },
   ): Promise<{ items: RunChargeItem[]; nextCursor?: string }>;
+  /**
+   * 消耗汇总:[since, until) 内受理的运行按维度归组,金额口径同月度额度检查。
+   * 传 accountId 只算这一个账号;不传算全平台(管理员)。按合计从大到小
+   */
+  summarize(opts: {
+    accountId?: string;
+    since: number;
+    until: number;
+    by: SummaryDimension;
+  }): Promise<ChargeSummaryRow[]>;
   /** 本月各账号用量(口径同受理时的额度检查) */
   /** 传 accountId 只算这一个账号(用户积分页),不传算全部(账号管理) */
   monthUsageByAccount(since: number, accountId?: string): Promise<Map<string, bigint>>;

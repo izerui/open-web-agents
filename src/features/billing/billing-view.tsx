@@ -25,6 +25,7 @@ import { ArrowDownToLine, RefreshCw, Wallet } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { BatchCreditForm } from "./batch-credit-form";
+import { type ChargeDrill, ChargeSummary } from "./charge-summary";
 import { PendingCharges } from "./pending-charges";
 import { ReconciliationView } from "./reconciliation-view";
 import { RunChargeList } from "./run-charge-list";
@@ -57,6 +58,8 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
   const requestSeq = useRef(0);
   const pending = useRef(false);
   const creditAttempt = useRef<{ payload: string; key: string } | null>(null);
+  /** 从消耗汇总点进来的运行明细筛选;换账号时清掉 */
+  const [drill, setDrill] = useState<ChargeDrill | null>(null);
 
   const loadAccounts = useCallback(async () => {
     try {
@@ -166,6 +169,19 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
   return (
     <SpaceShell area={admin ? "admin" : "personal"} title={admin ? "积分管理" : "积分账户"}>
       {admin && <ReconciliationView />}
+      {admin && (
+        <ChargeSummary
+          platform
+          onSelectAccount={(id) => {
+            requestSeq.current++;
+            setStatement(null);
+            setAccountId(id);
+            setDrill(null);
+            setReceipt("");
+            creditAttempt.current = null;
+          }}
+        />
+      )}
       {admin && <BatchCreditForm onDone={() => load()} />}
       {admin && (
         <PendingCharges
@@ -173,6 +189,7 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
             requestSeq.current++;
             setStatement(null);
             setAccountId(id);
+            setDrill(null);
             setReceipt("");
             creditAttempt.current = null;
           }}
@@ -195,6 +212,7 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
                 requestSeq.current++;
                 setStatement(null);
                 setAccountId(event.target.value);
+                setDrill(null);
                 setReceipt("");
                 creditAttempt.current = null;
               }}
@@ -309,7 +327,20 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
           </fieldset>
         </form>
       )}
-      {statement && <RunChargeList accountId={admin ? accountId : undefined} />}
+      {statement && (
+        <ChargeSummary
+          key={admin ? accountId : "self"}
+          accountId={admin ? accountId : undefined}
+          onDrill={setDrill}
+        />
+      )}
+      {statement && (
+        <RunChargeList
+          accountId={admin ? accountId : undefined}
+          drill={drill}
+          onClearDrill={() => setDrill(null)}
+        />
+      )}
       {statement && (
         <section>
           <div className="mb-3 flex items-center justify-between">

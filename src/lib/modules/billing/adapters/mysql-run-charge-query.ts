@@ -1,13 +1,19 @@
 import type { Db } from "@/lib/db/client";
-import { agents, runCharges, runs, sessions, users } from "@/lib/db/schema";
+import { agents, apiKeys, runCharges, runs, sessions, users } from "@/lib/db/schema";
 import type { RunPricing } from "@/lib/shared";
-import { and, desc, eq, gte, isNotNull, lt, or, sql } from "drizzle-orm";
+import { type SQL, and, desc, eq, gte, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import {
+  type ChargeSummaryRow,
+  SESSION_SOURCE_TO_CHARGE,
+  type SummaryDimension,
+} from "../domain/charge-summary";
 import { monthWindowUtc } from "../domain/run-charge";
 import {
   PENDING_REASONS,
   type PendingChargeItem,
   type PendingReason,
   type ReconRawRow,
+  type RunChargeFilter,
   type RunChargeItem,
   type RunChargeQuery,
 } from "../run-charge-ports";
@@ -24,6 +30,39 @@ const inMonth = (since: number) => {
     lt(runCharges.createdAt, new Date(w.until)),
   );
 };
+
+/**
+ * 会话来源 → 展示来源(api 与 invoke 合并);会话不存在的归 other。
+ * 常量直接写进 SQL(取自代码里的固定映射)而不是绑定参数:GROUP BY 与 SELECT 各绑一份参数时,
+ * MySQL 认不出两者是同一个表达式(ONLY_FULL_GROUP_BY 下报错)
+ */
+const SOURCE_SQL: SQL<string> = sql<string>`CASE ${sql.join(
+  Object.entries(SESSION_SOURCE_TO_CHARGE).map(([from, to]) => {
+    if (!/^[a-z]+$/.test(from) || !/^[a-z]+$/.test(to)) throw new Error("来源映射须为小写字母");
+    return sql`WHEN ${sessions.source} = '${sql.raw(from)}' THEN '${sql.raw(to)}'`;
+  }),
+  sql` `,
+)} ELSE 'other' END`;
+
+/** 明细筛选:窗口 + 一个维度的取值(取值口径与 summarize 的归组一致) */
+function filterOf(f: RunChargeFilter | undefined): SQL | undefined {
+  if (!f) return undefined;
+  return and(
+    f.since !== undefined ? gte(runCharges.createdAt, new Date(f.since)) : undefined,
+    f.until !== undefined ? lt(runCharges.createdAt, new Date(f.until)) : undefined,
+    f.source !== undefined ? sql`${SOURCE_SQL} = ${f.source}` : undefined,
+    f.agentId === undefined
+      ? undefined
+      : f.agentId === null
+        ? isNull(agents.id)
+        : eq(agents.id, f.agentId),
+    f.apiKeyId === undefined
+      ? undefined
+      : f.apiKeyId === null
+        ? isNull(runCharges.apiKeyId)
+        : eq(runCharges.apiKeyId, f.apiKeyId),
+  );
+}
 
 const big = (v: unknown) => BigInt(String(v ?? "0").split(".")[0] || "0");
 
@@ -70,7 +109,7 @@ export class MysqlRunChargeQuery implements RunChargeQuery {
 
   async listByAccount(
     accountId: string,
-    opts: { limit: number; cursor?: string },
+    opts: { limit: number; cursor?: string; filter?: RunChargeFilter },
   ): Promise<{ items: RunChargeItem[]; nextCursor?: string }> {
     const cursor = opts.cursor ? decodeCursor(opts.cursor) : null;
     const at = cursor ? new Date(cursor.createdAt) : null;
@@ -83,6 +122,7 @@ export class MysqlRunChargeQuery implements RunChargeQuery {
       .where(
         and(
           eq(runCharges.accountId, accountId),
+          filterOf(opts.filter),
           at && cursor
             ? or(
                 lt(runCharges.createdAt, at),
@@ -197,6 +237,62 @@ export class MysqlRunChargeQuery implements RunChargeQuery {
         };
       }),
     };
+  }
+
+  async summarize(opts: {
+    accountId?: string;
+    since: number;
+    until: number;
+    by: SummaryDimension;
+  }): Promise<ChargeSummaryRow[]> {
+    const group: { key: SQL; name: SQL } = {
+      source: { key: SOURCE_SQL, name: sql`NULL` },
+      agent: { key: sql`${agents.id}`, name: sql`MAX(${agents.name})` },
+      key: { key: sql`${runCharges.apiKeyId}`, name: sql`MAX(${apiKeys.name})` },
+      account: { key: sql`${runCharges.accountId}`, name: sql`MAX(${users.email})` },
+    }[opts.by];
+    const open = sql`${runCharges.state} = 'open'`;
+    const used = usedOf();
+    const rows = await this.db
+      .select({
+        key: sql<string | null>`${group.key}`,
+        name: sql<string | null>`${group.name}`,
+        runs: sql<number>`COUNT(*)`,
+        charged: sql<
+          string | null
+        >`SUM(CASE WHEN ${open} THEN 0 ELSE COALESCE(${runCharges.chargedMicro}, 0) END)`,
+        owed: sql<
+          string | null
+        >`SUM(CASE WHEN ${open} THEN 0 ELSE COALESCE(${runCharges.owedMicro}, 0) END)`,
+        reserved: sql<
+          string | null
+        >`SUM(CASE WHEN ${open} THEN ${runCharges.reservedMicro} ELSE 0 END)`,
+        used,
+      })
+      .from(runCharges)
+      .leftJoin(runs, eq(runs.id, runCharges.runId))
+      .leftJoin(sessions, eq(sessions.id, runs.sessionId))
+      .leftJoin(agents, eq(agents.id, sessions.agentId))
+      .leftJoin(apiKeys, eq(apiKeys.id, runCharges.apiKeyId))
+      .leftJoin(users, eq(users.id, runCharges.accountId))
+      .where(
+        and(
+          opts.accountId ? eq(runCharges.accountId, opts.accountId) : undefined,
+          gte(runCharges.createdAt, new Date(opts.since)),
+          lt(runCharges.createdAt, new Date(opts.until)),
+        ),
+      )
+      .groupBy(group.key)
+      .orderBy(desc(used));
+    return rows.map((r) => ({
+      key: r.key ?? null,
+      name: r.name ?? null,
+      runs: Number(r.runs),
+      chargedMicro: big(r.charged).toString(),
+      owedMicro: big(r.owed).toString(),
+      reservedMicro: big(r.reserved).toString(),
+      usedMicro: big(r.used).toString(),
+    }));
   }
 
   async pendingCounts(): Promise<Record<PendingReason, number>> {

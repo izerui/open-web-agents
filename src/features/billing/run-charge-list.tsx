@@ -4,8 +4,9 @@ import { Button } from "@/components/ui/button";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { creditsAmount, creditsExact } from "@/lib/modules/billing/domain/credits-display";
 import type { RunChargeItem } from "@/lib/modules/billing/run-charge-ports";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { ChargeDrill } from "./charge-summary";
 
 function stateText(c: RunChargeItem): string {
   if (c.state === "open") return "冻结中";
@@ -28,7 +29,16 @@ function stateText(c: RunChargeItem): string {
 }
 
 /** 运行计费明细:每次运行按用量应扣与实际扣除 */
-export function RunChargeList({ accountId }: { accountId?: string }) {
+export function RunChargeList({
+  accountId,
+  drill,
+  onClearDrill,
+}: {
+  accountId?: string;
+  /** 从消耗汇总点进来的筛选 */
+  drill?: ChargeDrill | null;
+  onClearDrill?: () => void;
+}) {
   const [items, setItems] = useState<RunChargeItem[]>([]);
   const [next, setNext] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
@@ -41,6 +51,7 @@ export function RunChargeList({ accountId }: { accountId?: string }) {
       setLoading(true);
       const params = new URLSearchParams({ limit: "50" });
       if (accountId) params.set("accountId", accountId);
+      for (const [k, v] of Object.entries(drill?.params ?? {})) params.set(k, v);
       if (cursor) params.set("cursor", cursor);
       try {
         const r = await fetchJson<{ items: RunChargeItem[]; nextCursor?: string }>(
@@ -56,7 +67,7 @@ export function RunChargeList({ accountId }: { accountId?: string }) {
         if (mine === seq.current) setLoading(false);
       }
     },
-    [accountId],
+    [accountId, drill],
   );
   useEffect(() => {
     setItems([]);
@@ -77,6 +88,15 @@ export function RunChargeList({ accountId }: { accountId?: string }) {
           <RefreshCw className="size-4" />
         </Button>
       </div>
+      {drill && (
+        <p className="mb-3 flex items-center gap-2 text-xs" data-testid="run-charge-drill">
+          <span className="rounded bg-muted px-2 py-1">只看:{drill.label}</span>
+          <Button variant="ghost" size="sm" className="h-6 px-2" onClick={onClearDrill}>
+            <X className="size-3" />
+            看全部
+          </Button>
+        </p>
+      )}
       {error && <p className="mb-3 text-sm text-destructive">{error}</p>}
       {items.length === 0 ? (
         <p className="py-5 text-sm text-muted-foreground">{loading ? "载入中…" : "暂无运行"}</p>

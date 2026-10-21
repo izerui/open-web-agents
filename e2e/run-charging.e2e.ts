@@ -491,5 +491,28 @@ describe.skipIf(!databaseUrl)("运行计费", () => {
       const c = await chargeRow(runId);
       expect(c, entry).toMatchObject({ account_id: u.accountId, mode: "live" });
     }
+
+    // 消耗汇总按来源:对话与分支都是网页对话,调用是 API 调用,另有 AI 编辑、评测
+    type Summary = { rows: { key: string | null; runs: number }[] };
+    const summary = await u.client.get<Summary>("/api/billing/summary?by=source");
+    expect(summary.status, JSON.stringify(summary.body)).toBe(200);
+    expect(Object.fromEntries(summary.body.rows.map((r) => [r.key, r.runs]))).toEqual({
+      web: 2,
+      api: 1,
+      design: 1,
+      eval: 1,
+    });
+    // 按 Key:只有调用带 Key
+    const byKey = await u.client.get<Summary>("/api/billing/summary?by=key");
+    expect(byKey.body.rows.map((r) => r.runs).sort()).toEqual([1, 4]);
+    // 从汇总点进来:按来源筛出明细
+    const drilled = await u.client.get<{ items: { runId: string }[] }>(
+      "/api/billing/runs?window=this_month&source=api",
+    );
+    expect(drilled.body.items.map((i) => i.runId)).toEqual([ids.invoke]);
+    const designOnly = await u.client.get<{ items: { runId: string }[] }>(
+      "/api/billing/runs?window=this_month&source=design",
+    );
+    expect(designOnly.body.items.map((i) => i.runId)).toEqual([ids.design]);
   });
 });

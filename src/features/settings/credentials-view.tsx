@@ -22,7 +22,7 @@ export function CredentialsView({ configured }: { configured: boolean }) {
       </dl>
       <nav aria-label="算力相关页面" className="flex flex-wrap gap-x-6 gap-y-3 text-sm">
         <Link className="text-primary underline underline-offset-4" href="/settings/usage">
-          用量与成本
+          token 用量
         </Link>
         <Link className="text-primary underline underline-offset-4" href="/settings/keys">
           接入中心与 API Key

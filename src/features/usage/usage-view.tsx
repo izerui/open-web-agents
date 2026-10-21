@@ -6,7 +6,6 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { NativeSelect as Select } from "@/components/ui/native-select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatCredits } from "@/lib/modules/capabilities/domain/catalog";
 import {
   type UsageBucket,
   type UsageTotals,
@@ -106,7 +105,7 @@ export function UsageView({ scope = "self" }: { scope?: "self" | "all" }) {
   return (
     <SpaceShell
       area={scope === "all" ? "admin" : "personal"}
-      title={scope === "all" ? "全平台用量" : "我的用量"}
+      title={scope === "all" ? "全平台 token 用量" : "token 用量"}
       subtitle={`${scope === "all" ? "所有用户的会话" : "仅我的会话"} · 最近 ${data?.days ?? days} 天`}
       actions={
         <Select
@@ -129,6 +128,17 @@ export function UsageView({ scope = "self" }: { scope?: "self" | "all" }) {
           ))}
         </div>
       )}
+
+      <p className="mb-4 text-xs text-muted-foreground" data-testid="usage-billing-note">
+        这里是 token 用量,用于了解智能体的使用情况;实际扣费以
+        <a
+          className="mx-1 underline underline-offset-2"
+          href={scope === "all" ? "/admin/billing" : "/settings/billing"}
+        >
+          积分页
+        </a>
+        为准。
+      </p>
 
       {error && (
         <Alert variant="destructive">
@@ -202,16 +212,14 @@ export function UsageView({ scope = "self" }: { scope?: "self" | "all" }) {
             </CardContent>
           </Card>
 
-          {data.runs && data.runs.length > 0 && (
-            <RunDetailSection runs={data.runs} note={data.creditEstimateNote} />
-          )}
+          {data.runs && data.runs.length > 0 && <RunDetailSection runs={data.runs} />}
         </>
       )}
     </SpaceShell>
   );
 }
 
-function RunDetailSection({ runs, note }: { runs: RunDetail[]; note?: string }) {
+function RunDetailSection({ runs }: { runs: RunDetail[] }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggle = (id: string) =>
     setExpanded((prev) => {
@@ -224,8 +232,7 @@ function RunDetailSection({ runs, note }: { runs: RunDetail[]; note?: string }) 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-sm font-medium">运行明细与积分估算</CardTitle>
-        {note && <p className="text-xs text-muted-foreground">{note}</p>}
+        <CardTitle className="text-sm font-medium">运行明细</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="overflow-x-auto">
@@ -233,7 +240,7 @@ function RunDetailSection({ runs, note }: { runs: RunDetail[]; note?: string }) 
             <caption className="sr-only">运行明细</caption>
             <thead>
               <tr className="border-b text-muted-foreground">
-                {["", "时间", "智能体", "状态", "输入", "输出", "积分估算"].map((h) => (
+                {["", "时间", "智能体", "状态", "输入", "输出"].map((h) => (
                   <th scope="col" key={h} className="px-2 py-2">
                     {h}
                   </th>
@@ -291,38 +298,6 @@ function RunDetailSection({ runs, note }: { runs: RunDetail[]; note?: string }) 
                       <td className="whitespace-nowrap px-2 py-2 font-mono">
                         {r.outputTokens.toLocaleString()}
                       </td>
-                      <td className="whitespace-nowrap px-2 py-2 font-mono">
-                        {est.models.length === 0 ? (
-                          <span className="text-muted-foreground">—</span>
-                        ) : est.models.every((m) => m.unpriced) ? (
-                          <span className="text-muted-foreground" title="所有模型均未配置价目">
-                            无法估算
-                          </span>
-                        ) : est.models.some((m) => m.unpriced) ? (
-                          <span title="已知部分的估算，含未定价模型">
-                            ≥{formatCredits(est.totalMicroCredits)}
-                            <Badge variant="outline" className="ml-1 text-[9px]">
-                              含未定价
-                            </Badge>
-                          </span>
-                        ) : (
-                          formatCredits(est.totalMicroCredits)
-                        )}
-                        {!est.complete && (
-                          <Badge variant="outline" className="ml-1 text-[9px]">
-                            不完整
-                          </Badge>
-                        )}
-                        {r.estimateSource === "current_price" && est.models.length > 0 && (
-                          <Badge
-                            variant="outline"
-                            className="ml-1 text-[9px]"
-                            title="按当前价目估算，非运行时价目"
-                          >
-                            当前价
-                          </Badge>
-                        )}
-                      </td>
                     </tr>
                     {open &&
                       est.models.map((m, i) => (
@@ -337,13 +312,7 @@ function RunDetailSection({ runs, note }: { runs: RunDetail[]; note?: string }) 
                               <span className="ml-1 text-[10px]">v{m.version}</span>
                             )}
                           </td>
-                          <td className="px-2 py-1">
-                            {m.unpriced && (
-                              <Badge variant="outline" className="text-[9px]">
-                                未定价
-                              </Badge>
-                            )}
-                          </td>
+                          <td className="px-2 py-1" />
                           <td className="whitespace-nowrap px-2 py-1 font-mono">
                             {m.inputTokens.toLocaleString()}
                             {m.cacheReadTokens > 0 && (
@@ -359,9 +328,6 @@ function RunDetailSection({ runs, note }: { runs: RunDetail[]; note?: string }) 
                                 (缓存写 {m.cacheWriteTokens.toLocaleString()})
                               </span>
                             )}
-                          </td>
-                          <td className="whitespace-nowrap px-2 py-1 font-mono">
-                            {m.microCredits !== null ? formatCredits(m.microCredits) : "—"}
                           </td>
                         </tr>
                       ))}

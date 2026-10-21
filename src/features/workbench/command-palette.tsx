@@ -41,7 +41,7 @@ const PAGES = [
   { href: "/settings/runs", label: "运行记录", icon: History },
   { href: "/settings/keys", label: "接入中心", icon: Terminal },
   { href: "/settings/audit", label: "审计日志", icon: ScrollText },
-  { href: "/settings/usage", label: "用量与成本", icon: BarChart3 },
+  { href: "/settings/usage", label: "token 用量", icon: BarChart3 },
   { href: "/settings/credentials", label: "平台算力", icon: Cpu },
   { href: "/settings/account", label: "账号安全", icon: Lock },
 ] as const;
