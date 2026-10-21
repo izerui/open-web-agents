@@ -17,6 +17,7 @@ import type { GrantRepo } from "@/lib/modules/access/ports";
 import { createClaudeSdkEngine } from "@/lib/modules/agent-engine/adapters/claude-sdk/default-engine";
 import { JsonlTranscript } from "@/lib/modules/agent-engine/adapters/claude-sdk/jsonl-transcript";
 import type { EngineDeps } from "@/lib/modules/agent-engine/adapters/claude-sdk/runner";
+import { probeMcp } from "@/lib/modules/agent-engine/adapters/mcp-probe";
 import type { ModelMetering } from "@/lib/modules/agent-engine/domain/model-usage";
 import type { EnginePort, TranscriptPort } from "@/lib/modules/agent-engine/ports";
 import { readBundle, writeBundle } from "@/lib/modules/agent/adapters/fs-bundle-store";
@@ -29,6 +30,7 @@ import {
 } from "@/lib/modules/agent/adapters/mysql-variable-repo";
 import type { KnowledgeWriter } from "@/lib/modules/agent/application/clone-agent";
 import { AgentDesigner } from "@/lib/modules/agent/application/designer";
+import { McpConnectionCheck } from "@/lib/modules/agent/application/mcp-connection-check";
 import { AgentReleases } from "@/lib/modules/agent/application/releases";
 import { seedBuiltin } from "@/lib/modules/agent/application/seed-builtin";
 import { ARCHITECT_AGENT_ID, ARCHITECT_CONFIG } from "@/lib/modules/agent/domain/architect";
@@ -74,6 +76,7 @@ import { checkInvokeRate } from "@/lib/modules/identity/application/invoke-rate-
 import { SecretBox, maskSecret } from "@/lib/modules/identity/domain/secret-box";
 import type { ApiKeyRepo } from "@/lib/modules/identity/ports";
 import type { UserRepo } from "@/lib/modules/identity/user-ports";
+import { createGuardedFetch } from "@/lib/modules/integration/adapters/guarded-fetch";
 import { createGuardedSender } from "@/lib/modules/integration/adapters/guarded-http-sender";
 import { MysqlWebhookDeliveryLog } from "@/lib/modules/integration/adapters/mysql-webhook-delivery-log";
 import { deliverWebhook, runFinishedPayload } from "@/lib/modules/integration/application/webhook";
@@ -193,6 +196,8 @@ export interface Container {
   runCharges: RunChargeQuery;
   packages: PackageRepo;
   variables: VariableRepo;
+  /** MCP 测试连接:握手并列出工具,不调用工具(见 mcp-connection-check.ts) */
+  mcpCheck: McpConnectionCheck;
   knowledgeWriterFactory: (txDb: Db) => KnowledgeWriter;
 }
 
@@ -679,6 +684,18 @@ function build(): Container {
     runCharges: new MysqlRunChargeQuery(db),
     packages,
     variables: variableRepo,
+    mcpCheck: new McpConnectionCheck({
+      allowStdioMcp: env.allowStdioMcp,
+      variablesOf: (agentId, userId) => variableRepo.get(agentId, userId),
+      // 地址规则与 webhook 相同:回环、云元数据等永远禁止,内网由 OWA_WEBHOOK_ALLOW_PRIVATE 放行
+      probe: (def, secrets) =>
+        probeMcp(def, secrets, {
+          fetch: createGuardedFetch({
+            allowAddress: (ip) => isAddressAllowed(ip, env.webhookAllowPrivate),
+          }),
+          stdioHome: path.join(env.dataDir, ".agent-home"),
+        }),
+    }),
     admission: new RunAdmission({
       sessions,
       checkRate: (i) =>

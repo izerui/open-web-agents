@@ -10,12 +10,9 @@ function substituteVars(text: string, vars: Record<string, string>): string {
   return text.replace(VAR_PATTERN, (match, name: string) => vars[name] ?? match);
 }
 
-function substituteMcpEnv(
-  servers: McpDef[] | undefined,
-  allVars: Record<string, string>,
-): McpDef[] | undefined {
-  if (!servers?.length) return servers;
-  return servers.map((s) => ({
+/** 单个 MCP 的 url 与 env 里的 {{变量}} 换成值;没有值的原样留着。运行与测试连接共用 */
+export function substituteMcpServer(s: McpDef, allVars: Record<string, string>): McpDef {
+  return {
     ...s,
     ...(s.env
       ? {
@@ -25,7 +22,15 @@ function substituteMcpEnv(
         }
       : {}),
     ...(s.url !== undefined ? { url: substituteVars(s.url, allVars) } : {}),
-  }));
+  };
+}
+
+function substituteMcpEnv(
+  servers: McpDef[] | undefined,
+  allVars: Record<string, string>,
+): McpDef[] | undefined {
+  if (!servers?.length) return servers;
+  return servers.map((s) => substituteMcpServer(s, allVars));
 }
 
 export class MissingRequiredVariables extends Error {

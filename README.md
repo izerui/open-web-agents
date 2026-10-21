@@ -85,6 +85,12 @@ curl localhost:5678/api/agents/<taskId>/result -H "X-Api-Key: <key>"
 工作副本只包含资源引用,不复制 MCP 凭证或技能脚本。目标的归属、回调、图标与逃生舱保留。
 应用只保存草稿,不发布。尚未发布过的智能体沿用原有“调用草稿”的兼容规则。
 
+**MCP 测试连接**:构建器与 AI 编辑里每个 MCP 都可"测试连接" —— 服务端按运行时的方式换入本人保存的变量值,
+握手(initialize)并列出工具(tools/list),**不调用任何工具**;失败时说明原因(地址不通、超时、认证失败、
+需要 OAuth、不是 MCP 服务、缺变量值),结果里的密钥抹掉。http 地址规则同 webhook(回环、云元数据始终禁止,
+内网需 `OWA_WEBHOOK_ALLOW_PRIVATE=1`,检查接在建连的 DNS 解析上);平台开启 stdio 时会启动一次程序,
+列完工具即结束进程。每个账号每分钟最多 20 次。
+
 底层 `agent-architect` 仅是平台私有执行器,不开放普通列表、调用、分享、发布或修改。
 设计运行仍复用原有 worker、事件流、计费归属与审计。旧设计历史保留,首次继续编辑须显式载入当前草稿。
 
@@ -207,7 +213,7 @@ const bus = new RedisBus(env.redisUrl); // 曾是 InMemoryBus
 | `OWA_EMBEDDED_WORKER`                               | 设 0 关掉 web 进程内嵌的 worker(拆进程部署时用)           |
 | `OWA_SHUTDOWN_GRACE_MS`                             | worker 收到 SIGTERM 后等在途任务的上限,默认 60000       |
 | `OWA_WORKER_CONCURRENCY`                            | 单个 worker 进程同时执行的运行数,默认 4(同一会话仍串行)     |
-| `OWA_WEBHOOK_ALLOW_PRIVATE`                         | webhook 允许投递到内网私有网段,默认 0;回环与云元数据地址始终禁止 |
+| `OWA_WEBHOOK_ALLOW_PRIVATE`                         | webhook 投递与 MCP 测试连接允许连内网私有网段,默认 0;回环与云元数据地址始终禁止 |
 | `OWA_ALLOW_SIGNUP`                                  | 是否开放自助注册,默认 1;第一个账号始终可注册并成为管理员       |
 | `OWA_AUTH_IP_RATE_LIMIT`                            | 同一地址每 15 分钟的登录/注册上限,默认 30,0 关闭;按账号限流始终开启 |
 
@@ -342,6 +348,8 @@ worker 收到 SIGTERM 后先停止认领新任务,再**等在途任务真正落�
 | GET             | `/api/agents/{id}/webhook/deliveries`      | cookie(所有者)          | 回调投递记录              |
 | POST            | `/api/agents/{id}/webhook/test`            | cookie(所有者)          | 测试投递                |
 | POST            | `/api/runs/{id}/webhook/redeliver`         | cookie(所有者)          | 手动重发回调              |
+| POST            | `/api/agents/mcp-check`                    | cookie(write)          | MCP 测试连接(构建器):`{ agentId?, server, variables? }`,握手并列出工具,不调用工具 |
+| POST            | `/api/agents/design/{id}/mcp-check`        | cookie                 | MCP 测试连接(AI 编辑):`{ name }`,按已保存草稿里还原后的真实配置测试 |
 | GET             | `/api/audit`                               | cookie                 | 审计日志(与自己相关的;管理员 `scope=all` 看全部) |
 | GET/POST        | `/api/agents/{id}/versions`                | 读:cookie / key;发布:cookie(write) | 版本列表 / 把草稿发布为新版本 |
 | GET             | `/api/agents/{id}/versions/{v}`            | cookie / key           | 某个版本的完整内容            |

@@ -40,6 +40,7 @@ import {
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { McpCheck } from "./mcp-check";
 import { DiffView } from "./release-panel";
 
 interface View {
@@ -630,37 +631,54 @@ export function DesignWorkspace({ initialSessionId }: { initialSessionId?: strin
                                     : (draft.mcpServers ?? []).map((m) => m.name),
                                 );
                                 const conflict = inlineNames.has(r.name);
+                                const savedRef = view?.draft?.mcpRefs.includes(r.ref) ?? false;
                                 return (
-                                  <label
-                                    key={r.ref}
-                                    className={`flex items-start gap-2 text-sm ${conflict ? "opacity-50" : ""}`}
-                                    title={
-                                      conflict
-                                        ? `与 inline 定义「${r.name}」冲突，请先移除 inline 或不勾选`
-                                        : undefined
-                                    }
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      className="mt-1"
-                                      checked={draft[key].includes(r.ref)}
-                                      disabled={conflict && !draft[key].includes(r.ref)}
-                                      onChange={(e) =>
-                                        setDraft({
-                                          ...draft,
-                                          [key]: e.target.checked
-                                            ? [...draft[key], r.ref]
-                                            : draft[key].filter((ref) => ref !== r.ref),
-                                        })
+                                  <div key={r.ref} className="space-y-1">
+                                    <label
+                                      className={`flex items-start gap-2 text-sm ${conflict ? "opacity-50" : ""}`}
+                                      title={
+                                        conflict
+                                          ? `与 inline 定义「${r.name}」冲突，请先移除 inline 或不勾选`
+                                          : undefined
                                       }
-                                    />
-                                    <span className="min-w-0 break-words">
-                                      {r.name}
-                                      <span className="ml-2 text-xs text-muted-foreground">
-                                        {r.agentName}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        className="mt-1"
+                                        checked={draft[key].includes(r.ref)}
+                                        disabled={conflict && !draft[key].includes(r.ref)}
+                                        onChange={(e) =>
+                                          setDraft({
+                                            ...draft,
+                                            [key]: e.target.checked
+                                              ? [...draft[key], r.ref]
+                                              : draft[key].filter((ref) => ref !== r.ref),
+                                          })
+                                        }
+                                      />
+                                      <span className="min-w-0 break-words">
+                                        {r.name}
+                                        <span className="ml-2 text-xs text-muted-foreground">
+                                          {r.agentName}
+                                        </span>
                                       </span>
-                                    </span>
-                                  </label>
+                                    </label>
+                                    {kind === "mcp" && draft.mcpRefs.includes(r.ref) && (
+                                      <div className="pl-6">
+                                        <McpCheck
+                                          name={r.name}
+                                          resetKey={`${r.ref}:${view?.revision ?? ""}`}
+                                          disabledReason={
+                                            dirty || !savedRef ? "先保存草稿再测试连接" : undefined
+                                          }
+                                          requestAction={() => ({
+                                            url: `/api/agents/design/${id}/mcp-check`,
+                                            body: { name: r.name },
+                                          })}
+                                        />
+                                      </div>
+                                    )}
+                                  </div>
                                 );
                               })}
                             {!view?.resources?.some((r) => r.kind === kind) && (
@@ -694,6 +712,22 @@ export function DesignWorkspace({ initialSessionId }: { initialSessionId?: strin
                                   env: {Object.keys(m.env).join(", ")}
                                 </p>
                               )}
+                              <div className="mt-2">
+                                <McpCheck
+                                  name={m.name}
+                                  resetKey={`${m.name}:${view?.revision ?? ""}`}
+                                  disabledReason={
+                                    dirty ||
+                                    !view?.draft?.mcpServers?.some((x) => x.name === m.name)
+                                      ? "先保存草稿再测试连接"
+                                      : undefined
+                                  }
+                                  requestAction={() => ({
+                                    url: `/api/agents/design/${id}/mcp-check`,
+                                    body: { name: m.name },
+                                  })}
+                                />
+                              </div>
                             </div>
                           ))}
                         </fieldset>

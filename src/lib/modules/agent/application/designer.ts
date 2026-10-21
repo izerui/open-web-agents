@@ -175,6 +175,37 @@ export class AgentDesigner {
     };
   }
 
+  /**
+   * 测试连接用:草稿里名为 name 的 MCP 的真实配置 —— 引用来源原样带入、目标里已保存的密钥还原,
+   * 与保存后实际运行的配置相同(预览里看到的是脱敏的)。不改草稿。
+   * 一并返回变量定义与目标智能体:变量值按本人在目标智能体上保存的取,与运行时一致。
+   * 只在会话锁里读配置;真正去连接在锁外进行,慢的 MCP 不会占着会话
+   */
+  mcpForCheck(subject: Subject, id: string, name: string) {
+    return this.deps.inSession(id, async (tx) => {
+      const { session, target } = await this.context(tx, subject, id);
+      const state = await this.sync(tx, session);
+      if (!state) throw new DesignError(409, "design_legacy", "请先载入当前草稿");
+      const resources = await Promise.all(
+        state.resourceAgentIds.map((sourceId) => this.target(tx, subject, sourceId)),
+      );
+      let config: AgentSnapshot["config"];
+      try {
+        const resolved = resolveDesign(state.draft, resources);
+        config = restoreMcpSecrets(resolved.config, target?.config, state.mcpBaseline);
+      } catch (err) {
+        throw new DesignError(
+          400,
+          "invalid_config",
+          err instanceof Error ? err.message : "草稿无法解析",
+        );
+      }
+      const def = config.mcpServers?.find((m) => m.name === name);
+      if (!def) throw new DesignError(404, "mcp_not_found", `草稿里没有名为 ${name} 的 MCP`);
+      return { def, variables: config.variables, targetId: target?.id };
+    });
+  }
+
   inspect(subject: Subject, id: string) {
     return this.deps.inSession(id, async (tx) => {
       const { session, target } = await this.context(tx, subject, id);

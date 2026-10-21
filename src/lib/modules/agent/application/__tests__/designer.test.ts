@@ -397,6 +397,65 @@ describe("AgentDesigner", () => {
     expect(saved.saved.config.mcpServers?.[0]?.env?.KEY).toBe("env-secret");
   });
 
+  it("mcpForCheck:按名称取草稿里 MCP 的真实配置(预览脱敏,测试用还原后的),与保存后一致;不改草稿", async () => {
+    const targetWithMcp: Agent = {
+      ...target,
+      config: {
+        ...target.config,
+        mcpServers: [
+          {
+            name: "api",
+            type: "http",
+            url: "https://old.example.com/mcp?token=real-secret",
+            env: { KEY: "env-secret" },
+          },
+        ],
+        variables: [{ name: "X", required: false, secret: true }],
+      },
+    };
+    const h = await setup({ target: targetWithMcp });
+    const state = (await h.sessions.get("design"))?.designState;
+    if (!state?.draft.mcpServers?.[0]) throw new Error("no mcp in draft");
+    // AI 改了主机,保留脱敏的查询串;另外勾选引用来源里的 search
+    state.draft.mcpServers[0] = {
+      ...state.draft.mcpServers[0],
+      url: "https://new.example.com/mcp?***",
+    };
+    await h.sessions.update("design", { designState: state });
+    const view = await h.edit(
+      { ...(await h.inspect()).draft, mcpRefs: ['["source","mcp","search"]'] },
+      ["target", "source"],
+    );
+    expect(JSON.stringify(view)).not.toContain("real-secret");
+    const before = (await h.sessions.get("design"))?.designState;
+
+    const inline = await h.designer.mcpForCheck(owner, "design", "api");
+    expect(inline).toEqual({
+      def: expect.objectContaining({
+        url: "https://new.example.com/mcp?token=real-secret",
+        env: { KEY: "env-secret" },
+      }),
+      variables: [{ name: "X", required: false, secret: true }],
+      targetId: "target",
+    });
+    const ref = await h.designer.mcpForCheck(owner, "design", "search");
+    expect(ref.def).toMatchObject({ url: "https://example.test/mcp?token=secret-token" });
+    await expect(h.designer.mcpForCheck(owner, "design", "nope")).rejects.toMatchObject({
+      status: 404,
+      code: "mcp_not_found",
+    });
+    // 别人的设计会话:不存在
+    await expect(
+      h.designer.mcpForCheck({ userId: "other" }, "design", "api"),
+    ).rejects.toMatchObject({
+      status: 404,
+    });
+    expect((await h.sessions.get("design"))?.designState).toEqual(before);
+    // 测试用的配置与保存后一致
+    const saved = await h.designer.apply(owner, "design", (await h.inspect()).previewToken);
+    expect(saved.saved.config.mcpServers?.find((m) => m.name === "api")).toEqual(inline.def);
+  });
+
   it("variable template URL: only change path, original hidden params preserved", async () => {
     const targetVarUrl: Agent = {
       ...target,

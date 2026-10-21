@@ -16,6 +16,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { EvalPanel } from "@/features/builder/eval-panel";
 import { KnowledgePanel } from "@/features/builder/knowledge-panel";
+import { McpCheck } from "@/features/builder/mcp-check";
 import { ReleasePanel } from "@/features/builder/release-panel";
 import { SharePanel } from "@/features/builder/share-panel";
 import { InvokeSnippetTabs } from "@/features/integration/invoke-snippet";
@@ -61,6 +62,36 @@ const INPUT_SCHEMA_EXAMPLE = `{
   "required": ["topic"],
   "additionalProperties": false
 }`;
+
+/** 构建器里的一行 MCP → 配置;保存与测试连接共用。env 不是字符串键值 JSON 时抛错 */
+function mcpOfRow(m: McpDraft) {
+  if (m.type === "http") {
+    return { name: m.name.trim(), type: "http" as const, url: m.url.trim() };
+  }
+  let env: Record<string, string> | undefined;
+  if (m.envText.trim()) {
+    const parsed = JSON.parse(m.envText) as unknown;
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed) ||
+      Object.values(parsed).some((v) => typeof v !== "string")
+    ) {
+      throw new Error(`MCP「${m.name || "未命名"}」的 env 必须是字符串键值 JSON 对象`);
+    }
+    env = parsed as Record<string, string>;
+  }
+  return {
+    name: m.name.trim(),
+    type: "stdio" as const,
+    command: m.command.trim(),
+    args: m.argsText
+      .split("\n")
+      .map((x) => x.trim())
+      .filter(Boolean),
+    env,
+  };
+}
 
 interface McpDraft {
   /** 稳定行 id。用数组索引作 key 会在删除中间行时把编辑状态错位到别行。 */
@@ -395,38 +426,7 @@ export function Builder() {
     }
     setSaving(true);
     try {
-      const mcpServers = draft.mcpServers
-        .filter((m) => m.name.trim())
-        .map((m) => {
-          if (m.type === "http") {
-            return { name: m.name.trim(), type: "http" as const, url: m.url.trim() };
-          }
-
-          let env: Record<string, string> | undefined;
-          if (m.envText.trim()) {
-            const parsed = JSON.parse(m.envText) as unknown;
-            if (
-              typeof parsed !== "object" ||
-              parsed === null ||
-              Array.isArray(parsed) ||
-              Object.values(parsed).some((v) => typeof v !== "string")
-            ) {
-              throw new Error(`MCP「${m.name || "未命名"}」的 env 必须是字符串键值 JSON 对象`);
-            }
-            env = parsed as Record<string, string>;
-          }
-
-          return {
-            name: m.name.trim(),
-            type: "stdio" as const,
-            command: m.command.trim(),
-            args: m.argsText
-              .split("\n")
-              .map((x) => x.trim())
-              .filter(Boolean),
-            env,
-          };
-        });
+      const mcpServers = draft.mcpServers.filter((m) => m.name.trim()).map(mcpOfRow);
 
       const res = await fetch("/api/agents", {
         method: "POST",
@@ -1055,6 +1055,25 @@ export function Builder() {
                   />
                 </div>
               )}
+              <McpCheck
+                name={m.name || `第 ${i + 1} 个`}
+                resetKey={JSON.stringify([m.type, m.url, m.command, m.argsText, m.envText])}
+                requestAction={() => ({
+                  url: "/api/agents/mcp-check",
+                  body: {
+                    // 打开的是已保存的智能体:变量值取本人在它上面保存的
+                    agentId: openedId ?? undefined,
+                    server: mcpOfRow(m),
+                    variables: draft.variables
+                      .filter((v) => v.name.trim())
+                      .map((v) => ({
+                        name: v.name.trim(),
+                        required: v.required,
+                        secret: v.secret,
+                      })),
+                  },
+                })}
+              />
             </div>
           ))}
         </CardContent>

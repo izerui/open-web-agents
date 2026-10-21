@@ -49,7 +49,7 @@ const schema = z.object({
       z.boolean(),
     )
     .default(false),
-  // webhook 允许投递到内网私有网段(RFC1918 / CGNAT / IPv6 ULA)。回环与云元数据地址始终禁止。
+  // webhook 投递与 MCP 测试连接允许连内网私有网段(RFC1918 / CGNAT / IPv6 ULA)。回环与云元数据地址始终禁止。
   OWA_WEBHOOK_ALLOW_PRIVATE: z
     .preprocess(
       (v) => ["1", "true", "on", "yes"].includes(String(v ?? "").toLowerCase()),

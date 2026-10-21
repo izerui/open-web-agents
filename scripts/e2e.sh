@@ -50,6 +50,10 @@ else
   # 每个智能体的调用限流调低,好让限流用例几十次请求内就能撞上;已有用例对单个智能体
   # 每分钟的调用远低于它。测试从 OWA_E2E_INVOKE_AGENT_LIMIT 得知这个值
   export OWA_E2E_INVOKE_AGENT_LIMIT="${OWA_INVOKE_RATE_LIMIT_PER_AGENT:-20}"
+  # MCP 测试连接的 e2e 把模拟 MCP 服务放在本机内网地址上:内网须显式放行(回环与云元数据始终禁止)。
+  # 测试据 OWA_E2E_ALLOW_PRIVATE 得知放行了
+  export OWA_E2E_ALLOW_PRIVATE="${OWA_WEBHOOK_ALLOW_PRIVATE:-1}"
+  OWA_WEBHOOK_ALLOW_PRIVATE="$OWA_E2E_ALLOW_PRIVATE" \
   OWA_INVOKE_RATE_LIMIT_PER_AGENT="$OWA_E2E_INVOKE_AGENT_LIMIT" \
   OWA_AUTH_IP_RATE_LIMIT="${OWA_AUTH_IP_RATE_LIMIT:-0}" PORT="$PORT" pnpm start >"$LOG" 2>&1 &
   SERVER_PID=$!

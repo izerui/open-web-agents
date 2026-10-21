@@ -26,7 +26,37 @@ export interface GuardedSenderOptions {
   resolve?: (hostname: string) => Promise<{ address: string; family: number }[]>;
 }
 
-const defaultResolve = (hostname: string) => dnsLookup(hostname, { all: true, verbatim: true });
+export const defaultResolve = (hostname: string) =>
+  dnsLookup(hostname, { all: true, verbatim: true });
+
+/**
+ * 建连用的 lookup:解析、逐个校验、把【刚校验过的这批地址】原样交给连接 —— 不再有第二次解析。
+ * 有不允许的地址(或解析不到)时用 reject 造出的错误让建连失败。webhook 与 MCP 测试连接共用
+ */
+export function guardedLookup(opts: {
+  allowAddress: (ip: string) => boolean;
+  resolve: (hostname: string) => Promise<{ address: string; family: number }[]>;
+  reject: (hostname: string, badAddress: string | undefined) => Error;
+}): LookupFunction {
+  return (hostname, options, callback) => {
+    opts
+      .resolve(hostname)
+      .then((addrs) => {
+        const bad = addrs.find((a) => !opts.allowAddress(a.address));
+        if (addrs.length === 0 || bad) {
+          callback(opts.reject(hostname, bad?.address) as NodeJS.ErrnoException, "", 4);
+          return;
+        }
+        if (options.all) {
+          callback(null, addrs);
+        } else {
+          const first = addrs[0] as { address: string; family: number };
+          callback(null, first.address, first.family);
+        }
+      })
+      .catch((err: NodeJS.ErrnoException) => callback(err, "", 4));
+  };
+}
 
 export function createGuardedSender(opts: GuardedSenderOptions): WebhookSender {
   const resolve = opts.resolve ?? defaultResolve;
@@ -45,28 +75,17 @@ export function createGuardedSender(opts: GuardedSenderOptions): WebhookSender {
         return;
       }
 
-      let rejected: WebhookTargetRejected | null = null;
-      const lookup: LookupFunction = (hostname, options, callback) => {
-        resolve(hostname)
-          .then((addrs) => {
-            const bad = addrs.find((a) => !opts.allowAddress(a.address));
-            if (addrs.length === 0 || bad) {
-              rejected = new WebhookTargetRejected(
-                `webhook 目标 ${hostname} 解析到不允许的地址${bad ? `:${bad.address}` : "(无解析结果)"}`,
-              );
-              callback(rejected, "", 4);
-              return;
-            }
-            // 把【刚校验过的这批地址】原样交给连接 —— 不再有第二次解析
-            if (options.all) {
-              callback(null, addrs);
-            } else {
-              const first = addrs[0] as { address: string; family: number };
-              callback(null, first.address, first.family);
-            }
-          })
-          .catch((err: NodeJS.ErrnoException) => callback(err, "", 4));
-      };
+      let rejected: Error | null = null;
+      const lookup = guardedLookup({
+        allowAddress: opts.allowAddress,
+        resolve,
+        reject: (hostname, bad) => {
+          rejected = new WebhookTargetRejected(
+            `webhook 目标 ${hostname} 解析到不允许的地址${bad ? `:${bad}` : "(无解析结果)"}`,
+          );
+          return rejected;
+        },
+      });
 
       const client = url.protocol === "https:" ? https : http;
       const req = client.request(
