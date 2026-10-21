@@ -88,6 +88,7 @@ import { signingSecretsOf } from "@/lib/modules/integration/domain/signing-secre
 import { isAddressAllowed } from "@/lib/modules/integration/domain/webhook-policy";
 import { MysqlKnowledgeRepo } from "@/lib/modules/knowledge/adapters/mysql-knowledge-repo";
 import { ChunkCache } from "@/lib/modules/knowledge/application/chunk-cache";
+import { KNOWLEDGE_LIMITS } from "@/lib/modules/knowledge/domain/limits";
 import {
   type ScoredChunk,
   formatContext,
@@ -256,7 +257,7 @@ function inheritedEnv(): Record<string, string> {
 
 function build(): Container {
   const env = loadEnv();
-  const { db } = createDb(env.databaseUrl);
+  const { db, pool } = createDb(env.databaseUrl);
   const probeDatabase = databaseProbe(db);
 
   const gateway = new EnvModelGateway({
@@ -324,7 +325,8 @@ function build(): Container {
   const transcript = new JsonlTranscript();
   const approval = new RedisApproval(env.redisUrl);
   const usage = new MysqlUsageRepo(db);
-  const knowledge = new MysqlKnowledgeRepo(db);
+  // 给上连接池:带期限的写入(知识库上传)拿连接有界,整个写入在一个连接上完成
+  const knowledge = new MysqlKnowledgeRepo(db, KNOWLEDGE_LIMITS, pool);
   const knowledgeChunks = new ChunkCache(knowledge);
   const searchKnowledge = async (agentId: string, query: string) => {
     const chunks = await knowledgeChunks.chunksOf(agentId);

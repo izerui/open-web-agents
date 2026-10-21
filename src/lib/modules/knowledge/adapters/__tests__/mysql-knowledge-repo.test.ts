@@ -54,6 +54,79 @@ if (!TEST_DB_URL) {
   });
 
   describe("MysqlKnowledgeRepo(真实 MySQL)", () => {
+    describe(
+      "createMany 等连接池分配连接:有界,放弃后晚到的连接立刻归还",
+      { timeout: 30_000 },
+      () => {
+        /** 只有一个连接的池,和用它的仓储 */
+        function singlePool() {
+          const p = mysql.createPool({ uri: TEST_DB_URL as string, connectionLimit: 1 });
+          const r = new MysqlKnowledgeRepo(drizzle(p, { schema, mode: "default" }), limits, p);
+          return { p, r };
+        }
+        const count = async (agentId: string) => (await repo.list(agentId)).docs.length;
+
+        it("连接池占满:到期限就放弃、不写入;之后连接释放,池子照常可用(晚到的连接已归还)", async () => {
+          const { p, r } = singlePool();
+          try {
+            const agentId = await newAgent();
+            const held = await p.getConnection();
+            const start = Date.now();
+            await expect(
+              r.createMany(agentId, [doc(agentId, "排队")], { deadline: Date.now() + 500 }),
+            ).rejects.toMatchObject({ why: "timeout" });
+            expect(Date.now() - start).toBeLessThan(1_000);
+            // 期限过后才释放连接:排队中的那次 getConnection 会拿到它,必须立刻还回来
+            await new Promise((res) => setTimeout(res, 300));
+            held.release();
+            await new Promise((res) => setTimeout(res, 100));
+            const t = Date.now();
+            await p.query("SELECT 1");
+            expect(Date.now() - t).toBeLessThan(500);
+            expect(await count(agentId)).toBe(0);
+          } finally {
+            await p.end();
+          }
+        });
+
+        it("等连接期间调用方取消:放弃、不写入", async () => {
+          const { p, r } = singlePool();
+          try {
+            const agentId = await newAgent();
+            const held = await p.getConnection();
+            const ac = new AbortController();
+            setTimeout(() => ac.abort(), 200);
+            await expect(
+              r.createMany(agentId, [doc(agentId, "取消")], {
+                deadline: Date.now() + 10_000,
+                signal: ac.signal,
+              }),
+            ).rejects.toMatchObject({ why: "aborted" });
+            held.release();
+            await new Promise((res) => setTimeout(res, 100));
+            expect(await count(agentId)).toBe(0);
+          } finally {
+            await p.end();
+          }
+        });
+
+        it("对照:没有争用时照常写入,返回的是事务内回读的完整记录", async () => {
+          const { p, r } = singlePool();
+          try {
+            const agentId = await newAgent();
+            const saved = await r.createMany(agentId, [doc(agentId, "甲"), doc(agentId, "乙")], {
+              deadline: Date.now() + 5_000,
+            });
+            expect(saved.map((d) => d.content)).toEqual(["甲", "乙"]);
+            expect(saved.every((d) => d.createdAt > 0)).toBe(true);
+            expect(await count(agentId)).toBe(2);
+          } finally {
+            await p.end();
+          }
+        });
+      },
+    );
+
     describe("createMany 等智能体行锁期间被放弃:锁释放后也不写入", { timeout: 30_000 }, () => {
       /** 另一个连接占住智能体那一行的锁,ms 毫秒后提交释放 */
       async function holdLock(agentId: string, ms: number) {

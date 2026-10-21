@@ -1,4 +1,5 @@
 import type { Db } from "@/lib/db/client";
+import * as schema from "@/lib/db/schema";
 import { knowledgeDocs } from "@/lib/db/schema";
 import {
   KNOWLEDGE_LIMITS,
@@ -8,7 +9,9 @@ import {
   batchLimitViolation,
 } from "@/lib/modules/knowledge/domain/limits";
 import { type Chunk, chunkText } from "@/lib/modules/knowledge/domain/retrieval";
-import { asc, eq, sql } from "drizzle-orm";
+import { asc, eq, inArray, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/mysql2";
+import type mysql from "mysql2/promise";
 
 export interface KnowledgeDoc {
   id: string;
@@ -42,7 +45,51 @@ export class MysqlKnowledgeRepo {
   constructor(
     private readonly db: Db,
     private readonly limits: KnowledgeLimits = KNOWLEDGE_LIMITS,
+    /**
+     * 底层连接池。给了它,带期限的 createMany 自己从池里拿连接、拿连接有界,整个写入(含回读)
+     * 在这一个连接上完成;不给(如嵌在别的事务里用)则走 db 本身
+     */
+    private readonly pool?: mysql.Pool,
   ) {}
+
+  /**
+   * 从池里拿一个连接,最多等到 deadline。等不到抛 KnowledgeWriteAborted("timeout");
+   * 那之后池子才分到的连接拿到就立刻还回去,不占着。等待期间调用方取消同样放弃
+   */
+  private acquire(pool: mysql.Pool, deadline: number, signal?: AbortSignal) {
+    return new Promise<mysql.PoolConnection>((resolve, reject) => {
+      let gaveUp = false;
+      const giveUp = (why: "timeout" | "aborted") => {
+        if (gaveUp) return;
+        gaveUp = true;
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+        reject(new KnowledgeWriteAborted(why));
+      };
+      const onAbort = () => giveUp("aborted");
+      const timer = setTimeout(() => giveUp("timeout"), Math.max(0, deadline - Date.now()));
+      signal?.addEventListener("abort", onAbort, { once: true });
+      pool.getConnection().then(
+        (conn) => {
+          if (gaveUp) {
+            conn.release();
+            return;
+          }
+          gaveUp = true;
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", onAbort);
+          resolve(conn);
+        },
+        (err) => {
+          if (gaveUp) return;
+          gaveUp = true;
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", onAbort);
+          reject(err);
+        },
+      );
+    });
+  }
 
   /**
    * 新增一篇。超限抛 KnowledgeLimitExceeded。
@@ -77,64 +124,91 @@ export class MysqlKnowledgeRepo {
       }
     };
     check();
-    await this.db.transaction(async (tx) => {
-      let restoreLockWait: number | null = null;
-      try {
-        if (opts.deadline !== undefined) {
-          // innodb_lock_wait_timeout 只能按整秒设,向上取整:多出的不到一秒由下面拿到锁后的复查兜住
-          const seconds = Math.max(1, Math.ceil((opts.deadline - Date.now()) / 1000));
-          const prev = await tx.execute(sql`SELECT @@SESSION.innodb_lock_wait_timeout AS v`);
-          restoreLockWait = Number(((prev as unknown as [{ v: number }[]])[0] ?? [])[0]?.v ?? 50);
-          await tx.execute(sql.raw(`SET SESSION innodb_lock_wait_timeout = ${seconds}`));
-        }
-        let locked: unknown;
+    // 有期限且有连接池:拿连接有界,整个写入(含回读)在这一个连接上完成,提交后不再排队拿连接
+    const conn =
+      opts.deadline !== undefined && this.pool
+        ? await this.acquire(this.pool, opts.deadline, opts.signal)
+        : null;
+    const db = conn ? (drizzle(conn, { schema, mode: "default" }) as unknown as Db) : this.db;
+    let saved: KnowledgeDoc[] = [];
+    try {
+      await db.transaction(async (tx) => {
+        let restoreLockWait: number | null = null;
         try {
-          locked = await tx.execute(
-            sql`SELECT id FROM agents WHERE id = ${agentId} LIMIT 1 FOR UPDATE`,
+          if (opts.deadline !== undefined) {
+            // innodb_lock_wait_timeout 只能按整秒设,向上取整:多出的不到一秒由下面拿到锁后的复查兜住
+            const seconds = Math.max(1, Math.ceil((opts.deadline - Date.now()) / 1000));
+            const prev = await tx.execute(sql`SELECT @@SESSION.innodb_lock_wait_timeout AS v`);
+            restoreLockWait = Number(((prev as unknown as [{ v: number }[]])[0] ?? [])[0]?.v ?? 50);
+            await tx.execute(sql.raw(`SET SESSION innodb_lock_wait_timeout = ${seconds}`));
+          }
+          let locked: unknown;
+          try {
+            locked = await tx.execute(
+              sql`SELECT id FROM agents WHERE id = ${agentId} LIMIT 1 FOR UPDATE`,
+            );
+          } catch (err) {
+            // 1205 = ER_LOCK_WAIT_TIMEOUT:等锁到了期限
+            if ((err as { errno?: number }).errno === 1205)
+              throw new KnowledgeWriteAborted("timeout");
+            throw err;
+          }
+          const lockedRows = (locked as unknown as [unknown[]])[0];
+          if (!Array.isArray(lockedRows) || lockedRows.length === 0) {
+            throw new Error(`agent not found: ${agentId}`);
+          }
+          // 等锁期间可能已经断开或到点
+          check();
+          const [u] = await tx
+            .select({
+              docs: sql<number>`COUNT(*)`,
+              chars: sql<number>`COALESCE(SUM(CHAR_LENGTH(${knowledgeDocs.content})), 0)`,
+            })
+            .from(knowledgeDocs)
+            .where(eq(knowledgeDocs.agentId, agentId));
+          const reason = batchLimitViolation(
+            { docs: Number(u?.docs ?? 0), chars: Number(u?.chars ?? 0) },
+            docs.map((d) => [...d.content].length),
+            this.limits,
           );
-        } catch (err) {
-          // 1205 = ER_LOCK_WAIT_TIMEOUT:等锁到了期限
-          if ((err as { errno?: number }).errno === 1205)
-            throw new KnowledgeWriteAborted("timeout");
-          throw err;
+          if (reason) throw new KnowledgeLimitExceeded(reason);
+          await tx.insert(knowledgeDocs).values(docs);
+          // 回读在事务内、同一个连接上做:提交后再去池里排队拿连接,又是一段不限时的等待
+          const rows = await tx
+            .select()
+            .from(knowledgeDocs)
+            .where(
+              inArray(
+                knowledgeDocs.id,
+                docs.map((d) => d.id),
+              ),
+            );
+          const byId = new Map(rows.map((r) => [r.id, r]));
+          saved = docs.map((d) => {
+            const r = byId.get(d.id);
+            if (!r) throw new Error(`knowledge doc insert failed: ${d.id}`);
+            return {
+              id: r.id,
+              agentId: r.agentId,
+              title: r.title,
+              content: r.content,
+              createdAt: r.createdAt.getTime(),
+            };
+          });
+          // 提交前最后一次:此刻放弃,事务回滚
+          check();
+        } finally {
+          if (restoreLockWait !== null) {
+            await tx
+              .execute(sql.raw(`SET SESSION innodb_lock_wait_timeout = ${restoreLockWait}`))
+              .catch(() => {});
+          }
         }
-        const lockedRows = (locked as unknown as [unknown[]])[0];
-        if (!Array.isArray(lockedRows) || lockedRows.length === 0) {
-          throw new Error(`agent not found: ${agentId}`);
-        }
-        // 等锁期间可能已经断开或到点
-        check();
-        const [u] = await tx
-          .select({
-            docs: sql<number>`COUNT(*)`,
-            chars: sql<number>`COALESCE(SUM(CHAR_LENGTH(${knowledgeDocs.content})), 0)`,
-          })
-          .from(knowledgeDocs)
-          .where(eq(knowledgeDocs.agentId, agentId));
-        const reason = batchLimitViolation(
-          { docs: Number(u?.docs ?? 0), chars: Number(u?.chars ?? 0) },
-          docs.map((d) => [...d.content].length),
-          this.limits,
-        );
-        if (reason) throw new KnowledgeLimitExceeded(reason);
-        await tx.insert(knowledgeDocs).values(docs);
-        // 提交前最后一次:此刻放弃,事务回滚
-        check();
-      } finally {
-        if (restoreLockWait !== null) {
-          await tx
-            .execute(sql.raw(`SET SESSION innodb_lock_wait_timeout = ${restoreLockWait}`))
-            .catch(() => {});
-        }
-      }
-    });
-    const out: KnowledgeDoc[] = [];
-    for (const d of docs) {
-      const got = await this.get(d.id);
-      if (!got) throw new Error(`knowledge doc insert failed: ${d.id}`);
-      out.push(got);
+      });
+    } finally {
+      conn?.release();
     }
-    return out;
+    return saved;
   }
 
   async get(id: string): Promise<KnowledgeDoc | null> {
