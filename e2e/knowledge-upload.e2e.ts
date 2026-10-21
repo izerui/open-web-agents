@@ -2,7 +2,12 @@
 // 检索测试命中 → 运行时确实把命中的片段带进了给模型的请求(假网关核对)。
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startFakeGateway } from "../scripts/sdk-probe/fake-gateway.mjs";
-import { docx, pdf } from "../src/lib/modules/knowledge/adapters/__tests__/fixtures/make";
+import {
+  docx,
+  heavyDocx,
+  pdf,
+  xlsxWithGaps,
+} from "../src/lib/modules/knowledge/adapters/__tests__/fixtures/make";
 import { BASE, type Client, newUser, serverUp } from "./client";
 
 const databaseUrl = process.env.OWA_E2E_DATABASE_URL;
@@ -112,6 +117,41 @@ describe("知识库上传文件", () => {
       (await upload(stranger, agentId, [{ name: "a.txt", bytes: new TextEncoder().encode("x") }]))
         .status,
     ).toBe(403);
+  });
+
+  it("Excel 空单元格按列对齐:缺 B2 时 C2 仍在第 3 列(数学)", async () => {
+    const r = await upload(owner, agentId, [{ name: "成绩表.xlsx", bytes: xlsxWithGaps() }]);
+    expect(r.status, JSON.stringify(r.body)).toBe(201);
+    const saved = r.body.results[0];
+    const docId = saved?.ok ? saved.docs[0]?.id : undefined;
+    const doc = await owner.get<{ content: string }>(`/api/agents/${agentId}/knowledge/${docId}`);
+    expect(doc.body.content.split("\n")[2]).toBe("张三\t\t95");
+  });
+
+  it("解析很重的文件时,服务照常响应其他请求;之后的上传照常处理", { timeout: 120_000 }, async () => {
+    let done = false;
+    const heavy = upload(owner, agentId, [{ name: "很大.docx", bytes: heavyDocx() }]).finally(
+      () => {
+        done = true;
+      },
+    );
+    const latencies: number[] = [];
+    while (!done) {
+      const t = Date.now();
+      const h = await fetch(`${BASE}/api/health?probe=live`);
+      expect(h.ok).toBe(true);
+      latencies.push(Date.now() - t);
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    const r = await heavy;
+    // 解析出的文字超过知识库总上限:给出原因而不是超时或崩溃
+    expect(r.body.results[0]).toMatchObject({ ok: false });
+    expect(latencies.length).toBeGreaterThan(3);
+    expect(Math.max(...latencies)).toBeLessThan(1_000);
+    const after = await upload(owner, agentId, [
+      { name: "之后.docx", bytes: docx(["解析重文件之后照常"]) },
+    ]);
+    expect(after.body.results[0]).toMatchObject({ ok: true });
   });
 
   it("参数:没有文件、超过 20 个文件 400", async () => {

@@ -2,8 +2,9 @@
 // 包括不嵌入字体、靠 CMap 编码的中文 PDF(老的中文公文、教材常见),以及各种该拒绝的情况。
 import { strToU8, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
-import { EXTRACT_LIMITS, extractText } from "../extract-text";
-import { docx, pdf, pptx, xlsx } from "./fixtures/make";
+import { columnOf } from "../extract-child.mjs";
+import { EXTRACT_LIMITS, extractText, liveExtractionWorkers } from "../extract-text";
+import { docx, heavyDocx, pdf, pptx, xlsx, xlsxWithGaps } from "./fixtures/make";
 
 const ok = async (name: string, bytes: Uint8Array) => {
   const r = await extractText(name, bytes);
@@ -75,5 +76,76 @@ describe("extractText", () => {
     const broken = docx(["x"]).slice(0, 60);
     expect(await reason("坏.docx", broken)).toMatch(/损坏|不是 Office/);
     expect(await reason("坏.pdf", strToU8("%PDF-1.4\n垃圾"))).toMatch(/损坏|没有可提取/);
+  });
+
+  it("Excel 有空单元格:按坐标放进对应的列,不往前挤(缺 B2 时 95 仍在数学列)", async () => {
+    const r = await ok("成绩.xlsx", xlsxWithGaps());
+    const lines = r.text.split("\n");
+    expect(lines[0]).toBe("工作表:成绩");
+    expect(lines[1]).toBe("姓名\t语文\t数学");
+    expect(lines[2]).toBe("张三\t\t95");
+    expect(lines[2]?.split("\t")[2]).toBe("95"); // 第 3 列 = 数学
+    expect(lines[3]).toBe("李四\t88\t90"); // 没写坐标的按顺序排
+    expect(lines[4]?.split("\t")).toHaveLength(28); // AB 是第 28 列
+    expect(lines[4]?.endsWith("\t备注")).toBe(true);
+  });
+
+  it("列坐标换算", () => {
+    expect([
+      columnOf("A1"),
+      columnOf("C2"),
+      columnOf("Z9"),
+      columnOf("AA10"),
+      columnOf("AB4"),
+    ]).toEqual([0, 2, 25, 26, 27]);
+    expect(columnOf(undefined)).toBeNull();
+  });
+});
+
+describe("extractText:时限与内存真的停下解析(独立子进程)", { timeout: 60_000 }, () => {
+  /** 主线程在这段时间里还能不能跑计时器:同步解析放在主线程时,这里一次都跑不到 */
+  async function ticksDuring<T>(p: Promise<T>): Promise<{ value: T; ticks: number; ms: number }> {
+    let ticks = 0;
+    const t = setInterval(() => {
+      ticks++;
+    }, 10);
+    const start = Date.now();
+    try {
+      const value = await p;
+      return { value, ticks, ms: Date.now() - start };
+    } finally {
+      clearInterval(t);
+    }
+  }
+  const settle = async () => {
+    for (let i = 0; i < 100 && liveExtractionWorkers() > 0; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  };
+
+  it("超时:到点就返回,解析期间当前进程照常响应;子进程确实退出;之后的解析照常", async () => {
+    const heavy = heavyDocx();
+    expect(heavy.length).toBeLessThan(EXTRACT_LIMITS.maxBytes);
+    const { value, ticks, ms } = await ticksDuring(
+      extractText("大.docx", heavy, { ...EXTRACT_LIMITS, timeoutMs: 300 }),
+    );
+    expect(value).toMatchObject({ ok: false });
+    expect(value.ok === false && value.reason).toContain("已停止解析");
+    expect(ms).toBeLessThan(2_000);
+    expect(ticks).toBeGreaterThan(10);
+    await settle();
+    expect(liveExtractionWorkers()).toBe(0);
+    expect((await ok("后续.docx", docx(["照常解析"]))).text).toBe("照常解析");
+    await settle();
+    expect(liveExtractionWorkers()).toBe(0);
+  });
+
+  it("内存超限:只有解析子进程退出,给出原因;当前进程不受影响", async () => {
+    const r = await extractText("大.docx", heavyDocx(), { ...EXTRACT_LIMITS, maxHeapMb: 16 });
+    expect(r).toMatchObject({ ok: false });
+    expect(r.ok === false && r.reason).toContain("内存上限");
+    await settle();
+    expect(liveExtractionWorkers()).toBe(0);
+    expect((await ok("后续.txt", strToU8("照常"))).text).toBe("照常");
   });
 });

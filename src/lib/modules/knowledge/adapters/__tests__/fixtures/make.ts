@@ -81,3 +81,46 @@ export function pdf(text: string, opts: { cjk?: boolean; empty?: boolean } = {})
   out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
   return Uint8Array.from(out, (c) => c.charCodeAt(0));
 }
+
+/**
+ * 有空单元格的表:Excel 不写空单元格,只有坐标能说明值在哪一列。
+ * 第 2 行缺 B2(语文)、只有 A2 与 C2;第 3 行的单元格没写坐标(按顺序排);第 4 行只有 AB4
+ */
+export function xlsxWithGaps(): Uint8Array {
+  return zipSync({
+    "[Content_Types].xml": enc(
+      '<Types><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/></Types>',
+    ),
+    "xl/workbook.xml": enc(
+      '<workbook><sheets><sheet name="成绩" sheetId="1" r:id="rId1"/></sheets></workbook>',
+    ),
+    "xl/_rels/workbook.xml.rels": enc(
+      '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>',
+    ),
+    "xl/sharedStrings.xml": enc(
+      "<sst><si><t>姓名</t></si><si><t>语文</t></si><si><t>数学</t></si><si><t>张三</t></si><si><t>李四</t></si></sst>",
+    ),
+    "xl/worksheets/sheet1.xml": enc(
+      "<worksheet><sheetData>" +
+        '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="s"><v>2</v></c></row>' +
+        '<row r="2"><c r="A2" t="s"><v>3</v></c><c r="C2"><v>95</v></c></row>' +
+        '<row r="3"><c t="s"><v>4</v></c><c><v>88</v></c><c><v>90</v></c></row>' +
+        '<row r="4"><c r="AB4" t="inlineStr"><is><t>备注</t></is></c></row>' +
+        "</sheetData></worksheet>",
+    ),
+  });
+}
+
+/** 一个解压后很大(约 85MB XML)、压缩后很小的 Word:解析要做大量同步工作 */
+export function heavyDocx(): Uint8Array {
+  const p = "<w:p><w:r><w:t>x</w:t></w:r></w:p>";
+  return zipSync(
+    {
+      "[Content_Types].xml": enc(
+        '<Types><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>',
+      ),
+      "word/document.xml": enc(`<w:document><w:body>${p.repeat(2_500_000)}</w:body></w:document>`),
+    },
+    { level: 1 },
+  );
+}
