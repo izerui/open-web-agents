@@ -55,15 +55,30 @@ export function liveExtractionWorkers(): number {
   return alive;
 }
 
-async function slot<T>(fn: () => Promise<T>): Promise<T> {
-  if (running >= MAX_PARALLEL) await new Promise<void>((r) => waiting.push(r));
-  running++;
-  try {
-    return await fn();
-  } finally {
-    running--;
-    waiting.shift()?.();
+/** 等一个解析名额,最多等 timeoutMs;等不到返回 false(并从队列里撤下,不占后面的名额) */
+function acquire(timeoutMs: number): Promise<boolean> {
+  if (running < MAX_PARALLEL) {
+    running++;
+    return Promise.resolve(true);
   }
+  return new Promise((resolve) => {
+    const take = () => {
+      clearTimeout(timer);
+      running++;
+      resolve(true);
+    };
+    const timer = setTimeout(() => {
+      const at = waiting.indexOf(take);
+      if (at >= 0) waiting.splice(at, 1);
+      resolve(false);
+    }, timeoutMs);
+    waiting.push(take);
+  });
+}
+
+function release() {
+  running--;
+  waiting.shift()?.();
 }
 
 type Format = Extract<ExtractResult, { ok: true }>["format"];
@@ -122,7 +137,21 @@ export async function extractText(
   if (bytes.length > limits.maxBytes) {
     return { ok: false, reason: `文件超过 ${Math.round(limits.maxBytes / 1024 / 1024)}MB 上限` };
   }
-  const r = await slot(() => runChild(fileName, bytes, limits));
+  // 排队等解析名额的时间也算在时限里:时限是这个文件从交来到出结果的总时长
+  const started = Date.now();
+  let r: RunOutcome;
+  if (!(await acquire(limits.timeoutMs))) {
+    r = { ok: false, timeout: true };
+  } else {
+    try {
+      r = await runChild(fileName, bytes, {
+        ...limits,
+        timeoutMs: Math.max(1, limits.timeoutMs - (Date.now() - started)),
+      });
+    } finally {
+      release();
+    }
+  }
   if ("timeout" in r) {
     return {
       ok: false,

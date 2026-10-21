@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { EXTRACT_LIMITS, extractText } from "@/lib/modules/knowledge/adapters/extract-text";
+import { UPLOAD_LIMITS } from "@/lib/modules/knowledge/application/upload-limits";
 import { KNOWLEDGE_LIMITS, KnowledgeLimitExceeded } from "@/lib/modules/knowledge/domain/limits";
 import { splitDoc, titleOf } from "@/lib/modules/knowledge/domain/split-doc";
 import { requirePermission } from "../_lib/access";
@@ -9,9 +10,8 @@ import { requirePermission } from "../_lib/access";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** 一次最多传几个文件、整个请求最大多少:解析在 web 进程里做,要有界 */
-const MAX_FILES = 20;
-const MAX_REQUEST_BYTES = 100 * 1024 * 1024;
+/** 本进程里正在处理的上传请求数(见 UPLOAD_LIMITS.maxInflight) */
+let inflight = 0;
 
 /**
  * 边读边数请求体,超过上限立刻停止读取。返回读到的全部字节,超限返回 null。
@@ -59,9 +59,22 @@ type FileResult =
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { knowledge, audit } = getContainer();
+  let counted = false;
   try {
     const r = await requirePermission(req, id, "write");
     if (r.error) return r.error;
+
+    const { maxFiles: MAX_FILES, maxRequestBytes: MAX_REQUEST_BYTES, budgetMs } = UPLOAD_LIMITS;
+    // 同时处理的上传请求有上限:每个都要在内存里缓冲请求体。读请求体之前就拒绝
+    if (inflight >= UPLOAD_LIMITS.maxInflight) {
+      return Response.json(
+        { error: "当前上传的人较多,请稍后再试" },
+        { status: 503, headers: { "Retry-After": "10" } },
+      );
+    }
+    inflight++;
+    counted = true;
+    const deadline = Date.now() + budgetMs;
 
     const tooLarge = () =>
       Response.json(
@@ -94,6 +107,18 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     // 逐个处理:解析占 CPU,并发只会让每个都更慢;也让容量上限按顺序判定
     for (const f of files) {
       const name = f.name || "未命名文件";
+      // 总时长用完、或客户端已经断开:剩下的不解析不入库,如实标出
+      const remaining = deadline - Date.now();
+      if (req.signal.aborted || remaining < 1_000) {
+        results.push({
+          file: name,
+          ok: false,
+          reason: req.signal.aborted
+            ? "上传连接已断开,这个文件没有处理"
+            : `本次上传处理时间已用完(上限 ${Math.round(budgetMs / 1000)} 秒),这个文件没有处理;请分批上传`,
+        });
+        continue;
+      }
       // 先看大小再读内容:超过单文件上限的不转成数组
       if (f.size > EXTRACT_LIMITS.maxBytes) {
         results.push({
@@ -103,7 +128,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         });
         continue;
       }
-      const got = await extractText(name, new Uint8Array(await f.arrayBuffer()));
+      const got = await extractText(name, new Uint8Array(await f.arrayBuffer()), {
+        ...EXTRACT_LIMITS,
+        // 单个文件的解析时限不超过本次上传剩下的时间
+        timeoutMs: Math.min(EXTRACT_LIMITS.timeoutMs, remaining),
+      });
       if (!got.ok) {
         results.push({ file: name, ok: false, reason: got.reason });
         continue;
@@ -159,5 +188,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const res = authErrorResponse(err);
     if (res) return res;
     throw err;
+  } finally {
+    if (counted) inflight--;
   }
 }

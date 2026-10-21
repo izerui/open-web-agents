@@ -165,3 +165,74 @@ export function heavyDocx(): Uint8Array {
     { level: 1 },
   );
 }
+
+/**
+ * 带数字格式的表:Excel 把日期存成序号(2024-01-01 是 45292),靠单元格样式(s)→ cellXfs → numFmtId
+ * 才知道它是日期。含内置日期格式(14)、自定义日期时间格式(164)、内置时间(20)、百分比(10)、
+ * 浮点误差、布尔值;date1904 = true 时按 1904 日期系统
+ */
+export function xlsxFormats(opts: { date1904?: boolean } = {}): Uint8Array {
+  const cell = (r: string, v: string, s?: number, t?: string) =>
+    `<c r="${r}"${s !== undefined ? ` s="${s}"` : ""}${t ? ` t="${t}"` : ""}><v>${v}</v></c>`;
+  // 1904 系统的序号比 1900 系统小 1462
+  const d = (n: number) => String(opts.date1904 ? n - 1462 : n);
+  return zipSync({
+    "[Content_Types].xml": enc(
+      '<Types><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/></Types>',
+    ),
+    "xl/workbook.xml": enc(
+      `<workbook>${opts.date1904 ? '<workbookPr date1904="1"/>' : ""}<sheets><sheet name="记录" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+    ),
+    "xl/_rels/workbook.xml.rels": enc(
+      '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>',
+    ),
+    "xl/styles.xml": enc(
+      '<styleSheet><numFmts count="1"><numFmt numFmtId="164" formatCode="yyyy&quot;年&quot;m&quot;月&quot;d&quot;日&quot; hh:mm"/></numFmts>' +
+        '<cellXfs count="5"><xf numFmtId="0"/><xf numFmtId="14"/><xf numFmtId="164"/><xf numFmtId="20"/><xf numFmtId="10"/></cellXfs></styleSheet>',
+    ),
+    "xl/worksheets/sheet1.xml": enc(
+      `<worksheet><sheetData><row r="1">${cell("A1", d(45292), 1)}${cell("B1", d(45292.5), 2)}${cell("C1", "0.75", 3)}${cell("D1", "0.125", 4)}</row><row r="2">${cell("A2", "0.30000000000000004")}${cell("B2", "1", undefined, "b")}${cell("C2", "12345", 0)}${cell("D2", d(59), 1)}${cell("E2", d(61), 1)}</row></sheetData></worksheet>`,
+    ),
+  });
+}
+
+/** 用 Node 的解码器反查出旧编码(GBK / Big5)的编码表,把文字编码成对应字节 */
+const legacyTables = new Map<string, Map<string, number[]>>();
+export function encodeLegacy(text: string, encoding: "gb18030" | "big5"): Uint8Array {
+  let table = legacyTables.get(encoding);
+  if (!table) {
+    table = new Map();
+    const dec = new TextDecoder(encoding, { fatal: true });
+    for (let lead = 0x81; lead <= 0xfe; lead++) {
+      for (let trail = 0x40; trail <= 0xfe; trail++) {
+        try {
+          const ch = dec.decode(Uint8Array.from([lead, trail]));
+          if ([...ch].length === 1 && !table.has(ch)) table.set(ch, [lead, trail]);
+        } catch {
+          // 不是合法的双字节序列
+        }
+      }
+    }
+    legacyTables.set(encoding, table);
+  }
+  const out: number[] = [];
+  for (const ch of text) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (code < 0x80) out.push(code);
+    else {
+      const bytes = table.get(ch);
+      if (!bytes) throw new Error(`${encoding} 编不了「${ch}」`);
+      out.push(...bytes);
+    }
+  }
+  return Uint8Array.from(out);
+}
+
+export function utf16(text: string, order: "le" | "be", bom: boolean): Uint8Array {
+  const out: number[] = bom ? (order === "le" ? [0xff, 0xfe] : [0xfe, 0xff]) : [];
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    out.push(...(order === "le" ? [c & 0xff, c >> 8] : [c >> 8, c & 0xff]));
+  }
+  return Uint8Array.from(out);
+}

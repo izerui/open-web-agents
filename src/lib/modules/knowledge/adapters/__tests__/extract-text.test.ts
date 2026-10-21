@@ -4,7 +4,18 @@ import { strToU8, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import { columnOf } from "../extract-child.mjs";
 import { EXTRACT_LIMITS, extractText, liveExtractionWorkers } from "../extract-text";
-import { docx, heavyDocx, pdf, pptx, pptxOrdered, xlsx, xlsxWithGaps } from "./fixtures/make";
+import {
+  docx,
+  encodeLegacy,
+  heavyDocx,
+  pdf,
+  pptx,
+  pptxOrdered,
+  utf16,
+  xlsx,
+  xlsxFormats,
+  xlsxWithGaps,
+} from "./fixtures/make";
 
 const ok = async (name: string, bytes: Uint8Array) => {
   const r = await extractText(name, bytes);
@@ -92,6 +103,21 @@ describe("extractText", () => {
     expect((await ok("旧.txt", gbk)).text).toBe("中文");
   });
 
+  it("文本编码:记事本存的 Unicode(UTF-16,有无 BOM)、GBK、Big5 都按原文读出;认不出的编码拒绝而不是存乱码", async () => {
+    const zh = "差旅住宿标准:每晚不超过 450 元,需要附上发票和行程单。";
+    const tw = "這是一段繁體中文的測試資料,我們要確認編碼判斷正確,不會變成亂碼。";
+    expect((await ok("记事本.txt", utf16(zh, "le", true))).text).toBe(zh);
+    expect((await ok("大端.txt", utf16(zh, "be", true))).text).toBe(zh);
+    expect((await ok("无BOM.txt", utf16(zh, "le", false))).text).toBe(zh);
+    expect((await ok("旧简体.txt", encodeLegacy(zh, "gb18030"))).text).toBe(zh);
+    expect((await ok("繁體.txt", encodeLegacy(tw, "big5"))).text).toBe(tw);
+    // 不是中文旧编码的非 UTF-8 文本(如 Windows-1252 的西文):认不出,拒绝并提示另存为 UTF-8
+    const latin1 = Uint8Array.from("Café déjà vu, naïve façade résumé crème brûlée", (c) =>
+      c.charCodeAt(0),
+    );
+    expect(await reason("西文.txt", latin1)).toContain("UTF-8");
+  });
+
   it("该拒绝的:扫描版 PDF、旧版 Office、非 Office 压缩包、改了扩展名的二进制、空文件、超大、解压炸弹", async () => {
     expect(await reason("扫描.pdf", pdf("", { empty: true }))).toContain("扫描件");
     const ole = Uint8Array.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0, 0, 0]);
@@ -130,6 +156,19 @@ describe("extractText", () => {
     expect(lines[3]).toBe("李四\t88\t90"); // 没写坐标的按顺序排
     expect(lines[4]?.split("\t")).toHaveLength(28); // AB 是第 28 列
     expect(lines[4]?.endsWith("\t备注")).toBe(true);
+  });
+
+  it("Excel 数字格式:日期、日期时间、时间、百分比按格式显示,不输出内部序号;浮点误差按常规格式;布尔值", async () => {
+    const r = await ok("记录.xlsx", xlsxFormats());
+    const [, row1, row2] = r.text.split("\n");
+    expect(row1).toBe("2024-01-01\t2024-01-01 12:00\t18:00\t12.50%");
+    // 0.30000000000000004 → 0.3;1900 闰年问题:序号 59 是 1900-02-28,61 是 1900-03-01
+    expect(row2).toBe("0.3\tTRUE\t12345\t1900-02-28\t1900-03-01");
+  });
+
+  it("Excel 1904 日期系统:同一日期显示相同", async () => {
+    const r = await ok("记录.xlsx", xlsxFormats({ date1904: true }));
+    expect(r.text.split("\n")[1]).toBe("2024-01-01\t2024-01-01 12:00\t18:00\t12.50%");
   });
 
   it("列坐标换算", () => {
@@ -180,6 +219,26 @@ describe("extractText:时限与内存真的停下解析(独立子进程)", { tim
     expect((await ok("后续.docx", docx(["照常解析"]))).text).toBe("照常解析");
     await settle();
     expect(liveExtractionWorkers()).toBe(0);
+  });
+
+  it("排队等名额的时间也算在时限里:名额被占满时,时限到了就返回,不等名额空出来;之后照常", async () => {
+    const heavy = heavyDocx();
+    const busy = [
+      extractText("占名额1.docx", heavy, { ...EXTRACT_LIMITS, timeoutMs: 4_000 }),
+      extractText("占名额2.docx", heavy, { ...EXTRACT_LIMITS, timeoutMs: 4_000 }),
+    ];
+    const start = Date.now();
+    const queued = await extractText("排队.docx", docx(["小文件"]), {
+      ...EXTRACT_LIMITS,
+      timeoutMs: 300,
+    });
+    expect(Date.now() - start).toBeLessThan(1_000);
+    expect(queued).toMatchObject({ ok: false });
+    expect(queued.ok === false && queued.reason).toContain("已停止解析");
+    await Promise.all(busy);
+    await settle();
+    // 超时撤下的排队项不占后面的名额
+    expect((await ok("之后.docx", docx(["照常"]))).text).toBe("照常");
   });
 
   it("内存超限:只有解析子进程退出,给出原因;当前进程不受影响", async () => {
