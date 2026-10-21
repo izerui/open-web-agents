@@ -6,6 +6,7 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { type BrowserContext, expect, test } from "@playwright/test";
+import { passDraftEval } from "./eval-gate";
 
 const BASE = process.env.OWA_E2E_BASE_URL ?? "http://localhost:5678";
 const DB = process.env.OWA_E2E_DATABASE_URL;
@@ -197,6 +198,7 @@ test.describe("模型提供者管理", () => {
         })
       ).json();
       const agentId = agent.agent.id as string;
+      await passDraftEval(api, agentId);
       expect(
         (await api.post(`${BASE}/api/agents/${agentId}/versions`, { data: {} })).status(),
       ).toBe(201);
@@ -318,6 +320,7 @@ test.describe("模型提供者管理", () => {
           })
         ).json()
       ).agent.id as string;
+      await passDraftEval(api, agentId);
       expect(
         (await api.post(`${BASE}/api/agents/${agentId}/versions`, { data: {} })).status(),
       ).toBe(201);
@@ -431,6 +434,7 @@ test.describe("模型提供者管理", () => {
           data: { ...(id ? { id } : {}), name: agentName, config: { systemPrompt: "测试", model } },
         });
       const agentId = (await (await saveDraft(a.id)).json()).agent.id as string;
+      await passDraftEval(api, agentId);
       expect(
         (await api.post(`${BASE}/api/agents/${agentId}/versions`, { data: {} })).status(),
       ).toBe(201);

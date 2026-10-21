@@ -1,5 +1,6 @@
 import { InMemoryAgentRepo } from "@/lib/modules/agent/adapters/in-memory-agent-repo";
 import { InMemoryAgentVersionRepo } from "@/lib/modules/agent/adapters/in-memory-agent-version-repo";
+import { UNGATED } from "@/lib/modules/agent/application/__tests__/ungated";
 import { AgentReleases } from "@/lib/modules/agent/application/releases";
 import { InMemoryRunRepo } from "@/lib/modules/run/adapters/in-memory-run-repo";
 import {
@@ -24,7 +25,7 @@ async function setup(withCrypto = true) {
     runs,
     sessions,
     agents,
-    releases: new AgentReleases(agents, versions),
+    releases: new AgentReleases(agents, versions, UNGATED),
     encryptOverride: withCrypto ? (o) => `enc:${JSON.stringify(o)}` : undefined,
   });
   return { runs, agents, versions, sessions, enqueuer };
@@ -33,7 +34,7 @@ async function setup(withCrypto = true) {
 describe("RunEnqueuer", () => {
   it("会话锁定了版本:草稿之后再改,运行仍按那一版的快照执行并记下版本号", async () => {
     const { runs, agents, versions, sessions, enqueuer } = await setup();
-    const releases = new AgentReleases(agents, versions);
+    const releases = new AgentReleases(agents, versions, UNGATED);
     const a1 = await agents.get("a1");
     if (!a1) throw new Error("seed missing");
     await releases.publish(a1, "u1");
@@ -59,7 +60,7 @@ describe("RunEnqueuer", () => {
       runs,
       sessions,
       agents,
-      releases: new AgentReleases(agents, versions),
+      releases: new AgentReleases(agents, versions, UNGATED),
       charged: async () => {
         charged.calls++;
         throw new Error("不该走到计费事务");

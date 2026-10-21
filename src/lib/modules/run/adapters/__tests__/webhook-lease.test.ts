@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import { createDb } from "@/lib/db/client";
 import { InMemoryAgentRepo } from "@/lib/modules/agent/adapters/in-memory-agent-repo";
 import { InMemoryAgentVersionRepo } from "@/lib/modules/agent/adapters/in-memory-agent-version-repo";
+import { UNGATED } from "@/lib/modules/agent/application/__tests__/ungated";
 import { AgentReleases } from "@/lib/modules/agent/application/releases";
 import { WebhookDispatcher } from "@/lib/modules/integration/application/webhook-dispatcher";
 import { resolveRunTarget } from "@/lib/modules/integration/application/webhook-target";
@@ -200,7 +201,7 @@ if (!TEST_DB_URL) {
           runs: repo,
           sessions,
           agents,
-          releases: new AgentReleases(agents, new InMemoryAgentVersionRepo(agents)),
+          releases: new AgentReleases(agents, new InMemoryAgentVersionRepo(agents), UNGATED),
         });
         const dflt = randomUUID().replace(/-/g, "").slice(0, 24);
         const explicit = randomUUID().replace(/-/g, "").slice(0, 24);

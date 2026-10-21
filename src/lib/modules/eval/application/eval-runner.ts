@@ -16,6 +16,7 @@ import { checkPromptSize } from "@/lib/modules/run/domain/limits";
 import { type RunRecord, toRunResult } from "@/lib/modules/run/domain/run-result";
 import type { SessionRepo } from "@/lib/modules/session/ports";
 import { gradeRun, snapshotOutput } from "../domain/assertions";
+import { casesHash } from "../domain/release-gate";
 import type { EvalRepo, EvalResult, EvalRun } from "../ports";
 
 export const MAX_EVAL_CASES = 100;
@@ -111,6 +112,8 @@ export async function startEvalRun(
     agentId: agent.id,
     ...(release.version !== null ? { agentVersion: release.version } : {}),
     configHash,
+    // 用例在开跑时就已读定(上面的 cases):之后改了用例,这次结果就对不上当前用例了
+    casesHash: casesHash(cases) ?? undefined,
     status: "running",
     total: cases.length,
     passed: 0,

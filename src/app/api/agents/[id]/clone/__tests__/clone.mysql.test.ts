@@ -3,6 +3,7 @@ import { type Db, createDb } from "@/lib/db/client";
 import { agentVersions, agents, knowledgeDocs } from "@/lib/db/schema";
 import { MysqlAgentRepo } from "@/lib/modules/agent/adapters/mysql-agent-repo";
 import { MysqlAgentVersionRepo } from "@/lib/modules/agent/adapters/mysql-agent-version-repo";
+import { UNGATED } from "@/lib/modules/agent/application/__tests__/ungated";
 import { AgentReleases } from "@/lib/modules/agent/application/releases";
 import { MysqlKnowledgeRepo } from "@/lib/modules/knowledge/adapters/mysql-knowledge-repo";
 import { eq } from "drizzle-orm";
@@ -21,7 +22,7 @@ if (!url) {
   const { db, pool } = createDb(url);
   const agentRepo = new MysqlAgentRepo(db);
   const knowledgeRepo = new MysqlKnowledgeRepo(db);
-  const releases = new AgentReleases(agentRepo, new MysqlAgentVersionRepo(db));
+  const releases = new AgentReleases(agentRepo, new MysqlAgentVersionRepo(db), UNGATED);
   const cleanupIds = new Set<string>();
 
   function trackId(id?: string) {

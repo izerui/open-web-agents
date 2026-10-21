@@ -28,6 +28,7 @@ export type ApiErrorCode =
   | "idempotency_key_invalid"
   | "idempotency_conflict"
   | "nothing_to_publish"
+  | "eval_required"
   | "limit_exceeded"
   | "service_unavailable"
   /** 运行没有在接受追加消息(还没开始或已收尾),这条没有受理 */

@@ -24,6 +24,7 @@ const toRun = (r: RunRow): EvalRun => ({
   agentId: r.agentId,
   agentVersion: r.agentVersion ?? undefined,
   configHash: r.configHash ?? undefined,
+  casesHash: r.casesHash ?? undefined,
   status: r.status === "done" ? "done" : "running",
   total: r.total,
   passed: r.passed,
@@ -105,6 +106,7 @@ export class MysqlEvalRepo implements EvalRepo {
         agentId: run.agentId,
         agentVersion: run.agentVersion ?? null,
         configHash: run.configHash ?? null,
+        casesHash: run.casesHash ?? null,
         status: run.status,
         total: run.total,
         passed: run.passed,
@@ -146,6 +148,22 @@ export class MysqlEvalRepo implements EvalRepo {
       .orderBy(desc(evalRuns.createdAt), desc(evalRuns.id))
       .limit(limit);
     return rows.map(toRun);
+  }
+
+  async latestByConfig(agentId: string, configHashes: string[]): Promise<Map<string, EvalRun>> {
+    // 每个摘要一次走索引(agent_id, config_hash, created_at)取最新一条:版本数有限,不会多
+    const found = await Promise.all(
+      [...new Set(configHashes)].map(async (hash) => {
+        const rows = await this.db
+          .select()
+          .from(evalRuns)
+          .where(and(eq(evalRuns.agentId, agentId), eq(evalRuns.configHash, hash)))
+          .orderBy(desc(evalRuns.createdAt), desc(evalRuns.id))
+          .limit(1);
+        return rows[0] ? ([hash, toRun(rows[0])] as const) : null;
+      }),
+    );
+    return new Map(found.filter((x) => x !== null));
   }
 
   async results(evalRunId: string): Promise<EvalResult[]> {

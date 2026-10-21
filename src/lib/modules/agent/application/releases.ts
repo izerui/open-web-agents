@@ -3,7 +3,8 @@
 // 规则:
 // - agents 表里的那一行永远是【草稿】。构建器、AI 设计师只改草稿。
 // - 发布 = 把草稿整份快照成新版本,并把发布指针指向它。
-// - 回滚 = 把发布指针指回某个旧版本(不新建版本,秒级生效)。
+// - 发布前必须过门槛(PublishGate):草稿要有一次配置相同、用例相同、全部通过的评测,没有例外。
+// - 回滚 = 把发布指针指回某个旧版本(不新建版本,秒级生效)。回滚不过门槛:旧版本当初已发布过。
 // - 对外入口(接口调用、API Key 会话)默认跑发布指针指向的版本;
 //   从未发布过的智能体跑草稿 —— 发布功能上线前创建的智能体行为不变。
 
@@ -38,6 +39,23 @@ export class NothingToPublish extends BrandedError {
   }
 }
 
+/** 没过发布门槛(评测没有全部通过等)。路由翻成 409。 */
+export class PublishBlocked extends BrandedError {
+  static readonly brand = Symbol.for("owa.error.PublishBlocked");
+  constructor(reason: string) {
+    super(reason);
+    this.name = "PublishBlocked";
+  }
+}
+
+/**
+ * 发布门槛:返回不能发布的原因,能发布返回 null。contentHash 是这次要发布的内容的摘要 ——
+ * 判定的就是要冻结的这一份,不是另读一次草稿
+ */
+export interface PublishGate {
+  blockReason(agentId: string, contentHash: string): Promise<string | null>;
+}
+
 /** 一次运行实际使用的内容。version 为 null = 草稿。 */
 export interface Release extends AgentSnapshot {
   version: number | null;
@@ -47,6 +65,8 @@ export class AgentReleases {
   constructor(
     private readonly agents: Pick<AgentRepo, "get" | "upsert">,
     private readonly versions: AgentVersionRepo,
+    /** 必填:没有绕过门槛的发布入口 */
+    private readonly gate: PublishGate,
   ) {}
 
   async publish(agent: Agent, by: string, note?: string): Promise<AgentVersion> {
@@ -55,6 +75,8 @@ export class AgentReleases {
     if (agent.publishedVersion !== undefined && hash === agent.publishedHash) {
       throw new NothingToPublish(agent.publishedVersion);
     }
+    const blocked = await this.gate.blockReason(agent.id, hash);
+    if (blocked) throw new PublishBlocked(blocked);
     return this.versions.publish(agent.id, snapshot, {
       contentHash: hash,
       note: note?.trim().slice(0, 512) || undefined,

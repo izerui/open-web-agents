@@ -1,7 +1,7 @@
 // 审计日志的端到端回归:操作留痕、可见范围、机密不进日志。
 
 import { beforeAll, describe, expect, it } from "vitest";
-import { Client, newUser, serverUp } from "./client";
+import { Client, newUser, passDraftEval, serverUp } from "./client";
 
 type AgentRes = { agent?: { id: string } };
 type Audit = {
@@ -50,6 +50,7 @@ describe("审计日志", () => {
       name: "审计对象",
       config: { systemPrompt: SECRET_PROMPT, model: "sonnet" },
     });
+    await passDraftEval(owner, agentId);
     await owner.post(`/api/agents/${agentId}/versions`, { note: "首版" });
     await owner.post(`/api/agents/${agentId}/share`, { target: ed?.email, permission: "write" });
     // 协作者改了所有者的智能体

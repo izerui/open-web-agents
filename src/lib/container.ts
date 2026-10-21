@@ -62,7 +62,8 @@ import { MysqlCapabilityRepo } from "@/lib/modules/capabilities/adapters/mysql-c
 import { PricedModels } from "@/lib/modules/capabilities/application/priced-models";
 import type { CapabilityRepo } from "@/lib/modules/capabilities/ports";
 import { MysqlEvalRepo } from "@/lib/modules/eval/adapters/mysql-eval-repo";
-import type { EvalDeps } from "@/lib/modules/eval/application/eval-runner";
+import { type EvalDeps, readEvalRun } from "@/lib/modules/eval/application/eval-runner";
+import { ReleaseEvals } from "@/lib/modules/eval/application/release-evals";
 import type { EvalRepo } from "@/lib/modules/eval/ports";
 import { RedisBus } from "@/lib/modules/events/adapters/redis-bus";
 import type { BusPort } from "@/lib/modules/events/ports";
@@ -139,6 +140,8 @@ export interface Container {
   agents: AgentRepo;
   /** 版本与发布:发布、回滚、载入草稿,以及每个入口该跑哪一版。 */
   releases: AgentReleases;
+  /** 各版本(与草稿)的评测结论;也是发布门槛 */
+  releaseEvals: ReleaseEvals;
   bus: BusPort;
   engine: EnginePort;
   gateway: ModelGatewayPort;
@@ -270,7 +273,12 @@ function build(): Container {
 
   const sessions = new MysqlSessionRepo(db);
   const agents = new MysqlAgentRepo(db);
-  const releases = new AgentReleases(agents, new MysqlAgentVersionRepo(db));
+  // 发布门槛:草稿须有一次配置相同、用例相同、全部通过的评测
+  // 进行中的评测先顺带判分(evalDeps 在下面建好,这里只在请求时才调用)
+  const releaseEvals = new ReleaseEvals(new MysqlEvalRepo(db), async (evalRunId) => {
+    return (await readEvalRun(evalDeps, evalRunId))?.run ?? null;
+  });
+  const releases = new AgentReleases(agents, new MysqlAgentVersionRepo(db), releaseEvals);
   // 内置智能体:首次写入定义;之后没人改过就升级到代码里的新定义,有人改过就保留(见 seed-builtin.ts)。
   // 它们归 system 所有,首次写入时(同一事务里)授予公开只读 —— 否则新注册用户在列表里看不到
   const seedPublic = (definition: Agent, grantId: string) =>
@@ -667,6 +675,7 @@ function build(): Container {
     sessions,
     agents,
     releases,
+    releaseEvals,
     bus,
     engine,
     gateway,

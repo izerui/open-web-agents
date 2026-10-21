@@ -137,3 +137,40 @@ export async function serverUp(): Promise<boolean> {
 }
 
 export { BASE };
+
+/**
+ * 让当前(已保存的)草稿过发布门槛:草稿须有一次配置相同、用例相同、全部通过的评测。
+ * 用一个"期望失败"的用例 —— e2e 屏蔽了模型,运行必然失败,这个用例稳定通过(已有就按 input 更新)。
+ * 声明了 inputSchema 的智能体要给符合它的 input。对草稿评测并等它结束,要求全部通过
+ */
+export async function passDraftEval(
+  c: Client,
+  agentId: string,
+  input: unknown = "e2e 发布门槛",
+): Promise<void> {
+  const base = `/api/agents/${agentId}/evals`;
+  const body = { name: "e2e 发布门槛", input, assertions: { expectSuccess: false } };
+  const cases = await c.get<{ cases?: { id: string; name: string }[] }>(`${base}/cases`);
+  const existing = cases.body.cases?.find((x) => x.name === body.name);
+  const saved = existing
+    ? await c.put(`${base}/cases/${existing.id}`, body)
+    : await c.post(`${base}/cases`, body);
+  if (saved.status !== 200 && saved.status !== 201) {
+    throw new Error(`保存评测用例失败(${saved.status})`);
+  }
+  const start = await c.post<{ run?: { id: string } }>(`${base}/runs`, { target: "draft" });
+  const id = start.body.run?.id;
+  if (start.status !== 202 || !id) throw new Error(`发起评测失败(${start.status})`);
+  for (let i = 0; i < 120; i++) {
+    const r = await c.get<{ run?: { status: string; passed: number; total: number } }>(
+      `${base}/runs/${id}`,
+    );
+    const run = r.body.run;
+    if (run?.status === "done") {
+      if (run.passed !== run.total) throw new Error(`评测没有全部通过:${run.passed}/${run.total}`);
+      return;
+    }
+    await new Promise((ok) => setTimeout(ok, 250));
+  }
+  throw new Error("评测 30 秒内没有结束");
+}

@@ -1,5 +1,6 @@
 import type { Grant, Subject } from "@/lib/modules/access/domain/grants";
 import type { GrantRepo } from "@/lib/modules/access/ports";
+import { UNGATED } from "@/lib/modules/agent/application/__tests__/ungated";
 import type { StoragePort } from "@/lib/modules/artifacts/ports";
 import { InMemoryRunRepo } from "@/lib/modules/run/adapters/in-memory-run-repo";
 import { InMemorySessionRepo } from "@/lib/modules/session/adapters/in-memory-session-repo";
@@ -157,7 +158,7 @@ describe("AgentDesigner", () => {
   it("preserves ownership, webhook, icon, escape hatch and the released snapshot", async () => {
     const h = await setup({ target });
     const versions = new InMemoryAgentVersionRepo(h.agents);
-    const releases = new AgentReleases(h.agents, versions);
+    const releases = new AgentReleases(h.agents, versions, UNGATED);
     const published = await releases.publish(target, owner.userId);
     await h.edit({ ...draftOf(target), systemPrompt: "Unpublished edit" });
     const result = await h.designer.apply(owner, "design", (await h.inspect()).previewToken);

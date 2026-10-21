@@ -149,5 +149,35 @@ if (!TEST_DB_URL) {
       expect(await repo.getRun(runId)).toMatchObject({ status: "done", passed: 1, failed: 1 });
       expect((await repo.listRuns(agentId, 10)).map((r) => r.id)).toContain(runId);
     });
+
+    it("latestByConfig:每个内容摘要各取最近一次(不论是否结束);用例摘要原样往返", async () => {
+      const mk = async (id: string, configHash: string, status: "running" | "done") => {
+        await repo.createRun(
+          {
+            id,
+            agentId,
+            configHash,
+            casesHash: `cases-${id}`,
+            status,
+            total: 1,
+            passed: status === "done" ? 1 : 0,
+            failed: 0,
+            startedBy: "u",
+          },
+          [],
+        );
+        await new Promise((ok) => setTimeout(ok, 5));
+      };
+      const tag = randomUUID().slice(0, 8);
+      await mk(`${tag}-1`, `h1-${tag}`, "done");
+      await mk(`${tag}-2`, `h1-${tag}`, "running");
+      await mk(`${tag}-3`, `h2-${tag}`, "done");
+      const got = await repo.latestByConfig(agentId, [`h1-${tag}`, `h2-${tag}`, `h3-${tag}`]);
+      expect(got.get(`h1-${tag}`)).toMatchObject({ id: `${tag}-2`, status: "running" });
+      expect(got.get(`h2-${tag}`)).toMatchObject({ id: `${tag}-3`, casesHash: `cases-${tag}-3` });
+      expect(got.has(`h3-${tag}`)).toBe(false);
+      // 别的智能体同摘要的评测不算
+      expect((await repo.latestByConfig("other-agent", [`h1-${tag}`])).size).toBe(0);
+    });
   });
 }

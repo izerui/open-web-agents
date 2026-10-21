@@ -49,6 +49,16 @@ export class InMemoryEvalRepo implements EvalRepo {
       .slice(0, limit)
       .map((r) => structuredClone(r));
   }
+  async latestByConfig(agentId: string, configHashes: string[]) {
+    const out = new Map<string, EvalRun>();
+    for (const hash of new Set(configHashes)) {
+      const r = [...this.runs.values()]
+        .filter((x) => x.agentId === agentId && x.configHash === hash)
+        .sort((a, b) => b.createdAt - a.createdAt)[0];
+      if (r) out.set(hash, structuredClone(r));
+    }
+    return out;
+  }
   async results(evalRunId: string) {
     return structuredClone(this.res.get(evalRunId) ?? []);
   }

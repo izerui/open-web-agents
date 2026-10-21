@@ -1,5 +1,6 @@
 import { InMemoryAgentRepo } from "@/lib/modules/agent/adapters/in-memory-agent-repo";
 import { InMemoryAgentVersionRepo } from "@/lib/modules/agent/adapters/in-memory-agent-version-repo";
+import { UNGATED } from "@/lib/modules/agent/application/__tests__/ungated";
 import {
   AgentReleases,
   NothingToPublish,
@@ -19,7 +20,7 @@ const seed: Agent = {
 
 async function setup() {
   const agents = new InMemoryAgentRepo([seed]);
-  const releases = new AgentReleases(agents, new InMemoryAgentVersionRepo(agents));
+  const releases = new AgentReleases(agents, new InMemoryAgentVersionRepo(agents), UNGATED);
   const get = async () => {
     const a = await agents.get("a1");
     if (!a) throw new Error("missing");

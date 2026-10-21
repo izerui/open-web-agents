@@ -1,6 +1,6 @@
 // HTTP contract only: no model calls or writes of generated skill packages.
 import { beforeAll, describe, expect, it } from "vitest";
-import { Client, newUser, serverUp } from "./client";
+import { Client, newUser, passDraftEval, serverUp } from "./client";
 
 type Draft = {
   name: string;
@@ -253,6 +253,7 @@ describe("platform AI editor", () => {
 
   it("saves a draft without changing the published version or webhook", async () => {
     const agentId = await createAgent(user, { webhookUrl: "https://hooks.example.com/designer" });
+    await passDraftEval(user, agentId);
     expect((await user.post(`/api/agents/${agentId}/versions`, { note: "Original" })).status).toBe(
       201,
     );

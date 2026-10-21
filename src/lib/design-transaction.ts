@@ -6,6 +6,8 @@ import type { DesignerDeps } from "@/lib/modules/agent/application/designer";
 import { AgentReleases } from "@/lib/modules/agent/application/releases";
 import { MysqlRunChargeStore } from "@/lib/modules/billing/adapters/mysql-run-charge-store";
 import type { RunCharging } from "@/lib/modules/billing/application/run-charging";
+import { MysqlEvalRepo } from "@/lib/modules/eval/adapters/mysql-eval-repo";
+import { ReleaseEvals } from "@/lib/modules/eval/application/release-evals";
 import { MysqlRunRepo } from "@/lib/modules/run/adapters/mysql-run-repo";
 import { type ChargedCreate, RunEnqueuer } from "@/lib/modules/run/application/enqueue";
 import { MysqlSessionRepo } from "@/lib/modules/session/adapters/mysql-session-repo";
@@ -47,7 +49,11 @@ export function designTransaction(db: Db, charging?: RunCharging): DesignerDeps[
           agents,
           sessions,
           runs,
-          releases: new AgentReleases(agents, new MysqlAgentVersionRepo(txDb)),
+          releases: new AgentReleases(
+            agents,
+            new MysqlAgentVersionRepo(txDb),
+            new ReleaseEvals(new MysqlEvalRepo(txDb)),
+          ),
           // 设计的计费受理跟设计事务同进退:拒绝或失败时设计改动一起回滚
           ...(charging ? { charged: chargedOn(txDb, charging) } : {}),
         });

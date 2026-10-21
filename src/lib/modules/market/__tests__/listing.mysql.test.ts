@@ -4,6 +4,7 @@ import { accessGrants, agentVersions, agents as agentsTable } from "@/lib/db/sch
 import { MysqlGrantRepo } from "@/lib/modules/access/adapters/mysql-grant-repo";
 import { MysqlAgentRepo } from "@/lib/modules/agent/adapters/mysql-agent-repo";
 import { MysqlAgentVersionRepo } from "@/lib/modules/agent/adapters/mysql-agent-version-repo";
+import { UNGATED } from "@/lib/modules/agent/application/__tests__/ungated";
 import { AgentReleases } from "@/lib/modules/agent/application/releases";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
@@ -23,7 +24,7 @@ describe.skipIf(!databaseUrl)("market listing SQL contract", () => {
     return {
       agents,
       grants: new MysqlGrantRepo(connection.db),
-      releases: new AgentReleases(agents, new MysqlAgentVersionRepo(connection.db)),
+      releases: new AgentReleases(agents, new MysqlAgentVersionRepo(connection.db), UNGATED),
     };
   }
 

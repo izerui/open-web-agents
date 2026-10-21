@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { Client, newUser, serverUp } from "./client";
+import { Client, newUser, passDraftEval, serverUp } from "./client";
 
 const databaseUrl = process.env.OWA_E2E_DATABASE_URL;
 if (databaseUrl && new URL(databaseUrl).pathname !== "/owa_test") {
@@ -76,7 +76,10 @@ describe.skipIf(!databaseUrl)("market end-to-end", () => {
     });
     expect(response.status).toBe(201);
     const id = response.body.agent.id;
-    if (publish) expect((await owner.post(`/api/agents/${id}/versions`, {})).status).toBe(201);
+    if (publish) {
+      await passDraftEval(owner, id, { query: "发布门槛" });
+      expect((await owner.post(`/api/agents/${id}/versions`, {})).status).toBe(201);
+    }
     return id;
   }
 

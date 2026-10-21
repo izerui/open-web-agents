@@ -82,6 +82,60 @@ export function DiffView({ title, changes }: { title: string; changes: Change[] 
   );
 }
 
+/** 某一版(或草稿)的评测结论,见服务端 eval/domain/release-gate.ts */
+interface EvalBrief {
+  id: string;
+  passed: number;
+  total: number;
+  createdAt: number;
+  finishedAt?: number;
+}
+interface EvalSummary {
+  state: "no_cases" | "none" | "running" | "cases_changed" | "failed" | "passed";
+  run?: EvalBrief;
+  /** 草稿这份内容没评测过时,最近一次评测(配置已变化,不代表当前内容) */
+  previous?: EvalBrief;
+}
+
+/** 草稿评测状态的说明;发布要求 passed */
+function draftEvalText(e: EvalSummary): string {
+  const r = e.run;
+  switch (e.state) {
+    case "passed":
+      return `当前草稿评测 ${r?.passed}/${r?.total} 全部通过,可以发布`;
+    case "failed":
+      return `当前草稿评测 ${r?.passed}/${r?.total} 通过 —— 全部通过才能发布`;
+    case "running":
+      return "当前草稿的评测进行中 —— 结束并全部通过后才能发布";
+    case "cases_changed":
+      return `上次评测(${r?.passed}/${r?.total})之后评测用例有改动 —— 需要对草稿重新评测并全部通过`;
+    case "no_cases":
+      return "还没有评测用例 —— 在下方「评测」里添加用例并对草稿评测,全部通过后才能发布";
+    case "none":
+      return e.previous
+        ? `配置已变化:上次评测(${e.previous.passed}/${e.previous.total})不代表当前草稿 —— 对草稿重新评测并全部通过后才能发布`
+        : "当前草稿还没有评测过 —— 在下方「评测」里对草稿运行评测,全部通过后才能发布";
+  }
+}
+
+/** 版本列表里那一版的评测标记 */
+function versionEvalText(e: EvalSummary | undefined): string {
+  const r = e?.run;
+  switch (e?.state) {
+    case "passed":
+    case "failed":
+      return `评测 ${r?.passed}/${r?.total}`;
+    case "cases_changed":
+      return `评测 ${r?.passed}/${r?.total} · 用例已改动`;
+    case "running":
+      return "评测中";
+    case "no_cases":
+      return "无用例";
+    default:
+      return "未评测";
+  }
+}
+
 interface VersionMeta {
   version: number;
   name: string;
@@ -101,6 +155,8 @@ export function ReleasePanel({
   publishedVersion,
   hasUnpublishedChanges,
   unsaved,
+  draft,
+  evalTick,
   onChanged,
   onRestored,
 }: {
@@ -109,10 +165,19 @@ export function ReleasePanel({
   hasUnpublishedChanges: boolean;
   /** 表单里还有没保存的修改:发布的是已保存的草稿,先保存再发布 */
   unsaved: boolean;
+  /** 已保存的草稿(重新读取后是新对象):变了就重读评测结论 */
+  draft: unknown;
+  /** 评测面板有变化(用例增删改、发起或结束评测)时递增:重读评测结论 */
+  evalTick: number;
   onChanged: () => unknown;
   onRestored: () => unknown;
 }) {
   const [versions, setVersions] = useState<VersionMeta[] | null>(null);
+  /** 只有能改的人拿得到;拿不到时不显示、也不据此拦发布(服务端照样会拦) */
+  const [evals, setEvals] = useState<{
+    draft: EvalSummary;
+    versions: Record<string, EvalSummary>;
+  } | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   /** 正在看的对比:哪一版、跟谁比、结果 */
@@ -135,19 +200,29 @@ export function ReleasePanel({
 
   const load = useCallback(async () => {
     try {
-      const d = await fetchJson<{ versions: VersionMeta[] }>(
-        `/api/agents/${encodeURIComponent(agentId)}/versions`,
-      );
+      const d = await fetchJson<{
+        versions: VersionMeta[];
+        evals?: { draft: EvalSummary; versions: Record<string, EvalSummary> };
+      }>(`/api/agents/${encodeURIComponent(agentId)}/versions`);
       setVersions(d.versions);
+      setEvals(d.evals ?? null);
     } catch (e) {
       setVersions([]);
       toast.error(`版本列表加载失败:${errorText(e)}`);
     }
   }, [agentId]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: draft / evalTick 只是重读的信号
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, draft, evalTick]);
+
+  // 草稿评测进行中:每 3 秒重读一次(服务端读的时候顺带判分)
+  useEffect(() => {
+    if (evals?.draft.state !== "running") return;
+    const t = setTimeout(() => void load(), 3000);
+    return () => clearTimeout(t);
+  }, [evals, load]);
 
   async function act(key: string, url: string, body: unknown, ok: string, after: () => unknown) {
     if (busy) return;
@@ -170,7 +245,9 @@ export function ReleasePanel({
 
   const base = `/api/agents/${encodeURIComponent(agentId)}`;
   const next = (versions?.[0]?.version ?? 0) + 1;
-  const canPublish = !unsaved && (publishedVersion === null || hasUnpublishedChanges);
+  const hasChanges = publishedVersion === null || hasUnpublishedChanges;
+  const evalPassed = evals?.draft.state === "passed";
+  const canPublish = !unsaved && hasChanges && evalPassed;
 
   return (
     <Card>
@@ -220,7 +297,17 @@ export function ReleasePanel({
           </Button>
         </div>
         {unsaved && (
-          <p className="text-xs text-muted-foreground">表单有未保存的修改 —— 先保存草稿再发布。</p>
+          <p className="text-xs text-muted-foreground">
+            表单有未保存的修改 —— 先保存草稿再发布;评测与发布针对的都是已保存的草稿。
+          </p>
+        )}
+        {evals && hasChanges && (
+          <p
+            className={`text-xs ${evalPassed ? "text-emerald-700" : "text-amber-700"}`}
+            data-testid="draft-eval"
+          >
+            {draftEvalText(evals.draft)}
+          </p>
         )}
         {!unsaved && publishedVersion !== null && !hasUnpublishedChanges && (
           <p className="text-xs text-muted-foreground">
@@ -246,6 +333,14 @@ export function ReleasePanel({
                     </Badge>
                   )}
                 </span>
+                {evals && (
+                  <span
+                    className={`shrink-0 ${evals.versions[v.version]?.state === "passed" ? "text-emerald-700" : "text-muted-foreground"}`}
+                    data-testid="version-eval"
+                  >
+                    {versionEvalText(evals.versions[v.version])}
+                  </span>
+                )}
                 <span className="shrink-0 text-muted-foreground">
                   {new Date(v.createdAt).toLocaleString()}
                 </span>

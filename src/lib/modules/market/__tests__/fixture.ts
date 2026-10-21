@@ -3,6 +3,7 @@ import type { Grant } from "@/lib/modules/access/domain/grants";
 import type { GrantRepo } from "@/lib/modules/access/ports";
 import { InMemoryAgentRepo } from "@/lib/modules/agent/adapters/in-memory-agent-repo";
 import { InMemoryAgentVersionRepo } from "@/lib/modules/agent/adapters/in-memory-agent-version-repo";
+import { UNGATED } from "@/lib/modules/agent/application/__tests__/ungated";
 import { AgentReleases } from "@/lib/modules/agent/application/releases";
 import { catalogView } from "@/lib/modules/agent/domain/__tests__/model-catalog";
 import type { Agent } from "@/lib/modules/agent/ports";
@@ -40,7 +41,7 @@ export const publishedAgent: Agent = {
 export async function fixture() {
   const agents = new InMemoryAgentRepo([publishedAgent]);
   const versions = new InMemoryAgentVersionRepo(agents);
-  const releases = new AgentReleases(agents, versions);
+  const releases = new AgentReleases(agents, versions, UNGATED);
   await releases.publish(publishedAgent, "owner");
   await agents.upsert({
     ...publishedAgent,

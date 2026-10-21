@@ -4,7 +4,7 @@
 // 入参校验、结果、运行记录都对得上实际执行的那一版。这些都只有从 HTTP 入口打进来才测得出。
 
 import { beforeAll, describe, expect, it } from "vitest";
-import { Client, newUser, serverUp } from "./client";
+import { Client, newUser, passDraftEval, serverUp } from "./client";
 
 type AgentRes = { agent?: { id: string }; error?: string };
 type ListRes = {
@@ -85,7 +85,8 @@ describe("智能体版本与发布", () => {
     expect(v.body.versions).toEqual([]);
   });
 
-  it("发布 v1;草稿没改时再发布返回 409 nothing_to_publish", async () => {
+  it("发布 v1;草稿没改时再发布返回 409 nothing_to_publish", { timeout: 60_000 }, async () => {
+    await passDraftEval(owner, agentId, { a: "门槛" });
     const p = await owner.post<{ version?: { version: number } }>(
       `/api/agents/${agentId}/versions`,
       { note: "首版" },
@@ -139,6 +140,7 @@ describe("智能体版本与发布", () => {
   });
 
   it("发布 v2 后调用切到 v2;显式 version 可锁定旧版;不存在的版本 404,非法 400", async () => {
+    await passDraftEval(owner, agentId, { b: 1 });
     const p = await owner.post(`/api/agents/${agentId}/versions`, { note: "换契约" });
     expect(p.status).toBe(201);
     const latest = await invoke({ input: { b: 2 } });
@@ -235,6 +237,7 @@ describe("API Key 的智能体绑定与只读边界", () => {
     a = await mk("绑定-A");
     b = await mk("绑定-B");
     for (const id of [a, b]) {
+      await passDraftEval(owner, id);
       expect((await owner.post(`/api/agents/${id}/versions`, {})).status).toBe(201);
     }
     keyA =
@@ -292,6 +295,7 @@ describe("幂等重放跨版本:v1 受理 → 发布不兼容的 v2 → 原键�
         config: { systemPrompt: "p", model: "sonnet", inputSchema, outputSchema },
       });
     const id = (await save(undefined, schemaA)).body.agent?.id ?? "";
+    await passDraftEval(owner, id, { a: "门槛" });
     expect((await owner.post(`/api/agents/${id}/versions`, {})).status).toBe(201);
     const key =
       (await owner.post<{ plaintext?: string }>("/api/keys", { name: "r", agentId: id })).body
@@ -312,6 +316,7 @@ describe("幂等重放跨版本:v1 受理 → 发布不兼容的 v2 → 原键�
 
     // v2:入参改成 schemaB(与原请求不兼容),并声明了 outputSchema
     await save(id, schemaB, { type: "object", properties: { ok: { type: "boolean" } } });
+    await passDraftEval(owner, id, { b: 1 });
     expect((await owner.post(`/api/agents/${id}/versions`, {})).status).toBe(201);
     // 新请求确实会被 v2 拒绝 —— 证明下面的重放不是因为校验碰巧通过
     const fresh = await anon.post<R>(

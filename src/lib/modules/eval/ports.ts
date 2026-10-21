@@ -38,6 +38,8 @@ export interface EvalRun {
   agentVersion?: number;
   /** 这次评测固定下来的配置的内容摘要;所有用例跑的都是这一份 */
   configHash?: string;
+  /** 开跑时这组用例的摘要(见 domain/release-gate.ts);旧记录没有 */
+  casesHash?: string;
   status: "running" | "done";
   total: number;
   passed: number;
@@ -61,6 +63,8 @@ export interface EvalRepo {
   createRun(run: Omit<EvalRun, "createdAt">, results: EvalResult[]): Promise<void>;
   getRun(id: string): Promise<EvalRun | null>;
   listRuns(agentId: string, limit: number): Promise<EvalRun[]>;
+  /** 每个内容摘要各自最近的一次评测(不论是否结束);没评测过的摘要不在结果里 */
+  latestByConfig(agentId: string, configHashes: string[]): Promise<Map<string, EvalRun>>;
   results(evalRunId: string): Promise<EvalResult[]>;
   /** 写回一个用例的判分(只改还是 pending 的;重复判分不会改动已有结论) */
   gradeResult(

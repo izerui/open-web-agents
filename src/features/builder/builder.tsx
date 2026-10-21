@@ -380,6 +380,8 @@ export function Builder() {
   }
 
   const selectedAgent = openedId ? list.find((agent) => agent.id === openedId) : undefined;
+  /** 评测面板有变化时递增:发布面板据此重读评测结论 */
+  const [evalTick, setEvalTick] = useState(0);
   const canWrite = selectedAgent?.canWrite !== false;
   // 新建时自己就是所有者;已有的看服务端给的判定
   const canManageWebhook = selectedAgent?.canManageWebhook !== false;
@@ -1403,6 +1405,8 @@ export function Builder() {
           publishedVersion={selectedAgent.publishedVersion ?? null}
           hasUnpublishedChanges={selectedAgent.hasUnpublishedChanges === true}
           unsaved={dirty}
+          draft={selectedAgent}
+          evalTick={evalTick}
           onChanged={reload}
           onRestored={async () => {
             await reload();
@@ -1417,6 +1421,9 @@ export function Builder() {
           agentId={openedId}
           publishedVersion={selectedAgent.publishedVersion ?? null}
           hasInputSchema={Boolean(parsedInputSchema)}
+          unsaved={dirty}
+          draft={selectedAgent}
+          onChanged={() => setEvalTick((t) => t + 1)}
         />
       )}
 

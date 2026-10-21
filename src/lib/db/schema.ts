@@ -503,6 +503,11 @@ export const evalRuns = mysqlTable(
      * 历史里据此认出"这两次评测跑的是不是同一份配置"—— 草稿没有版本号,只能靠它
      */
     configHash: varchar("config_hash", { length: 64 }),
+    /**
+     * 开跑时这组用例(输入与断言)的摘要。之后增删改用例,据此标出"用例已改动",
+     * 旧结果不再算数(见 eval/domain/release-gate.ts)。旧记录为空
+     */
+    casesHash: varchar("cases_hash", { length: 64 }),
     /** running / done */
     status: varchar("status", { length: 16 }).notNull(),
     total: int("total").notNull(),
@@ -512,7 +517,11 @@ export const evalRuns = mysqlTable(
     createdAt: timestamp("created_at", { fsp: 3 }).defaultNow().notNull(),
     finishedAt: timestamp("finished_at", { fsp: 3 }),
   },
-  (t) => ({ byAgent: index("idx_eval_runs_agent").on(t.agentId, t.createdAt) }),
+  (t) => ({
+    byAgent: index("idx_eval_runs_agent").on(t.agentId, t.createdAt),
+    /** 按内容摘要找某一版(或草稿)最近的评测:发布门槛与版本列表用 */
+    byConfig: index("idx_eval_runs_config").on(t.agentId, t.configHash, t.createdAt),
+  }),
 );
 
 /**

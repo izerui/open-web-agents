@@ -1,5 +1,6 @@
 import { InMemoryAgentRepo } from "@/lib/modules/agent/adapters/in-memory-agent-repo";
 import { InMemoryAgentVersionRepo } from "@/lib/modules/agent/adapters/in-memory-agent-version-repo";
+import { UNGATED } from "@/lib/modules/agent/application/__tests__/ungated";
 import { AgentReleases } from "@/lib/modules/agent/application/releases";
 import { contentHash, snapshotOf } from "@/lib/modules/agent/domain/release";
 import { InMemoryEvalRepo } from "@/lib/modules/eval/adapters/in-memory-eval-repo";
@@ -31,7 +32,7 @@ async function setup(opts: { inputSchema?: Record<string, unknown>; enqueueFails
   const deps = {
     evals,
     agents,
-    releases: new AgentReleases(agents, new InMemoryAgentVersionRepo(agents)),
+    releases: new AgentReleases(agents, new InMemoryAgentVersionRepo(agents), UNGATED),
     sessions,
     workspaceFor: async (id: string) => `/ws/${id}`,
     enqueue: async (r: EnqueueRequest) => {
@@ -226,7 +227,7 @@ describe("一次评测的所有用例跑同一份配置", () => {
       },
     ]);
     const original = await agents.get("a1");
-    const releases = new AgentReleases(agents, new InMemoryAgentVersionRepo(agents));
+    const releases = new AgentReleases(agents, new InMemoryAgentVersionRepo(agents), UNGATED);
     const sessions = new InMemorySessionRepo();
     const runs = new InMemoryRunRepo();
     const enqueuer = new RunEnqueuer({ runs, sessions, agents, releases });

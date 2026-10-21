@@ -1,7 +1,7 @@
 // 版本对比 —— 真实服务。
 
 import { beforeAll, describe, expect, it } from "vitest";
-import { type Client, newUser, serverUp } from "./client";
+import { type Client, newUser, passDraftEval, serverUp } from "./client";
 
 type Change = {
   path: string;
@@ -48,8 +48,10 @@ describe("版本对比", () => {
     const first = await save("你是审查员。\n逐条检查。\n输出 JSON。");
     expect(first.status, first.body.error).toBeLessThan(300);
     agentId = first.body.agent?.id ?? "";
+    await passDraftEval(owner, agentId);
     expect((await owner.post(`/api/agents/${agentId}/versions`, { note: "v1" })).status).toBe(201);
     await save("你是审查员。\n逐条检查,标出风险。\n输出 JSON。");
+    await passDraftEval(owner, agentId);
     expect((await owner.post(`/api/agents/${agentId}/versions`, { note: "v2" })).status).toBe(201);
     await save("你是审查员。\n逐条检查,标出风险。\n输出 JSON。", "opus"); // 草稿只改模型
     const email = (await reader.get<{ user?: { email: string } }>("/api/auth")).body.user?.email;

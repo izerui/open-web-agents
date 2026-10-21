@@ -1,18 +1,39 @@
 import { openAgent } from "@/app/api/agents/_lib/agent-access";
 import { apiError } from "@/lib/api-error";
 import { getContainer } from "@/lib/container";
-import { parseVersion } from "@/lib/modules/agent/domain/release";
+import { contentHash, parseVersion, snapshotOf } from "@/lib/modules/agent/domain/release";
 import { startEvalRun } from "@/lib/modules/eval/application/eval-runner";
+import { casesHash } from "@/lib/modules/eval/domain/release-gate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** 最近的评测。 */
+/**
+ * 最近的评测。每次评测标出它对应的内容:与当前草稿相同(matchesDraft)、与哪些版本相同
+ * (matchesVersions,按内容摘要比对,不按发起时选的目标);casesChanged = 之后用例有改动或无法核对
+ */
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const opened = await openAgent(req, id, "write");
   if (!opened.ok) return opened.res;
-  return Response.json({ runs: await getContainer().evals.listRuns(id, 20) });
+  const { evals, releases } = getContainer();
+  const [runs, versions, cases] = await Promise.all([
+    evals.listRuns(id, 20),
+    releases.list(id),
+    evals.listCases(id),
+  ]);
+  const draftHash = contentHash(snapshotOf(opened.agent));
+  const current = casesHash(cases);
+  return Response.json({
+    runs: runs.map((r) => ({
+      ...r,
+      matchesDraft: r.configHash === draftHash,
+      matchesVersions: versions
+        .filter((v) => r.configHash !== undefined && v.contentHash === r.configHash)
+        .map((v) => v.version),
+      casesChanged: r.casesHash === undefined || r.casesHash !== current,
+    })),
+  });
 }
 
 /**

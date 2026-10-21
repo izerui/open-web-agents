@@ -1,7 +1,7 @@
 "use client";
 
 import { FlaskConical, Pencil, Play, Plus, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +37,12 @@ interface EvalRun {
   passed: number;
   failed: number;
   createdAt: number;
+  /** 与当前(已保存的)草稿内容相同 */
+  matchesDraft?: boolean;
+  /** 与哪些版本内容相同 */
+  matchesVersions?: number[];
+  /** 评测之后用例有改动(或评测早于用例核对,无法确认) */
+  casesChanged?: boolean;
 }
 
 /** 与服务端 EvalOutput 同形(见 eval/domain/assertions.ts) */
@@ -78,11 +84,20 @@ export function EvalPanel({
   agentId,
   publishedVersion,
   hasInputSchema,
+  unsaved,
+  draft,
+  onChanged,
 }: {
   agentId: string;
   publishedVersion: number | null;
   /** 智能体声明了 inputSchema:新用例默认按 JSON 输入 */
   hasInputSchema: boolean;
+  /** 表单有未保存的修改:评测跑的是已保存的草稿 */
+  unsaved: boolean;
+  /** 已保存的草稿(重新读取后是新对象):变了就重读,重新标出各次评测对应哪份内容 */
+  draft: unknown;
+  /** 用例或评测有变化(发布面板据此重读评测结论) */
+  onChanged: () => void;
 }) {
   const base = `/api/agents/${encodeURIComponent(agentId)}/evals`;
   const [cases, setCases] = useState<EvalCase[] | null>(null);
@@ -93,6 +108,9 @@ export function EvalPanel({
   const [busy, setBusy] = useState(false);
   const [detail, setDetail] = useState<{ run: EvalRun; results: EvalResult[] } | null>(null);
 
+  // 通知不作为重读的依据:父组件每次渲染给的都是新函数
+  const notify = useRef(onChanged);
+  notify.current = onChanged;
   const load = useCallback(async () => {
     try {
       const [c, r] = await Promise.all([
@@ -101,15 +119,17 @@ export function EvalPanel({
       ]);
       setCases(c.cases);
       setRuns(r.runs);
+      notify.current();
     } catch (e) {
       setCases([]);
       toast.error(`评测加载失败:${errorText(e)}`);
     }
   }, [base]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: draft 只是重读的信号
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, draft]);
 
   const openRun = useCallback(
     async (id: string) => {
@@ -201,6 +221,7 @@ export function EvalPanel({
         </CardTitle>
         <CardDescription>
           配一组标准输入与规则断言,发布前跑一遍看通过率。只在点了「运行评测」才跑,每个用例调用一次模型。
+          发布要求:对当前草稿的评测全部通过,且之后没有改过配置或用例。
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -339,6 +360,11 @@ export function EvalPanel({
             <Play className="size-3.5" /> 运行评测
           </Button>
         </div>
+        {unsaved && target === "draft" && (
+          <p className="text-xs text-amber-700">
+            表单有未保存的修改:评测跑的是已保存的草稿,先保存再评测。
+          </p>
+        )}
 
         {runs.length > 0 && (
           <div className="divide-y divide-border rounded border">
@@ -353,6 +379,22 @@ export function EvalPanel({
                   {r.agentVersion !== undefined ? `v${r.agentVersion}` : "草稿"}
                   {r.configHash && (
                     <span className="ml-1 text-muted-foreground">#{r.configHash.slice(0, 7)}</span>
+                  )}
+                </span>
+                <span className="shrink-0" data-testid="eval-run-match">
+                  {r.matchesDraft && <Badge variant="success">= 当前草稿</Badge>}
+                  {r.matchesVersions?.map((v) => (
+                    <Badge key={v} variant="secondary" className="ml-1">
+                      = v{v}
+                    </Badge>
+                  ))}
+                  {!r.matchesDraft && !r.matchesVersions?.length && (
+                    <Badge variant="warning">配置已变化</Badge>
+                  )}
+                  {r.casesChanged && (
+                    <Badge variant="warning" className="ml-1">
+                      用例已改动
+                    </Badge>
                   )}
                 </span>
                 <span className="flex-1">
