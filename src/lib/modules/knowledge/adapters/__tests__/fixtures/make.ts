@@ -20,7 +20,12 @@ export function docx(paragraphs: string[]): Uint8Array {
  * 用户在 PowerPoint 里拖动页面后,文件 slideN.xml 不改名,只有 sldIdLst 的顺序变;
  * 关系表的 Target 混用相对与绝对路径,与真实文件一致
  */
-export function pptxOrdered(slides: string[][], order: number[]): Uint8Array {
+export function pptxOrdered(
+  slides: string[][],
+  order: number[],
+  /** 制造损坏:某页(文件编号)的关系条目缺失、目标文件缺失,或整个关系表缺失 */
+  broken: { missingRel?: number; missingFile?: number; noRels?: boolean } = {},
+): Uint8Array {
   const files: Record<string, Uint8Array> = {
     "[Content_Types].xml": enc(
       '<Types><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/></Types>',
@@ -32,18 +37,22 @@ export function pptxOrdered(slides: string[][], order: number[]): Uint8Array {
     ),
     "ppt/_rels/presentation.xml.rels": enc(
       `<Relationships><Relationship Id="rIdM" Type="slideMaster" Target="slideMasters/slideMaster1.xml"/>${slides
+        .map((_, i) => i)
+        .filter((i) => broken.missingRel !== i + 1)
         .map(
-          (_, i) =>
+          (i) =>
             `<Relationship Id="rIdS${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="${i % 2 ? "/ppt/" : ""}slides/slide${i + 1}.xml"/>`,
         )
         .join("")}</Relationships>`,
     ),
   };
   slides.forEach((lines, i) => {
+    if (broken.missingFile === i + 1) return;
     files[`ppt/slides/slide${i + 1}.xml`] = enc(
       `<p:sld><p:cSld><p:spTree>${lines.map((l) => `<a:p><a:r><a:t>${l}</a:t></a:r></a:p>`).join("")}</p:spTree></p:cSld></p:sld>`,
     );
   });
+  if (broken.noRels) Reflect.deleteProperty(files, "ppt/_rels/presentation.xml.rels");
   return zipSync(files);
 }
 

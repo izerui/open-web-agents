@@ -198,34 +198,42 @@ function docxText(parts) {
 /**
  * 页面的展示顺序。【不能按文件编号】用户在 PowerPoint 里拖动页面后,slideN.xml 不改名,
  * 只有 presentation.xml 的 sldIdLst 顺序变;按编号读会悄悄把资料顺序读错,页码也跟着错。
- * 顺序取 sldIdLst 里各页的 r:id,经 presentation.xml.rels 对到文件;不在顺序表里的页(已从演示里删掉,
- * 文件还留在包里)不导入。缺顺序表时才退回按文件编号排
+ * 顺序取 sldIdLst 里各页的 r:id,经 presentation.xml.rels 对到文件。
+ * 【顺序表里的每一页都必须解析得到】任何一页的 r:id、关系或文件缺失,都说明文件已损坏:
+ * 拒绝整份文件。跳过它继续导入,会少一页、后面的页码全部错位,而上传还显示成功,原文件又不保留。
+ * 不在顺序表里的页文件(已从演示里删掉、文件还留在包里)不导入。只有压根没有顺序表时才按文件编号排
  */
 function slideOrder(parts) {
-  const files = Object.keys(parts).filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n));
-  const byNumber = () =>
-    files
+  const presentation = parts["ppt/presentation.xml"] ?? "";
+  const list = /<p:sldIdLst\b[^>]*>([\s\S]*?)<\/p:sldIdLst>/.exec(presentation)?.[1];
+  if (list === undefined) {
+    return Object.keys(parts)
+      .filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n))
       .map((n) => ({ n, i: Number(/slide(\d+)\.xml$/.exec(n)?.[1]) }))
       .sort((a, b) => a.i - b.i)
       .map((x) => x.n);
-  const list = /<p:sldIdLst\b[^>]*>([\s\S]*?)<\/p:sldIdLst>/.exec(
-    parts["ppt/presentation.xml"] ?? "",
-  )?.[1];
+  }
+  const broken = (what) =>
+    new Rejected(`PPT 文件结构不完整(${what}),可能已损坏;请在 PowerPoint 里打开另存后再上传`);
   const relsXml = parts["ppt/_rels/presentation.xml.rels"];
-  if (!list || !relsXml) return byNumber();
+  if (relsXml === undefined) throw broken("缺少页面关系表");
   const rels = new Map(
     [...relsXml.matchAll(/<Relationship\b[^>]*>/g)].map((m) => [
       /\bId="([^"]+)"/.exec(m[0])?.[1] ?? "",
       /\bTarget="([^"]+)"/.exec(m[0])?.[1] ?? "",
     ]),
   );
-  const ordered = [...list.matchAll(/<p:sldId\b[^>]*>/g)]
-    .map((m) => rels.get(/\br:id="([^"]+)"/.exec(m[0])?.[1] ?? ""))
-    .filter(Boolean)
+  return [...list.matchAll(/<p:sldId\b[^>]*>/g)].map((m, idx) => {
+    const page = `第 ${idx + 1} 页`;
+    const rid = /\br:id="([^"]+)"/.exec(m[0])?.[1];
+    if (!rid) throw broken(`${page}没有引用`);
+    const target = rels.get(rid);
+    if (!target) throw broken(`${page}的引用 ${rid} 在关系表里找不到`);
     // Target 相对 ppt/ 目录,也可能写成以 / 开头的包内绝对路径
-    .map((t) => (t.startsWith("/") ? t.slice(1) : path.posix.normalize(`ppt/${t}`)))
-    .filter((n) => n in parts);
-  return ordered.length > 0 ? ordered : byNumber();
+    const file = target.startsWith("/") ? target.slice(1) : path.posix.normalize(`ppt/${target}`);
+    if (!(file in parts)) throw broken(`${page}指向的 ${file} 不存在`);
+    return file;
+  });
 }
 
 function pptxText(parts) {

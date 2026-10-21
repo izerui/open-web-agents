@@ -134,6 +134,28 @@ describe("知识库上传文件", () => {
     expect(doc.body.content).toBe("第 1 页\n第二讲 方法\n\n第 2 页\n第一讲 绪论");
   });
 
+  it("PPT 顺序表中间一页的引用缺失:上传失败并说明,不入库(不跳过后把后面的页码错位)", async () => {
+    const before = await owner.get<{ docs: { title: string }[] }>(
+      `/api/agents/${agentId}/knowledge`,
+    );
+    const r = await upload(owner, agentId, [
+      {
+        name: "缺一页的课件.pptx",
+        bytes: pptxOrdered([["第一讲"], ["第二讲"], ["第三讲"]], [1, 2, 3], { missingRel: 2 }),
+      },
+    ]);
+    expect(r.status).toBe(400);
+    expect(r.body.results[0]).toMatchObject({ ok: false });
+    const failed = r.body.results[0];
+    expect(failed?.ok === false && failed.reason).toContain("第 2 页");
+    const after = await owner.get<{ docs: { title: string }[] }>(
+      `/api/agents/${agentId}/knowledge`,
+    );
+    expect(after.body.docs.map((d) => d.title).sort()).toEqual(
+      before.body.docs.map((d) => d.title).sort(),
+    );
+  });
+
   it("Excel 空单元格按列对齐:缺 B2 时 C2 仍在第 3 列(数学)", async () => {
     const r = await upload(owner, agentId, [{ name: "成绩表.xlsx", bytes: xlsxWithGaps() }]);
     expect(r.status, JSON.stringify(r.body)).toBe(201);

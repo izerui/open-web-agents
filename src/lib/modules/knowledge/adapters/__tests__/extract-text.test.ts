@@ -51,6 +51,28 @@ describe("extractText", () => {
     expect(dropped).toMatchObject({ pages: 2, text: "第 1 页\n丙\n\n第 2 页\n甲" });
   });
 
+  it("PPT 顺序表里的页解析不到(关系缺失、文件缺失、关系表缺失):拒绝整份文件并说明,不跳过后继续", async () => {
+    const three = [["甲"], ["乙"], ["丙"]];
+    const missingRel = await reason(
+      "缺关系.pptx",
+      pptxOrdered(three, [1, 2, 3], { missingRel: 2 }),
+    );
+    expect(missingRel).toContain("第 2 页");
+    expect(missingRel).toContain("损坏");
+    const missingFile = await reason(
+      "缺文件.pptx",
+      pptxOrdered(three, [3, 2, 1], { missingFile: 2 }),
+    );
+    expect(missingFile).toContain("第 2 页");
+    expect(
+      await reason("缺关系表.pptx", pptxOrdered(three, [1, 2, 3], { noRels: true })),
+    ).toContain("损坏");
+    // 对照:顺序表完整时交换顺序照常导入
+    expect((await ok("正常.pptx", pptxOrdered(three, [3, 1, 2]))).text).toBe(
+      "第 1 页\n丙\n\n第 2 页\n甲\n\n第 3 页\n乙",
+    );
+  });
+
   it("Excel:按工作表,每行一行、单元格用制表符;共享字符串、内联字符串与数字", async () => {
     const r = await ok("成绩.xlsx", xlsx());
     expect(r.text).toBe("工作表:成绩\n姓名\t分数\n张三\t95.5\n\n工作表:说明&备注\n满分 100");
