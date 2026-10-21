@@ -127,6 +127,62 @@ test.describe("消耗汇总", () => {
     }
   });
 
+  test("先点 A → 全平台切上月 → 再点 A:账号区域仍在,汇总与明细切到上月", async ({
+    page,
+    context,
+    browser,
+  }) => {
+    const admin = await register(context, "summary-same-admin");
+    const promoted = admin.role !== "admin";
+    if (promoted) await sql("UPDATE users SET role = 'admin' WHERE id = ?", [admin.id]);
+    const other = await browser.newContext();
+    const target = await register(other, "summary-same-target");
+    await other.close();
+    const agentId = id();
+    await sql("INSERT INTO agents (id, owner_id, name, config) VALUES (?, ?, 'PW 同账号', '{}')", [
+      agentId,
+      target.id,
+    ]);
+    const lastMonth = await seedRun(
+      target.id,
+      agentId,
+      "web",
+      null,
+      100,
+      "DATE_SUB(DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-01'), INTERVAL 10 DAY)",
+    );
+    await seedRun(target.id, agentId, "web", null, 7);
+    try {
+      await page.goto(`${BASE}/admin/billing`);
+      const platform = page.getByRole("region", { name: "全平台消耗汇总" });
+      await platform.getByRole("button", { name: "按账号" }).click();
+      const row = platform.getByTestId("charge-summary-row").filter({ hasText: target.email });
+      // 第一次:本月点 A
+      await row.getByRole("button", { name: target.email }).click();
+      const own = page.getByRole("region", { name: "消耗汇总", exact: true });
+      await expect(own.getByTestId("charge-summary-total")).toContainText("7.00");
+      await expect(page.getByTestId("balance-available")).toBeVisible();
+
+      // 全平台切到上月,再点同一个 A
+      await platform.getByLabel("时间范围").selectOption("last_month");
+      await expect(row).toContainText("100.00");
+      await row.getByRole("button", { name: target.email }).click();
+
+      // 账号区域仍在(余额、账号汇总、明细都没消失),并切到上月
+      await expect(page.locator("#billing-account")).toHaveValue(target.id);
+      await expect(page.getByTestId("balance-available")).toBeVisible();
+      await expect(own.getByLabel("时间范围")).toHaveValue("last_month");
+      await expect(own.getByTestId("charge-summary-total")).toContainText("100.00");
+      await expect(page.getByTestId("run-charge-drill")).toContainText("上月");
+      const charges = page.getByTestId("run-charge");
+      await expect(charges).toHaveCount(1);
+      await expect(charges.first()).toContainText(lastMonth);
+      await expect(page.getByRole("heading", { name: "账户流水" })).toBeVisible();
+    } finally {
+      if (promoted) await sql("UPDATE users SET role = 'user' WHERE id = ?", [admin.id]);
+    }
+  });
+
   test("积分页:按来源 / 智能体 / Key 汇总,点一行筛出明细;token 用量页说明以积分页为准", async ({
     page,
     context,

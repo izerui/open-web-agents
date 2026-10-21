@@ -168,6 +168,27 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
     }
   }
 
+  /**
+   * 切到某个账号查看,带上账号汇总的时间范围与运行明细的筛选。
+   * 只有换了账号才清空并重新加载余额流水 —— 加载只跟着 accountId 走,
+   * 同一个账号再点一次(比如在全平台汇总换了时间范围再点它)若也清空,就没有加载来承接,整块消失
+   */
+  function selectAccount(
+    id: string,
+    range: SummaryWindow = "this_month",
+    next: ChargeDrill | null = null,
+  ) {
+    if (id !== accountId) {
+      requestSeq.current++;
+      setStatement(null);
+      setAccountId(id);
+    }
+    setAccountRange(range);
+    setDrill(next);
+    setReceipt("");
+    creditAttempt.current = null;
+  }
+
   const selected = accounts.find((account) => account.id === accountId);
   return (
     <SpaceShell area={admin ? "admin" : "personal"} title={admin ? "积分管理" : "积分账户"}>
@@ -175,35 +196,17 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
       {admin && (
         <ChargeSummary
           platform
-          onSelectAccount={(id, range) => {
-            requestSeq.current++;
-            setStatement(null);
-            setAccountId(id);
-            setAccountRange(range);
+          onSelectAccount={(id, range) =>
             // 明细也只看这段时间,和刚才那笔汇总对得上
-            setDrill({
+            selectAccount(id, range, {
               label: `${WINDOW_LABEL[range]} · 该账号全部运行`,
               params: { window: range },
-            });
-            setReceipt("");
-            creditAttempt.current = null;
-          }}
+            })
+          }
         />
       )}
       {admin && <BatchCreditForm onDone={() => load()} />}
-      {admin && (
-        <PendingCharges
-          onSelectAccount={(id) => {
-            requestSeq.current++;
-            setStatement(null);
-            setAccountId(id);
-            setAccountRange("this_month");
-            setDrill(null);
-            setReceipt("");
-            creditAttempt.current = null;
-          }}
-        />
-      )}
+      {admin && <PendingCharges onSelectAccount={(id) => selectAccount(id)} />}
       {statement && (
         <div className="mb-5 border-b pb-4 text-sm text-muted-foreground">
           每次运行发起时先冻结积分,结束后按实际用量扣除,多余的退回可用余额。
@@ -217,15 +220,7 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
               id="billing-account"
               value={accountId}
               disabled={busy}
-              onChange={(event) => {
-                requestSeq.current++;
-                setStatement(null);
-                setAccountId(event.target.value);
-                setAccountRange("this_month");
-                setDrill(null);
-                setReceipt("");
-                creditAttempt.current = null;
-              }}
+              onChange={(event) => selectAccount(event.target.value)}
             >
               <option value="">选择账号</option>
               {accounts.map((account) => (
