@@ -234,6 +234,8 @@ export function Workbench() {
    */
   const [agentsState, setAgentsState] = useState<"loading" | "ok" | "error">("loading");
   const [agentId, setAgentId] = useState("default");
+  /** ?agent= 只在第一次拿到智能体列表时生效一次,之后的刷新不覆盖用户自己的选择 */
+  const urlAgentPendingRef = useRef(true);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -340,12 +342,17 @@ export function Workbench() {
         setAgentsState("ok");
         const nextAgents = d.agents ?? [];
         setAgents(nextAgents);
+        // 从构建器"试运行"跳过来时 URL 带着 ?agent=,第一次加载时优先选中它。
+        // 曾经只在"还没选中"时才采用 —— 而初始值是 "default",默认智能体可见时参数永远被忽略。
+        // 同时带 ?session= 时以会话所属的智能体为准
+        const search = window.location.search;
+        const wanted =
+          urlAgentPendingRef.current && !sessionIdFromSearch(search)
+            ? agentIdFromSearch(search)
+            : null;
+        urlAgentPendingRef.current = false;
         setAgentId((currentId) => {
-          // 从构建器"试运行"跳过来时 URL 带着 ?agent=,优先选中它
-          const wanted = agentIdFromSearch(window.location.search);
-          if (!currentId && wanted && nextAgents.some((agent) => agent.id === wanted)) {
-            return wanted;
-          }
+          if (wanted && nextAgents.some((agent) => agent.id === wanted)) return wanted;
           return nextAgents.some((agent) => agent.id === currentId)
             ? currentId
             : (nextAgents[0]?.id ?? "");

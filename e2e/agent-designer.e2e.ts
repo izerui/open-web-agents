@@ -308,9 +308,12 @@ describe("platform AI editor", () => {
     };
     const ready = await edit(id, { ...draft(), ...refs }, [source]);
     expect(ready.issues).toEqual([]);
-    for (const marker of ["secret-marker", "private-env-marker", "private-script-marker"]) {
+    // MCP 地址里的 token 与 env 密钥始终脱敏
+    for (const marker of ["secret-marker", "private-env-marker"]) {
       expect(JSON.stringify(ready)).not.toContain(marker);
     }
+    // 技能正文是审核内容:只有对来源有编辑权限的人才能引用,他本来就能读到全文(50c0f09 起差异预览显示技能正文)
+    expect(JSON.stringify(ready.changes)).toContain("private-script-marker");
     expect(
       (
         await user.post("/api/agents", {
@@ -368,6 +371,69 @@ describe("platform AI editor", () => {
     const result = await apply(id, invalid.previewToken);
     expect(result.status).toBe(400);
     expect(result.body.code).toBe("invalid_config");
+  });
+
+  it("source permission boundary: read grants cannot be referenced; revoking write invalidates an old preview", async () => {
+    const email = (await user.get<{ user: { email: string } }>("/api/auth")).body.user.email;
+    const share = async (source: string, permission: "read" | "write") => {
+      const r = await other.post<{ grant: { id: string } }>(`/api/agents/${source}/share`, {
+        target: email,
+        permission,
+      });
+      expect(r.status).toBe(201);
+      return r.body.grant.id;
+    };
+    const skillConfig = {
+      systemPrompt: "Shared",
+      model: "sonnet",
+      skillPackages: [
+        {
+          name: "shared-skill",
+          description: "Shared",
+          files: { "SKILL.md": "# Shared", "scripts/run.sh": "shared-script-marker" },
+        },
+      ],
+    };
+
+    // 只分享给本人 read:不能选作资源来源
+    const readOnly = await createAgent(other, { config: skillConfig });
+    await share(readOnly, "read");
+    const id1 = await start();
+    const before = await inspect(id1);
+    const denied = await user.patch(path(id1), {
+      revision: before.revision,
+      resourceAgentIds: [readOnly],
+    });
+    expect(denied.status).toBe(403);
+    expect(JSON.stringify(await inspect(id1))).not.toContain("shared-script-marker");
+
+    // 分享 write:可以引用、能看到正文;撤销后旧预览不能应用,也不会建出带这份技能的智能体
+    const writable = await createAgent(other, { config: skillConfig });
+    const grantId = await share(writable, "write");
+    const id2 = await start();
+    const available = await edit(id2, draft(), [writable]);
+    const refs = available.resources.filter((r) => r.kind === "skill").map((r) => r.ref);
+    expect(refs).toHaveLength(1);
+    const ready = await edit(id2, { ...draft(), skillRefs: refs }, [writable]);
+    expect(ready.issues).toEqual([]);
+    expect(JSON.stringify(ready.changes)).toContain("shared-script-marker");
+
+    const revoked = await other.del(`/api/agents/${writable}/share?grantId=${grantId}`);
+    expect(revoked.status).toBeLessThan(300);
+    const listBefore = (await user.get<{ agents: { id: string }[] }>("/api/agents")).body.agents;
+    const stale = await apply(id2, ready.previewToken);
+    expect(stale.status).toBeGreaterThanOrEqual(400);
+    expect(stale.status).toBeLessThan(500);
+    const listAfter = (await user.get<{ agents: SavedAgent[] }>("/api/agents")).body.agents;
+    // 旧预览没有建出新智能体;带这份技能的只有分享给本人只读的那个来源(只读本来就能看到技能正文)
+    expect(listAfter.map((a) => a.id).sort()).toEqual(listBefore.map((a) => a.id).sort());
+    expect(
+      listAfter.filter((a) => JSON.stringify(a).includes("shared-script-marker")).map((a) => a.id),
+    ).toEqual([readOnly]);
+    // 撤销后重新查看:来源失效被明确指出,预览里不再带正文
+    const after = await inspect(id2);
+    expect(after.issues.some((i) => i.field === "resources")).toBe(true);
+    expect(JSON.stringify(after)).not.toContain("shared-script-marker");
   });
 
   it.each([
