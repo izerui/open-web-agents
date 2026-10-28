@@ -435,7 +435,7 @@ test("旧会话追加消息的迟到重发结果不能发送到新会话", async
   await expect(page.getByLabel("排队中的消息")).toHaveCount(0);
 });
 
-test("移动端审批与输入区均可见，切会话时立即清除旧审批", async ({ page }) => {
+test("移动端审批与输入区均可见，切会话时立即清除旧审批", async ({ page }, testInfo) => {
   await fixture(page);
   await page.setViewportSize({ width: 375, height: 812 });
   await page.route("**/api/sessions/review-default-session/approvals", (route) =>
@@ -473,7 +473,7 @@ test("移动端审批与输入区均可见，切会话时立即清除旧审批",
   expect(cardBox && inputBox && cardBox.y + cardBox.height <= inputBox.y).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({
-    path: "docs/design-demos/ia-v2/review-2026-10-28/05-approval-mobile.png",
+    path: testInfo.outputPath("approval-mobile.png"),
     animations: "disabled",
   });
   await page.getByRole("button", { name: "打开智能体树" }).click();
@@ -484,3 +484,178 @@ test("移动端审批与输入区均可见，切会话时立即清除旧审批",
   await expect(page.getByText("写入本会话的工作目录", { exact: false })).toHaveCount(0);
   await nextPoll?.fulfill({ json: { pending: [], grants: [] } });
 });
+
+for (const next of ["另一会话", "同会话下一轮", "原运行"] as const) {
+  test(`停止响应仅影响原运行，当前为${next}`, async ({ page }) => {
+    await fixture(page);
+    let cancellation: Route | undefined;
+    let stream: Route | undefined;
+    await page.route("**/api/sessions/*/approvals", (route) =>
+      route.fulfill({ json: { pending: [], grants: [] } }),
+    );
+    await page.route("**/api/sessions/review-default-session/history", (route) =>
+      route.fulfill({
+        json: {
+          turns: [{ runId: "old-run", prompt: "原来的运行", events: [], running: true }],
+          activeRunId: "old-run",
+        },
+      }),
+    );
+    await page.route("**/api/sessions/review-a-session/history", (route) =>
+      route.fulfill({
+        json: {
+          turns: [{ runId: "new-run", prompt: "后来的运行", events: [], running: true }],
+          activeRunId: "new-run",
+        },
+      }),
+    );
+    await page.route("**/api/sessions/*/events?*", (route) => {
+      if (route.request().url().includes("runId=old-run")) {
+        stream = route;
+        return;
+      }
+      return route.fulfill({
+        contentType: "text/event-stream",
+        body: 'data: {"kind":"status","status":"running"}\n\n',
+      });
+    });
+    await page.route("**/api/sessions/review-default-session/cancel", (route) => {
+      cancellation = route;
+    });
+    await page.route("**/api/sessions/review-default-session/run", (route) =>
+      route.fulfill({
+        contentType: "text/event-stream",
+        headers: { "X-Run-Id": "new-run" },
+        body: 'data: {"kind":"status","status":"running"}\n\n',
+      }),
+    );
+    await page.goto("/?session=review-default-session");
+    await expect(page.getByRole("button", { name: "停止运行", exact: true })).toBeVisible();
+    await expect.poll(() => Boolean(stream)).toBe(true);
+    await page.getByRole("button", { name: "停止运行", exact: true }).click();
+    await expect.poll(() => Boolean(cancellation)).toBe(true);
+    if (next === "另一会话") {
+      await page.getByRole("button", { name: "展开 审查智能体 A 的会话" }).click();
+      await page.getByRole("link", { name: "A 历史会话", exact: true }).click();
+      await expect(page.getByRole("heading", { level: 1, name: "审查智能体 A" })).toBeVisible();
+    } else if (next === "同会话下一轮") {
+      await stream?.fulfill({
+        contentType: "text/event-stream",
+        body: 'data: {"kind":"result","runId":"old-run","status":"success","summary":"原运行已结束"}\n\n',
+      });
+      await expect(page.getByRole("button", { name: "发送消息", exact: true })).toBeVisible();
+      await page.getByRole("textbox", { name: "消息", exact: true }).fill("后来的运行");
+      await page.getByRole("textbox", { name: "消息", exact: true }).press("Enter");
+    }
+    await expect(page.getByRole("button", { name: "停止运行", exact: true })).toBeVisible();
+    await cancellation?.fulfill({ json: { cancelled: ["old-run"], note: "旧请求停止完成" } });
+    await page.waitForTimeout(150);
+    if (next === "原运行") {
+      await expect(page.getByRole("button", { name: "发送消息", exact: true })).toBeVisible();
+      await expect(page.getByText("旧请求停止完成", { exact: false })).toBeVisible();
+    } else {
+      await expect(page.getByRole("button", { name: "停止运行", exact: true })).toBeVisible();
+      await expect(page.getByText("旧请求停止完成", { exact: false })).toHaveCount(0);
+    }
+  });
+}
+
+test("准备 AI 编辑时继续输入，跳转前需确认且可以保留新修改", async ({ page }) => {
+  await fixture(page);
+  let pending: Route | undefined;
+  await page.route("**/api/agents/design", (route) => {
+    pending = route;
+  });
+  await page.goto("/agents?id=review-a");
+  await expect(prompt(page)).toHaveValue("审查智能体 A 已保存提示词");
+  await page.getByRole("button", { name: "AI 编辑", exact: true }).click();
+  await expect.poll(() => Boolean(pending)).toBe(true);
+  await prompt(page).fill("请求发出后输入的新修改");
+  let confirmations = 0;
+  page.on("dialog", async (dialog) => {
+    confirmations++;
+    await dialog.dismiss();
+  });
+  await pending?.fulfill({ json: { sessionId: "prepared-design" } });
+  await expect.poll(() => confirmations).toBe(1);
+  await expect(page).toHaveURL(/\/agents\?id=review-a$/);
+  await expect(prompt(page)).toHaveValue("请求发出后输入的新修改");
+  await expect(save(page)).toBeEnabled();
+});
+
+for (const [status, outcome] of [
+  [202, "dropped"],
+  [409, "dropped"],
+  [202, "delivered"],
+] as const) {
+  test(`追加消息 ${outcome} 事件先于 HTTP ${status} 返回时，正确处理且不重复补发`, async ({
+    page,
+  }) => {
+    await fixture(page);
+    let stream: Route | undefined;
+    let steer: Route | undefined;
+    const prompts: string[] = [];
+    await page.route("**/api/sessions/*/approvals", (route) =>
+      route.fulfill({ json: { pending: [], grants: [] } }),
+    );
+    await page.route("**/api/sessions/review-default-session/history", (route) =>
+      route.fulfill({
+        json: {
+          turns: [{ runId: "steer-run", prompt: "模拟执行", events: [], running: true }],
+          activeRunId: "steer-run",
+        },
+      }),
+    );
+    await page.route("**/api/sessions/*/events?*", (route) => {
+      stream = route;
+    });
+    await page.route("**/api/sessions/review-default-session/steer", (route) => {
+      steer = route;
+    });
+    await page.route("**/api/sessions/review-default-session/run", (route) => {
+      prompts.push(route.request().postDataJSON().prompt);
+      const id = `resent-${prompts.length}`;
+      return route.fulfill({
+        contentType: "text/event-stream",
+        headers: { "X-Run-Id": id },
+        body: `data: ${JSON.stringify({
+          kind: "result",
+          runId: id,
+          status: "success",
+          summary: "模拟完成",
+        })}\n\n`,
+      });
+    });
+    await page.goto("/?session=review-default-session");
+    const input = page.getByRole("textbox", { name: "消息", exact: true });
+    await expect(input).toHaveAttribute("placeholder", /运行中/);
+    await expect.poll(() => Boolean(stream)).toBe(true);
+    await input.fill("必须补发的消息");
+    await input.press("Enter");
+    await expect.poll(() => Boolean(steer)).toBe(true);
+    const id = steer?.request().postDataJSON().id;
+    await stream?.fulfill({
+      contentType: "text/event-stream",
+      body: [
+        { kind: "steer", id, text: "必须补发的消息", outcome },
+        { kind: "result", runId: "steer-run", status: "success", summary: "原运行完成" },
+      ]
+        .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+        .join(""),
+    });
+    await expect(input).toHaveAttribute("placeholder", "说点什么,或输入 /");
+    await steer?.fulfill({
+      status,
+      json: status === 202 ? { outcome: "pending" } : { code: "dropped" },
+    });
+    const expected = outcome === "dropped" ? ["必须补发的消息"] : [];
+    await expect.poll(() => prompts).toEqual(expected);
+    await expect(page.getByRole("button", { name: "发送消息", exact: true })).toBeVisible();
+    // A later render must not re-arm the already handled dropped event.
+    await input.fill("下一条正常输入");
+    await input.press("Enter");
+    await expect.poll(() => prompts.length).toBe(expected.length + 1);
+    await page.waitForTimeout(150);
+    expect(prompts).toEqual([...expected, "下一条正常输入"]);
+  });
+}

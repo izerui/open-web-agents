@@ -405,6 +405,7 @@ export function Workbench() {
    * 继续产生副作用与费用,直到 30 分钟墙钟上限。用户以为停了,其实没停。
    */
   const cancelRun = useCallback(async () => {
+    const seq = openSeqRef.current;
     const markLocalCancelled = (summary: string) => {
       setTurns((all) =>
         all.map((turn) =>
@@ -444,6 +445,7 @@ export function Workbench() {
       });
       if (!res.ok) throw await responseError(res, "停止运行失败");
       const body = (await res.json()) as { cancelled?: string[]; note?: string };
+      if (seq !== openSeqRef.current || activeRunRef.current !== activeRun) return;
       if ((body.cancelled?.length ?? 0) === 0) {
         toast.info(body.note ?? "运行已经结束");
       } else {
@@ -452,7 +454,9 @@ export function Workbench() {
         if (activeRunRef.current === activeRun) activeRunRef.current = null;
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      if (seq === openSeqRef.current && activeRunRef.current === activeRun) {
+        toast.error(error instanceof Error ? error.message : String(error));
+      }
     }
   }, [sessionId]);
 
@@ -898,25 +902,30 @@ export function Workbench() {
    */
   async function steerOrQueue(sid: string, runId: string, text: string) {
     const seq = openSeqRef.current;
-    const r = await sendSteer({ sessionId: sid, runId, id: crypto.randomUUID(), text });
+    const id = crypto.randomUUID();
+    // The stream may report delivery before the HTTP acknowledgement arrives.
+    pendingSteerRef.current.add(id);
+    const r = await sendSteer({ sessionId: sid, runId, id, text });
     if (seq !== openSeqRef.current) return;
     switch (r.kind) {
       case "delivered":
-        toast.success("已交给智能体");
+        if (pendingSteerRef.current.delete(id)) toast.success("已交给智能体");
         return;
       case "pending":
-        pendingSteerRef.current.add(r.id);
-        toast.message("已提交,等待智能体接收");
+        if (pendingSteerRef.current.has(id)) toast.message("已提交,等待智能体接收");
         return;
       case "unconfirmed":
         // 结局若之后从事件流里来(未送达),照样会自动改为排队
-        pendingSteerRef.current.add(r.id);
-        toast.warning("暂时无法确认这条是否已交给智能体,请留意它的回答;确认没收到再重新发送");
+        if (pendingSteerRef.current.has(id)) {
+          toast.warning("暂时无法确认这条是否已交给智能体,请留意它的回答;确认没收到再重新发送");
+        }
         return;
       case "invalid":
+        pendingSteerRef.current.delete(id);
         toast.error(r.message);
         return;
       case "resend":
+        if (!pendingSteerRef.current.delete(id)) return;
         setQueued((q) => [...q, { id: crypto.randomUUID(), text, files: [] }]);
         toast.message("这一轮正在收尾,本轮结束后作为新消息发送");
         return;
@@ -927,9 +936,11 @@ export function Workbench() {
   useEffect(() => {
     for (const turn of turns) {
       for (const e of turn.events) {
-        if (e.kind !== "steer" || e.outcome !== "dropped" || !e.id) continue;
+        if (e.kind !== "steer" || !e.id) continue;
         if (!pendingSteerRef.current.delete(e.id)) continue;
-        setQueued((q) => [...q, { id: crypto.randomUUID(), text: e.text, files: [] }]);
+        if (e.outcome === "dropped") {
+          setQueued((q) => [...q, { id: crypto.randomUUID(), text: e.text, files: [] }]);
+        }
       }
     }
   }, [turns]);

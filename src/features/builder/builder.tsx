@@ -460,6 +460,13 @@ export function Builder() {
         body: JSON.stringify(agentId ? { agentId } : {}),
       });
       if (seq !== editSeqRef.current) return;
+      if (
+        draftRef.current !== draft &&
+        JSON.stringify(draftRef.current) !== cleanDraftRef.current &&
+        !window.confirm("准备 AI 编辑期间又有新的修改，确定放弃这些修改并进入 AI 编辑？")
+      ) {
+        return;
+      }
       allowNavigationRef.current = true;
       router.push(`/agents/design?session=${encodeURIComponent(d.sessionId)}`);
     } catch (e) {
