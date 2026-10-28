@@ -1,0 +1,8 @@
+三方向外观：
+  dir-1.html：深·近黑底 #1E1F22，无衬线标题（-apple-system），正文 -apple-system
+  dir-2.html：深·近黑底 #1E1F22，无衬线标题（-apple-system），正文 -apple-system
+  dir-3.html：深·近黑底 #1E1F22，无衬线标题（-apple-system），正文 -apple-system
+  dir-1.html ↔ dir-2.html：色板距离 0.022，骨架相关 0.21
+  dir-1.html ↔ dir-3.html：色板距离 0.004，骨架相关 0.08
+  dir-2.html ↔ dir-3.html：色板距离 0.02，骨架相关 0.11
+  ✓ 三版拉开了

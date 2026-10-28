@@ -28,6 +28,7 @@ test.describe("评测与发布", () => {
     page.on("dialog", (d) => void d.accept());
 
     await page.goto(`${BASE}/agents?id=${agentId}`);
+    await page.getByRole("tab", { name: "发布与分享", exact: true }).click();
     const draftEval = page.getByTestId("draft-eval");
     const publish = page.getByRole("button", { name: "发布为 v1" });
     await expect(draftEval).toContainText("还没有评测用例", { timeout: 15_000 });
@@ -40,11 +41,13 @@ test.describe("评测与发布", () => {
     await page.reload();
     await expect(draftEval).toContainText("还没有评测过", { timeout: 15_000 });
 
+    await page.getByRole("tab", { name: "评测", exact: true }).click();
     await page.getByRole("button", { name: "运行评测" }).click();
     // 评测面板跑完 → 发布面板随即重读
     await expect(draftEval).toContainText("1/1 全部通过", { timeout: 30_000 });
     await expect(publish).toBeEnabled();
     await expect(page.getByTestId("eval-run-match").first()).toContainText("= 当前草稿");
+    await page.getByRole("tab", { name: "发布与分享", exact: true }).click();
     await publish.click();
     await expect(page.getByTestId("version-eval").first()).toHaveText("评测 1/1", {
       timeout: 15_000,
@@ -52,6 +55,7 @@ test.describe("评测与发布", () => {
     await expect(page.getByTestId("eval-run-match").first()).toContainText("= v1");
 
     // 表单里改草稿并保存:发布面板提示配置已变化,不能发布
+    await page.getByRole("tab", { name: "配置", exact: true }).click();
     await page.getByPlaceholder("你是代码评审专家……").fill("改过的提示词");
     await page.getByRole("button", { name: "保存智能体" }).click();
     await expect(draftEval).toContainText("配置已变化", { timeout: 15_000 });

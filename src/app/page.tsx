@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export default async function Home({
   searchParams,
-}: { searchParams: Promise<{ session?: string }> }) {
+}: { searchParams: Promise<{ session?: string; agent?: string }> }) {
   const { authService, env, sessions, auth } = getContainer();
 
   // 服务端就把未登录的人挡在工作台之外,避免先渲染再被 API 全线 401
@@ -16,19 +16,19 @@ export default async function Home({
     const req = new Request("http://internal/", { headers: { cookie: h.get("cookie") ?? "" } });
     if (!(await authService.currentUser(req))) redirect("/login");
   }
-  const { session } = await searchParams;
+  const { session, agent } = await searchParams;
   if (session) {
     const h = await headers();
     const req = new Request("http://internal/", { headers: { cookie: h.get("cookie") ?? "" } });
     try {
       await auth.assertSessionAccess(await auth.resolveWeb(req), session);
     } catch {
-      return <Workbench />;
+      return <Workbench key={session} />;
     }
     if ((await sessions.get(session))?.source === "design") {
       redirect(`/agents/design?session=${encodeURIComponent(session)}`);
     }
   }
 
-  return <Workbench />;
+  return <Workbench key={session ?? agent ?? "default"} />;
 }

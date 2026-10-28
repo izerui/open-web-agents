@@ -361,7 +361,7 @@ export function EvalPanel({
           </Button>
         </div>
         {unsaved && target === "draft" && (
-          <p className="text-xs text-amber-700">
+          <p className="text-xs text-warning">
             表单有未保存的修改:评测跑的是已保存的草稿,先保存再评测。
           </p>
         )}

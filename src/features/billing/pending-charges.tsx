@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadError } from "@/components/load-error";
 import { Button } from "@/components/ui/button";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { creditsAmount, creditsExact } from "@/lib/modules/billing/domain/credits-display";
@@ -102,11 +103,13 @@ export function PendingCharges({ onSelectAccount }: { onSelectAccount?: (id: str
       <p className="text-xs text-muted-foreground">
         {reason ? REASON[reason].hint : "这里只列出,不提供核销、退还或确认结清等处理操作。"}
       </p>
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && <LoadError compact what="待核对记录" message={error} />}
       {items.length === 0 ? (
-        <p className="py-3 text-sm text-muted-foreground">
-          {loading ? "载入中…" : "没有待核对的记录"}
-        </p>
+        error ? null : (
+          <p className="py-3 text-sm text-muted-foreground">
+            {loading ? "载入中…" : "没有待核对的记录"}
+          </p>
+        )
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs" data-testid="pending-charges">

@@ -330,9 +330,12 @@ export function FilePanel({
   return (
     <div className="flex h-full flex-col text-sm">
       {/* 顶部工具栏 */}
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-        <Folder className="size-4 shrink-0 text-muted-foreground" />
-        <span className="text-xs font-medium">工作空间</span>
+      {/* 窗口名已经在工具窗口的标签上,这里只给路径和操作 */}
+      <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border pr-1.5 pl-3">
+        <Folder className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
+          {sessionId ? `workspaces/${sessionId.slice(0, 8)}` : "尚未创建"}
+        </span>
         {loading.size > 0 && <Spinner className="size-3 text-muted-foreground" />}
         <Button
           variant="ghost"

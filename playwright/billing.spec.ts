@@ -52,6 +52,7 @@ test.describe("积分与计费界面", () => {
       await expect(page.getByTestId("balance-available")).toHaveText("0.00");
       await expect(page.getByTestId("balance-reserved")).toHaveText("0");
       await expect(page.getByText("结束后按实际用量扣除")).toBeVisible();
+      await page.getByRole("tab", { name: "运行消耗", exact: true }).click();
       const row = page.getByTestId("run-charge").filter({ hasText: runId });
       await expect(row.locator("td").nth(2)).toHaveText("57.75");
       await expect(row.locator("td").nth(3)).toHaveText("57.75");
@@ -87,6 +88,10 @@ test.describe("积分与计费界面", () => {
     if (promoted) await sql("UPDATE users SET role = 'admin' WHERE id = ?", [user.id]);
     try {
       await page.goto(`${BASE}/admin/billing`);
+      await page
+        .getByRole("navigation", { name: "计费管理分区" })
+        .getByRole("button", { name: "对账", exact: true })
+        .click();
       await expect(page.getByRole("region", { name: "对账", exact: true })).toBeVisible();
       await expect(page.getByTestId("billing-mode")).toHaveCount(0);
       await expect(page.getByText(/试算|计费模式|正式扣费/)).toHaveCount(0);
@@ -122,6 +127,7 @@ test.describe("积分与计费界面", () => {
     }
     try {
       await page.goto(`${BASE}/settings/billing`);
+      await page.getByRole("tab", { name: "运行消耗", exact: true }).click();
       const row = (i: number) =>
         page.getByTestId("run-charge").filter({ hasText: rows[i]?.id ?? "" });
       await expect(row(0)).toContainText("余额不足,欠 27.75 积分,充值后自动补扣");
@@ -145,6 +151,7 @@ test.describe("积分与计费界面", () => {
     );
     try {
       await page.reload();
+      await page.getByRole("tab", { name: "运行消耗", exact: true }).click();
       const r = page.getByTestId("run-charge").filter({ hasText: refunded });
       await expect(r).toContainText("已结算(多扣的 23.10 积分已退还)");
       await expect(r.locator("td").nth(3)).toHaveText("69.30");
@@ -170,9 +177,9 @@ test.describe("积分与计费界面", () => {
       const [row] = (await sql("SELECT email FROM users WHERE id = ?", [target.id])) as unknown as [
         { email: string }[],
       ];
-      const card = page.locator("div.rounded-xl, [data-slot=card]").filter({
-        hasText: row[0]?.email ?? "",
-      });
+      // 账号是表格里的一行,点邮箱打开右侧详情,额度在详情里改
+      await page.getByRole("button", { name: row[0]?.email ?? "" }).click();
+      const card = page.getByTestId("account-detail");
       const legacy = card.getByTestId("legacy-limit");
       await expect(legacy).toContainText("旧上限 $5.00 待按积分重新设置");
       await card.getByLabel("月度上限(积分)").fill("500");
@@ -202,6 +209,11 @@ test.describe("积分与计费界面", () => {
     const missing = `nobody-${Date.now()}@example.test`;
     try {
       await page.goto(`${BASE}/admin/billing`);
+      await page
+        .getByRole("navigation", { name: "计费管理分区" })
+        .getByRole("button", { name: "账户", exact: true })
+        .click();
+      await page.getByRole("button", { name: "批量发放积分", exact: true }).click();
       await page.getByLabel(/^邮箱/).fill(`${email}\n${missing}\nnot-an-email`);
       await page.getByLabel("每人积分").fill("8.8");
       await page.getByLabel("发放说明").fill("PW 批量发放");
@@ -263,6 +275,11 @@ test.describe("积分与计费界面", () => {
     };
     try {
       await page.goto(`${BASE}/admin/billing`);
+      await page
+        .getByRole("navigation", { name: "计费管理分区" })
+        .getByRole("button", { name: "账户", exact: true })
+        .click();
+      await page.getByRole("button", { name: "批量发放积分", exact: true }).click();
       await page.getByLabel(/^邮箱/).fill(email);
       await page.getByLabel("每人积分").fill("6");
       await page.getByLabel("发放说明").fill("PW 审计故障");
@@ -360,6 +377,10 @@ test.describe("积分与计费界面", () => {
     const before = await snapshot();
     try {
       await page.goto(`${BASE}/admin/billing`);
+      await page
+        .getByRole("navigation", { name: "计费管理分区" })
+        .getByRole("button", { name: "对账", exact: true })
+        .click();
       const section = page.getByRole("region", { name: "待核对计费" });
       const row = (i: number) =>
         section.getByTestId("pending-charge").filter({ hasText: seed[i]?.id ?? "" });
@@ -485,6 +506,10 @@ test.describe("积分与计费界面", () => {
       }
 
       await page.goto(`${BASE}/admin/billing`);
+      await page
+        .getByRole("navigation", { name: "计费管理分区" })
+        .getByRole("button", { name: "对账", exact: true })
+        .click();
       const section = page.getByRole("region", { name: "对账", exact: true });
       const line = section.getByTestId("recon-line").filter({ hasText: providerName });
       await expect(line).toContainText("3");

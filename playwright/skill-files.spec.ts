@@ -20,7 +20,9 @@ async function createAgent(ctx: BrowserContext, name: string) {
     data: { name, config: { systemPrompt: "测试", model: "sonnet" } },
   });
   expect(res.ok()).toBeTruthy();
-  return ((await res.json()) as { agent?: { id: string } }).agent!.id;
+  const body = (await res.json()) as { agent?: { id: string } };
+  if (!body.agent?.id) throw new Error("创建智能体未返回 ID");
+  return body.agent.id;
 }
 
 type AgentList = {
@@ -31,9 +33,9 @@ type AgentList = {
 };
 
 function getSkillFiles(body: AgentList, agentId: string, skillName: string) {
-  return body.agents?.find((a) => a.id === agentId)?.config?.skillPackages?.find(
-    (s) => s.name === skillName,
-  )?.files;
+  return body.agents
+    ?.find((a) => a.id === agentId)
+    ?.config?.skillPackages?.find((s) => s.name === skillName)?.files;
 }
 
 test.describe("技能包多文件管理", () => {
@@ -64,6 +66,7 @@ test.describe("技能包多文件管理", () => {
     });
 
     await page.goto(`${BASE}/agents?id=${agentId}`);
+    await page.getByRole("tab", { name: "能力", exact: true }).click();
     await expect(page.getByLabel("技能名")).toHaveValue("render-anim", { timeout: 10_000 });
 
     // 验证所有文件可见
@@ -95,14 +98,12 @@ test.describe("技能包多文件管理", () => {
     expect(files?.["templates/base.py"]).toContain("class Base");
   });
 
-  test("新增文件 → 写内容 → 保存 → 重新打开 → 删除文件 → 再保存", async ({
-    page,
-    context,
-  }) => {
+  test("新增文件 → 写内容 → 保存 → 重新打开 → 删除文件 → 再保存", async ({ page, context }) => {
     await register(context, "skill-crud");
     const agentId = await createAgent(context, "PW 技能增删");
 
     await page.goto(`${BASE}/agents?id=${agentId}`);
+    await page.getByRole("tab", { name: "能力", exact: true }).click();
     await page.waitForTimeout(2000);
 
     // 添加技能
@@ -112,7 +113,9 @@ test.describe("技能包多文件管理", () => {
 
     // 编辑 SKILL.md
     await page.getByText("SKILL.md").first().click();
-    await page.locator('textarea[placeholder*="SKILL.md"]').fill("# 数据处理\n运行 scripts/proc.sh");
+    await page
+      .locator('textarea[placeholder*="SKILL.md"]')
+      .fill("# 数据处理\n运行 scripts/proc.sh");
 
     // 添加附属文件
     await page.getByRole("button", { name: "添加文件" }).click();
@@ -120,7 +123,9 @@ test.describe("技能包多文件管理", () => {
     await page.getByRole("button", { name: "确定" }).click();
 
     // 写脚本内容（添加后自动展开）
-    await page.locator('textarea[placeholder="scripts/proc.sh 内容"]').fill("#!/bin/bash\necho done");
+    await page
+      .locator('textarea[placeholder="scripts/proc.sh 内容"]')
+      .fill("#!/bin/bash\necho done");
 
     // 再添加一个文件
     await page.getByRole("button", { name: "添加文件" }).click();
@@ -142,6 +147,7 @@ test.describe("技能包多文件管理", () => {
     // 重新打开页面
     await page.reload();
     await page.waitForTimeout(3000);
+    await page.getByRole("tab", { name: "能力", exact: true }).click();
     await expect(page.getByLabel("技能名")).toHaveValue("data-tool", { timeout: 10_000 });
 
     // 验证文件列表

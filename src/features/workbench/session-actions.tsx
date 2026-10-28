@@ -17,7 +17,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { SidebarMenuAction } from "@/components/ui/sidebar";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { Archive, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
@@ -94,9 +93,13 @@ export function SessionActions({
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <SidebarMenuAction showOnHover aria-label={`会话操作:${label}`}>
+          <button
+            type="button"
+            aria-label={`会话操作:${label}`}
+            className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-background/40 hover:text-foreground data-[state=open]:bg-background/40 [&_svg]:size-4"
+          >
             <MoreHorizontal />
-          </SidebarMenuAction>
+          </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent side="right" align="start">
           <DropdownMenuItem

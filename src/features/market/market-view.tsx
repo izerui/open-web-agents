@@ -5,7 +5,6 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ModelPrice } from "@/features/models/model-price";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { MARKET_CATEGORIES, type MarketAgent } from "@/lib/modules/market/domain/catalog";
@@ -16,10 +15,9 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { MarketActions } from "./market-actions";
 
-export function MarketView() {
+export function MarketView({ manageOnly = false }: { manageOnly?: boolean }) {
   const { me } = useMe();
   const admin = isAdminView(me);
-  const [manage, setManage] = useState(false);
   const [items, setItems] = useState<MarketAgent[]>([]);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
@@ -27,10 +25,11 @@ export function MarketView() {
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
   const reload = useCallback(() => setRefresh((v) => v + 1), []);
-  const managing = manage && admin;
+  const managing = manageOnly && admin;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: Explicit refresh retries the current query.
   useEffect(() => {
+    if (manageOnly && !admin) return;
     const controller = new AbortController();
     setLoading(true);
     setError("");
@@ -47,7 +46,7 @@ export function MarketView() {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [managing, refresh]);
+  }, [managing, refresh, manageOnly, admin]);
 
   const term = search.trim().toLocaleLowerCase();
   const visible = items.filter(
@@ -58,8 +57,8 @@ export function MarketView() {
 
   return (
     <SpaceShell
-      area="market"
-      title="智能体市场"
+      area={manageOnly ? "admin" : "market"}
+      title={manageOnly ? "市场管理" : "发现智能体"}
       actions={
         <Button
           variant="ghost"
@@ -73,17 +72,6 @@ export function MarketView() {
         </Button>
       }
     >
-      {admin && (
-        <Tabs
-          value={managing ? "manage" : "browse"}
-          onValueChange={(value) => setManage(value === "manage")}
-        >
-          <TabsList>
-            <TabsTrigger value="browse">浏览市场</TabsTrigger>
-            <TabsTrigger value="manage">上下架管理</TabsTrigger>
-          </TabsList>
-        </Tabs>
-      )}
       <div className="flex flex-col gap-3 sm:flex-row">
         <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground" />

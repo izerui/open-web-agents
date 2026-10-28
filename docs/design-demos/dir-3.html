@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Open Web Agents · Fleet 静谧</title>
+<style>
+:root{
+  --stage:#141518; --bg:#1e1f22; --panel:#2b2d30; --border:#393b40; --hover:#2f3135; --hover2:#393b40;
+  --select:#2e436e; --accent:#3574f0; --link:#548af7; --text:#dfe1e5; --dim:#8c8f96; --faint:#6f737a;
+  --green:#5fb865; --yellow:#e0b153; --red:#db5c5c; --cyan:#2aacb8; --purple:#c77dbb;
+  --gap:6px; --r:10px;
+  --sans:"Inter Tight",Inter,"PingFang SC","Hiragino Sans GB",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--stage);color:var(--text);font:13px/1.5 var(--sans);overflow:hidden;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+input{font:inherit;color:inherit}
+svg.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:none}
+svg.s{width:14px;height:14px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-radius:6px}
+
+/* 标题栏 */
+.titlebar{height:36px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 10px}
+.tb-left,.tb-right{display:flex;align-items:center;gap:2px}
+.tb-right{justify-content:flex-end;gap:6px}
+.ib{width:28px;height:26px;display:grid;place-items:center;border-radius:6px;color:var(--dim)}
+.ib:hover{background:var(--hover);color:var(--text)}
+.ib[aria-pressed="true"]{color:var(--text)}
+.ib[aria-pressed="false"]{color:var(--faint)}
+.tb-sep{width:1px;height:14px;background:var(--border);margin:0 6px}
+.crumb{display:flex;align-items:center;gap:6px;color:var(--dim);white-space:nowrap;min-width:0}
+.agent-btn{display:flex;align-items:center;gap:4px;padding:3px 6px;border-radius:6px;color:var(--text);font-weight:500}
+.agent-btn:hover{background:var(--hover)}
+.agent-btn svg{color:var(--dim)}
+.crumb .dotsep{color:var(--faint)}
+.crumb .title{overflow:hidden;text-overflow:ellipsis}
+.search-btn{display:flex;align-items:center;gap:8px;height:26px;padding:0 6px 0 8px;border:1px solid var(--border);border-radius:7px;color:var(--dim);min-width:150px}
+.search-btn:hover{border-color:#4a4d54;color:var(--text)}
+.search-btn span{flex:1;text-align:left}
+kbd{font:11px/1 var(--mono);color:var(--dim);background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:3px 5px}
+.avatar{width:24px;height:24px;border-radius:50%;background:#3d4f6e;color:#cfdcf5;font-size:11px;font-weight:600;display:grid;place-items:center}
+.review{display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;font-size:11px}
+.review button{padding:2px 7px;color:var(--faint)}
+.review button.on{background:var(--hover2);color:var(--text)}
+
+/* 舞台与面板 */
+.stage{height:calc(100vh - 36px);padding:0 var(--gap) var(--gap)}
+.screen{height:100%;display:none;gap:var(--gap)}
+.screen.on{display:grid}
+#wb{grid-template-columns:260px minmax(0,1fr) 280px;transition:grid-template-columns .18s ease}
+#wb.no-left{grid-template-columns:0 minmax(0,1fr) 280px}
+#wb.no-right{grid-template-columns:260px minmax(0,1fr) 0}
+#wb.no-left.no-right{grid-template-columns:0 minmax(0,1fr) 0}
+#wb.no-left{column-gap:0}#wb.no-left .p-left{margin-right:calc(var(--gap) * -1)}
+#wb.no-left .p-left,#wb.no-right .p-right{border-width:0;opacity:0;pointer-events:none}
+#wb.no-right .p-right{margin-left:calc(var(--gap) * -1)}
+#admin{grid-template-columns:minmax(0,1fr)}
+.panel{background:var(--bg);border:1px solid var(--border);border-radius:var(--r);display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;transition:opacity .15s}
+.panel.alt{background:var(--panel)}
+.ptabs{height:30px;flex:none;display:flex;align-items:center;gap:2px;padding:0 6px 0 4px}
+.ptab{height:22px;padding:0 8px;border-radius:6px;display:flex;align-items:center;gap:6px;color:var(--dim);white-space:nowrap}
+.ptab.on{background:var(--hover2);color:var(--text)}
+.ptab:not(.on):hover{color:var(--text)}
+.ptabs .grow{flex:1}
+.ptabs .ib{width:24px;height:22px}
+.pbody{flex:1;min-height:0;overflow:auto;scrollbar-width:thin;scrollbar-color:#3d3f44 transparent}
+
+/* 会话面板 */
+.grp{padding:12px 12px 4px;color:var(--faint);font-size:12px}
+.sess{display:block;width:calc(100% - 12px);margin:0 6px;text-align:left;padding:6px 8px;border-radius:6px}
+.sess:hover{background:var(--hover)}
+.sess.on{background:var(--select)}
+.sess b{display:block;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sess small{display:flex;gap:6px;color:var(--dim);font-size:12px}
+.sess.on small{color:#a9b6cf}
+.sess .run{color:var(--link)}
+
+/* 对话 */
+.chat{position:relative}
+.chat .pbody{padding:0 24px;scrollbar-gutter:stable both-edges}
+.chat::after{content:'';position:absolute;left:1px;right:1px;bottom:0;height:16px;background:var(--bg);border-radius:0 0 var(--r) var(--r);z-index:1}
+.composer{z-index:2}
+.col{max-width:720px;margin:0 auto;padding:40px 0 180px}
+.runtime{display:flex;align-items:center;gap:10px;color:var(--dim);font-size:12px;padding-right:4px;white-space:nowrap}
+.runtime i{width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block;margin-right:5px}
+.runtime .m{font-family:var(--mono);font-size:11.5px}
+.msg-user{display:flex;justify-content:flex-end;margin-bottom:40px}
+.msg-user p{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:8px 14px;font-size:14px;line-height:1.7;max-width:80%}
+.who{display:flex;align-items:center;gap:8px;color:var(--dim);font-size:12px;margin-bottom:14px}
+.who .glyph{width:20px;height:20px;border-radius:6px;background:var(--panel);border:1px solid var(--border);display:grid;place-items:center;color:var(--cyan)}
+.tools{margin:0 0 22px -6px}
+.tools-row{display:flex;text-align:left;align-items:center;gap:6px;padding:3px 6px;border-radius:6px;color:var(--faint);font-size:12.5px}
+.tools-row:hover{color:var(--dim);background:#232427}
+.tools-row .chev{transition:transform .15s}
+.tools.open .chev{transform:rotate(90deg)}
+.tools-row .fail{color:#b86a6a;white-space:nowrap}
+.tool-list{display:none;margin:4px 0 0 26px;border-left:1px solid var(--border);padding:2px 0 2px 12px}
+.tools.open .tool-list{display:block}
+.trow{display:grid;grid-template-columns:14px 1fr auto;align-items:center;gap:8px;padding:2px 0;font-size:12px;color:var(--dim)}
+.trow code{font:11.5px var(--mono);color:var(--faint)}
+.trow .t{font:11px var(--mono);color:var(--faint)}
+.trow.bad,.trow.bad code{color:var(--red)}
+.ok{color:var(--green)}
+.md{font-size:14px;line-height:1.7;color:var(--text)}
+.md p{margin:0 0 12px}
+.md ul{margin:0 0 14px;padding-left:20px}
+.md li{margin:6px 0}
+.md li::marker{color:var(--faint)}
+.md code{font:12.5px var(--mono);background:#2b2d30;border:1px solid #34363b;border-radius:4px;padding:1px 5px;color:#e6e7ea}
+.md .muted{color:var(--dim)}
+.ask{margin-top:32px;border:1px solid var(--border);background:var(--panel);border-radius:12px;padding:16px 18px 18px}
+.ask-h{display:flex;align-items:center;gap:8px;color:var(--dim);font-size:12px}
+.ask-h .pend{width:6px;height:6px;border-radius:50%;background:var(--yellow)}
+.ask-q{font-size:14px;line-height:1.7;margin:8px 0 14px}
+.opts{display:flex;flex-wrap:wrap;gap:8px}
+.chip{display:flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)}
+.chip:hover{border-color:#50535a}
+.chip .rad{width:12px;height:12px;border-radius:50%;border:1.5px solid #5d6068;flex:none}
+.chip[aria-checked="true"]{border-color:var(--accent);background:#25324a}
+.chip[aria-checked="true"] .rad{border:3.5px solid var(--accent);background:#fff}
+.chip em{font-style:normal;font-size:11px;color:var(--link)}
+.other{margin-top:10px;width:100%;height:32px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);outline:none}
+.other::placeholder{color:var(--faint)}
+.other:focus{border-color:var(--accent)}
+.ask-f{display:flex;align-items:center;justify-content:flex-end;gap:12px;margin-top:14px}
+.ask-f .hint{color:var(--faint);font-size:12px;margin-right:auto}
+.btn{height:28px;padding:0 14px;border-radius:7px;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.btn.primary{background:var(--accent);color:#fff}
+.btn.primary:hover{background:#4583f5}
+.btn.primary:disabled{background:transparent;color:var(--faint);border:1px dashed #4a4d54;cursor:not-allowed}
+.btn.ghost{border:1px solid var(--border)}
+.btn.ghost:hover{background:var(--hover)}
+.answered{display:none;margin-top:12px;color:var(--dim);font-size:12.5px}
+.composer{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);width:min(720px,calc(100% - 48px));background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:10px 10px 8px 14px;box-shadow:0 8px 24px rgba(0,0,0,.35)}
+.composer:focus-within{border-color:#4b5263}
+.composer textarea{width:100%;resize:none;background:none;border:0;outline:none;color:var(--text);font:14px/1.6 var(--sans);height:46px}
+.composer textarea::placeholder{color:var(--faint)}
+.cbar{display:flex;align-items:center;gap:4px}
+.cbar .grow{flex:1}
+.send{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;background:var(--hover2);color:var(--dim)}
+.send.ready{background:var(--accent);color:#fff}
+.cmeta{font-size:11.5px;color:var(--faint);margin-right:6px}
+
+/* 文件树 */
+.tree{padding:6px 6px 12px}
+.node{display:flex;align-items:center;gap:6px;height:24px;padding:0 6px;border-radius:6px;color:var(--text);width:100%;text-align:left;white-space:nowrap}
+.node:hover{background:var(--hover)}
+.node.on{background:var(--select)}
+.node .tw{width:12px;color:var(--faint)}
+.node svg.f{color:var(--dim)}
+.node .g{margin-left:auto;font-size:11px;color:var(--green);font-family:var(--mono)}
+.node .g.mod{color:var(--link)}
+.wsmeta{padding:10px 12px;color:var(--faint);font-size:12px;border-top:1px solid #2a2b2f;font-family:var(--mono)}
+
+/* 账号管理 */
+.ahead{display:flex;align-items:center;gap:14px;padding:18px 24px 14px;flex-wrap:wrap}
+.ahead h1{font-size:16px;font-weight:600}
+.ahead .sub{color:var(--dim)}
+.ahead .grow{flex:1}
+.sfield{display:flex;align-items:center;gap:6px;height:28px;width:240px;padding:0 8px;border:1px solid var(--border);border-radius:7px;color:var(--faint);background:var(--bg)}
+.sfield:focus-within{border-color:var(--accent)}
+.sfield input{flex:1;min-width:0;background:none;border:0;outline:none}
+.sfield input::placeholder{color:var(--faint)}
+.twrap{padding:0 12px 12px}
+table{width:100%;border-collapse:collapse;table-layout:fixed}
+th{height:32px;text-align:left;font-weight:400;color:var(--dim);font-size:12px;padding:0 12px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg)}
+td{height:36px;padding:0 12px;border-bottom:1px solid #2a2c30;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+tbody tr:hover td{background:#25272a}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.mono{font-family:var(--mono);font-size:12px}
+.dimc{color:var(--dim)}
+.you{font-size:11px;color:var(--dim);border:1px solid var(--border);border-radius:4px;padding:0 5px;margin-left:8px}
+.role-admin{color:var(--text)}
+.role-user{color:var(--dim)}
+.ops{display:flex;justify-content:flex-end;gap:2px;opacity:0;transition:opacity .1s}
+tr:hover .ops,tr:focus-within .ops,tr.menu-open .ops{opacity:1}
+.lbtn{height:24px;padding:0 8px;border-radius:6px;color:var(--dim)}
+.lbtn:hover{background:var(--hover2);color:var(--text)}
+.off td{color:var(--faint)}
+.tfoot{display:flex;justify-content:space-between;color:var(--faint);font-size:12px;padding:10px 12px 0}
+
+/* 浮层 */
+.pop{position:fixed;z-index:30;background:var(--panel);border:1px solid var(--border);border-radius:9px;padding:4px;min-width:180px;box-shadow:0 12px 32px rgba(0,0,0,.45);display:none}
+.pop.on{display:block}
+.mi{display:flex;align-items:center;gap:8px;width:100%;height:28px;padding:0 8px;border-radius:6px;text-align:left;white-space:nowrap}
+.mi:hover,.mi.act{background:var(--select)}
+.mi .r{margin-left:auto;color:var(--dim);font-size:12px}
+.mi.danger{color:var(--red)}
+.mi.danger:hover{background:#4a2a2c}
+.msep{height:1px;background:var(--border);margin:4px 2px}
+.mhead{padding:6px 8px 4px;color:var(--faint);font-size:12px}
+.scrim{position:fixed;inset:0;background:rgba(10,11,13,.55);z-index:40;display:none;align-items:flex-start;justify-content:center;padding-top:14vh}
+.scrim.on{display:flex}
+.palette{width:min(600px,calc(100vw - 24px));background:var(--panel);border:1px solid #45484f;border-radius:12px;box-shadow:0 24px 64px rgba(0,0,0,.55);overflow:hidden}
+.pin{display:flex;align-items:center;gap:10px;height:46px;padding:0 14px;border-bottom:1px solid var(--border);color:var(--dim)}
+.pin input{flex:1;background:none;border:0;outline:none;font-size:14px}
+.pin input::placeholder{color:var(--faint)}
+.plist{max-height:min(420px,56vh);overflow:auto;padding:4px 6px 6px;scrollbar-width:thin}
+.pg{padding:10px 8px 4px;color:var(--faint);font-size:12px}
+.pi{display:flex;align-items:center;gap:10px;height:32px;padding:0 8px;border-radius:7px;color:var(--text);cursor:pointer}
+.pi svg{color:var(--dim)}
+.pi .ctx{color:var(--faint);font-size:12px}
+.pi .k{margin-left:auto;display:flex;gap:3px}
+.pi.act{background:var(--select)}
+.pi.act svg{color:var(--text)}
+.pempty{padding:28px;text-align:center;color:var(--faint)}
+.pfoot{display:flex;gap:16px;padding:8px 14px;border-top:1px solid var(--border);color:var(--faint);font-size:12px}
+.pfoot span{display:flex;align-items:center;gap:5px}
+.toast{position:fixed;left:50%;bottom:28px;transform:translate(-50%,8px);background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:8px 14px;color:var(--text);opacity:0;transition:.2s;z-index:50;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+
+/* 窄屏 */
+@media (max-width:1100px){ #wb{grid-template-columns:220px minmax(0,1fr) 0} #wb .p-right{border-width:0;opacity:0;margin-left:-6px} }
+@media (max-width:760px){
+  :root{--gap:4px}
+  .titlebar{grid-template-columns:auto 1fr auto;padding:0 4px;gap:4px}
+  .tb-left .tb-sep,.tb-left #tFocus,.tb-left #tRight,.review,.crumb .dotsep,.crumb .title{display:none}
+  .crumb{justify-content:center}
+  .search-btn{min-width:0;padding:0 6px}.search-btn span,.search-btn kbd{display:none}
+  #wb,#wb.no-left,#wb.no-right{grid-template-columns:minmax(0,1fr)}
+  #wb .p-left,#wb .p-right{display:none}
+  #wb.show-left{grid-template-columns:minmax(0,1fr)}
+  #wb.show-left .p-left{display:flex;position:fixed;inset:40px 4px 4px;z-index:20;opacity:1;pointer-events:auto;border-width:1px;margin:0}
+  .chat .pbody{padding:0 14px}
+  .col{padding-top:24px}
+  .runtime .m,.runtime .bal{display:none}
+  .composer{width:calc(100% - 16px);bottom:8px}
+  .ahead{padding:14px 14px 10px}.sfield{width:100%}
+  .twrap{padding:0 4px 8px}
+  .c-date,.c-agents,.c-limit{display:none}
+  .ops{opacity:1}.ops .lbtn.reset{display:none}
+  col.c-mail{width:auto!important}col.c-role{width:56px!important}col.c-used{width:64px!important}col.c-ops{width:40px!important}
+  td,th{padding:0 6px}.cmeta{display:none}.tools-row{align-items:flex-start}.tools-row .chev{margin-top:3px}
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-left" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M9 4v16"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M15 4v16"/></symbol>
+  <symbol id="i-focus" viewBox="0 0 24 24"><path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><path d="m21 11-8.6 8.6a5 5 0 0 1-7-7l8.5-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.3-2.4l7.9-7.9"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+  <symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V4M9 14h.01M15 14h.01"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-dots" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+  <symbol id="i-msg" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></symbol>
+  <symbol id="i-store" viewBox="0 0 24 24"><path d="M4 9 5.5 4h13L20 9M4 9v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9M4 9h16M9 20v-6h6v6"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></symbol>
+  <symbol id="i-wand" viewBox="0 0 24 24"><path d="m15 4 1 2 2 1-2 1-1 2-1-2-2-1 2-1zM4 20 14 10"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M3 20a6 6 0 0 1 12 0M16 4.5a3.5 3.5 0 0 1 0 7M21 20a6 6 0 0 0-4-5.6"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></symbol>
+  <symbol id="i-chip" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></symbol>
+  <symbol id="i-coins" viewBox="0 0 24 24"><ellipse cx="10" cy="7" rx="6" ry="3"/><path d="M4 7v5c0 1.7 2.7 3 6 3s6-1.3 6-3V7M8 17.6c.6.3 1.3.4 2 .4 3.3 0 6-1.3 6-3M14 12.5c3.2.2 6 1.4 6 3s-2.7 3-6 3"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 4v16h16M8 16v-4M12 16V8M16 16v-6"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3"/></symbol>
+  <symbol id="i-log" viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6z"/></symbol>
+  <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0zM12 17v5"/></symbol>
+  <symbol id="i-receipt" viewBox="0 0 24 24"><path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2z"/><path d="M9 8h6M9 12h6"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 5v14l11-7z"/></symbol>
+  <symbol id="i-term" viewBox="0 0 24 24"><path d="m5 8 4 4-4 4M12 16h7"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></symbol>
+  <symbol id="i-userplus" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M3 20a6 6 0 0 1 12 0M19 8v6M16 11h6"/></symbol>
+</svg>
+
+<header class="titlebar">
+  <div class="tb-left">
+    <button class="ib" id="tLeft" aria-pressed="true" title="会话面板 ⌘B"><svg class="i"><use href="#i-left"/></svg></button>
+    <button class="ib" id="tRight" aria-pressed="true" title="工作空间面板 ⌘⌥B"><svg class="i"><use href="#i-right"/></svg></button>
+    <button class="ib" id="tFocus" aria-pressed="false" title="专注对话 ⌘."><svg class="i"><use href="#i-focus"/></svg></button>
+  </div>
+  <div class="crumb" id="crumb">
+    <button class="agent-btn" id="agentBtn" aria-haspopup="menu"><span id="agentName">通用智能体</span><svg class="i s"><use href="#i-down"/></svg></button>
+    <span class="dotsep">·</span><span class="title" id="crumbTitle">创建一个简单的 REST API</span>
+  </div>
+  <div class="tb-right">
+    <div class="review" title="评审用：切换两屏"><button class="on" data-go="wb">工作台</button><button data-go="admin">账号</button></div>
+    <button class="search-btn" id="kBtn"><svg class="i s"><use href="#i-search"/></svg><span>搜索或跳转</span><kbd>⌘K</kbd></button>
+    <div class="avatar" title="design-review@example.test">DR</div>
+  </div>
+</header>
+
+<main class="stage">
+  <!-- ① 工作台 -->
+  <section class="screen on" id="wb">
+    <aside class="panel alt p-left">
+      <div class="ptabs"><span class="ptab on">会话</span><span class="grow"></span>
+        <button class="ib" title="搜索会话"><svg class="i s"><use href="#i-search"/></svg></button>
+        <button class="ib" title="新会话 ⌘N"><svg class="i s"><use href="#i-plus"/></svg></button></div>
+      <div class="pbody" id="sessList"></div>
+    </aside>
+
+    <section class="panel chat">
+      <div class="ptabs">
+        <span class="ptab on"><svg class="i s"><use href="#i-msg"/></svg>创建一个简单的 REST API</span>
+        <span class="grow"></span>
+        <div class="runtime"><span><i></i>空闲</span><span class="m">gpt-6-astra</span><span class="m">3 积分/百万 token</span><span class="bal">余额 1,280 积分</span></div>
+      </div>
+      <div class="pbody" id="chatScroll">
+        <div class="col">
+          <div class="msg-user"><p>创建一个简单的 REST API</p></div>
+          <div class="who"><span class="glyph"><svg class="i s"><use href="#i-bot"/></svg></span>通用智能体<span>·</span><span>用时 1 分 12 秒</span></div>
+          <div class="tools" id="tools">
+            <button class="tools-row" id="toolsBtn" aria-expanded="false"><svg class="i s chev"><use href="#i-chev"/></svg><span>Ran 13 tools · EnterPlanMode, Agent ×3 +2 · <span class="fail">1 failed</span></span></button>
+            <div class="tool-list" id="toolList"></div>
+          </div>
+          <div class="md">
+            <p>我已完成只读规划，当前卡在两个点：</p>
+            <ul>
+              <li>默认方案还没确认。我推荐用 <code>items</code> 作资源、接 MySQL，首版只做 <code>GET /api/items</code>、<code>POST /api/items</code> 和 <code>GET /api/items/[id]</code>。</li>
+              <li>plan mode 要把计划写到 <code>~/.claude/plans/</code>，但当前会话只允许写工作目录，计划文件没能落盘；另外 <code>pnpm test</code> 因为还没有测试脚本而失败，不影响方案。</li>
+            </ul>
+            <p class="muted">你选一个方向，我就按它继续。</p>
+          </div>
+          <div class="ask" id="ask">
+            <div class="ask-h"><span class="pend" id="askDot"></span><span id="askState">智能体的提问 · 未回答</span></div>
+            <p class="ask-q">为了敲定这个 REST API 的实现方向，你希望我按哪种方案规划？</p>
+            <div class="opts" role="radiogroup" aria-label="方案">
+              <button class="chip" role="radio" aria-checked="false"><span class="rad"></span>items + 落库<em>推荐</em></button>
+              <button class="chip" role="radio" aria-checked="false"><span class="rad"></span>换资源名</button>
+              <button class="chip" role="radio" aria-checked="false"><span class="rad"></span>仅演示接口</button>
+            </div>
+            <input class="other" id="other" placeholder="其他（自己填写）">
+            <div class="ask-f"><span class="hint" id="askHint">选一个方案，或在上面写下你的想法</span><button class="btn primary" id="submit" disabled>提交回答</button></div>
+            <p class="answered" id="answered"></p>
+          </div>
+        </div>
+      </div>
+      <div class="composer">
+        <textarea id="input" placeholder="说点什么，或输入 /" rows="2"></textarea>
+        <div class="cbar">
+          <button class="ib" title="附件"><svg class="i"><use href="#i-clip"/></svg></button>
+          <span class="grow"></span><span class="cmeta">⏎ 发送 · ⇧⏎ 换行</span>
+          <button class="send" id="send" title="发送"><svg class="i"><use href="#i-up"/></svg></button>
+        </div>
+      </div>
+    </section>
+
+    <aside class="panel alt p-right">
+      <div class="ptabs"><span class="ptab on">文件</span><span class="ptab">变更 2</span><span class="grow"></span>
+        <button class="ib" title="刷新"><svg class="i s"><use href="#i-history"/></svg></button></div>
+      <div class="pbody"><div class="tree" id="tree"></div></div>
+      <div class="wsmeta">workspaces/2879def4 · 9 个文件</div>
+    </aside>
+  </section>
+
+  <!-- ② 账号管理 -->
+  <section class="screen" id="admin">
+    <section class="panel">
+      <div class="ptabs"><span class="ptab"><svg class="i s"><use href="#i-msg"/></svg>工作台</span><span class="ptab on"><svg class="i s"><use href="#i-users"/></svg>账号管理<svg class="i s" style="width:12px;color:var(--faint)"><use href="#i-x"/></svg></span><span class="grow"></span></div>
+      <div class="ahead">
+        <h1>账号管理</h1><span class="sub">311 个账号 · 311 个启用中 · 本月消耗 0 积分</span><span class="grow"></span>
+        <label class="sfield"><svg class="i s"><use href="#i-search"/></svg><input id="acctQ" placeholder="按邮箱筛选"></label>
+        <button class="btn primary"><svg class="i s"><use href="#i-userplus"/></svg>新建账号</button>
+      </div>
+      <div class="pbody twrap">
+        <table>
+          <colgroup><col class="c-mail" style="width:34%"><col class="c-role" style="width:10%"><col class="c-date" style="width:12%"><col class="c-agents" style="width:9%"><col class="c-used" style="width:11%"><col class="c-limit" style="width:10%"><col class="c-ops" style="width:14%"></colgroup>
+          <thead><tr><th>邮箱</th><th>角色</th><th class="c-date">注册日期</th><th class="num c-agents">智能体数</th><th class="num">本月消耗</th><th class="num c-limit">月度上限</th><th class="num">操作</th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+        <div class="tfoot"><span id="shown"></span><span>按注册日期倒序</span></div>
+      </div>
+    </section>
+  </section>
+</main>
+
+<div class="pop" id="agentPop" role="menu"></div>
+<div class="pop" id="rowPop" role="menu">
+  <button class="mi" data-t="已设为管理员"><svg class="i s"><use href="#i-shield"/></svg>设为管理员</button>
+  <button class="mi" data-t="修改月度上限"><svg class="i s"><use href="#i-coins"/></svg>修改月度上限</button>
+  <button class="mi" data-t="查看 token 用量"><svg class="i s"><use href="#i-chart"/></svg>查看 token 用量</button>
+  <div class="msep"></div>
+  <button class="mi danger" data-t="停用需要二次确认（原型）"><svg class="i s"><use href="#i-x"/></svg>停用账号</button>
+</div>
+
+<div class="scrim" id="scrim">
+  <div class="palette" role="dialog" aria-label="命令面板">
+    <div class="pin"><svg class="i"><use href="#i-search"/></svg><input id="pq" placeholder="搜索页面、智能体、会话或命令" autocomplete="off"><kbd>esc</kbd></div>
+    <div class="plist" id="plist" role="listbox"></div>
+    <div class="pfoot"><span><kbd>↑</kbd><kbd>↓</kbd>选择</span><span><kbd>⏎</kbd>打开</span><span><kbd>esc</kbd>关闭</span></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const ic=(id,c='i s')=>`<svg class="${c}"><use href="#i-${id}"/></svg>`;
+const isMac=/Mac|iPhone|iPad/.test(navigator.platform);
+let toastT;
+function toast(t){const el=$('#toast');el.textContent=t;el.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>el.classList.remove('on'),1600)}
+
+/* 会话列表 */
+const sessions=[
+  ['今天',[['创建一个简单的 REST API','10:42','3 轮',1],['在工作目录写一个 hello.py','09:15','2 轮'],['帮我分析这个项目的架构','08:30','运行中',0,1]]],
+  ['更早',[['把 README 翻译成英文','昨天','5 轮'],['排查 pnpm test 在 CI 上超时','10月24日','8 轮'],['MCP 服务连通性检查','10月22日','2 轮'],['生成本周的发布说明','10月20日','4 轮'],['写一个读取 CSV 的脚本','10月18日','3 轮'],['评测用例：退款流程','10月15日','6 轮']]]];
+$('#sessList').innerHTML=sessions.map(([g,l])=>`<div class="grp">${g}</div>`+l.map(([t,d,n,on,run])=>
+  `<button class="sess${on?' on':''}"><b>${t}</b><small><span>${d}</span><span class="${run?'run':''}">${n}</span></small></button>`).join('')).join('');
+$('#sessList').addEventListener('click',e=>{const b=e.target.closest('.sess');if(!b)return;$$('.sess').forEach(x=>x.classList.remove('on'));b.classList.add('on');
+  const t=b.querySelector('b').textContent;$('#crumbTitle').textContent=t;$('#wb').classList.remove('show-left')});
+
+/* 工具调用 */
+const tools=[['EnterPlanMode','','0.1s'],['Agent','探索 src 目录结构','14.2s'],['Agent','梳理现有 API 约定','11.8s'],['Agent','检查数据库配置','9.6s'],
+  ['Read','src/app/api/route.ts','0.2s'],['Read','package.json','0.1s'],['Read','tsconfig.json','0.1s'],['Read','src/lib/db.ts','0.2s'],['Read','.env.example','0.1s'],
+  ['Read','next.config.ts','0.1s'],['Read','hello.py','0.1s'],['Bash','ls -la src/app','0.4s'],['Bash','pnpm test','3.1s',1]];
+$('#toolList').innerHTML=tools.map(([n,a,t,bad])=>`<div class="trow${bad?' bad':''}">${bad?ic('x'):`<span class="ok">${ic('check')}</span>`}<span>${n} ${n==='Agent'?`<span style="color:var(--faint)">${a}</span>`:`<code>${a}</code>`}${bad?' · 退出码 1':''}</span><span class="t">${t}</span></div>`).join('');
+$('#toolsBtn').onclick=()=>{const o=$('#tools').classList.toggle('open');$('#toolsBtn').setAttribute('aria-expanded',o)};
+
+/* 提问卡片 */
+const chips=$$('.chip'),sub=$('#submit'),other=$('#other');
+function syncAsk(){const has=chips.some(c=>c.getAttribute('aria-checked')==='true')||other.value.trim();sub.disabled=!has;
+  $('#askHint').textContent=has?'提交后智能体会按这个方向继续':'选一个方案，或在上面写下你的想法'}
+chips.forEach(c=>c.onclick=()=>{const was=c.getAttribute('aria-checked')==='true';chips.forEach(x=>x.setAttribute('aria-checked','false'));if(!was)c.setAttribute('aria-checked','true');syncAsk()});
+other.oninput=syncAsk;
+sub.onclick=()=>{const c=chips.find(x=>x.getAttribute('aria-checked')==='true');const v=other.value.trim()||c.childNodes[1].textContent;
+  $('#askState').textContent='智能体的提问 · 已回答';$('#askDot').style.background='var(--green)';
+  $$('#ask .opts,#ask .other,#ask .ask-f').forEach(e=>e.style.display='none');const a=$('#answered');a.style.display='block';a.textContent='你的回答：'+v;toast('已提交回答，智能体继续运行')};
+
+/* 输入框 */
+const inp=$('#input');inp.oninput=()=>$('#send').classList.toggle('ready',!!inp.value.trim());
+inp.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();if(inp.value.trim()){toast('已发送');inp.value='';inp.oninput()}}};
+
+/* 文件树 */
+const files=[[0,'d','src',1],[1,'d','app',1],[2,'d','api',1],[3,'f','route.ts',0,'M'],[2,'f','layout.tsx'],[2,'f','page.tsx'],[1,'d','lib',1],[2,'f','db.ts'],
+  [0,'f','hello.py',0,'A'],[0,'f','package.json'],[0,'f','tsconfig.json'],[0,'f','next.config.ts'],[0,'f','.env.example'],[0,'f','README.md']];
+$('#tree').innerHTML=files.map(([d,t,n,o,g])=>`<button class="node${n==='route.ts'?' on':''}" style="padding-left:${6+d*14}px"><span class="tw">${t==='d'?`<svg class="i s" style="width:12px;transform:rotate(${o?90:0}deg)"><use href="#i-chev"/></svg>`:''}</span>${ic(t==='d'?'folder':'file','i s f')}${n}${g?`<span class="g${g==='M'?' mod':''}">${g}</span>`:''}</button>`).join('');
+$('#tree').addEventListener('click',e=>{const b=e.target.closest('.node');if(!b)return;$$('.node').forEach(x=>x.classList.remove('on'));b.classList.add('on')});
+
+/* 面板开关 */
+const wb=$('#wb'),mobile=()=>innerWidth<=760;
+function syncTb(){$('#tLeft').setAttribute('aria-pressed',!wb.classList.contains('no-left'));$('#tRight').setAttribute('aria-pressed',!wb.classList.contains('no-right'));
+  $('#tFocus').setAttribute('aria-pressed',wb.classList.contains('no-left')&&wb.classList.contains('no-right'))}
+function togLeft(){go('wb');if(mobile()){wb.classList.toggle('show-left');return}wb.classList.toggle('no-left');syncTb()}
+function togRight(){go('wb');wb.classList.toggle('no-right');syncTb()}
+function focusMode(){go('wb');const f=wb.classList.contains('no-left')&&wb.classList.contains('no-right');wb.classList.toggle('no-left',!f);wb.classList.toggle('no-right',!f);syncTb()}
+$('#tLeft').onclick=togLeft;$('#tRight').onclick=togRight;$('#tFocus').onclick=focusMode;
+
+/* 两屏切换 */
+function go(s){$$('.screen').forEach(x=>x.classList.toggle('on',x.id===s));$$('.review button').forEach(b=>b.classList.toggle('on',b.dataset.go===s));
+  $('#crumb').style.visibility='visible';
+  if(s==='admin'){$('#agentBtn').style.display='none';$('.crumb .dotsep').style.display='none';$('#crumbTitle').dataset.prev??=$('#crumbTitle').textContent;$('#crumbTitle').textContent='平台管理 · 账号管理';$('#crumbTitle').style.display='inline'}
+  else{$('#agentBtn').style.display='';$('.crumb .dotsep').style.display='';$('#crumbTitle').style.display='';if($('#crumbTitle').dataset.prev){$('#crumbTitle').textContent=$('#crumbTitle').dataset.prev;delete $('#crumbTitle').dataset.prev}}}
+$$('.review button').forEach(b=>b.onclick=()=>go(b.dataset.go));
+$$('#admin .ptab')[0].onclick=()=>go('wb');
+
+/* 智能体切换 */
+const agents=[['通用智能体','gpt-6-astra'],['代码审查助手','gpt-6-astra'],['数据分析师','qwen-max-3'],['文档撰写','deepseek-v4'],['退款客服（草稿）','gpt-6-mini']];
+function renderAgents(){$('#agentPop').innerHTML=`<div class="mhead">切换智能体</div>`+agents.map(([n,m])=>`<button class="mi" data-a="${n}">${n===$('#agentName').textContent?ic('check'):'<span style="width:14px"></span>'}${n}<span class="r">${m}</span></button>`).join('')
+  +`<div class="msep"></div><button class="mi" data-a="__store">${ic('store')}智能体市场</button>`}
+function openPop(pop,anchor,alignRight){const r=anchor.getBoundingClientRect();pop.classList.add('on');const w=pop.offsetWidth,h=pop.offsetHeight;
+  let x=alignRight?r.right-w:r.left+r.width/2-w/2;x=Math.max(8,Math.min(x,innerWidth-w-8));let y=r.bottom+4;if(y+h>innerHeight-8)y=r.top-h-4;pop.style.left=x+'px';pop.style.top=y+'px'}
+function closePops(){$$('.pop').forEach(p=>p.classList.remove('on'));$$('tr.menu-open').forEach(t=>t.classList.remove('menu-open'))}
+$('#agentBtn').onclick=e=>{e.stopPropagation();const on=$('#agentPop').classList.contains('on');closePops();if(!on){renderAgents();openPop($('#agentPop'),$('#agentBtn'))}};
+function setAgent(n){$('#agentName').textContent=n;const m=agents.find(a=>a[0]===n);if(m)$$('.runtime .m')[0].textContent=m[1];toast('已切换到 '+n)}
+$('#agentPop').onclick=e=>{const b=e.target.closest('[data-a]');if(!b)return;closePops();b.dataset.a==='__store'?toast('打开：智能体市场'):setAgent(b.dataset.a)};
+document.addEventListener('click',e=>{if(!e.target.closest('.pop'))closePops()});
+
+/* 账号表格 */
+const base=['design-review@example.test','e2e-admission-1792400263723-0@example.test','e2e-admission-1792399815410-0@example.test','e2e-repro-1792397979018-0@example.test',
+ 'zhang.wei@company.com','li.na@company.com','wang.fang@company.com','chen.jie@company.com','liu.yang@company.com','yang.min@company.com','zhao.lei@company.com',
+ 'huang.ting@company.com','zhou.hao@company.com','wu.xiaoyu@company.com','xu.ming@company.com','sun.li@company.com','ma.chao@company.com','zhu.yan@company.com',
+ 'hu.bin@company.com','guo.jing@company.com','lin.qing@company.com','he.tao@company.com','ops-bot@company.com','qa-runner@company.com'];
+const dates=['2026/10/27','2026/10/20','2026/10/20','2026/10/20','2026/10/18','2026/10/16','2026/10/14','2026/10/11','2026/10/09','2026/10/02','2026/09/28','2026/09/25','2026/09/21','2026/09/17','2026/09/12','2026/09/08','2026/09/03','2026/08/30','2026/08/26','2026/08/19','2026/08/12','2026/08/05','2026/07/29','2026/07/22'];
+const rows=base.map((m,i)=>({m,admin:i===0||i===6||i===13,you:i===0,d:dates[i],a:[0,3,3,1,5,2,7,0,4,1,2,6,0,3,1,2,9,0,1,4,2,0,1,2][i],used:0,lim:[null,null,null,null,5000,2000,null,3000,5000,null,1000,null,2000,null,5000,null,10000,null,2000,null,null,3000,null,1000][i]}));
+function renderRows(q=''){const list=rows.filter(r=>r.m.includes(q.trim().toLowerCase()));
+  $('#rows').innerHTML=list.map(r=>`<tr data-admin="${r.admin?1:''}"><td title="${r.m}">${r.m}${r.you?'<span class="you">你自己</span>':''}</td><td class="${r.admin?'role-admin':'role-user'}">${r.admin?'管理员':'成员'}</td><td class="mono dimc c-date">${r.d}</td><td class="num mono c-agents">${r.a}</td><td class="num mono">${r.used}</td><td class="num c-limit ${r.lim?'mono':'dimc'}">${r.lim?r.lim.toLocaleString():'不限'}</td>
+  <td><div class="ops"><button class="lbtn reset" data-m="${r.m}">重置密码</button><button class="lbtn more" aria-haspopup="menu" title="更多">${ic('dots')}</button></div></td></tr>`).join('')
+  ||`<tr><td colspan="7" class="dimc" style="text-align:center;height:80px">没有匹配“${q}”的账号</td></tr>`;
+  $('#shown').textContent=`显示 ${list.length} / 311`}
+renderRows();$('#acctQ').oninput=e=>renderRows(e.target.value);
+$('#rows').addEventListener('click',e=>{const r=e.target.closest('.reset');if(r){toast('已向 '+r.dataset.m+' 发送重置密码邮件');return}
+  const m=e.target.closest('.more');if(!m)return;e.stopPropagation();const tr=m.closest('tr'),was=tr.classList.contains('menu-open');closePops();if(was)return;tr.classList.add('menu-open');const f=$('#rowPop .mi');f.lastChild.textContent=tr.dataset.admin?'取消管理员':'设为管理员';f.dataset.t=tr.dataset.admin?'已取消管理员':'已设为管理员';openPop($('#rowPop'),m,true)});
+$('#rowPop').onclick=e=>{const b=e.target.closest('.mi');if(b){closePops();toast(b.dataset.t)}};
+
+/* 命令面板 */
+const K=isMac?'⌘':'Ctrl';
+const cmds=[
+ ['跳转','msg','工作台','',[K,'1'],()=>go('wb')],
+ ['跳转','store','智能体市场','',[],null],['跳转','box','我的智能体','',[],null],['跳转','wand','AI 编辑','',[],null],
+ ['智能体','bot','通用智能体','切换',[],()=>{go('wb');setAgent('通用智能体')}],['智能体','bot','代码审查助手','切换',[],()=>{go('wb');setAgent('代码审查助手')}],['智能体','bot','数据分析师','切换',[],()=>{go('wb');setAgent('数据分析师')}],
+ ['操作','plus','新会话','',[K,'N'],()=>{go('wb');toast('已新建会话')}],['操作','left','切换会话面板','',[K,'B'],togLeft],['操作','right','切换工作空间面板','',[K,'⌥','B'],togRight],['操作','focus','专注对话','',[K,'.'],focusMode],
+ ['账号设置','history','运行记录','账号设置',[],null],['账号设置','plug','接入中心','账号设置',[],null],['账号设置','log','审计日志','账号设置',[],null],['账号设置','chart','token 用量','账号设置',[],null],
+ ['账号设置','coins','积分账户','账号设置',[],null],['账号设置','receipt','积分套餐','账号设置',[],null],['账号设置','chip','平台算力','账号设置',[],null],['账号设置','shield','账号安全','账号设置',[],null],
+ ['平台管理','users','账号管理','平台管理',[K,'⇧','A'],()=>go('admin')],['平台管理','server','模型提供者','平台管理',[],null],['平台管理','grid','模型总览','平台管理',[],null],
+ ['平台管理','coins','积分管理','平台管理',[],null],['平台管理','receipt','套餐与订单','平台管理',[],null],['平台管理','chart','全平台 token 用量','平台管理',[],null]];
+let sel=0,vis=[];
+function renderPal(){const q=$('#pq').value.trim().toLowerCase();vis=cmds.filter(c=>!q||(c[2]+c[3]+c[0]).toLowerCase().includes(q));if(q){const sc=c=>c[2].toLowerCase().includes(q)?0:1;const gs=[...new Set(vis.map(c=>c[0]))].sort((a,b)=>Math.min(...vis.filter(c=>c[0]===a).map(sc))-Math.min(...vis.filter(c=>c[0]===b).map(sc)));vis=gs.flatMap(g=>vis.filter(c=>c[0]===g).sort((a,b)=>sc(a)-sc(b)))}
+  if(sel>=vis.length)sel=Math.max(0,vis.length-1);let g='',h='';
+  vis.forEach((c,i)=>{if(c[0]!==g){g=c[0];h+=`<div class="pg">${g}</div>`}
+    h+=`<div class="pi${i===sel?' act':''}" data-i="${i}" role="option" aria-selected="${i===sel}">${ic(c[1])}<span>${c[2]}</span>${c[3]&&c[3]!==c[0]?`<span class="ctx">${c[3]}</span>`:''}<span class="k">${c[4].map(k=>`<kbd>${k}</kbd>`).join('')}</span></div>`});
+  $('#plist').innerHTML=h||`<div class="pempty">没有找到“${$('#pq').value}”</div>`;const a=$('#plist .act');if(a)a.scrollIntoView({block:'nearest'})}
+function openPal(){closePops();$('#scrim').classList.add('on');$('#pq').value='';sel=0;renderPal();$('#pq').focus()}
+function closePal(){$('#scrim').classList.remove('on')}
+function run(i){const c=vis[i];if(!c)return;closePal();c[5]?c[5]():toast(`打开：${c[3]&&c[3]!==c[0]?c[3]+' · ':''}${c[2]}`)}
+$('#kBtn').onclick=openPal;$('#pq').oninput=()=>{sel=0;renderPal()};
+$('#plist').addEventListener('click',e=>{const p=e.target.closest('.pi');if(p)run(+p.dataset.i)});
+$('#plist').addEventListener('mousemove',e=>{const p=e.target.closest('.pi');if(p&&+p.dataset.i!==sel){sel=+p.dataset.i;$$('.pi').forEach(x=>x.classList.toggle('act',x===p))}});
+$('#scrim').addEventListener('mousedown',e=>{if(e.target.id==='scrim')closePal()});
+document.addEventListener('keydown',e=>{const mod=e.metaKey||e.ctrlKey;
+  if(mod&&e.key.toLowerCase()==='k'){e.preventDefault();$('#scrim').classList.contains('on')?closePal():openPal();return}
+  if($('#scrim').classList.contains('on')){
+    if(e.key==='Escape'){e.preventDefault();closePal()}
+    else if(e.key==='ArrowDown'){e.preventDefault();sel=(sel+1)%Math.max(vis.length,1);renderPal()}
+    else if(e.key==='ArrowUp'){e.preventDefault();sel=(sel-1+vis.length)%Math.max(vis.length,1);renderPal()}
+    else if(e.key==='Enter'){e.preventDefault();run(sel)}
+    return}
+  if(e.key==='Escape')closePops();
+  if(mod&&e.code==='KeyB'){e.preventDefault();e.altKey?togRight():togLeft()}
+  if(mod&&e.key==='.'){e.preventDefault();focusMode()}});
+</script>
+</body>
+</html>

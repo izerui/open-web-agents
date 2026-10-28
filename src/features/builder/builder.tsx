@@ -1,30 +1,25 @@
 "use client";
 
+import { notifyAgentCatalogChanged } from "@/components/ide/agent-catalog";
+import { BEFORE_CLIENT_NAVIGATION } from "@/components/ide/client-navigation";
+import { ToolGroup, ToolRow } from "@/components/ide/tool-list";
 import { SpaceShell } from "@/components/space-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { NativeSelect as Select } from "@/components/ui/native-select";
-import {
-  SidebarGroup,
-  SidebarGroupLabel,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-} from "@/components/ui/sidebar";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { EvalPanel } from "@/features/builder/eval-panel";
 import { KnowledgePanel } from "@/features/builder/knowledge-panel";
 import { McpCheck } from "@/features/builder/mcp-check";
 import { ReleasePanel } from "@/features/builder/release-panel";
 import { SharePanel } from "@/features/builder/share-panel";
-import { InvokeSnippetTabs } from "@/features/integration/invoke-snippet";
 import type { AgentSummary } from "@/features/workbench/types";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { PERMISSION_MODES, type PermissionMode } from "@/lib/shared";
 import { findPathConflict, isSafeSkillPath } from "@/lib/shared/skill-package";
-import { cn } from "@/lib/utils";
 import {
   Bot,
   ChevronDown,
@@ -32,12 +27,14 @@ import {
   FileCode,
   FilePlus,
   Play,
+  Plug,
   Plus,
   Save,
   Sparkles,
   Trash2,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ModelSelect, modelOf, useModelCatalog } from "./model-select";
@@ -271,8 +268,26 @@ function parseSkills(text: string): string[] {
  * 不该进前端包(工作台同样如此)。
  */
 const BUILT_IN_AGENT_IDS = ["default", "agent-architect"];
+const BUILDER_SECTIONS = [
+  ["config", "配置"],
+  ["capabilities", "能力"],
+  ["knowledge", "知识"],
+  ["security", "安全与契约"],
+  ["eval", "评测"],
+  ["release", "发布与分享"],
+] as const;
+const SECTION_TAB_CLASS =
+  "min-h-11 flex-none rounded-md px-3 after:hidden data-[state=active]:bg-sidebar-active data-[state=active]:text-sidebar-active-foreground dark:data-[state=active]:bg-sidebar-active dark:data-[state=active]:text-sidebar-active-foreground";
+const SECTION_LIST_CLASS =
+  "mb-4 h-auto w-full flex-wrap justify-start gap-1.5 rounded-none border-b border-border bg-transparent p-0 pb-4";
 
 export function Builder() {
+  const searchParams = useSearchParams();
+  const requestedId = searchParams.get("id");
+  const creating = !requestedId && searchParams.get("new") === "1";
+  const [section, setSection] = useState("config");
+  const [listLoaded, setListLoaded] = useState(false);
+  const handledRouteRef = useRef<string | null>(null);
   const modelCatalog = useModelCatalog();
   const [list, setList] = useState<AgentSummary[]>([]);
   const [allowStdioMcp, setAllowStdioMcp] = useState(false);
@@ -293,16 +308,29 @@ export function Builder() {
   const [saving, setSaving] = useState(false);
   const cleanDraftRef = useRef(JSON.stringify(EMPTY));
   const editSeqRef = useRef(0);
+  const editorGeneration = editSeqRef.current;
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  useEffect(
+    () => () => {
+      editSeqRef.current += 1;
+    },
+    [],
+  );
   const allowNavigationRef = useRef(false);
   const dirty = useMemo(() => JSON.stringify(draft) !== cleanDraftRef.current, [draft]);
 
   const setCleanDraft = useCallback((next: Draft) => {
+    allowNavigationRef.current = false;
     cleanDraftRef.current = JSON.stringify(next);
     setDraft(next);
   }, []);
 
   const confirmDiscard = useCallback(
-    () => !dirty || window.confirm("当前智能体有未保存修改，确定放弃这些修改？"),
+    () =>
+      allowNavigationRef.current ||
+      !dirty ||
+      window.confirm("当前智能体有未保存修改，确定放弃这些修改？"),
     [dirty],
   );
 
@@ -312,6 +340,7 @@ export function Builder() {
         .then((d) => {
           setList((d.agents ?? []).filter((agent) => agent.canRead !== false));
           setAllowStdioMcp(d.capabilities?.stdioMcp === true);
+          setListLoaded(true);
         })
         .catch((e: unknown) => toast.error(`智能体列表加载失败:${errorText(e)}`)),
     [],
@@ -334,6 +363,13 @@ export function Builder() {
       const target = event.target;
       const link = target instanceof Element ? target.closest<HTMLAnchorElement>("a[href]") : null;
       if (!link || link.target === "_blank") return;
+      const destination = new URL(link.href, window.location.href);
+      if (
+        destination.origin === window.location.origin &&
+        destination.pathname === window.location.pathname &&
+        destination.search === window.location.search
+      )
+        return;
       if (!window.confirm("当前智能体有未保存修改，确定离开并放弃这些修改？")) {
         event.preventDefault();
         event.stopPropagation();
@@ -341,9 +377,21 @@ export function Builder() {
       }
       allowNavigationRef.current = true;
     };
+    const guardNavigation = (event: Event) => {
+      if (event.defaultPrevented || allowNavigationRef.current) return;
+      if (!window.confirm("当前智能体有未保存修改，确定离开并放弃这些修改？")) {
+        event.preventDefault();
+        return;
+      }
+      if (!(event instanceof CustomEvent && event.detail?.preflightOnly)) {
+        allowNavigationRef.current = true;
+      }
+    };
+    window.addEventListener(BEFORE_CLIENT_NAVIGATION, guardNavigation);
     window.addEventListener("beforeunload", warnBeforeUnload);
     document.addEventListener("click", guardInternalLink, true);
     return () => {
+      window.removeEventListener(BEFORE_CLIENT_NAVIGATION, guardNavigation);
       window.removeEventListener("beforeunload", warnBeforeUnload);
       document.removeEventListener("click", guardInternalLink, true);
     };
@@ -404,16 +452,19 @@ export function Builder() {
   async function startDesign(agentId?: string) {
     if (dirty && !window.confirm("当前有未保存的修改,设计会话看不到它们。仍然继续?")) return;
     setDesigning(true);
+    const seq = editSeqRef.current;
     try {
       const d = await fetchJson<{ sessionId: string }>("/api/agents/design", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(agentId ? { agentId } : {}),
       });
+      if (seq !== editSeqRef.current) return;
       allowNavigationRef.current = true;
       router.push(`/agents/design?session=${encodeURIComponent(d.sessionId)}`);
     } catch (e) {
-      toast.error(`无法开始设计:${errorText(e)}`);
+      if (seq === editSeqRef.current) toast.error(`无法开始设计:${errorText(e)}`);
+    } finally {
       setDesigning(false);
     }
   }
@@ -427,6 +478,7 @@ export function Builder() {
       return;
     }
     setSaving(true);
+    const saveSeq = editSeqRef.current;
     try {
       const mcpServers = draft.mcpServers.filter((m) => m.name.trim()).map(mcpOfRow);
 
@@ -498,14 +550,20 @@ export function Builder() {
       if (!res.ok || data.error || !data.agent) {
         throw new Error(data.error ?? `HTTP ${res.status}`);
       }
-      const savedDraft = { ...draft, id: data.agent.id };
-      cleanDraftRef.current = JSON.stringify(savedDraft);
-      setDraft((current) => ({ ...current, id: data.agent?.id ?? current.id }));
-      setOpenedId(data.agent.id);
-      toast.success(`已保存:${data.agent.id}`);
+      if (saveSeq === editSeqRef.current) {
+        const savedDraft = { ...draft, id: data.agent.id };
+        cleanDraftRef.current = JSON.stringify(savedDraft);
+        setDraft((current) => ({ ...current, id: data.agent?.id ?? current.id }));
+        setOpenedId(data.agent.id);
+        syncAgentUrl(data.agent.id);
+        toast.success(`已保存:${data.agent.id}`);
+      }
+      notifyAgentCatalogChanged();
       await reload();
     } catch (e) {
-      toast.error(`保存失败:${e instanceof Error ? e.message : String(e)}`);
+      if (saveSeq === editSeqRef.current) {
+        toast.error(`保存失败:${e instanceof Error ? e.message : String(e)}`);
+      }
     } finally {
       setSaving(false);
     }
@@ -519,17 +577,40 @@ export function Builder() {
       )
     )
       return;
+    const seq = editSeqRef.current;
     try {
       await fetchJson(`/api/agents/${encodeURIComponent(id)}`, { method: "DELETE" });
+      notifyAgentCatalogChanged();
       toast.success(`已删除「${name}」`);
-      editSeqRef.current += 1;
-      setCleanDraft(EMPTY);
-      setOpenedId(null);
-      loadedConfigRef.current = {};
+      if (seq === editSeqRef.current) {
+        editSeqRef.current += 1;
+        setCleanDraft(EMPTY);
+        setOpenedId(null);
+        loadedConfigRef.current = {};
+        syncAgentUrl();
+      }
       await reload();
     } catch (e) {
       toast.error(`删除失败:${errorText(e)}`);
     }
+  }
+
+  function syncAgentUrl(id?: string, isNew = false) {
+    const query = id ? `?id=${encodeURIComponent(id)}` : isNew ? "?new=1" : "";
+    handledRouteRef.current = id ? `id:${id}` : isNew ? "new" : "list";
+    if (`${window.location.pathname}${window.location.search}` !== `/agents${query}`) {
+      window.history.pushState(null, "", `/agents${query}`);
+    }
+  }
+
+  function newAgent() {
+    if (!confirmDiscard()) return;
+    editSeqRef.current += 1;
+    setCleanDraft(EMPTY);
+    setOpenedId(null);
+    loadedConfigRef.current = {};
+    setSection("config");
+    syncAgentUrl(undefined, true);
   }
 
   function edit(a: AgentSummary) {
@@ -540,7 +621,7 @@ export function Builder() {
         if (seq !== editSeqRef.current) return;
         setAllowStdioMcp(d.capabilities?.stdioMcp === true);
         const full = d.agents?.find((x) => x.id === a.id);
-        if (!full || full.canRead === false) return;
+        if (!full || full.canRead === false) throw new Error("智能体不存在或无权查看");
         const cfg = full.config as Record<string, unknown>;
         loadedConfigRef.current = cfg;
         const nextDraft: Draft = {
@@ -652,114 +733,174 @@ export function Builder() {
         };
         setCleanDraft(nextDraft);
         setOpenedId(a.id);
+        if (a.id !== openedId) setSection("config");
+        syncAgentUrl(a.id);
       })
       // 点了智能体却没反应最让人困惑 —— 至少说清楚是没读到,而不是这个智能体本身是空的
       .catch((error: unknown) => {
-        if (seq === editSeqRef.current) toast.error(`打开智能体失败:${errorText(error)}`);
+        if (seq === editSeqRef.current) {
+          allowNavigationRef.current = false;
+          toast.error(`打开智能体失败:${errorText(error)}`);
+        }
       });
   }
 
-  /**
-   * 深链:/agents?id=xxx 直接打开该智能体(接入中心、运行记录等处跳过来)。
-   * 只在列表第一次到手时处理一次,之后用户在侧栏里切换不受它干扰。
-   */
-  const deepLinkDoneRef = useRef(false);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: 只响应列表到手;edit 每次渲染都是新引用
+  // 同页对象树链接与浏览器前进/后退也要同步；普通表单编辑不重复加载配置。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 路由键去重，edit 使用当前渲染的草稿确认逻辑
   useEffect(() => {
-    if (deepLinkDoneRef.current || list.length === 0) return;
-    deepLinkDoneRef.current = true;
-    const id = new URLSearchParams(window.location.search).get("id");
-    const target = id ? list.find((a) => a.id === id) : undefined;
-    if (target) edit(target);
-  }, [list]);
+    if (!listLoaded) return;
+    const route = requestedId ? `id:${requestedId}` : creating ? "new" : "list";
+    if (handledRouteRef.current === route) return;
+    const previousRoute = handledRouteRef.current;
+    handledRouteRef.current = route;
+    if (!confirmDiscard()) {
+      const previous = openedId
+        ? `?id=${encodeURIComponent(openedId)}`
+        : previousRoute === "new"
+          ? "?new=1"
+          : "";
+      handledRouteRef.current = previousRoute;
+      window.history.replaceState(null, "", `/agents${previous}`);
+      return;
+    }
+    allowNavigationRef.current = true;
+    const target = requestedId ? list.find((a) => a.id === requestedId) : undefined;
+    if (target) {
+      edit(target);
+    } else {
+      editSeqRef.current += 1;
+      setCleanDraft(EMPTY);
+      setOpenedId(null);
+      loadedConfigRef.current = {};
+      setSection("config");
+      if (requestedId) toast.error("智能体不存在或无权查看");
+    }
+  }, [requestedId, creating, listLoaded, list]);
 
-  /** 智能体列表挂进子空间侧栏 —— 再开一条自己的侧栏就成了两级导航,看着像两个产品 */
+  /** 智能体列表放进左侧工具窗口 —— 再开一条自己的侧栏就成了两级导航,看着像两个产品 */
   const agentList = (
-    <SidebarGroup>
+    <>
+      <ul>
+        <ToolRow icon={<Plus />} onClickAction={newAgent}>
+          新建智能体
+        </ToolRow>
+      </ul>
       {/*
-        标签写数量而不是"智能体"。
-        【为什么】侧栏顶部的空间标识已经写着「我的智能体」,紧跟一个同名标签
+        分组标签写数量而不是"智能体"。
+        【为什么】工具窗口标题已经写着「我的智能体」,紧跟一个同名标签
         等于把同一句话说两遍;数量是这个位置唯一还能提供新信息的东西。
       */}
-      <SidebarGroupLabel>共 {list.length} 个</SidebarGroupLabel>
-      <SidebarMenu>
-        <SidebarMenuItem>
-          <SidebarMenuButton
-            onClick={() => {
-              if (!confirmDiscard()) return;
-              editSeqRef.current += 1;
-              setCleanDraft(EMPTY);
-              setOpenedId(null);
-              loadedConfigRef.current = {};
-            }}
-            tooltip="新建智能体"
-          >
-            <Plus className="text-muted-foreground/60" />
-            <span className="text-xs">新建智能体</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-
-        {list.map((a) => {
-          const active = openedId === a.id;
-          return (
-            <SidebarMenuItem key={a.id}>
-              <SidebarMenuButton
-                isActive={active}
-                tooltip={a.name}
-                onClick={() => edit(a)}
-                className="relative data-[active=true]:bg-sidebar-active data-[active=true]:text-sidebar-active-foreground"
-              >
-                <span
-                  className={cn(
-                    "absolute left-0 top-1.5 bottom-1.5 w-0.5 origin-left rounded-r-full bg-brand transition-transform duration-200",
-                    active ? "scale-x-100" : "scale-x-0",
-                  )}
-                />
-                <Bot className={cn(active ? "text-brand" : "text-muted-foreground/60")} />
-                <span className="min-w-0 flex-1 truncate text-xs">{a.name}</span>
+      <ToolGroup label={`共 ${list.length} 个`}>
+        {list.map((a) => (
+          <ToolRow
+            key={a.id}
+            active={openedId === a.id}
+            title={a.name}
+            icon={<Bot />}
+            onClickAction={() => edit(a)}
+            meta={
+              <span className="flex gap-1">
                 {a.config.outputSchema && (
-                  <Badge variant="secondary" className="shrink-0 px-1 text-[9px]">
+                  <Badge variant="secondary" className="h-4 px-1 text-[10px]">
                     接口
                   </Badge>
                 )}
                 {(a as { canWrite?: boolean }).canWrite === false && (
-                  <Badge variant="outline" className="shrink-0 px-1 text-[9px]">
+                  <Badge variant="outline" className="h-4 px-1 text-[10px]">
                     只读
                   </Badge>
                 )}
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          );
-        })}
-      </SidebarMenu>
-    </SidebarGroup>
+              </span>
+            }
+          >
+            {a.name}
+          </ToolRow>
+        ))}
+      </ToolGroup>
+    </>
   );
+
+  if (!openedId && !creating) {
+    return (
+      <SpaceShell area="agents" title="我的智能体" sidebarExtra={agentList}>
+        <div className="space-y-2">
+          <h1 className="text-lg font-semibold">我的智能体</h1>
+          <p className="text-sm text-muted-foreground">
+            {listLoaded ? "选择智能体，查看配置或继续编辑。" : "正在加载智能体…"}
+          </p>
+        </div>
+        <div className="divide-y divide-border">
+          {list.map((agent) => (
+            <button
+              key={agent.id}
+              type="button"
+              className="flex min-h-16 w-full items-center gap-3 px-3 py-3 text-left hover:bg-muted/50"
+              onClick={() => edit(agent)}
+            >
+              <Bot className="size-5 shrink-0 text-primary" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium">{agent.name}</span>
+                {agent.description && (
+                  <span className="block truncate text-sm text-muted-foreground">
+                    {agent.description}
+                  </span>
+                )}
+              </span>
+              {agent.canWrite === false && <Badge variant="outline">只读</Badge>}
+              <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+            </button>
+          ))}
+          {listLoaded && list.length === 0 && (
+            <p className="py-8 text-sm text-muted-foreground">暂无可查看的智能体。</p>
+          )}
+        </div>
+      </SpaceShell>
+    );
+  }
 
   if (selectedAgent && !canWrite) {
     return (
       <SpaceShell
         area="agents"
         title={selectedAgent.name}
-        subtitle="只读智能体配置"
-        sidebarExtra={agentList}
+        object={{ id: selectedAgent.id, name: selectedAgent.name, tab: "config" }}
       >
+        <h2 className="text-xl font-semibold">智能体配置</h2>
         <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
           这是只读智能体。配置仅供查看，需要修改时请联系所有者。
         </p>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">配置</CardTitle>
-            {selectedAgent.description && (
-              <CardDescription>{selectedAgent.description}</CardDescription>
-            )}
-          </CardHeader>
-          <CardContent>
-            <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">
-              {JSON.stringify((selectedAgent as BuilderAgent).config, null, 2)}
-            </pre>
-          </CardContent>
-        </Card>
-        <KnowledgePanel key={selectedAgent.id} agentId={selectedAgent.id} canWrite={false} />
+        <Tabs
+          value={section === "knowledge" ? "knowledge" : "config"}
+          onValueChange={setSection}
+          key={openedId}
+        >
+          <TabsList variant="default" aria-label="智能体配置分区" className={SECTION_LIST_CLASS}>
+            <TabsTrigger value="config" className={SECTION_TAB_CLASS}>
+              配置
+            </TabsTrigger>
+            <TabsTrigger value="knowledge" className={SECTION_TAB_CLASS}>
+              知识
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="config" forceMount className="data-[state=inactive]:hidden">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">配置</CardTitle>
+                {selectedAgent.description && (
+                  <CardDescription>{selectedAgent.description}</CardDescription>
+                )}
+              </CardHeader>
+              <CardContent>
+                <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">
+                  {JSON.stringify((selectedAgent as BuilderAgent).config, null, 2)}
+                </pre>
+              </CardContent>
+            </Card>
+          </TabsContent>
+          <TabsContent value="knowledge" forceMount className="data-[state=inactive]:hidden">
+            <KnowledgePanel key={selectedAgent.id} agentId={selectedAgent.id} canWrite={false} />
+          </TabsContent>
+        </Tabs>
       </SpaceShell>
     );
   }
@@ -767,13 +908,42 @@ export function Builder() {
   return (
     <SpaceShell
       area="agents"
-      title="我的智能体"
-      subtitle={'定义一个只干特定某件事的"员工"。填了 outputSchema,它就能被企业系统当接口调用。'}
-      sidebarExtra={agentList}
-      actions={
-        <>
+      title={selectedAgent?.name ?? (openedId ? draft.name : "新建智能体")}
+      object={
+        openedId
+          ? { id: openedId, name: selectedAgent?.name ?? draft.name, tab: "config" }
+          : undefined
+      }
+      sidebarExtra={openedId ? undefined : agentList}
+      footer={
+        <div className="flex flex-wrap items-center gap-3">
+          <Button className="min-h-11" size="sm" onClick={save} disabled={!canSave}>
+            <Save className="size-3.5" />
+            {saving ? "保存中…" : "保存智能体"}
+          </Button>
+          {dirty && <span className="text-sm text-muted-foreground">有未保存的修改</span>}
+          {(schemaError || inputSchemaError) && (
+            <button
+              type="button"
+              className="min-h-11 text-sm text-destructive underline"
+              onClick={() => setSection("security")}
+            >
+              请检查安全与契约中的 Schema
+            </button>
+          )}
+          {selectedAgent && canWrite && (
+            <Badge
+              variant={selectedAgent.hasUnpublishedChanges ? "warning" : "secondary"}
+              title="接口调用和其他用户使用已发布版本；在「发布与分享」分区管理发布"
+            >
+              {selectedAgent.publishedVersion
+                ? `已发布 v${selectedAgent.publishedVersion}${selectedAgent.hasUnpublishedChanges ? " · 草稿有修改" : ""}`
+                : "未发布"}
+            </Badge>
+          )}
           {openedId && (
             <Button
+              className="min-h-11"
               size="sm"
               variant="outline"
               onClick={() => window.open(`/?agent=${encodeURIComponent(openedId)}`, "_blank")}
@@ -782,662 +952,712 @@ export function Builder() {
               试运行
             </Button>
           )}
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={designing || (Boolean(openedId) && !canWrite)}
-            onClick={() => void startDesign(openedId ?? undefined)}
-            title="和 AI 对话来设计:提示词、技能、MCP、输入输出契约"
-          >
-            <Sparkles className="size-3.5" />
-            {designing ? "准备中…" : openedId ? "AI 编辑" : "AI 创建"}
-          </Button>
           {selectedAgent?.canManageWebhook && !BUILT_IN_AGENT_IDS.includes(selectedAgent.id) && (
             <Button
               size="sm"
               variant="ghost"
-              className="text-destructive"
+              className="min-h-11 text-destructive"
               onClick={() => void removeAgent(selectedAgent.id, selectedAgent.name)}
             >
               <Trash2 className="size-3.5" />
               删除
             </Button>
           )}
-          {selectedAgent && canWrite && (
-            <Badge
-              variant={selectedAgent.hasUnpublishedChanges ? "warning" : "secondary"}
-              title="接口调用和其他用户使用已发布版本;发布在页面下方「版本与发布」"
-            >
-              {selectedAgent.publishedVersion
-                ? `已发布 v${selectedAgent.publishedVersion}${selectedAgent.hasUnpublishedChanges ? " · 草稿有修改" : ""}`
-                : "未发布"}
-            </Badge>
-          )}
-          <Button size="sm" onClick={save} disabled={!canSave}>
-            <Save className="size-3.5" />
-            {saving ? "保存中…" : "保存智能体"}
-          </Button>
-        </>
+        </div>
       }
     >
-      <div className="grid grid-cols-2 gap-3">
-        <label className="space-y-1">
-          <span className="text-xs text-muted-foreground">名称 *</span>
-          <Input
-            value={draft.name}
-            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-            placeholder="代码评审智能体"
-          />
-        </label>
-        <label className="space-y-1">
-          <span className="text-xs text-muted-foreground">ID(留空自动生成;保存后不可修改)</span>
-          <Input
-            value={draft.id}
-            onChange={(e) => setDraft({ ...draft, id: e.target.value })}
-            placeholder="code-reviewer"
-            disabled={Boolean(openedId)}
-          />
-        </label>
-      </div>
-
-      <label className="block space-y-1">
-        <span className="text-xs text-muted-foreground">描述</span>
-        <Input
-          value={draft.description}
-          onChange={(e) => setDraft({ ...draft, description: e.target.value })}
-        />
-      </label>
-
-      <label className="block space-y-1">
-        <span className="text-xs text-muted-foreground">
-          开场建议(可选,一行一条,最多 4 条)—— 工作台新会话里给用户点的示例输入
-        </span>
-        <Textarea
-          className="h-20 resize-y"
-          value={draft.startersText}
-          onChange={(e) => setDraft({ ...draft, startersText: e.target.value })}
-          placeholder={"审一下这份合同的付款条款\n把附件里的发票抽成表格"}
-        />
-      </label>
-
-      <label className="block space-y-1">
-        <span className="text-xs text-muted-foreground">系统提示词 *</span>
-        <Textarea
-          className="h-32 resize-y font-mono"
-          value={draft.systemPrompt}
-          onChange={(e) => setDraft({ ...draft, systemPrompt: e.target.value })}
-          placeholder="你是代码评审专家……"
-        />
-      </label>
-
-      <div className="grid grid-cols-2 gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
-          <span className="text-xs text-muted-foreground">模型</span>
-          <ModelSelect
-            ariaLabel="模型"
-            catalog={modelCatalog}
-            value={draft.model}
-            onChange={(model) => setDraft({ ...draft, model })}
-          />
+          <h2 className="text-xl font-semibold">{openedId ? "智能体配置" : "新建智能体"}</h2>
+          <p className="text-xs text-muted-foreground">
+            {selectedAgent?.name ?? (draft.name || "未命名智能体")} /{" "}
+            {BUILDER_SECTIONS.find(([value]) => value === section)?.[1]}
+          </p>
         </div>
-        <label className="space-y-1">
-          <span className="text-xs text-muted-foreground">最大轮次</span>
-          <Input
-            type="number"
-            value={draft.maxTurns}
-            onChange={(e) => setDraft({ ...draft, maxTurns: Number(e.target.value) })}
-          />
-        </label>
-      </div>
-
-      {/* ── 技能包 ── */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="text-sm">技能</CardTitle>
-              <CardDescription>
-                可复用的专门做法:流程、规范、脚本。描述写"何时使用",模型据此自动调用。 AI
-                编辑可选择已有技能;技能正文与文件在这里维护。
-              </CardDescription>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() =>
-                setDraft({ ...draft, skillPackages: [...draft.skillPackages, newSkillRow()] })
-              }
-            >
-              <Plus /> 添加
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {draft.skillPackages.length === 0 && (
-            <p className="text-xs text-muted-foreground">未配置技能</p>
-          )}
-          {draft.skillPackages.map((k, i) => {
-            const patch = (next: Partial<SkillDraft>) => {
-              const list = [...draft.skillPackages];
-              list[i] = { ...k, ...next };
-              setDraft({ ...draft, skillPackages: list });
-            };
-            const patchFile = (path: string, content: string) => {
-              patch({ files: { ...k.files, [path]: content } });
-            };
-            const removeFile = (path: string) => {
-              const { [path]: _, ...rest } = k.files;
-              patch({ files: rest });
-            };
-            const otherFiles = Object.keys(k.files).filter((p) => p !== "SKILL.md");
-            return (
-              <SkillEditor
-                key={k.uid}
-                skill={k}
-                otherFiles={otherFiles}
-                onPatch={patch}
-                onPatchFile={patchFile}
-                onRemoveFile={removeFile}
-                onDelete={() =>
-                  setDraft({
-                    ...draft,
-                    skillPackages: draft.skillPackages.filter((x) => x.uid !== k.uid),
-                  })
-                }
-              />
-            );
-          })}
-        </CardContent>
-      </Card>
-
-      {/* ── MCP 服务 ── */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="text-sm">MCP 服务</CardTitle>
-              <CardDescription>给智能体接外部工具(可选)</CardDescription>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() =>
-                setDraft({
-                  ...draft,
-                  mcpServers: [...draft.mcpServers, newMcpRow()],
-                })
-              }
-            >
-              <Plus /> 添加
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {draft.mcpServers.length === 0 && (
-            <p className="text-xs text-muted-foreground">未配置 MCP 服务</p>
-          )}
-          {draft.mcpServers.map((m, i) => (
-            <div key={m.uid} className="space-y-2 border-b border-border pb-3 last:border-b-0">
-              <div className="flex gap-2">
-                <Input
-                  value={m.name}
-                  onChange={(e) => {
-                    const next = [...draft.mcpServers];
-                    next[i] = { ...m, name: e.target.value };
-                    setDraft({ ...draft, mcpServers: next });
-                  }}
-                  placeholder="名称(字母/数字/_/-)"
-                />
-                <Select
-                  value={m.type}
-                  onChange={(e) => {
-                    const next = [...draft.mcpServers];
-                    next[i] = { ...m, type: e.target.value as "http" | "stdio" };
-                    setDraft({ ...draft, mcpServers: next });
-                  }}
-                >
-                  <option value="http">http</option>
-                  <option value="stdio" disabled={!allowStdioMcp}>
-                    {allowStdioMcp ? "stdio" : "stdio（平台未启用）"}
-                  </option>
-                </Select>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="shrink-0 text-destructive hover:text-destructive"
-                  aria-label={`删除 MCP 服务 ${m.name || i + 1}`}
-                  onClick={() =>
-                    setDraft({ ...draft, mcpServers: draft.mcpServers.filter((_, j) => j !== i) })
-                  }
-                >
-                  <Trash2 />
-                </Button>
-              </div>
-              {m.type === "http" ? (
-                <Input
-                  value={m.url}
-                  onChange={(e) => {
-                    const next = [...draft.mcpServers];
-                    next[i] = { ...m, url: e.target.value };
-                    setDraft({ ...draft, mcpServers: next });
-                  }}
-                  placeholder="https://mcp.example.com"
-                />
-              ) : (
-                <div className="grid grid-cols-2 gap-2">
-                  <Input
-                    className="col-span-2"
-                    value={m.command}
-                    onChange={(e) => {
-                      const next = [...draft.mcpServers];
-                      next[i] = { ...m, command: e.target.value };
-                      setDraft({ ...draft, mcpServers: next });
-                    }}
-                    placeholder="command，例如 npx"
-                  />
-                  <Textarea
-                    className="min-h-24 resize-y font-mono"
-                    value={m.argsText}
-                    onChange={(e) => {
-                      const next = [...draft.mcpServers];
-                      next[i] = { ...m, argsText: e.target.value };
-                      setDraft({ ...draft, mcpServers: next });
-                    }}
-                    placeholder={"args，每行一个\n-y\n@modelcontextprotocol/server-filesystem"}
-                  />
-                  <Textarea
-                    className="min-h-24 resize-y font-mono"
-                    value={m.envText}
-                    onChange={(e) => {
-                      const next = [...draft.mcpServers];
-                      next[i] = { ...m, envText: e.target.value };
-                      setDraft({ ...draft, mcpServers: next });
-                    }}
-                    placeholder={'env JSON，例如\n{"GITHUB_TOKEN":"..."}'}
-                  />
-                </div>
-              )}
-              <McpCheck
-                name={m.name || `第 ${i + 1} 个`}
-                resetKey={JSON.stringify([m.type, m.url, m.command, m.argsText, m.envText])}
-                requestAction={() => ({
-                  url: "/api/agents/mcp-check",
-                  body: {
-                    // 打开的是已保存的智能体:变量值取本人在它上面保存的
-                    agentId: openedId ?? undefined,
-                    server: mcpOfRow(m),
-                    variables: draft.variables
-                      .filter((v) => v.name.trim())
-                      .map((v) => ({
-                        name: v.name.trim(),
-                        required: v.required,
-                        secret: v.secret,
-                      })),
-                  },
-                })}
-              />
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-
-      {/* ── 子代理 ── */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="text-sm">子代理</CardTitle>
-              <CardDescription>把一类子任务交给带专属提示词的下级去做(可选)</CardDescription>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() =>
-                setDraft({ ...draft, subagents: [...draft.subagents, newSubagentRow()] })
-              }
-            >
-              <Plus /> 添加
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {draft.subagents.length === 0 && (
-            <p className="text-xs text-muted-foreground">未配置子代理</p>
-          )}
-          {draft.subagents.map((s, i) => (
-            <div key={s.uid} className="flex gap-2">
-              <div className="flex-1 space-y-1">
-                <div className="flex gap-2">
-                  <Input
-                    className="max-w-[12rem]"
-                    value={s.name}
-                    onChange={(e) => {
-                      const next = [...draft.subagents];
-                      next[i] = { ...s, name: e.target.value };
-                      setDraft({ ...draft, subagents: next });
-                    }}
-                    placeholder="名称,如 reviewer"
-                  />
-                  {/* 主 agent 靠这句话决定要不要把子任务交出去 —— 缺了它,
-                        子代理配了也没人调用。SDK 侧这是必需字段。 */}
-                  <Input
-                    value={s.description}
-                    onChange={(e) => {
-                      const next = [...draft.subagents];
-                      next[i] = { ...s, description: e.target.value };
-                      setDraft({ ...draft, subagents: next });
-                    }}
-                    placeholder="【何时】用它,如:需要审阅代码质量时"
-                  />
-                  <ModelSelect
-                    className="max-w-[16rem]"
-                    ariaLabel={`子代理 ${s.name || i + 1} 的模型`}
-                    catalog={modelCatalog}
-                    group={modelOf(modelCatalog, draft.model)?.group}
-                    inheritLabel="同主 agent"
-                    value={s.model}
-                    onChange={(model) => {
-                      const next = [...draft.subagents];
-                      next[i] = { ...s, model };
-                      setDraft({ ...draft, subagents: next });
-                    }}
-                  />
-                </div>
-                <Textarea
-                  className="min-h-[3rem]"
-                  value={s.prompt}
-                  onChange={(e) => {
-                    const next = [...draft.subagents];
-                    next[i] = { ...s, prompt: e.target.value };
-                    setDraft({ ...draft, subagents: next });
-                  }}
-                  placeholder="这个子代理的职责与要求(它的系统提示词)"
-                />
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="shrink-0 text-destructive hover:text-destructive"
-                aria-label={`删除子代理 ${s.name || i + 1}`}
-                onClick={() =>
-                  setDraft({ ...draft, subagents: draft.subagents.filter((_, j) => j !== i) })
-                }
-              >
-                <Trash2 />
-              </Button>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="text-sm">变量与密钥</CardTitle>
-              <CardDescription>
-                使用者运行前需要填写的参数，引用方式: {"{{变量名}}"}
-              </CardDescription>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() =>
-                setDraft({
-                  ...draft,
-                  variables: [
-                    ...draft.variables,
-                    {
-                      uid: crypto.randomUUID(),
-                      name: "",
-                      description: "",
-                      required: false,
-                      secret: false,
-                    },
-                  ],
-                })
-              }
-            >
-              <Plus /> 添加
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {draft.variables.length === 0 && (
-            <p className="text-xs text-muted-foreground">未定义变量，使用者不需要填写额外参数</p>
-          )}
-          {draft.variables.map((v, i) => (
-            <div key={v.uid} className="space-y-2 border-b border-border pb-3 last:border-b-0">
-              <div className="flex gap-2">
-                <Input
-                  value={v.name}
-                  onChange={(e) => {
-                    const next = [...draft.variables];
-                    next[i] = {
-                      ...v,
-                      name: e.target.value.replace(/[^A-Za-z0-9_]/g, "").toUpperCase(),
-                    };
-                    setDraft({ ...draft, variables: next });
-                  }}
-                  placeholder="变量名 (如 API_KEY)"
-                  className="font-mono"
-                />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label={`删除变量 ${v.name || i + 1}`}
-                  onClick={() =>
-                    setDraft({ ...draft, variables: draft.variables.filter((_, j) => j !== i) })
-                  }
-                >
-                  <Trash2 className="size-4" />
-                </Button>
-              </div>
-              <Input
-                value={v.description}
-                onChange={(e) => {
-                  const next = [...draft.variables];
-                  next[i] = { ...v, description: e.target.value };
-                  setDraft({ ...draft, variables: next });
-                }}
-                placeholder="说明（给填写者看）"
-              />
-              <div className="flex gap-4 text-xs">
-                <label className="flex items-center gap-1.5">
-                  <input
-                    type="checkbox"
-                    checked={v.required}
-                    onChange={(e) => {
-                      const next = [...draft.variables];
-                      next[i] = { ...v, required: e.target.checked };
-                      setDraft({ ...draft, variables: next });
-                    }}
-                  />
-                  必填
-                </label>
-                <label className="flex items-center gap-1.5">
-                  <input
-                    type="checkbox"
-                    checked={v.secret}
-                    onChange={(e) => {
-                      const next = [...draft.variables];
-                      next[i] = { ...v, secret: e.target.checked };
-                      setDraft({ ...draft, variables: next });
-                    }}
-                  />
-                  密钥（加密存储，不进提示词）
-                </label>
-              </div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-
-      <label className="block space-y-1">
-        <span className="text-xs text-muted-foreground">
-          权限模式 —— 按【使用场景】选,不是安全等级
-        </span>
-        <Select
-          value={draft.permissionMode}
-          onChange={(e) => setDraft({ ...draft, permissionMode: e.target.value as PermissionMode })}
-        >
-          {PERMISSION_MODES.map((m) => (
-            <option key={m} value={m}>
-              {PERMISSION_MODE_META[m].label}
-            </option>
-          ))}
-        </Select>
-        <span className="block text-xs text-muted-foreground">
-          {PERMISSION_MODE_META[draft.permissionMode].hint}
-          {draft.permissionMode === "bypassPermissions" && " 子代理会一并继承该模式,无法单独收紧。"}
-        </span>
-      </label>
-
-      <label className="block space-y-1">
-        <span className="text-xs text-muted-foreground">
-          没有审批人时(接口调用)命中下面的审批规则
-        </span>
-        <Select
-          value={draft.unattendedApproval}
-          onChange={(e) =>
-            setDraft({
-              ...draft,
-              unattendedApproval: e.target.value as Draft["unattendedApproval"],
-            })
-          }
-        >
-          <option value="">按入口默认(接口调用放行)</option>
-          <option value="deny">一律拒绝(更安全)</option>
-          <option value="allow">一律放行</option>
-        </Select>
-        <span className="block text-xs text-muted-foreground">
-          网页工作台里始终等人审批;接口调用没有审批人,不会挂着等。
-        </span>
-      </label>
-
-      <div className="grid grid-cols-2 gap-3">
-        <label className="space-y-1">
-          <span className="text-xs text-muted-foreground">需审批的工具(逗号分隔,可选)</span>
-          <Input
-            value={draft.approvalToolsText}
-            onChange={(e) => setDraft({ ...draft, approvalToolsText: e.target.value })}
-            placeholder="Bash, Write"
-          />
-        </label>
-        <label className="space-y-1">
-          <span className="text-xs text-muted-foreground">需审批的命令模式(逗号分隔)</span>
-          <Input
-            value={draft.approvalPatternsText}
-            onChange={(e) => setDraft({ ...draft, approvalPatternsText: e.target.value })}
-            placeholder="rm -rf, sudo, curl"
-          />
-        </label>
-      </div>
-
-      <label className="block space-y-1">
-        <span className="text-xs text-muted-foreground">
-          {canManageWebhook
-            ? "Webhook 回调(可选)—— 运行终态时推结果,用你在「模型凭证」页设置的密钥签名"
-            : "Webhook 回调 —— 仅智能体所有者可查看和设置"}
-        </span>
-        <Input
-          value={draft.webhookUrl}
-          onChange={(e) => setDraft({ ...draft, webhookUrl: e.target.value })}
-          placeholder={canManageWebhook ? "https://your-system/callback" : "(已隐藏)"}
-          disabled={!canManageWebhook}
-        />
-      </label>
-
-      <label className="block space-y-1">
-        <span className="text-xs text-muted-foreground">
-          工具白名单(逗号分隔,可选)—— 留空 = 不限制;填了就只允许这些工具
-        </span>
-        <Input
-          value={draft.toolsText}
-          onChange={(e) => setDraft({ ...draft, toolsText: e.target.value })}
-          placeholder="Read, Write, Bash"
-        />
-      </label>
-
-      <label className="block space-y-1">
-        <span className="text-xs text-muted-foreground">
-          inputSchema(JSON Schema,可选)—— 填了则 invoke 的入参必须符合它,否则 400
-        </span>
-        <Textarea
-          className="h-40 resize-y font-mono text-xs"
-          value={draft.inputSchemaText}
-          onChange={(e) => setDraft({ ...draft, inputSchemaText: e.target.value })}
-          placeholder={INPUT_SCHEMA_EXAMPLE}
-        />
-        {inputSchemaError && (
-          <span className="text-xs text-destructive">inputSchema 非法:{inputSchemaError}</span>
-        )}
-      </label>
-
-      <label className="block space-y-1">
-        <span className="text-xs text-muted-foreground">
-          outputSchema(JSON Schema,可选)—— 填了才能被系统当接口调用
-        </span>
-        <Textarea
-          className="h-56 resize-y font-mono text-xs"
-          value={draft.outputSchemaText}
-          onChange={(e) => setDraft({ ...draft, outputSchemaText: e.target.value })}
-          placeholder={SCHEMA_EXAMPLE}
-        />
-      </label>
-
-      {/* 保存按钮已提到吸顶页头 —— 这是个八百行的长表单,不该滚到底才能存 */}
-      <div className="flex items-center gap-3">
         <Button
-          variant="ghost"
           size="sm"
-          onClick={() => setDraft({ ...draft, outputSchemaText: SCHEMA_EXAMPLE })}
+          variant="outline"
+          className="min-h-11"
+          disabled={designing || (Boolean(openedId) && !canWrite)}
+          onClick={() => void startDesign(openedId ?? undefined)}
+          title="和 AI 对话来设计:提示词、技能、MCP、输入输出契约"
         >
-          <FileCode /> 填入示例 schema
+          <Sparkles className="size-3.5" />
+          {designing ? "准备中…" : openedId ? "AI 编辑" : "AI 创建"}
         </Button>
-        {schemaError && <span className="text-xs text-destructive">schema 非法:{schemaError}</span>}
-        {!schemaError && schemaText && <Badge variant="success">schema 合法 · 接口型智能体</Badge>}
       </div>
+      <Tabs value={section} onValueChange={setSection} key={openedId ?? "new"}>
+        <TabsList variant="default" aria-label="智能体配置分区" className={SECTION_LIST_CLASS}>
+          {BUILDER_SECTIONS.map(([value, label]) => (
+            <TabsTrigger key={value} value={value} className={SECTION_TAB_CLASS}>
+              {label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        {/* forceMount 保留各分区子组件状态，隐藏面板不进入键盘导航。 */}
+        <TabsContent value="config" forceMount className="space-y-6 data-[state=inactive]:hidden">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="space-y-1">
+              <span className="text-xs text-muted-foreground">名称 *</span>
+              <Input
+                value={draft.name}
+                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                placeholder="代码评审智能体"
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="text-xs text-muted-foreground">ID(留空自动生成;保存后不可修改)</span>
+              <Input
+                value={draft.id}
+                onChange={(e) => setDraft({ ...draft, id: e.target.value })}
+                placeholder="code-reviewer"
+                disabled={Boolean(openedId)}
+              />
+            </label>
+          </div>
 
-      {openedId && selectedAgent && canWrite && (
-        <ReleasePanel
-          agentId={openedId}
-          publishedVersion={selectedAgent.publishedVersion ?? null}
-          hasUnpublishedChanges={selectedAgent.hasUnpublishedChanges === true}
-          unsaved={dirty}
-          draft={selectedAgent}
-          evalTick={evalTick}
-          onChanged={reload}
-          onRestored={async () => {
-            await reload();
-            // 草稿内容换了,表单重新从服务端读一遍
-            edit(selectedAgent);
-          }}
-        />
-      )}
+          <label className="block space-y-1">
+            <span className="text-xs text-muted-foreground">描述</span>
+            <Input
+              value={draft.description}
+              onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+            />
+          </label>
 
-      {openedId && selectedAgent && canWrite && (
-        <EvalPanel
-          agentId={openedId}
-          publishedVersion={selectedAgent.publishedVersion ?? null}
-          hasInputSchema={Boolean(parsedInputSchema)}
-          unsaved={dirty}
-          draft={selectedAgent}
-          onChanged={() => setEvalTick((t) => t + 1)}
-        />
-      )}
+          <label className="block space-y-1">
+            <span className="text-xs text-muted-foreground">
+              开场建议(可选,一行一条,最多 4 条)—— 工作台新会话里给用户点的示例输入
+            </span>
+            <Textarea
+              className="h-20 resize-y"
+              value={draft.startersText}
+              onChange={(e) => setDraft({ ...draft, startersText: e.target.value })}
+              placeholder={"审一下这份合同的付款条款\n把附件里的发票抽成表格"}
+            />
+          </label>
 
-      {openedId && <KnowledgePanel key={openedId} agentId={openedId} canWrite={canWrite} />}
+          <label className="block space-y-1">
+            <span className="text-xs text-muted-foreground">系统提示词 *</span>
+            <Textarea
+              className="h-32 resize-y"
+              value={draft.systemPrompt}
+              onChange={(e) => setDraft({ ...draft, systemPrompt: e.target.value })}
+              placeholder="你是代码评审专家……"
+            />
+          </label>
 
-      {openedId && <SharePanel agentId={openedId} />}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
+              <span className="text-xs text-muted-foreground">模型</span>
+              <ModelSelect
+                ariaLabel="模型"
+                catalog={modelCatalog}
+                value={draft.model}
+                onChange={(model) => setDraft({ ...draft, model })}
+              />
+            </div>
+            <label className="space-y-1">
+              <span className="text-xs text-muted-foreground">最大轮次</span>
+              <Input
+                type="number"
+                value={draft.maxTurns}
+                onChange={(e) => setDraft({ ...draft, maxTurns: Number(e.target.value) })}
+              />
+            </label>
+          </div>
+        </TabsContent>
 
-      {openedId && (
-        <InvokeSnippet
-          agentId={openedId}
-          inputSchema={parsedInputSchema}
-          hasOutputSchema={Boolean(parsedSchema)}
-        />
-      )}
+        <TabsContent
+          value="capabilities"
+          forceMount
+          className="space-y-6 data-[state=inactive]:hidden"
+        >
+          <label className="block space-y-1">
+            <span className="text-xs text-muted-foreground">
+              工具白名单(逗号分隔,可选)—— 留空 = 不限制;填了就只允许这些工具
+            </span>
+            <Input
+              value={draft.toolsText}
+              onChange={(e) => setDraft({ ...draft, toolsText: e.target.value })}
+              placeholder="Read, Write, Bash"
+            />
+          </label>
+          {/* ── 技能包 ── */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-sm">技能</CardTitle>
+                  <CardDescription>
+                    可复用的专门做法:流程、规范、脚本。描述写"何时使用",模型据此自动调用。 AI
+                    编辑可选择已有技能;技能正文与文件在这里维护。
+                  </CardDescription>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    setDraft({ ...draft, skillPackages: [...draft.skillPackages, newSkillRow()] })
+                  }
+                >
+                  <Plus /> 添加
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {draft.skillPackages.length === 0 && (
+                <p className="text-xs text-muted-foreground">未配置技能</p>
+              )}
+              {draft.skillPackages.map((k, i) => {
+                const patch = (next: Partial<SkillDraft>) => {
+                  const list = [...draft.skillPackages];
+                  list[i] = { ...k, ...next };
+                  setDraft({ ...draft, skillPackages: list });
+                };
+                const patchFile = (path: string, content: string) => {
+                  patch({ files: { ...k.files, [path]: content } });
+                };
+                const removeFile = (path: string) => {
+                  const { [path]: _, ...rest } = k.files;
+                  patch({ files: rest });
+                };
+                const otherFiles = Object.keys(k.files).filter((p) => p !== "SKILL.md");
+                return (
+                  <SkillEditor
+                    key={k.uid}
+                    skill={k}
+                    otherFiles={otherFiles}
+                    onPatch={patch}
+                    onPatchFile={patchFile}
+                    onRemoveFile={removeFile}
+                    onDelete={() =>
+                      setDraft({
+                        ...draft,
+                        skillPackages: draft.skillPackages.filter((x) => x.uid !== k.uid),
+                      })
+                    }
+                  />
+                );
+              })}
+            </CardContent>
+          </Card>
+
+          {/* ── MCP 服务 ── */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-sm">MCP 服务</CardTitle>
+                  <CardDescription>给智能体接外部工具(可选)</CardDescription>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    setDraft({
+                      ...draft,
+                      mcpServers: [...draft.mcpServers, newMcpRow()],
+                    })
+                  }
+                >
+                  <Plus /> 添加
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {draft.mcpServers.length === 0 && (
+                <p className="text-xs text-muted-foreground">未配置 MCP 服务</p>
+              )}
+              {draft.mcpServers.map((m, i) => (
+                <div key={m.uid} className="space-y-2 border-b border-border pb-3 last:border-b-0">
+                  <div className="flex gap-2">
+                    <Input
+                      value={m.name}
+                      onChange={(e) => {
+                        const next = [...draft.mcpServers];
+                        next[i] = { ...m, name: e.target.value };
+                        setDraft({ ...draft, mcpServers: next });
+                      }}
+                      placeholder="名称(字母/数字/_/-)"
+                    />
+                    <Select
+                      value={m.type}
+                      onChange={(e) => {
+                        const next = [...draft.mcpServers];
+                        next[i] = { ...m, type: e.target.value as "http" | "stdio" };
+                        setDraft({ ...draft, mcpServers: next });
+                      }}
+                    >
+                      <option value="http">http</option>
+                      <option value="stdio" disabled={!allowStdioMcp}>
+                        {allowStdioMcp ? "stdio" : "stdio（平台未启用）"}
+                      </option>
+                    </Select>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="shrink-0 text-destructive hover:text-destructive"
+                      aria-label={`删除 MCP 服务 ${m.name || i + 1}`}
+                      onClick={() =>
+                        setDraft({
+                          ...draft,
+                          mcpServers: draft.mcpServers.filter((_, j) => j !== i),
+                        })
+                      }
+                    >
+                      <Trash2 />
+                    </Button>
+                  </div>
+                  {m.type === "http" ? (
+                    <Input
+                      value={m.url}
+                      onChange={(e) => {
+                        const next = [...draft.mcpServers];
+                        next[i] = { ...m, url: e.target.value };
+                        setDraft({ ...draft, mcpServers: next });
+                      }}
+                      placeholder="https://mcp.example.com"
+                    />
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2">
+                      <Input
+                        className="col-span-2"
+                        value={m.command}
+                        onChange={(e) => {
+                          const next = [...draft.mcpServers];
+                          next[i] = { ...m, command: e.target.value };
+                          setDraft({ ...draft, mcpServers: next });
+                        }}
+                        placeholder="command，例如 npx"
+                      />
+                      <Textarea
+                        className="min-h-24 resize-y font-mono"
+                        value={m.argsText}
+                        onChange={(e) => {
+                          const next = [...draft.mcpServers];
+                          next[i] = { ...m, argsText: e.target.value };
+                          setDraft({ ...draft, mcpServers: next });
+                        }}
+                        placeholder={"args，每行一个\n-y\n@modelcontextprotocol/server-filesystem"}
+                      />
+                      <Textarea
+                        className="min-h-24 resize-y font-mono"
+                        value={m.envText}
+                        onChange={(e) => {
+                          const next = [...draft.mcpServers];
+                          next[i] = { ...m, envText: e.target.value };
+                          setDraft({ ...draft, mcpServers: next });
+                        }}
+                        placeholder={'env JSON，例如\n{"GITHUB_TOKEN":"..."}'}
+                      />
+                    </div>
+                  )}
+                  <McpCheck
+                    name={m.name || `第 ${i + 1} 个`}
+                    resetKey={JSON.stringify([m.type, m.url, m.command, m.argsText, m.envText])}
+                    requestAction={() => ({
+                      url: "/api/agents/mcp-check",
+                      body: {
+                        // 打开的是已保存的智能体:变量值取本人在它上面保存的
+                        agentId: openedId ?? undefined,
+                        server: mcpOfRow(m),
+                        variables: draft.variables
+                          .filter((v) => v.name.trim())
+                          .map((v) => ({
+                            name: v.name.trim(),
+                            required: v.required,
+                            secret: v.secret,
+                          })),
+                      },
+                    })}
+                  />
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+
+          {/* ── 子代理 ── */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-sm">子代理</CardTitle>
+                  <CardDescription>把一类子任务交给带专属提示词的下级去做(可选)</CardDescription>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    setDraft({ ...draft, subagents: [...draft.subagents, newSubagentRow()] })
+                  }
+                >
+                  <Plus /> 添加
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {draft.subagents.length === 0 && (
+                <p className="text-xs text-muted-foreground">未配置子代理</p>
+              )}
+              {draft.subagents.map((s, i) => (
+                <div key={s.uid} className="flex gap-2">
+                  <div className="flex-1 space-y-1">
+                    <div className="flex gap-2">
+                      <Input
+                        className="max-w-[12rem]"
+                        value={s.name}
+                        onChange={(e) => {
+                          const next = [...draft.subagents];
+                          next[i] = { ...s, name: e.target.value };
+                          setDraft({ ...draft, subagents: next });
+                        }}
+                        placeholder="名称,如 reviewer"
+                      />
+                      {/* 主 agent 靠这句话决定要不要把子任务交出去 —— 缺了它,
+                        子代理配了也没人调用。SDK 侧这是必需字段。 */}
+                      <Input
+                        value={s.description}
+                        onChange={(e) => {
+                          const next = [...draft.subagents];
+                          next[i] = { ...s, description: e.target.value };
+                          setDraft({ ...draft, subagents: next });
+                        }}
+                        placeholder="【何时】用它,如:需要审阅代码质量时"
+                      />
+                      <ModelSelect
+                        className="max-w-[16rem]"
+                        ariaLabel={`子代理 ${s.name || i + 1} 的模型`}
+                        catalog={modelCatalog}
+                        group={modelOf(modelCatalog, draft.model)?.group}
+                        inheritLabel="同主 agent"
+                        value={s.model}
+                        onChange={(model) => {
+                          const next = [...draft.subagents];
+                          next[i] = { ...s, model };
+                          setDraft({ ...draft, subagents: next });
+                        }}
+                      />
+                    </div>
+                    <Textarea
+                      className="min-h-[3rem]"
+                      value={s.prompt}
+                      onChange={(e) => {
+                        const next = [...draft.subagents];
+                        next[i] = { ...s, prompt: e.target.value };
+                        setDraft({ ...draft, subagents: next });
+                      }}
+                      placeholder="这个子代理的职责与要求(它的系统提示词)"
+                    />
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="shrink-0 text-destructive hover:text-destructive"
+                    aria-label={`删除子代理 ${s.name || i + 1}`}
+                    onClick={() =>
+                      setDraft({ ...draft, subagents: draft.subagents.filter((_, j) => j !== i) })
+                    }
+                  >
+                    <Trash2 />
+                  </Button>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </TabsContent>
+        <TabsContent value="security" forceMount className="space-y-6 data-[state=inactive]:hidden">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-sm">变量与密钥</CardTitle>
+                  <CardDescription>
+                    使用者运行前需要填写的参数，引用方式: {"{{变量名}}"}
+                  </CardDescription>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    setDraft({
+                      ...draft,
+                      variables: [
+                        ...draft.variables,
+                        {
+                          uid: crypto.randomUUID(),
+                          name: "",
+                          description: "",
+                          required: false,
+                          secret: false,
+                        },
+                      ],
+                    })
+                  }
+                >
+                  <Plus /> 添加
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {draft.variables.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  未定义变量，使用者不需要填写额外参数
+                </p>
+              )}
+              {draft.variables.map((v, i) => (
+                <div key={v.uid} className="space-y-2 border-b border-border pb-3 last:border-b-0">
+                  <div className="flex gap-2">
+                    <Input
+                      value={v.name}
+                      onChange={(e) => {
+                        const next = [...draft.variables];
+                        next[i] = {
+                          ...v,
+                          name: e.target.value.replace(/[^A-Za-z0-9_]/g, "").toUpperCase(),
+                        };
+                        setDraft({ ...draft, variables: next });
+                      }}
+                      placeholder="变量名 (如 API_KEY)"
+                      className="font-mono"
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`删除变量 ${v.name || i + 1}`}
+                      onClick={() =>
+                        setDraft({
+                          ...draft,
+                          variables: draft.variables.filter((_, j) => j !== i),
+                        })
+                      }
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
+                  <Input
+                    value={v.description}
+                    onChange={(e) => {
+                      const next = [...draft.variables];
+                      next[i] = { ...v, description: e.target.value };
+                      setDraft({ ...draft, variables: next });
+                    }}
+                    placeholder="说明（给填写者看）"
+                  />
+                  <div className="flex gap-4 text-xs">
+                    <label className="flex items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        checked={v.required}
+                        onChange={(e) => {
+                          const next = [...draft.variables];
+                          next[i] = { ...v, required: e.target.checked };
+                          setDraft({ ...draft, variables: next });
+                        }}
+                      />
+                      必填
+                    </label>
+                    <label className="flex items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        checked={v.secret}
+                        onChange={(e) => {
+                          const next = [...draft.variables];
+                          next[i] = { ...v, secret: e.target.checked };
+                          setDraft({ ...draft, variables: next });
+                        }}
+                      />
+                      密钥（加密存储，不进提示词）
+                    </label>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+
+          <label className="block space-y-1">
+            <span className="text-xs text-muted-foreground">
+              权限模式 —— 按【使用场景】选,不是安全等级
+            </span>
+            <Select
+              value={draft.permissionMode}
+              onChange={(e) =>
+                setDraft({ ...draft, permissionMode: e.target.value as PermissionMode })
+              }
+            >
+              {PERMISSION_MODES.map((m) => (
+                <option key={m} value={m}>
+                  {PERMISSION_MODE_META[m].label}
+                </option>
+              ))}
+            </Select>
+            <span className="block text-xs text-muted-foreground">
+              {PERMISSION_MODE_META[draft.permissionMode].hint}
+              {draft.permissionMode === "bypassPermissions" &&
+                " 子代理会一并继承该模式,无法单独收紧。"}
+            </span>
+          </label>
+
+          <label className="block space-y-1">
+            <span className="text-xs text-muted-foreground">
+              没有审批人时(接口调用)命中下面的审批规则
+            </span>
+            <Select
+              value={draft.unattendedApproval}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  unattendedApproval: e.target.value as Draft["unattendedApproval"],
+                })
+              }
+            >
+              <option value="">按入口默认(接口调用放行)</option>
+              <option value="deny">一律拒绝(更安全)</option>
+              <option value="allow">一律放行</option>
+            </Select>
+            <span className="block text-xs text-muted-foreground">
+              网页工作台里始终等人审批;接口调用没有审批人,不会挂着等。
+            </span>
+          </label>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="space-y-1">
+              <span className="text-xs text-muted-foreground">需审批的工具(逗号分隔,可选)</span>
+              <Input
+                value={draft.approvalToolsText}
+                onChange={(e) => setDraft({ ...draft, approvalToolsText: e.target.value })}
+                placeholder="Bash, Write"
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="text-xs text-muted-foreground">需审批的命令模式(逗号分隔)</span>
+              <Input
+                value={draft.approvalPatternsText}
+                onChange={(e) => setDraft({ ...draft, approvalPatternsText: e.target.value })}
+                placeholder="rm -rf, sudo, curl"
+              />
+            </label>
+          </div>
+
+          <label className="block space-y-1">
+            <span className="text-xs text-muted-foreground">
+              {canManageWebhook
+                ? "Webhook 回调(可选)—— 运行终态时推结果,用你在「接入」页设置的密钥签名"
+                : "Webhook 回调 —— 仅智能体所有者可查看和设置"}
+            </span>
+            <Input
+              value={draft.webhookUrl}
+              onChange={(e) => setDraft({ ...draft, webhookUrl: e.target.value })}
+              placeholder={canManageWebhook ? "https://your-system/callback" : "(已隐藏)"}
+              disabled={!canManageWebhook}
+            />
+          </label>
+
+          <label className="block space-y-1">
+            <span className="text-xs text-muted-foreground">
+              inputSchema(JSON Schema,可选)—— 填了则 invoke 的入参必须符合它,否则 400
+            </span>
+            <Textarea
+              className="h-40 resize-y font-mono text-xs"
+              value={draft.inputSchemaText}
+              onChange={(e) => setDraft({ ...draft, inputSchemaText: e.target.value })}
+              placeholder={INPUT_SCHEMA_EXAMPLE}
+            />
+            {inputSchemaError && (
+              <span className="text-xs text-destructive">inputSchema 非法:{inputSchemaError}</span>
+            )}
+          </label>
+
+          <label className="block space-y-1">
+            <span className="text-xs text-muted-foreground">
+              outputSchema(JSON Schema,可选)—— 声明后返回结构化结果；留空仍可通过接口调用并返回文本
+            </span>
+            <Textarea
+              className="h-56 resize-y font-mono text-xs"
+              value={draft.outputSchemaText}
+              onChange={(e) => setDraft({ ...draft, outputSchemaText: e.target.value })}
+              placeholder={SCHEMA_EXAMPLE}
+            />
+          </label>
+
+          <div className="flex items-center gap-3">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setDraft({ ...draft, outputSchemaText: SCHEMA_EXAMPLE })}
+            >
+              <FileCode /> 填入示例 schema
+            </Button>
+            {schemaError && (
+              <span className="text-xs text-destructive">schema 非法:{schemaError}</span>
+            )}
+            {!schemaError && schemaText && <Badge variant="success">schema 合法</Badge>}
+          </div>
+          {openedId && (
+            <Link
+              href={`/settings/keys?agent=${encodeURIComponent(openedId)}`}
+              className="inline-flex min-h-11 items-center gap-2 rounded-md text-sm text-primary hover:underline"
+            >
+              <Plug className="size-4" />
+              前往接入，管理 API Key 与调用示例
+            </Link>
+          )}
+        </TabsContent>
+
+        <TabsContent value="release" forceMount className="space-y-6 data-[state=inactive]:hidden">
+          {openedId && selectedAgent && canWrite && (
+            <ReleasePanel
+              agentId={openedId}
+              publishedVersion={selectedAgent.publishedVersion ?? null}
+              hasUnpublishedChanges={selectedAgent.hasUnpublishedChanges === true}
+              unsaved={dirty}
+              draft={selectedAgent}
+              evalTick={evalTick}
+              onChanged={() => {
+                notifyAgentCatalogChanged();
+                return reload();
+              }}
+              onRestored={async () => {
+                notifyAgentCatalogChanged();
+                await reload();
+                if (editorGeneration !== editSeqRef.current) return;
+                if (draftRef.current !== draft) {
+                  toast.message("服务端草稿已恢复，当前表单的新修改仍保留。");
+                  return;
+                }
+                // 草稿内容换了,表单重新从服务端读一遍
+                edit(selectedAgent);
+              }}
+            />
+          )}
+          {openedId && <SharePanel key={openedId} agentId={openedId} />}
+          {!openedId && (
+            <p className="text-sm text-muted-foreground">保存智能体后管理发布与分享。</p>
+          )}
+        </TabsContent>
+
+        <TabsContent value="eval" forceMount className="space-y-6 data-[state=inactive]:hidden">
+          {openedId && selectedAgent && canWrite && (
+            <EvalPanel
+              agentId={openedId}
+              publishedVersion={selectedAgent.publishedVersion ?? null}
+              hasInputSchema={Boolean(parsedInputSchema)}
+              unsaved={dirty}
+              draft={selectedAgent}
+              onChanged={() => setEvalTick((t) => t + 1)}
+            />
+          )}
+          {!openedId && <p className="text-sm text-muted-foreground">保存智能体后添加评测用例。</p>}
+        </TabsContent>
+
+        <TabsContent
+          value="knowledge"
+          forceMount
+          className="space-y-6 data-[state=inactive]:hidden"
+        >
+          {openedId && <KnowledgePanel key={openedId} agentId={openedId} canWrite={canWrite} />}
+          {!openedId && <p className="text-sm text-muted-foreground">保存智能体后添加知识文档。</p>}
+        </TabsContent>
+      </Tabs>
     </SpaceShell>
   );
 }
@@ -1632,41 +1852,5 @@ function SkillEditor({
         </Button>
       )}
     </div>
-  );
-}
-
-/**
- *
- * 曾经是一段复制即 401 的 curl:没有 X-Api-Key、用相对地址、入参写死成纯文本
- * (声明了 inputSchema 的智能体会直接 400),而且只有填了 outputSchema 才显示。
- */
-function InvokeSnippet({
-  agentId,
-  inputSchema,
-  hasOutputSchema,
-}: {
-  agentId: string;
-  inputSchema?: Record<string, unknown> | null;
-  hasOutputSchema: boolean;
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-sm">接口调用</CardTitle>
-        <CardDescription>
-          在「接入中心」签发 Key 后,从你的后端调用(Key 不要放进浏览器)。
-          {hasOutputSchema
-            ? "已声明输出契约,结果在 structured 字段里。"
-            : "未声明输出契约,结果是文本;要拿结构化 JSON 请填写输出 schema。"}
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <InvokeSnippetTabs
-          agentId={agentId}
-          inputSchema={inputSchema}
-          hasOutputSchema={hasOutputSchema}
-        />
-      </CardContent>
-    </Card>
   );
 }

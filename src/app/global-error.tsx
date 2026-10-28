@@ -26,22 +26,22 @@ export default function GlobalError({
           alignItems: "center",
           justifyContent: "center",
           gap: "0.75rem",
-          background: "#090d11",
-          color: "#f3f4f6",
+          background: "#1e1f22",
+          color: "#dfe1e5",
           fontFamily: "system-ui, -apple-system, 'PingFang SC', sans-serif",
           textAlign: "center",
           padding: "2rem",
         }}
       >
         <h1 style={{ fontSize: "1.125rem", fontWeight: 600, margin: 0 }}>应用启动失败</h1>
-        <p style={{ fontSize: "0.875rem", color: "#9299a1", margin: 0, maxWidth: "32rem" }}>
+        <p style={{ fontSize: "0.875rem", color: "#8c8f96", margin: 0, maxWidth: "32rem" }}>
           数据没有丢失。请重试,若持续失败请把下面的编号提供给维护者。
         </p>
         <code
           style={{
             fontSize: "0.75rem",
-            color: "#9299a1",
-            border: "1px solid rgba(255,255,255,0.1)",
+            color: "#8c8f96",
+            border: "1px solid #393b40",
             borderRadius: "0.375rem",
             padding: "0.375rem 0.625rem",
           }}
@@ -56,8 +56,8 @@ export default function GlobalError({
             cursor: "pointer",
             border: "none",
             borderRadius: "0.375rem",
-            background: "#d68123",
-            color: "#1a1206",
+            background: "#3574f0",
+            color: "#ffffff",
             fontSize: "0.875rem",
             fontWeight: 500,
             padding: "0.5rem 1rem",

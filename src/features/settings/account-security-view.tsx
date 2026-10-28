@@ -47,8 +47,9 @@ export function AccountSecurityView() {
           <CardDescription>至少 8 位。管理员给你的初始密码请尽快在这里改掉。</CardDescription>
         </CardHeader>
         <CardContent>
+          {/* 密码框不需要 700px 宽:限宽后标签、输入框、按钮在一条视线上 */}
           <form
-            className="space-y-4"
+            className="max-w-sm space-y-4"
             onSubmit={(e) => {
               e.preventDefault();
               void submit();

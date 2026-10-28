@@ -21,7 +21,8 @@ async function createAgent(ctx: BrowserContext, name: string) {
   });
   expect(res.ok()).toBeTruthy();
   const body = (await res.json()) as { agent?: { id: string } };
-  return body.agent!.id;
+  if (!body.agent?.id) throw new Error("创建智能体未返回 ID");
+  return body.agent.id;
 }
 
 async function addDoc(ctx: BrowserContext, agentId: string, title: string, content: string) {
@@ -30,7 +31,8 @@ async function addDoc(ctx: BrowserContext, agentId: string, title: string, conte
   });
   expect(res.status()).toBe(201);
   const body = (await res.json()) as { doc?: { id: string } };
-  return body.doc!.id;
+  if (!body.doc?.id) throw new Error("创建知识文档未返回 ID");
+  return body.doc.id;
 }
 
 function knowledgePanel(page: import("@playwright/test").Page): Locator {
@@ -45,14 +47,24 @@ test.describe("知识库编辑浏览器验收", () => {
   test("添加 → 展开 → 编辑 → 保存 → 重新打开确认新内容", async ({ page, context }) => {
     await register(context, "kb-pw");
     const agentId = await createAgent(context, "PW 知识验收");
-    await addDoc(context, agentId, "二叉树基础", "二叉树是一种树形数据结构，每个节点最多有两个子节点。");
+    const docId = await addDoc(
+      context,
+      agentId,
+      "二叉树基础",
+      "二叉树是一种树形数据结构，每个节点最多有两个子节点。",
+    );
 
     await page.goto(`${BASE}/agents?id=${agentId}`);
+    await page.getByRole("tab", { name: "知识", exact: true }).click();
     const panel = knowledgePanel(page);
     await expect(panel.getByText("二叉树基础")).toBeVisible({ timeout: 15_000 });
 
     // 展开文档
+    const detailResponse = page.waitForResponse((response) =>
+      response.url().endsWith(`/api/agents/${agentId}/knowledge/${docId}`),
+    );
     await panel.getByText("二叉树基础").click();
+    expect((await detailResponse).ok()).toBeTruthy();
     await expect(docPre(panel)).toContainText("二叉树是一种树形数据结构", { timeout: 5_000 });
 
     // 点编辑
@@ -88,6 +100,7 @@ test.describe("知识库编辑浏览器验收", () => {
     await addDoc(context, agentId, "测试文档", "原始正文内容不为空");
 
     await page.goto(`${BASE}/agents?id=${agentId}`);
+    await page.getByRole("tab", { name: "知识", exact: true }).click();
     const panel = knowledgePanel(page);
     await expect(panel.getByText("测试文档")).toBeVisible({ timeout: 15_000 });
 
@@ -115,6 +128,7 @@ test.describe("知识库编辑浏览器验收", () => {
     const docBId = await addDoc(context, agentId, "文档B", "文档B的原始正文内容");
 
     await page.goto(`${BASE}/agents?id=${agentId}`);
+    await page.getByRole("tab", { name: "知识", exact: true }).click();
     const panel = knowledgePanel(page);
     await expect(panel.getByText("文档A")).toBeVisible({ timeout: 15_000 });
 

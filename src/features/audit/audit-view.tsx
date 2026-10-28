@@ -13,7 +13,6 @@ import {
   describeAudit,
 } from "@/features/audit/labels";
 import { errorText, fetchJson } from "@/lib/fetch-json";
-import { useMe } from "@/lib/use-me";
 import { cn } from "@/lib/utils";
 import { RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -24,11 +23,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * 看得到的范围:你名下资源上发生的事(包括别人对你分享出去的智能体的修改、
  * 有人尝试登录你的账号),以及你自己做的操作。管理员可以看全平台。
  */
-export function AuditView() {
-  const { me } = useMe();
-  const isAdmin = me?.user?.role === "admin";
+export function AuditView({ platform = false }: { platform?: boolean }) {
   const [action, setAction] = useState("");
-  const [scopeAll, setScopeAll] = useState(false);
   const [items, setItems] = useState<AuditItem[]>([]);
   const [cursor, setCursor] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
@@ -42,7 +38,7 @@ export function AuditView() {
       setError(null);
       const q = new URLSearchParams({ limit: "50" });
       if (action) q.set("action", action);
-      if (scopeAll) q.set("scope", "all");
+      if (platform) q.set("scope", "all");
       if (append) q.set("cursor", append);
       try {
         const d = await fetchJson<{ items: AuditItem[]; nextCursor?: string }>(`/api/audit?${q}`);
@@ -55,7 +51,7 @@ export function AuditView() {
         if (seq === seqRef.current) setLoading(false);
       }
     },
-    [action, scopeAll],
+    [action, platform],
   );
 
   useEffect(() => {
@@ -64,8 +60,9 @@ export function AuditView() {
 
   return (
     <SpaceShell
-      title="审计日志"
-      subtitle="你名下资源上发生的操作,以及你自己的操作"
+      area={platform ? "admin" : "personal"}
+      title={platform ? "平台审计" : "操作日志"}
+      subtitle={platform ? "全平台账号与资源的操作记录" : "你名下资源上发生的操作,以及你自己的操作"}
       actions={
         <Button size="sm" variant="outline" onClick={() => void load()} disabled={loading}>
           <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
@@ -87,16 +84,6 @@ export function AuditView() {
             </option>
           ))}
         </NativeSelect>
-        {isAdmin && (
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={scopeAll}
-              onChange={(e) => setScopeAll(e.target.checked)}
-            />
-            全平台
-          </label>
-        )}
       </div>
 
       {error && <p className="text-xs text-destructive">加载失败:{error}</p>}

@@ -76,18 +76,29 @@ export function ApprovalBar({
   const [now, setNow] = useState(() => Date.now());
   /** 已经弹过 toast 的待审 id —— 轮询每 2 秒回来一次,不能重复弹。 */
   const notifiedRef = useRef<Set<string>>(new Set());
+  const mountedRef = useRef(true);
+  const pollSeqRef = useRef(0);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      pollSeqRef.current += 1;
+    };
+  }, []);
 
   const poll = useCallback(async () => {
-    if (!sessionId) return;
+    if (!sessionId || !mountedRef.current) return;
+    const seq = ++pollSeqRef.current;
     try {
       const data = await fetchJson<{ pending?: Pending[]; grants?: Grant[] }>(
         `/api/sessions/${sessionId}/approvals`,
       );
+      if (seq !== pollSeqRef.current || !mountedRef.current) return;
       setPending(data.pending ?? []);
       setGrants(data.grants ?? []);
       setPollError(null);
     } catch (error) {
-      setPollError(errorText(error));
+      if (seq === pollSeqRef.current && mountedRef.current) setPollError(errorText(error));
     }
   }, [sessionId]);
 
@@ -141,11 +152,12 @@ export function ApprovalBar({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ approvalId: id, decision, ...extra }),
         });
+        if (!mountedRef.current) return;
         if (extra.remember) toast.success("已批准,本会话内同类不再询问(可随时撤销)");
         setDenying(null);
         await poll();
       } catch (error) {
-        toast.error(`提交审批失败:${errorText(error)}`);
+        if (mountedRef.current) toast.error(`提交审批失败:${errorText(error)}`);
       } finally {
         setBusy(null);
       }
@@ -209,10 +221,11 @@ export function ApprovalBar({
       await fetchJson(`/api/sessions/${sessionId}/approvals?grant=${encodeURIComponent(g.key)}`, {
         method: "DELETE",
       });
+      if (!mountedRef.current) return;
       toast.success(`已撤销:${g.label}将重新逐次审批`);
       await poll();
     } catch (error) {
-      toast.error(`撤销失败:${errorText(error)}`);
+      if (mountedRef.current) toast.error(`撤销失败:${errorText(error)}`);
     }
   };
 
@@ -244,7 +257,7 @@ export function ApprovalBar({
   return (
     <>
       {grantStrip}
-      <Card className="mx-3 mb-36 max-h-[50vh] overflow-y-auto border-[var(--warning)]/40 bg-[var(--warning)]/5">
+      <Card className="mx-3 mb-2 min-h-0 max-h-[50vh] shrink-0 overflow-y-auto border-warning/40 bg-warning/5">
         <CardContent className="space-y-3 p-3">
           {pollError && (
             <div className="flex items-center justify-between gap-3 text-xs text-destructive">
@@ -265,11 +278,11 @@ export function ApprovalBar({
                 {idx > 0 && <Separator className="mb-3" />}
 
                 {/* 标题行:图标 + 待确认标签 + 原因 + 倒计时 */}
-                <div className="flex items-center gap-2 text-xs">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
                   <ShieldAlert
                     className={cn(
                       "size-4 shrink-0",
-                      isUrgent ? "text-destructive" : "text-[var(--warning)]",
+                      isUrgent ? "text-destructive" : "text-warning",
                     )}
                   />
                   <Badge variant="warning">待确认</Badge>

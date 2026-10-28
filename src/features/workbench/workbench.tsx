@@ -1,6 +1,7 @@
 "use client";
 
-import { WorkbenchSidebar } from "@/components/workbench-sidebar";
+import { AgentTree } from "@/components/ide/agent-tree";
+import { IdeFrame } from "@/components/ide/ide-frame";
 import { followRun } from "@/features/chat/follow-run";
 import { fetchJson } from "@/lib/fetch-json";
 import { cn } from "@/lib/utils";
@@ -8,14 +9,12 @@ import type { FileUIPart } from "ai";
 import {
   AlertTriangle,
   Bot,
-  Check,
-  ChevronsUpDown,
   Command,
   FolderOpen,
+  ListTree,
   MessageSquare,
   Plus,
   RefreshCw,
-  Search,
   X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -33,34 +32,22 @@ import {
 } from "./conversation";
 import { createEventBatcher } from "./event-batcher";
 import { FilePanel } from "./file-panel";
+import { RunTree } from "./run-tree";
 import { SessionActions } from "./session-actions";
-import { activityOf, groupSessions, relativeTime } from "./session-groups";
+import { sessionLabel } from "./session-groups";
 import { sendSteer } from "./steer-client";
 import type { AgentSummary, SessionSummary, Turn } from "./types";
 import { VariablePrompt } from "./variable-prompt";
 import {
   agentIdFromSearch,
-  filterSessionsForAgent,
   sessionIdFromSearch,
   updateTurnByLocalId,
   withSessionInUrl,
 } from "./workbench.logic";
 import { makeWorkspaceFileDropHandlers } from "./workspace-file-drop";
 
-import {
-  ModelSelector,
-  ModelSelectorContent,
-  ModelSelectorEmpty,
-  ModelSelectorGroup,
-  ModelSelectorInput,
-  ModelSelectorItem,
-  ModelSelectorList,
-  ModelSelectorTrigger,
-} from "@/components/ai-elements/model-selector";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Kbd } from "@/components/ui/kbd";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -68,25 +55,7 @@ import {
   layoutStorage,
   useDefaultLayout,
 } from "@/components/ui/resizable";
-import { Separator } from "@/components/ui/separator";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
-import {
-  SidebarGroup,
-  SidebarGroupLabel,
-  SidebarInset,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarProvider,
-  SidebarTrigger,
-} from "@/components/ui/sidebar";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 
 import {
   Attachment,
@@ -112,6 +81,8 @@ import {
 import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion";
 import { refreshModelCatalog } from "@/features/builder/model-select";
 import { ModelPrice } from "@/features/models/model-price";
+
+const RIGHT_KEY = "owa.object-workspace.right";
 
 interface SlashCommand {
   name: string;
@@ -241,6 +212,8 @@ export function Workbench() {
    */
   const [agentsState, setAgentsState] = useState<"loading" | "ok" | "error">("loading");
   const [agentId, setAgentId] = useState("default");
+  const [contextReady, setContextReady] = useState(false);
+  const [agentContextError, setAgentContextError] = useState<string | null>(null);
   /** ?agent= 只在第一次拿到智能体列表时生效一次,之后的刷新不覆盖用户自己的选择 */
   const urlAgentPendingRef = useRef(true);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -258,7 +231,6 @@ export function Workbench() {
   /** 追加消息接口答"待定"(202)的那些:之后若在事件流里收到未送达,自动改为排队重发 */
   const pendingSteerRef = useRef(new Set<string>());
   const [filesKey, setFilesKey] = useState(0);
-  const [pickerOpen, setPickerOpen] = useState(false);
   /**
    * 会话列表【加载失败】。
    *
@@ -271,20 +243,49 @@ export function Workbench() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [sessionQuery, setSessionQuery] = useState("");
   const [slashIndex, setSlashIndex] = useState(0);
   const [dragActive, setDragActive] = useState(false);
   const [layoutReady, setLayoutReady] = useState(false);
   const [mobileLayout, setMobileLayout] = useState(false);
+  /** 右侧工具窗口当前是哪个标签;null = 收起。 */
+  const [rightTab, setRightTab] = useState<"files" | "runs" | null>(null);
+  const [rightReady, setRightReady] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const activeRunRef = useRef<{ abort: AbortController; runId?: string } | null>(null);
   /** 打开会话的序号:用来丢弃"切走之后才回来"的过期响应。 */
   const openSeqRef = useRef(0);
   const initialSessionAppliedRef = useRef(false);
 
+  useEffect(
+    () => () => {
+      openSeqRef.current += 1;
+      abortRef.current?.abort();
+      abortRef.current = null;
+      activeRunRef.current = null;
+      pendingSteerRef.current.clear();
+    },
+    [],
+  );
+
   const syncSessionUrl = useCallback((nextSessionId: string | null) => {
     const nextUrl = withSessionInUrl(window.location.href, nextSessionId);
     window.history.replaceState(window.history.state, "", nextUrl);
+  }, []);
+
+  // 右侧工具窗口的状态从上次离开时恢复
+  useEffect(() => {
+    const right = localStorage.getItem(RIGHT_KEY);
+    if (right === "files") setRightTab("files");
+    else if (right === "runs") setRightTab("runs");
+    setRightReady(true);
+  }, []);
+  useEffect(() => {
+    if (!rightReady) return;
+    localStorage.setItem(RIGHT_KEY, rightTab ?? "none");
+  }, [rightTab, rightReady]);
+
+  const toggleRight = useCallback((tab: "files" | "runs") => {
+    setRightTab((cur) => (cur === tab ? null : tab));
   }, []);
 
   useEffect(() => {
@@ -381,16 +382,20 @@ export function Workbench() {
   const newSession = useCallback(() => {
     if (running) return;
     openSeqRef.current += 1;
+    pendingSteerRef.current.clear();
     setQueued([]);
     abortRef.current?.abort();
     abortRef.current = null;
     activeRunRef.current = null;
     setSessionId(null);
     syncSessionUrl(null);
+    const url = new URL(window.location.href);
+    url.searchParams.set("agent", agentId);
+    window.history.replaceState(window.history.state, "", url);
     setTurns([]);
     setHistoryLoading(false);
     setHistoryError(null);
-  }, [running, syncSessionUrl]);
+  }, [agentId, running, syncSessionUrl]);
 
   /**
    * 中断 = 先告诉服务端取消,再断开本地流。
@@ -470,9 +475,13 @@ export function Workbench() {
     setRunning(false);
 
     const seq = ++openSeqRef.current;
+    pendingSteerRef.current.clear();
     setQueued([]);
     const targetSession = sessions.find((session) => session.id === id);
-    if (targetSession) setAgentId(targetSession.agentId);
+    if (targetSession) {
+      setAgentId(targetSession.agentId);
+      setAgentContextError(null);
+    }
     setSessionId(id);
     syncSessionUrl(id);
     setTurns([]);
@@ -536,15 +545,34 @@ export function Workbench() {
   // URL 只在会话列表首次成功加载后恢复一次；openSession 必须使用这一轮的 sessions 快照。
   // biome-ignore lint/correctness/useExhaustiveDependencies: one-time URL restoration
   useEffect(() => {
-    if (!sessionsLoaded || sessionsError !== null || initialSessionAppliedRef.current) return;
+    if (
+      !sessionsLoaded ||
+      sessionsError !== null ||
+      agentsState !== "ok" ||
+      initialSessionAppliedRef.current
+    )
+      return;
     initialSessionAppliedRef.current = true;
     const requestedSessionId = sessionIdFromSearch(window.location.search);
     if (requestedSessionId && sessions.some((session) => session.id === requestedSessionId)) {
       void openSession(requestedSessionId);
-    } else if (requestedSessionId) {
-      syncSessionUrl(null);
+    } else {
+      if (requestedSessionId) syncSessionUrl(null);
+      const params = new URLSearchParams(window.location.search);
+      if (params.has("agent")) {
+        const requestedAgentId = params.get("agent") ?? "";
+        if (requestedAgentId && agents.some((agent) => agent.id === requestedAgentId)) {
+          setAgentId(requestedAgentId);
+        } else {
+          setAgentId("");
+          setAgentContextError(
+            requestedAgentId ? "找不到指定的智能体，或你没有访问权限。" : "链接缺少智能体 ID。",
+          );
+        }
+      }
     }
-  }, [sessions, sessionsError, sessionsLoaded, syncSessionUrl]);
+    setContextReady(true);
+  }, [agents, agentsState, sessions, sessionsError, sessionsLoaded, syncSessionUrl]);
 
   /**
    * 拿到可用的会话 id,没有就现建一个。
@@ -553,9 +581,11 @@ export function Workbench() {
    * 建会话失败(未登录、库挂了)时 session 是 undefined,下一行立刻 TypeError,
    * 而这个异常发生在发送流程内部 —— 用户点了发送,界面毫无反应,也没有任何提示。
    */
-  async function ensureSession(firstPrompt: string): Promise<string> {
+  async function ensureSession(firstPrompt: string, signal: AbortSignal): Promise<string> {
+    if (!contextReady || agentContextError) throw new Error("请选择可用的智能体");
     if (sessionId) return sessionId;
     const res = await fetch("/api/sessions", {
+      signal,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // 用第一句话当标题:曾经不带标题,侧栏里一列全是看不出内容的 id
@@ -569,6 +599,7 @@ export function Workbench() {
       throw new Error(body?.error ?? `创建会话失败(HTTP ${res.status})`);
     }
     const session = body.session;
+    signal.throwIfAborted();
     setSessionId(session.id);
     syncSessionUrl(session.id);
     setSessions((s) => [session, ...s]);
@@ -584,6 +615,7 @@ export function Workbench() {
    */
   async function send(text?: string, files: FileUIPart[] = [], clearComposer = false) {
     const prompt = (text ?? input).trim();
+    if (!contextReady || agentContextError || !agentId) return;
     if (!prompt || running || historyLoading || historyError !== null) return;
     setRunning(true);
     // 这一轮按服务端当前的模型与价格运行:顺便刷新标题栏显示
@@ -609,7 +641,7 @@ export function Workbench() {
     activeRunRef.current = sendHandle;
 
     try {
-      const id = await ensureSession(prompt);
+      const id = await ensureSession(prompt, abort.signal);
       abort.signal.throwIfAborted();
       if (seq !== openSeqRef.current) throw new Error("会话已经切换");
       const uploadedFiles = await uploadPromptFiles(id, files, abort.signal);
@@ -776,15 +808,12 @@ export function Workbench() {
     current?.config.starters ?? (current?.id === "default" ? DEFAULT_AGENT_STARTERS : []);
   // 一个智能体都没有时,agentId 还是兜底的 "default",不能拿它当名字显示
   const hasAgents = agents.length > 0;
-  const sessionsForAgent = useMemo(
-    () => filterSessionsForAgent(sessions, agentId, ""),
-    [agentId, sessions],
-  );
-  const visibleSessions = useMemo(
-    () => filterSessionsForAgent(sessions, agentId, sessionQuery),
-    [agentId, sessionQuery, sessions],
-  );
-  const sessionGroups = useMemo(() => groupSessions(visibleSessions), [visibleSessions]);
+  const composerBlocked =
+    !contextReady ||
+    agentContextError !== null ||
+    historyLoading ||
+    historyError !== null ||
+    !hasAgents;
   const contextUsed = useMemo(() => contextTokens(turns), [turns]);
   const totalProcessed = useMemo(() => {
     const all = turns.flatMap((t) => t.events);
@@ -831,7 +860,17 @@ export function Workbench() {
       return send(text, message.files, true);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [running, cancelRun, input],
+    [
+      running,
+      cancelRun,
+      input,
+      contextReady,
+      agentContextError,
+      agentId,
+      sessionId,
+      historyLoading,
+      historyError,
+    ],
   );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally use the current send closure
@@ -840,7 +879,16 @@ export function Workbench() {
       void send(suggestion).catch(() => {});
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [running, input],
+    [
+      running,
+      input,
+      contextReady,
+      agentContextError,
+      agentId,
+      sessionId,
+      historyLoading,
+      historyError,
+    ],
   );
 
   /**
@@ -849,7 +897,9 @@ export function Workbench() {
    * 那条可能已经交给了智能体,再发一遍就执行两次。
    */
   async function steerOrQueue(sid: string, runId: string, text: string) {
+    const seq = openSeqRef.current;
     const r = await sendSteer({ sessionId: sid, runId, id: crypto.randomUUID(), text });
+    if (seq !== openSeqRef.current) return;
     switch (r.kind) {
       case "delivered":
         toast.success("已交给智能体");
@@ -953,8 +1003,61 @@ export function Workbench() {
     command.run();
   }, []);
 
+  const pickAgent = (id: string) => {
+    if (id === agentId || running) return;
+    newSession();
+    setAgentId(id);
+    setAgentContextError(null);
+    const url = new URL(window.location.href);
+    url.searchParams.set("agent", id);
+    url.searchParams.delete("session");
+    window.history.replaceState(window.history.state, "", url);
+  };
+  const sessionList = (
+    <>
+      {sessionsError && (
+        <div className="px-4 py-3 text-sm">
+          <p className="text-destructive">会话列表加载失败：{sessionsError}</p>
+          <Button variant="ghost" onClick={() => void loadSessions()}>
+            重试
+          </Button>
+        </div>
+      )}
+      {!sessionsLoaded && <p className="px-4 py-3 text-sm text-muted-foreground">正在读取会话…</p>}
+      <AgentTree
+        agents={agents}
+        sessions={sessions}
+        activeAgentId={agentId}
+        activeSessionId={sessionId}
+        running={running}
+        onPickAgentAction={pickAgent}
+        onOpenSessionAction={(id) => void openSession(id)}
+        onNewSessionAction={newSession}
+        sessionActions={(session) => (
+          <SessionActions
+            session={session}
+            onChanged={() => void loadSessions()}
+            onRemoved={(id) => {
+              setSessions((all) => all.filter((item) => item.id !== id));
+              if (id === sessionId) {
+                setRunning(false);
+                openSeqRef.current += 1;
+                pendingSteerRef.current.clear();
+                abortRef.current?.abort();
+                setSessionId(null);
+                syncSessionUrl(null);
+                setTurns([]);
+                setQueued([]);
+              }
+            }}
+          />
+        )}
+      />
+    </>
+  );
+
   return (
-    <SidebarProvider className="h-screen min-h-0">
+    <>
       <CommandPalette
         open={paletteOpen}
         onOpenChangeAction={setPaletteOpen}
@@ -965,246 +1068,44 @@ export function Workbench() {
         running={running}
         onOpenSessionAction={(id) => void openSession(id)}
         onNewSessionAction={newSession}
-        onPickAgentAction={(id) => {
-          setAgentId(id);
-          newSession();
-        }}
+        onPickAgentAction={pickAgent}
       />
 
-      {/* 侧栏只装工作台自己的东西:选哪个智能体、开新会话、我干过的活 */}
-      <WorkbenchSidebar
-        headerExtra={
-          <div className="space-y-2 group-data-[collapsible=icon]:hidden">
-            {/*
-              这里只有"选哪个智能体",没有"去改智能体" —— 维护入口统一在
-              侧栏底部的头像菜单里。曾经在选择器旁边挂过一个齿轮,
-              头像菜单补上智能体入口后它就成了同一根侧栏里的第二个同去处。
-            */}
-            <ModelSelector open={pickerOpen} onOpenChange={setPickerOpen}>
-              <ModelSelectorTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full min-w-0 justify-between font-normal"
-                  disabled={running}
-                  title={running ? "运行中不能切换智能体" : "切换智能体"}
-                >
-                  {/*
-                    【为什么空了要单独说】agentId 的兜底值是 "default",一个智能体都
-                    没有时这里会原样显示 "default" —— 看着像真有一个叫 default 的
-                    智能体,而实际上一个都没建。
-                  */}
-                  <span className={cn("truncate", !hasAgents && "text-muted-foreground")}>
-                    {hasAgents ? (current?.name ?? agentId) : "还没有智能体"}
-                  </span>
-                  <ChevronsUpDown className="size-3.5 shrink-0 opacity-50" />
-                </Button>
-              </ModelSelectorTrigger>
-              <ModelSelectorContent title="选择智能体">
-                <ModelSelectorInput placeholder="搜索智能体…" />
-                <ModelSelectorList>
-                  <ModelSelectorEmpty>没有匹配的智能体</ModelSelectorEmpty>
-                  <ModelSelectorGroup heading="智能体">
-                    {agents.map((a) => (
-                      <ModelSelectorItem
-                        key={a.id}
-                        value={`${a.name} ${a.id}`}
-                        onSelect={() => {
-                          // 换智能体等于换一套系统提示与工具,继续用旧会话没有意义
-                          setAgentId(a.id);
-                          newSession();
-                          setPickerOpen(false);
-                        }}
-                      >
-                        <Check
-                          className={cn("size-3.5", a.id === agentId ? "text-brand" : "opacity-0")}
-                        />
-                        <span className="flex-1 truncate">{a.name}</span>
-                        {a.config.outputSchema && (
-                          <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
-                            接口型
-                          </Badge>
-                        )}
-                      </ModelSelectorItem>
-                    ))}
-                  </ModelSelectorGroup>
-
-                  {/*
-                    【为什么一个都没有时要单独给条出路】新账号打开工作台,
-                    trigger 写着"还没有智能体",点开却是一份空列表 —— 去哪建
-                    全靠自己猜。有智能体之后这条就撤了:那时它只是头像菜单里
-                    「我的智能体」的重复。
-
-                    【为什么值里不含"智能体"三个字】搜索是按 value 过滤的 ——
-                    value 里带上常见词,用户搜某个智能体名字时这条会跟着被筛掉又出现,
-                    位置飘忽。给一个不会被正常输入命中的哨兵值。
-                  */}
-                  {!hasAgents && (
-                    <ModelSelectorItem
-                      value="__create__"
-                      onSelect={() => {
-                        setPickerOpen(false);
-                        router.push("/agents");
-                      }}
-                    >
-                      <Plus className="size-3.5 text-muted-foreground" />
-                      <span className="flex-1">新建第一个智能体…</span>
-                    </ModelSelectorItem>
-                  )}
-                </ModelSelectorList>
-              </ModelSelectorContent>
-            </ModelSelector>
-
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full"
-              onClick={newSession}
-              disabled={running}
-              title={running ? "运行中不能新建会话" : "新建会话"}
-            >
-              <Plus className="size-3.5" />
-              新会话
-            </Button>
-          </div>
+      <IdeFrame
+        onSearchAction={() => setPaletteOpen(true)}
+        object={
+          contextReady && !agentContextError && current
+            ? {
+                id: agentId,
+                name: current.name,
+                tab: "chat",
+                sessionId,
+                canReadConfig: current.canRead !== false,
+              }
+            : undefined
         }
+        widgets={
+          <Badge variant={running ? "success" : "outline"}>
+            {running
+              ? "运行中"
+              : activeSession?.agentVersion
+                ? `v${activeSession.agentVersion}`
+                : !activeSession && current?.canWrite !== true && current?.publishedVersion
+                  ? `已发布 v${current.publishedVersion}`
+                  : "草稿"}
+          </Badge>
+        }
+        toolWindow={{
+          title: "智能体",
+          body: sessionList,
+        }}
       >
-        {/* 以下作为 WorkbenchSidebar 的 children —— 侧栏下半部分就是会话列表 */}
-        <>
-          <SidebarGroup className="sticky top-0 z-10 bg-sidebar pb-1 group-data-[collapsible=icon]:hidden">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={sessionQuery}
-                onChange={(event) => setSessionQuery(event.target.value)}
-                placeholder="搜索会话"
-                aria-label="搜索会话"
-                className="h-8 bg-sidebar-accent/40 pl-8 pr-8 text-xs"
-              />
-              {sessionQuery && (
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  className="absolute right-0.5 top-0.5 size-7"
-                  aria-label="清除会话搜索"
-                  onClick={() => setSessionQuery("")}
-                >
-                  <X className="size-3.5" />
-                </Button>
-              )}
-            </div>
-          </SidebarGroup>
-          {/* 【加载失败】与【一条都没有】必须分开:界面长得一样,含义完全相反 */}
-          {sessionsError !== null && (
-            <div className="flex flex-col items-center gap-2 px-3 py-8 text-center group-data-[collapsible=icon]:hidden">
-              <AlertTriangle className="size-5 text-destructive" />
-              <p className="text-xs text-destructive">会话列表没读到</p>
-              <p className="text-[11px] text-muted-foreground">
-                历史还在,是这次请求失败了({sessionsError})
-              </p>
-              <Button variant="outline" size="sm" onClick={() => void loadSessions()}>
-                <RefreshCw className="size-3.5" />
-                重试
-              </Button>
-            </div>
-          )}
-
-          {/* 首次加载:骨架而不是"还没有会话" —— 两者长得一样,用户会以为历史丢了 */}
-          {!sessionsLoaded && sessionsError === null && (
-            <div className="space-y-2 px-3 py-3 group-data-[collapsible=icon]:hidden" aria-busy>
-              {[0, 1, 2, 3].map((i) => (
-                <Skeleton key={i} className="h-8 w-full" />
-              ))}
-            </div>
-          )}
-
-          {sessionsLoaded && sessionsError === null && sessionsForAgent.length === 0 && (
-            <div className="flex flex-col items-center gap-1.5 px-3 py-10 text-center group-data-[collapsible=icon]:hidden">
-              <MessageSquare className="size-5 text-muted-foreground/30" />
-              <p className="text-xs text-muted-foreground">还没有会话</p>
-              <p className="text-[11px] text-muted-foreground/60">发一条消息就会创建一个</p>
-            </div>
-          )}
-
-          {sessionsError === null &&
-            sessionsForAgent.length > 0 &&
-            visibleSessions.length === 0 && (
-              <div className="px-3 py-8 text-center text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
-                没有匹配的会话
-              </div>
-            )}
-
-          {/* 按时间分档 —— 一列没有层次的标题里,人找不到"刚才那条" */}
-          {sessionGroups.map(({ bucket, sessions: group }) => (
-            <SidebarGroup key={bucket}>
-              <SidebarGroupLabel>{bucket}</SidebarGroupLabel>
-              <SidebarMenu>
-                {group.map((s) => {
-                  const active = s.id === sessionId;
-                  const label = s.title || s.id.slice(0, 12);
-                  // 【为什么还要挂 id】批量 invoke 建出来的会话标题会完全一样(清一色 "invoke"),
-                  // 时间也挤在同一天 —— 只有 id 能区分是哪一条
-                  const when = [
-                    relativeTime(activityOf(s)),
-                    s.runCount ? `${s.runCount} 轮` : null,
-                    s.id.slice(0, 6),
-                  ]
-                    .filter(Boolean)
-                    .join(" · ");
-                  return (
-                    <SidebarMenuItem key={s.id}>
-                      <SidebarMenuButton
-                        isActive={active}
-                        tooltip={`${label} · ${when}`}
-                        onClick={() => void openSession(s.id)}
-                        className="relative h-auto py-1.5 data-[active=true]:bg-sidebar-active data-[active=true]:text-sidebar-active-foreground"
-                      >
-                        {/* 选中指示条:全站唯一的强色锚点 */}
-                        <span
-                          className={cn(
-                            "absolute left-0 top-1.5 bottom-1.5 w-0.5 origin-left rounded-r-full bg-brand transition-transform duration-200",
-                            active ? "scale-x-100" : "scale-x-0",
-                          )}
-                        />
-                        <MessageSquare
-                          className={cn(
-                            "shrink-0 transition-colors",
-                            active ? "text-brand" : "text-muted-foreground/60",
-                          )}
-                        />
-                        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                          <span className="truncate text-xs leading-tight">{label}</span>
-                          <span className="truncate text-[10px] leading-tight text-muted-foreground">
-                            {when}
-                          </span>
-                        </span>
-                        {active && running && (
-                          <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-brand" />
-                        )}
-                      </SidebarMenuButton>
-                      <SessionActions
-                        session={s}
-                        onChanged={() => void loadSessions()}
-                        onRemoved={(removedId) => {
-                          setSessions((all) => all.filter((x) => x.id !== removedId));
-                          // 正打开着的会话被归档/删除了:回到空白新会话,而不是停在一个已不存在的会话上
-                          if (removedId === sessionId) newSession();
-                        }}
-                      />
-                    </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            </SidebarGroup>
-          ))}
-        </>
-      </WorkbenchSidebar>
-
-      {/* 主区:对话 + 工作空间,可拖拽调宽并记忆 */}
-      <SidebarInset className="min-w-0 overflow-hidden">
         {layoutReady ? (
-          <ResizablePanelGroup defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
+          <ResizablePanelGroup
+            className="min-h-0 flex-1"
+            defaultLayout={defaultLayout}
+            onLayoutChanged={onLayoutChanged}
+          >
             {/* 尺寸必须带单位:v4 把裸数字当像素 */}
             <ResizablePanel
               id="chat"
@@ -1212,72 +1113,64 @@ export function Workbench() {
               minSize="40%"
               className="workbench-chat-panel flex min-w-0 flex-col"
             >
-              <div
-                className={cn(
-                  "flex shrink-0 items-center gap-2.5 border-b border-border px-3 py-2.5 text-xs",
-                  running && "run-line",
-                )}
-              >
-                <SidebarTrigger className="-ml-1" />
-                <Separator orientation="vertical" className="hidden h-4 sm:block" />
-                <span className="hidden min-w-0 truncate font-medium text-foreground sm:block">
-                  {current?.name ?? agentId}
-                </span>
-                {current?.config.outputSchema && (
-                  <Badge
-                    variant="secondary"
-                    className="hidden h-5 px-1.5 text-[10px] font-normal sm:inline-flex"
-                  >
-                    结构化输出
-                  </Badge>
-                )}
-                <ModelPrice
-                  model={shownModel}
-                  className="hidden min-w-0 truncate text-xs text-muted-foreground lg:block"
-                />
-                <Separator orientation="vertical" className="hidden h-3 sm:block" />
-                <span className="hidden truncate font-mono text-muted-foreground sm:block">
-                  {sessionId ? `${sessionId.slice(0, 8)}…` : "尚未创建会话"}
-                </span>
-                {running && (
-                  <span className="flex shrink-0 items-center gap-1.5 text-brand">
-                    <span className="size-1.5 animate-pulse rounded-full bg-brand" />
-                    <span className="hidden sm:inline">运行中</span>
-                  </span>
-                )}
-
-                <Sheet>
-                  <SheetTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      className="ml-auto md:hidden"
-                      aria-label="打开工作空间"
-                    >
-                      <FolderOpen className="size-4" />
-                    </Button>
-                  </SheetTrigger>
+              <div className="flex min-h-[70px] shrink-0 items-center gap-3 border-b border-border px-7 max-md:px-3">
+                <div className="min-w-0 flex-1">
+                  <h2 className="truncate text-sm font-semibold">
+                    {activeSession ? sessionLabel(activeSession) : "新会话"}
+                  </h2>
+                  <ModelPrice
+                    model={shownModel}
+                    className="truncate text-xs text-muted-foreground"
+                  />
+                </div>
+                <button
+                  type="button"
+                  aria-label="查看执行详情"
+                  title="查看执行详情"
+                  aria-pressed={rightTab === "runs"}
+                  onClick={() => toggleRight("runs")}
+                  className={cn(
+                    "flex size-11 shrink-0 items-center justify-center rounded-md hover:bg-accent",
+                    rightTab === "runs" && "bg-accent",
+                  )}
+                >
+                  <ListTree className="size-[18px]" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="打开工作空间"
+                  title="打开工作空间"
+                  aria-pressed={rightTab === "files"}
+                  onClick={() => toggleRight("files")}
+                  className={cn(
+                    "flex size-11 shrink-0 items-center justify-center rounded-md hover:bg-accent",
+                    rightTab === "files" && "bg-accent",
+                  )}
+                >
+                  <FolderOpen className="size-[18px]" />
+                </button>
+                <Sheet
+                  open={mobileLayout && rightTab !== null}
+                  onOpenChange={(open) => {
+                    if (!open) setRightTab(null);
+                  }}
+                >
                   <SheetContent className="w-[92vw] gap-0 p-0" side="right">
-                    <SheetTitle className="sr-only">工作空间</SheetTitle>
+                    <SheetTitle className="sr-only">
+                      {rightTab === "runs" ? "执行详情" : "工作空间"}
+                    </SheetTitle>
                     <SheetDescription className="sr-only">
-                      浏览、预览和下载当前会话文件
+                      查看当前会话的文件或工具执行过程
                     </SheetDescription>
-                    <FilePanel sessionId={sessionId} refreshKey={filesKey} live={running} />
+                    <div className="min-h-0 flex-1 pt-12">
+                      {rightTab === "runs" ? (
+                        <RunTree turns={turns} />
+                      ) : (
+                        <FilePanel sessionId={sessionId} refreshKey={filesKey} live={running} />
+                      )}
+                    </div>
                   </SheetContent>
                 </Sheet>
-
-                {/* 快捷键本身不可发现,得留一个看得见的入口 */}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 shrink-0 gap-2 text-muted-foreground md:ml-auto"
-                  onClick={() => setPaletteOpen(true)}
-                >
-                  <Search className="size-3.5" />
-                  <span className="hidden sm:inline">搜索</span>
-                  <Kbd>⌘K</Kbd>
-                </Button>
               </div>
 
               <div
@@ -1290,8 +1183,8 @@ export function Workbench() {
               >
                 {/* 拖拽覆盖层 */}
                 {dragActive && (
-                  <div className="pointer-events-none absolute inset-2 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary/60 bg-primary/[0.035]">
-                    <div className="flex items-center gap-2 rounded-full border border-primary/25 bg-background/95 px-4 py-2.5 text-sm font-medium text-foreground shadow-lg">
+                  <div className="pointer-events-none absolute inset-2 z-40 flex items-center justify-center rounded-lg border-2 border-dashed border-primary/60 bg-primary/[0.035]">
+                    <div className="flex items-center gap-2 rounded-md border border-primary/25 bg-popover px-4 py-2 text-sm font-medium text-foreground shadow-lg">
                       松手添加文件
                     </div>
                   </div>
@@ -1312,13 +1205,19 @@ export function Workbench() {
                   同一个失败出现两遍。
                 */}
                 {/* 对话区域 */}
-                <VariablePrompt
-                  key={`${agentId}-${sessionId ?? ""}`}
-                  agentId={agentId}
-                  sessionId={sessionId}
-                />
+                {contextReady && !agentContextError && (
+                  <VariablePrompt
+                    key={`${agentId}-${sessionId ?? ""}`}
+                    agentId={agentId}
+                    sessionId={sessionId}
+                  />
+                )}
                 <div className="relative flex min-h-0 flex-1 flex-col">
-                  {historyLoading ? (
+                  {agentContextError ? (
+                    <output className="flex min-h-0 flex-1 items-center justify-center px-6 text-sm text-destructive">
+                      {agentContextError}
+                    </output>
+                  ) : historyLoading ? (
                     <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
                       正在读取会话历史…
                     </div>
@@ -1378,6 +1277,7 @@ export function Workbench() {
                   ) : (
                     <ChatThread
                       key={sessionId ?? "new-session"}
+                      agentName={current?.name}
                       turns={turns}
                       onRerunAction={stableRerunAction}
                       onAnswerAction={stableAnswerAction}
@@ -1388,27 +1288,31 @@ export function Workbench() {
                 </div>
 
                 <ApprovalBar
+                  key={sessionId ?? "new"}
                   sessionId={sessionId}
                   running={running}
                   onQuestionsChange={setPendingQuestions}
                   refreshKey={approvalRefresh}
                 />
 
-                {/* 输入区 — absolute 底部浮动（t3code 风格） */}
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20">
+                {/* 输入区占据独立高度,消息与提问在上方滚动,不会被输入框盖住。 */}
+                <div className="z-20 shrink-0 py-3">
                   <div className="w-full px-3 sm:px-5">
-                    <div className="pointer-events-auto mx-auto max-w-3xl">
-                      {turns.length === 0 && starters.length > 0 && (
-                        <Suggestions className="pb-3">
-                          {starters.map((text) => (
-                            <Suggestion
-                              key={text}
-                              suggestion={text}
-                              onClick={handleSuggestionClick}
-                            />
-                          ))}
-                        </Suggestions>
-                      )}
+                    <div className="pointer-events-auto mx-auto max-w-[850px]">
+                      {contextReady &&
+                        !agentContextError &&
+                        turns.length === 0 &&
+                        starters.length > 0 && (
+                          <Suggestions className="pb-3">
+                            {starters.map((text) => (
+                              <Suggestion
+                                key={text}
+                                suggestion={text}
+                                onClick={handleSuggestionClick}
+                              />
+                            ))}
+                          </Suggestions>
+                        )}
                       <div className="pb-4">
                         {slashMenuOpen && (
                           <SlashCommandMenu
@@ -1449,11 +1353,14 @@ export function Workbench() {
                           </ul>
                         )}
                         <PromptInput globalDrop multiple onSubmit={handlePromptSubmit}>
-                          <PromptInputHeader>
+                          {/* 没有附件时这一段是空的,但仍带着上内边距,会把占位文字往下顶 */}
+                          <PromptInputHeader className="empty:hidden">
                             <AttachmentsDisplay />
                           </PromptInputHeader>
                           <PromptInputBody>
                             <PromptInputTextarea
+                              aria-label="消息"
+                              className="min-h-10"
                               value={input}
                               onChange={(event) => {
                                 setInput(event.target.value);
@@ -1482,7 +1389,7 @@ export function Workbench() {
                                   setInput("");
                                 }
                               }}
-                              disabled={historyLoading || historyError !== null || !hasAgents}
+                              disabled={composerBlocked}
                               placeholder={
                                 running
                                   ? "运行中也可以继续补充,会交给正在干活的智能体"
@@ -1490,33 +1397,39 @@ export function Workbench() {
                               }
                             />
                           </PromptInputBody>
+                          {/*
+                            左边是"往里加东西"(附件)和上下文用量,右边是"发出去"。
+                            曾经三样东西用 justify-between 平分,附件按钮孤零零地落在正中间。
+                          */}
                           <PromptInputFooter>
-                            {contextUsed > 0 ? (
-                              <ContextWindowMeter
-                                usedTokens={contextUsed}
-                                // Claude's standard context window. Replace this
-                                // with provider model metadata when available.
-                                maxTokens={200_000}
-                                totalProcessed={totalProcessed}
-                              />
-                            ) : (
-                              <span />
-                            )}
                             <PromptInputTools>
                               <PromptInputActionMenu>
-                                <PromptInputActionMenuTrigger tooltip="添加附件" />
+                                <PromptInputActionMenuTrigger
+                                  aria-label="添加附件"
+                                  tooltip="添加附件"
+                                />
                                 <PromptInputActionMenuContent>
                                   <PromptInputActionAddAttachments label="添加图片或文件" />
                                 </PromptInputActionMenuContent>
                               </PromptInputActionMenu>
+                              {contextUsed > 0 && (
+                                <ContextWindowMeter
+                                  usedTokens={contextUsed}
+                                  maxTokens={200_000}
+                                  totalProcessed={totalProcessed}
+                                />
+                              )}
                             </PromptInputTools>
-                            <PromptInputSubmit
-                              status={running ? "streaming" : "ready"}
-                              onStop={cancelRun}
-                              disabled={
-                                !running && (historyLoading || historyError !== null || !hasAgents)
-                              }
-                            />
+                            <div className="flex items-center gap-3">
+                              <PromptInputSubmit
+                                aria-label={running ? "停止运行" : "发送消息"}
+                                title={running ? "停止运行" : "发送消息"}
+                                className="size-11"
+                                status={running ? "streaming" : "ready"}
+                                onStop={cancelRun}
+                                disabled={!running && composerBlocked}
+                              />
+                            </div>
                           </PromptInputFooter>
                         </PromptInput>
                       </div>
@@ -1526,27 +1439,62 @@ export function Workbench() {
               </div>
             </ResizablePanel>
 
-            <ResizableHandle withHandle className="workbench-panel-handle" />
-
-            {/* 右栏:工作空间文件 */}
-            <ResizablePanel
-              id="files"
-              defaultSize="21%"
-              minSize="14%"
-              maxSize="45%"
-              className="workbench-files-panel panel-edge min-w-0 bg-card/40"
-            >
-              <FilePanel
-                sessionId={mobileLayout ? null : sessionId}
-                refreshKey={filesKey}
-                live={running}
-              />
-            </ResizablePanel>
+            {rightTab && !mobileLayout && (
+              <>
+                <ResizableHandle className="workbench-panel-handle" />
+                <ResizablePanel
+                  id="files"
+                  defaultSize="24%"
+                  minSize="16%"
+                  maxSize="45%"
+                  className="workbench-files-panel flex min-w-0 flex-col bg-sidebar"
+                >
+                  {/* 右侧工具窗口:工作空间与运行两个标签,和右侧工具窗口条上的两个图标对应 */}
+                  <div className="flex h-9 shrink-0 items-stretch gap-3 border-b border-border px-3 text-sm">
+                    {(
+                      [
+                        ["files", "工作空间"],
+                        ["runs", "运行"],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setRightTab(key)}
+                        className={cn(
+                          rightTab === key
+                            ? "text-foreground shadow-[inset_0_-2px_0_var(--primary)]"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                    <span className="flex-1" />
+                    <button
+                      type="button"
+                      aria-label="收起工具窗口"
+                      onClick={() => toggleRight(rightTab)}
+                      className="my-auto flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+                  <div className="min-h-0 flex-1">
+                    {rightTab === "files" ? (
+                      <FilePanel sessionId={sessionId} refreshKey={filesKey} live={running} />
+                    ) : (
+                      <RunTree turns={turns} />
+                    )}
+                  </div>
+                </ResizablePanel>
+              </>
+            )}
           </ResizablePanelGroup>
         ) : (
           <div className="h-full w-full bg-background" aria-hidden="true" />
         )}
-      </SidebarInset>
-    </SidebarProvider>
+      </IdeFrame>
+    </>
   );
 }

@@ -111,9 +111,9 @@ export function KnowledgeUpload({
           {results.map((r, i) => (
             <li key={`${r.file}-${i}`} className="flex items-start gap-1.5">
               {r.ok ? (
-                <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
+                <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-success" />
               ) : r.uncertain ? (
-                <HelpCircle className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
+                <HelpCircle className="mt-0.5 size-3.5 shrink-0 text-warning" />
               ) : (
                 <XCircle className="mt-0.5 size-3.5 shrink-0 text-destructive" />
               )}
@@ -128,7 +128,7 @@ export function KnowledgeUpload({
                     {r.docs.length > 1 ? `,较长,已切成 ${r.docs.length} 篇` : ""}
                   </span>
                 ) : (
-                  <span className={r.uncertain ? "text-amber-700" : "text-destructive"}>
+                  <span className={r.uncertain ? "text-warning" : "text-destructive"}>
                     {" "}
                     — {r.reason}
                   </span>

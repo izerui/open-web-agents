@@ -1,5 +1,6 @@
 "use client";
 
+import { NavigationCommands } from "@/components/ide/nav-palette";
 import {
   CommandDialog,
   CommandEmpty,
@@ -11,40 +12,10 @@ import {
   CommandShortcut,
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
-import {
-  BarChart3,
-  Bot,
-  Cpu,
-  History,
-  Lock,
-  MessageSquare,
-  Plus,
-  ScrollText,
-  Store,
-  Terminal,
-} from "lucide-react";
-import { useRouter } from "next/navigation";
+import { Bot, MessageSquare, Plus } from "lucide-react";
 import { useEffect } from "react";
-import { activityOf, relativeTime } from "./session-groups";
+import { activityOf, relativeTime, sessionLabel } from "./session-groups";
 import type { AgentSummary, SessionSummary } from "./types";
-
-/**
- * 可跳转的设置项。
- *
- * 【为什么不含管理员页】命令面板拿不到当前用户的角色(它只收到会话和智能体),
- * 把 /admin/* 列在这儿,非管理员搜出来点进去会被服务端弹回工作台 ——
- * 一个搜得到却用不了的结果比没有更让人困惑。管理入口只在用户菜单里出现。
- */
-const PAGES = [
-  { href: "/market", label: "智能体市场", icon: Store },
-  { href: "/agents", label: "我的智能体", icon: Bot },
-  { href: "/settings/runs", label: "运行记录", icon: History },
-  { href: "/settings/keys", label: "接入中心", icon: Terminal },
-  { href: "/settings/audit", label: "审计日志", icon: ScrollText },
-  { href: "/settings/usage", label: "token 用量", icon: BarChart3 },
-  { href: "/settings/credentials", label: "平台算力", icon: Cpu },
-  { href: "/settings/account", label: "账号安全", icon: Lock },
-] as const;
 
 /**
  * Cmd/Ctrl+K 命令面板:会话搜索、切换智能体、跳页面。
@@ -73,7 +44,6 @@ export function CommandPalette({
   onNewSessionAction: () => void;
   onPickAgentAction: (id: string) => void;
 }) {
-  const router = useRouter();
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
@@ -124,7 +94,7 @@ export function CommandPalette({
                   onSelect={() => run(() => onOpenSessionAction(s.id))}
                 >
                   <MessageSquare />
-                  <span className="flex-1 truncate">{s.title || s.id.slice(0, 12)}</span>
+                  <span className="flex-1 truncate">{sessionLabel(s)}</span>
                   {/* 标题可能整批重复,id 是唯一能区分的东西,别只留时间 */}
                   <CommandShortcut>
                     {relativeTime(activityOf(s))}
@@ -151,6 +121,10 @@ export function CommandPalette({
                   {/* 智能体不能跟"前往构建器"共用扳手图标,一列看下来分不清哪行是什么 */}
                   <Bot className={cn(a.id === currentAgentId && "text-brand")} />
                   <span className="flex-1 truncate">{a.name}</span>
+                  {/* 同名智能体(克隆来的、批量建的)只有 id 能分清 */}
+                  {agents.some((b) => b.id !== a.id && b.name === a.name) && (
+                    <CommandShortcut className="font-mono">{a.id.slice(0, 6)}</CommandShortcut>
+                  )}
                 </CommandItem>
               ))}
             </CommandGroup>
@@ -158,19 +132,7 @@ export function CommandPalette({
         )}
 
         <CommandSeparator />
-        <CommandGroup heading="前往">
-          {PAGES.map((p) => (
-            <CommandItem
-              key={p.href}
-              value={`前往 ${p.label} ${p.href}`}
-              // 客户端路由跳转:曾经是 window.location.assign 整页刷新,工作台状态全丢
-              onSelect={() => run(() => router.push(p.href))}
-            >
-              <p.icon />
-              <span>{p.label}</span>
-            </CommandItem>
-          ))}
-        </CommandGroup>
+        <NavigationCommands onSelectedAction={() => onOpenChangeAction(false)} />
       </CommandList>
     </CommandDialog>
   );

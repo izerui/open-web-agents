@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Open Web Agents 交互样例</title>
+  <!--
+  方向 A：Alan Cooper 目标导向。五项工作决定一级导航，会话属于工作台。
+  桌面距离、安静的操作界面；容量为一段对话、三次工具过程、一份待回答问题。
+  文件与执行详情随任务打开，不设永久右栏。所有数据为本地交互样例。
+  图标由已安装 lucide-react 经 react-dom/server 渲染，机械内嵌，无外部请求。
+  -->
+  <style>
+    :root{color-scheme:dark;--bg:#1e1f22;--panel:#2b2d30;--line:#393b40;--text:#dfe1e5;--muted:#a7abb3;--blue:#3574f0;--bright:#548af7;--selected:#2e436e;--green:#5fb865;--red:#db5c5c;--amber:#e0b153}
+    *{box-sizing:border-box;letter-spacing:0}
+    body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+    button,input,select,textarea{font:inherit;color:inherit}
+    button{cursor:pointer;border:1px solid transparent;border-radius:6px;background:transparent;min-height:44px;padding:8px 12px;display:inline-flex;align-items:center;justify-content:center;gap:8px}
+    button:hover{background:#35373b}button:disabled{opacity:1;color:#b8bdc7;background:#393b40;border-color:#50535a;cursor:not-allowed}
+    button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible{outline:2px solid var(--bright);outline-offset:3px}
+    svg{flex:none;vertical-align:middle}h1,h2,h3,p{margin:0;overflow-wrap:anywhere}h1{font-size:20px;font-weight:600;line-height:1.4}h2{font-size:17px;font-weight:600}h3{font-size:14px;font-weight:600}
+    small,.caption{font-size:12px;color:var(--muted)}p+p{margin-top:12px}
+    input,select,textarea{background:var(--bg);border:1px solid #50535a;border-radius:6px;padding:10px 12px;width:100%;min-width:0;min-height:44px}
+    textarea{resize:vertical;line-height:1.7;min-height:110px}
+    label{display:grid;gap:7px}input[type=checkbox],input[type=radio]{accent-color:var(--blue);width:18px;min-height:18px;margin:0}
+    .check{display:flex;align-items:center;gap:10px;min-height:44px}.muted{color:var(--muted)}.good{color:var(--green)}.bad{color:#ef8888}.warning{color:var(--amber)}
+    .row{display:flex;align-items:center;gap:10px;min-width:0}.spread{justify-content:space-between}.wrap{flex-wrap:wrap}.grow{flex:1;min-width:0}
+    .primary{background:#306bdc;color:#fff}.primary:hover{background:#2962d5}.outline{border-color:#50535a}.icon{width:44px;padding:10px;flex:none}
+    .pill{border:1px solid var(--line);padding:3px 8px;border-radius:4px;font-size:12px;white-space:nowrap;color:var(--muted)}
+    .brand{display:flex;align-items:center;gap:9px;font-weight:600}.mark{background:#306bdc;color:#fff;display:grid;place-items:center;width:30px;height:30px;border-radius:6px;font-size:13px;font-weight:700;flex:none}
+    .topbar{height:54px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;gap:12px}
+    .topbar .brand{font-size:14px}.top-actions{display:flex;align-items:center;gap:8px}.search-trigger{color:var(--muted)}
+    .shell{display:grid;grid-template-columns:176px minmax(0,1fr);gap:6px;padding:0 6px 6px;height:calc(100dvh - 54px)}
+    .global{background:var(--panel);border-radius:12px;padding:16px 8px 8px;display:flex;flex-direction:column;min-height:0}
+    .nav-label{font-size:12px;color:var(--muted);padding:0 12px 12px}.nav-item{width:100%;justify-content:flex-start;padding:10px 12px;margin-bottom:4px;min-height:48px}
+    .nav-item.active{background:var(--selected);color:#fff}.nav-item.active svg{color:#94b8ff}.nav-bottom{margin-top:auto;border-top:1px solid var(--line);padding-top:10px}
+    .identity{display:flex;align-items:center;gap:9px;width:100%;justify-content:flex-start}.avatar{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:#42454a;flex:none}
+    #main{min-width:0;min-height:0;position:relative}.panel{border-radius:12px;background:var(--panel);overflow:hidden}
+    .workbench{height:100%;display:grid;grid-template-columns:232px minmax(0,1fr);gap:6px}
+    .sessions{padding:15px 10px;display:flex;flex-direction:column;min-height:0}.sessions h2{font-size:14px}.sessions .outline{margin:14px 0 20px}
+    .session-list{overflow:auto}.session-item{width:100%;display:block;text-align:left;margin-bottom:7px;padding:12px;line-height:1.7}
+    .session-item strong{display:block;font-size:14px;font-weight:500}.session-item small{display:block;margin-top:4px}.session-item.active{background:var(--selected)}.session-item.active small{color:#c3c9d4}
+    .session-foot{margin-top:auto;padding:16px 10px 4px;color:var(--muted);font-size:12px}
+    .conversation{display:flex;flex-direction:column;min-height:0;position:relative}
+    .conversation-head{padding:18px 24px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center;justify-content:space-between}
+    .conversation-head h1{font-size:16px}.conversation-head .subtitle{margin-top:4px}.transcript{flex:1;overflow:auto;padding:20px max(24px,calc((100% - 800px)/2));scrollbar-width:thin}
+    .message{display:grid;grid-template-columns:30px minmax(0,1fr);gap:12px;margin-bottom:20px}.message .byline{font-weight:600;margin:2px 0 10px}.message p{line-height:1.85}
+    .agent-avatar{background:var(--selected);color:#a8c5ff;border-radius:7px}.user-avatar{font-size:12px}
+    .tool-summary{margin:12px 0;border-block:1px solid var(--line)}
+    .tool-line{display:flex;align-items:center;gap:9px;min-height:34px;font-size:14px}.tool-line code{color:var(--muted);font-size:12px;margin-left:auto}.tool-summary button{padding-left:0;color:var(--muted);font-size:14px}
+    .files{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.file-chip{border:1px solid #50535a;font:12px ui-monospace,monospace;justify-content:flex-start}.file-chip svg{color:var(--muted)}
+    .question{border-top:1px solid var(--line);padding-top:12px;margin-top:12px}.choices{display:flex;flex-wrap:wrap;gap:10px;margin:10px 0}
+    .choice{padding:9px 12px;border:1px solid #50535a;border-radius:6px;min-height:44px;cursor:pointer}.choice:has(input:checked){border-color:var(--bright);background:var(--selected)}
+    .question-footer{display:flex;justify-content:space-between;align-items:center;gap:10px}.question-footer small{color:var(--amber)}
+    .composer-wrap{padding:10px 24px 16px}.composer{border:1px solid #565961;background:var(--bg);border-radius:10px;padding:10px 14px;max-width:800px;margin:auto}
+    .composer textarea{border:0;min-height:44px;height:44px;max-height:140px;padding:0;resize:none;background:transparent}.composer-bottom{display:flex;align-items:center;justify-content:space-between}
+    .composer-note{text-align:center;font-size:12px;color:var(--muted);margin-top:8px}.blank{padding:55px 12px;text-align:center;color:var(--muted)}.blank svg{margin-bottom:12px}.blank h2{color:var(--text);margin-bottom:8px}
+    .page{height:100%;display:flex;flex-direction:column}.page-head{padding:26px 32px 20px;border-bottom:1px solid var(--line)}.page-head p{margin-top:5px;color:var(--muted)}
+    .page-body{padding:24px 32px;overflow:auto;flex:1;min-height:0}.section{max-width:940px;margin:0 auto}.section.wide{max-width:1100px}
+    .toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:22px}.toolbar input{max-width:330px}.toolbar select{width:auto;max-width:100%}
+    .tabs{display:flex;gap:18px;border-bottom:1px solid var(--line);padding:0 32px;overflow:auto;flex:none;scrollbar-width:thin}
+    .tab{white-space:nowrap;border-radius:0;color:var(--muted);border-bottom:2px solid transparent;padding:14px 4px}.tab.active{border-bottom-color:var(--bright);color:#fff}
+    .agent-list{border-top:1px solid var(--line)}.agent-row{border-bottom:1px solid var(--line);padding:22px 0;display:flex;align-items:center;gap:16px}.agent-row .agent-avatar{width:42px;height:42px;display:grid;place-items:center}
+    .agent-row h2{font-size:16px}.agent-row p{margin-top:4px;color:var(--muted)}.agent-row button{margin-left:auto}
+    .form-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:22px;margin-top:24px}.full{grid-column:1/-1}.field-help{color:var(--muted);font-size:12px}
+    .section-heading{margin:28px 0 14px}.section-heading:first-child{margin-top:0}.help-line{border-bottom:1px solid var(--line);padding-bottom:18px;color:var(--muted)}
+    .savebar{border-top:1px solid var(--line);padding:13px 32px;display:flex;justify-content:space-between;align-items:center;gap:12px}
+    .notice{padding:12px 0;color:var(--muted)}.notice svg{margin-right:8px}.notice.warning{color:var(--amber)}
+    .details-list details{border-bottom:1px solid var(--line);padding:12px 0}summary{min-height:44px;cursor:pointer;padding:10px 0}
+    .data-list{border-top:1px solid var(--line)}.data-row{width:100%;border-radius:0;border-bottom:1px solid var(--line);display:grid;grid-template-columns:minmax(0,1fr) 110px 80px 24px;text-align:left;gap:18px;padding:18px 10px}
+    .data-row strong{font-weight:500;display:block}.data-row small{display:block}.table-head{color:var(--muted);font-size:12px;min-height:40px;padding-block:8px}
+    .metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-bottom:1px solid var(--line);margin-bottom:26px;padding:6px 0 24px}
+    .metric{padding:0 25px;border-left:1px solid var(--line)}.metric:first-child{padding-left:0;border:0}.metric strong{font-size:30px;font-weight:500;display:block;margin-top:8px}
+    pre{font:13px/1.8 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:16px;white-space:pre-wrap;overflow-wrap:anywhere;margin:14px 0;max-width:100%}
+    code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}
+    dialog{background:var(--panel);color:var(--text);border:1px solid #50535a;border-radius:12px;padding:0;width:min(560px,calc(100vw - 24px));max-height:calc(100dvh - 24px)}
+    dialog::backdrop{background:#0009}dialog .dialog-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 20px;border-bottom:1px solid var(--line)}
+    .dialog-body{padding:20px;overflow:auto}.dialog-body label+label{margin-top:16px}.dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
+    #drawer{margin:6px 6px 6px auto;height:calc(100dvh - 12px);max-height:none;width:min(460px,calc(100vw - 12px))}
+    #drawer .dialog-body{height:calc(100% - 73px)}.search-result{display:flex;width:100%;justify-content:space-between;border-bottom:1px solid var(--line);border-radius:0}
+    #toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:12px 18px;background:#dfe1e5;color:#1e1f22;border-radius:6px;z-index:20;max-width:calc(100vw - 32px);box-shadow:0 6px 24px #0006}
+    #toast:empty{display:none}.mobile-only{display:none}.inline-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.divider{border-top:1px solid var(--line);margin:24px 0}
+    .mobile-menu .nav-item{margin:0}.mobile-menu .identity{margin-top:12px}.knowledge-item{padding:14px 0;border-bottom:1px solid var(--line)}
+    @media(max-width:1000px){.conversation-head{padding:16px}.transcript{padding:24px 18px}.composer-wrap{padding:12px 16px}.workbench{grid-template-columns:210px minmax(0,1fr)}.head-actions .button-text{display:none}}
+    @media(max-width:760px){
+      body{font-size:16px}.topbar{height:58px;padding:0 10px;gap:5px}.topbar .brand{font-size:12px;gap:7px}.topbar .mark{width:27px;height:27px;font-size:11px}
+      .top-actions{gap:0}.topbar .pill{padding:2px 6px;font-size:12px}.search-trigger{width:44px;padding:10px}.search-trigger span:last-child{display:none}
+      .shell{height:calc(100dvh - 58px);display:block;padding:0 6px 6px}.global{display:none}.mobile-only{display:inline-flex}
+      #main{height:100%}.workbench{display:block}.sessions{display:none}.conversation{height:100%}.conversation-head{padding:12px;gap:4px;align-items:flex-start}
+      .conversation-head h1{font-size:15px}.conversation-head .subtitle{font-size:12px}.head-actions{gap:0}.head-actions button{width:44px;padding:10px}
+      .transcript{padding:22px 14px}.message{gap:9px;grid-template-columns:26px minmax(0,1fr);margin-bottom:24px}.message .avatar{width:26px;height:26px}
+      .message p{line-height:1.8}.tool-line{font-size:13px;flex-wrap:wrap;gap:7px;padding:5px 0}.tool-line code{margin-left:0}.files{gap:6px}.file-chip{font-size:12px;padding:7px}
+      .composer-wrap{padding:8px 12px 12px}.composer{padding:10px}.composer textarea{font-size:16px;min-height:44px}.composer-note{font-size:12px}.composer-bottom .caption{max-width:210px}
+      .question-footer{align-items:flex-start;flex-wrap:wrap}.page-head{padding:20px 18px 16px}.page-head .row{flex-wrap:wrap}.page-head h1{font-size:20px}
+      .page-body{padding:20px 18px}.tabs{padding:0 18px;gap:18px}.tab{font-size:14px}.form-grid{grid-template-columns:1fr;gap:18px}.full{grid-column:auto}
+      .agent-row{align-items:flex-start;gap:10px;flex-wrap:wrap}.agent-row .grow{min-width:180px}.agent-row button{margin-left:52px}
+      .savebar{padding:12px 18px;flex-wrap:wrap;font-size:13px}.toolbar{gap:10px}.toolbar input{max-width:none}.data-row{grid-template-columns:minmax(0,1fr) 64px;gap:8px;padding:15px 0}.data-row .source{grid-row:2;font-size:12px}.data-row>svg{display:none}
+      .metrics{gap:12px}.metric{padding:0 0 0 12px}.metric strong{font-size:24px}.metric .caption{font-size:12px}.dialog-body{padding:18px}pre{font-size:12px}
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="row">
+      <button class="icon mobile-only" data-action="navigation" aria-label="打开导航" title="打开导航"><span data-icon="PanelLeft"></span></button>
+      <div class="brand"><span class="mark">OW</span><span>Open Web Agents</span></div>
+    </div>
+    <div class="top-actions"><span class="pill">交互样例</span><button id="search-trigger" class="search-trigger" data-action="search" aria-label="搜索目的地" title="搜索目的地"><span data-icon="Search"></span><span>搜索</span></button></div>
+  </header>
+  <div class="shell">
+    <nav class="global" aria-label="主导航" id="global-nav"></nav>
+    <main id="main"></main>
+  </div>
+  <dialog id="modal" aria-labelledby="modal-title" closedby="any"></dialog>
+  <dialog id="drawer" aria-labelledby="drawer-title" closedby="any"></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script>
+    const ICONS = {
+  "MessageSquare": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-message-square\" aria-hidden=\"true\"><path d=\"M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z\"></path></svg>",
+  "Bot": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-bot\" aria-hidden=\"true\"><path d=\"M12 8V4H8\"></path><rect width=\"16\" height=\"12\" x=\"4\" y=\"8\" rx=\"2\"></rect><path d=\"M2 14h2\"></path><path d=\"M20 14h2\"></path><path d=\"M15 13v2\"></path><path d=\"M9 13v2\"></path></svg>",
+  "Activity": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-activity\" aria-hidden=\"true\"><path d=\"M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2\"></path></svg>",
+  "KeyRound": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-key-round\" aria-hidden=\"true\"><path d=\"M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z\"></path><circle cx=\"16.5\" cy=\"7.5\" r=\".5\" fill=\"currentColor\"></circle></svg>",
+  "Wallet": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-wallet\" aria-hidden=\"true\"><path d=\"M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1\"></path><path d=\"M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4\"></path></svg>",
+  "Settings": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-settings\" aria-hidden=\"true\"><path d=\"M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915\"></path><circle cx=\"12\" cy=\"12\" r=\"3\"></circle></svg>",
+  "Search": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-search\" aria-hidden=\"true\"><path d=\"m21 21-4.34-4.34\"></path><circle cx=\"11\" cy=\"11\" r=\"8\"></circle></svg>",
+  "Plus": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-plus\" aria-hidden=\"true\"><path d=\"M5 12h14\"></path><path d=\"M12 5v14\"></path></svg>",
+  "PanelLeft": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-panel-left\" aria-hidden=\"true\"><rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\"></rect><path d=\"M9 3v18\"></path></svg>",
+  "X": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-x\" aria-hidden=\"true\"><path d=\"M18 6 6 18\"></path><path d=\"m6 6 12 12\"></path></svg>",
+  "ArrowUp": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-arrow-up\" aria-hidden=\"true\"><path d=\"m5 12 7-7 7 7\"></path><path d=\"M12 19V5\"></path></svg>",
+  "ChevronRight": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-chevron-right\" aria-hidden=\"true\"><path d=\"m9 18 6-6-6-6\"></path></svg>",
+  "FileText": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-file-text\" aria-hidden=\"true\"><path d=\"M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z\"></path><path d=\"M14 2v5a1 1 0 0 0 1 1h5\"></path><path d=\"M10 9H8\"></path><path d=\"M16 13H8\"></path><path d=\"M16 17H8\"></path></svg>",
+  "Folder": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-folder\" aria-hidden=\"true\"><path d=\"M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z\"></path></svg>",
+  "Terminal": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-terminal\" aria-hidden=\"true\"><path d=\"M12 19h8\"></path><path d=\"m4 17 6-6-6-6\"></path></svg>",
+  "Check": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-check\" aria-hidden=\"true\"><path d=\"M20 6 9 17l-5-5\"></path></svg>",
+  "CircleAlert": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-circle-alert\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"></circle><line x1=\"12\" x2=\"12\" y1=\"8\" y2=\"12\"></line><line x1=\"12\" x2=\"12.01\" y1=\"16\" y2=\"16\"></line></svg>",
+  "Download": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-download\" aria-hidden=\"true\"><path d=\"M12 15V3\"></path><path d=\"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4\"></path><path d=\"m7 10 5 5 5-5\"></path></svg>",
+  "Copy": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-copy\" aria-hidden=\"true\"><rect width=\"14\" height=\"14\" x=\"8\" y=\"8\" rx=\"2\" ry=\"2\"></rect><path d=\"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2\"></path></svg>",
+  "Save": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-save\" aria-hidden=\"true\"><path d=\"M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z\"></path><path d=\"M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7\"></path><path d=\"M7 3v4a1 1 0 0 0 1 1h7\"></path></svg>",
+  "ArrowLeft": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-arrow-left\" aria-hidden=\"true\"><path d=\"m12 19-7-7 7-7\"></path><path d=\"M19 12H5\"></path></svg>",
+  "Sparkles": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-sparkles\" aria-hidden=\"true\"><path d=\"M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z\"></path><path d=\"M20 2v4\"></path><path d=\"M22 4h-4\"></path><circle cx=\"4\" cy=\"20\" r=\"2\"></circle></svg>",
+  "Shield": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-shield\" aria-hidden=\"true\"><path d=\"M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z\"></path></svg>",
+  "UserRound": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-user-round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"8\" r=\"5\"></circle><path d=\"M20 21a8 8 0 0 0-16 0\"></path></svg>",
+  "SlidersHorizontal": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-sliders-horizontal\" aria-hidden=\"true\"><path d=\"M10 5H3\"></path><path d=\"M12 19H3\"></path><path d=\"M14 3v4\"></path><path d=\"M16 17v4\"></path><path d=\"M21 12h-9\"></path><path d=\"M21 19h-5\"></path><path d=\"M21 5h-7\"></path><path d=\"M8 10v4\"></path><path d=\"M8 12H3\"></path></svg>",
+  "Send": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-send\" aria-hidden=\"true\"><path d=\"M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z\"></path><path d=\"m21.854 2.147-10.94 10.939\"></path></svg>",
+  "BookOpen": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-book-open\" aria-hidden=\"true\"><path d=\"M12 5v16\"></path><path d=\"M20.001 19A2 2 0 0022 17V5a2 2 0 00-1.999-2L16 3.002A5 5 0 0012 5a5 5 0 00-4-2H4a2 2 0 00-2 2v12a2 2 0 001.999 2H8a5 5 0 014 2 5 5 0 014-2z\"></path></svg>",
+  "CircleHelp": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-circle-question-mark\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"></circle><path d=\"M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3\"></path><path d=\"M12 17h.01\"></path></svg>",
+  "MoreHorizontal": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-ellipsis\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"1\"></circle><circle cx=\"19\" cy=\"12\" r=\"1\"></circle><circle cx=\"5\" cy=\"12\" r=\"1\"></circle></svg>"
+};
+    const $ = (s, root=document) => root.querySelector(s);
+    const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const icon = name => ICONS[name] || '';
+    const btn = (label, action, name='', cls='', extra='') => `<button class="${cls}" data-action="${action}" ${extra}>${name ? icon(name) : ''}${label}</button>`;
+    const iconBtn = (label, action, name) => btn('',action,name,'icon',`aria-label="${label}" title="${label}"`);
+    const empty = (title,text,name='Folder') => `<div class="blank">${icon(name)}<h2>${title}</h2><p>${text}</p></div>`;
+    const nav = [['workbench','工作台','MessageSquare'],['agents','智能体','Bot'],['runs','运行记录','Activity'],['api','接口接入','KeyRound'],['billing','用量与费用','Wallet']];
+    const agentTabs = ['配置','能力','知识','安全与契约','评测','发布与分享'];
+    const billingTabs = ['分析','流水','充值与订单','价格'];
+    const runs = [
+      {title:'创建一个简单的 REST API',source:'工作台',status:'成功',input:'创建一个简单的 REST API，包含健康检查和用户列表接口。',output:'接口结构已整理。健康检查和用户列表使用独立路由，用户列表支持分页。'},
+      {title:'整理接口说明',source:'接口调用',status:'成功',input:'整理接口参数和响应字段。',output:'已整理健康检查与用户列表接口说明。'},
+      {title:'检查接口测试覆盖',source:'评测',status:'失败',input:'验证健康检查和用户列表的测试覆盖。',output:'尚未配置测试脚本'}
+    ];
+    const fileContents = {
+      'src/app.ts': '// 交互样例\nimport express from "express";\nimport { users } from "./routes/users";\n\nconst app = express();\napp.get("/health", (_, res) => res.json({ status: "ok" }));\napp.use("/users", users);\nexport default app;',
+      'src/routes/users.ts': '// 交互样例\nimport { Router } from "express";\nexport const users = Router();\nusers.get("/", (req, res) => {\n  const page = Math.max(1, Number(req.query.page) || 1);\n  res.json({ items: [], page, pageSize: 20 });\n});',
+      'README.md': '# 接口说明（交互样例）\n\nGET /health：健康检查。\nGET /users?page=1：分页用户列表。\n\n测试状态：尚未配置测试脚本。\n这份文件仅用于交互预览。'
+    };
+    const defaults = () => ({
+      sessions:[{id:1,title:'创建一个简单的 REST API',sample:true,messages:[],answer:''},{id:2,title:'整理项目文档',sample:false,messages:[],answer:''}],
+      agents:[
+        {id:1,name:'通用智能体',description:'处理日常任务、文件与代码',prompt:'你是一个可靠的工作助手。先明确目标，再执行任务；完成后交付结果与验证说明。',model:'默认模型',effort:'标准',turns:20,read:true,write:true,bash:true,approval:'危险操作需审批',input:'',output:'',knowledge:[],saved:false,published:false},
+        {id:2,name:'接口开发助手',description:'构建接口、整理契约与测试',prompt:'根据需求实现接口，交付文件、接口契约与测试结果。',model:'默认模型',effort:'标准',turns:20,read:true,write:true,bash:true,approval:'危险操作需审批',input:'',output:'',knowledge:[],saved:false,published:false},
+        {id:3,name:'文档整理助手',description:'梳理文档结构，提炼关键信息',prompt:'整理输入文档，保留事实与来源。',model:'默认模型',effort:'标准',turns:20,read:true,write:false,bash:false,approval:'每次执行需审批',input:'',output:'',knowledge:[],saved:false,published:false}
+      ],keys:[],webhook:'',orders:[],logs:[],accountName:'样例管理员'
+    });
+    const storageKey = 'owa-ia-v2-direction-a';
+    let data;
+    try { data = JSON.parse(localStorage.getItem(storageKey)) || defaults(); } catch { data = defaults(); }
+    const state = {page:'workbench',session:1,agent:1,detail:false,agentTab:'配置',billingTab:'分析',apiTab:'调用与密钥',adminTab:'账号',accountTab:'账号安全',source:'全部来源',status:'全部状态',apiAgent:1,agentQuery:'',choice:'',file:'src/app.ts'};
+    const persist = () => { try { localStorage.setItem(storageKey,JSON.stringify(data)); } catch { toast('浏览器未允许保存；当前修改仅在本次打开期间保留'); } };
+    const currentSession = () => data.sessions.find(s=>s.id===state.session) || data.sessions[0];
+    const currentAgent = () => data.agents.find(a=>a.id===state.agent) || data.agents[0];
+    let toastTimer;
+    function toast(text){ $('#toast').textContent=text;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').textContent='',3500); }
+    function log(text){data.logs.unshift(text);persist();}
+    function navigationHTML(){
+      return `<div class="nav-label">工作空间</div>${nav.map(([id,label,name])=>btn(label,'nav:'+id,name,'nav-item'+(state.page===id?' active':''),state.page===id?'aria-current="page"':'')).join('')}
+        <div class="nav-bottom">${btn('平台管理','nav:admin','Shield','nav-item'+(state.page==='admin'?' active':''))}
+        <button class="identity" data-action="account-menu"><span class="avatar">${icon('UserRound')}</span><span><span>${esc(data.accountName)}</span><br><small>账号设置</small></span></button></div>`;
+    }
+    function tabs(labels,active,prefix){return `<div class="tabs" aria-label="页面分区">${labels.map(t=>btn(t,`${prefix}:${t}`,'','tab'+(t===active?' active':''),`aria-pressed="${t===active}"`)).join('')}</div>`;}
+    function page(title,description,body,actions='',tabbar='',footer=''){
+      return `<section class="page panel"><header class="page-head"><div class="row spread"><div><h1>${title}</h1><p>${description}</p></div>${actions}</div></header>${tabbar}<div class="page-body"><div class="section">${body}</div></div>${footer}</section>`;
+    }
+    function render(){
+      $('#global-nav').innerHTML=navigationHTML();
+      const views={workbench,agents:agentPage,runs:runsPage,api:apiPage,billing:billingPage,admin:adminPage,account:accountPage};
+      $('#main').innerHTML=views[state.page]();
+      document.querySelectorAll('[data-icon]').forEach(el=>el.innerHTML=icon(el.dataset.icon));
+    }
+    function go(pageName){state.page=pageName;closeDialogs();render();$('#main h1')?.setAttribute('tabindex','-1');$('#main h1')?.focus({preventScroll:true});}
+    function sessionItems(){return data.sessions.map(s=>`<button class="session-item ${state.session===s.id?'active':''}" data-action="session:${s.id}" ${state.session===s.id?'aria-current="true"':''}><strong>${esc(s.title)}</strong><small>${s.answer?'已回答':s.sample?'等待你的回答':s.messages.length ? s.messages.length+' 条消息' : '尚无消息'}</small></button>`).join('');}
+    function message(role,text){return `<article class="message"><span class="avatar ${role==='你'?'user-avatar':'agent-avatar'}">${role==='你'?'你':icon('Bot')}</span><div><div class="byline">${role}</div><p style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(text)}</p></div></article>`;}
+    function sampleConversation(s){
+      return message('你','创建一个简单的 REST API，包含健康检查和用户列表接口。')+
+      `<article class="message"><span class="avatar agent-avatar">${icon('Bot')}</span><div><div class="byline">通用智能体</div>
+        <p>接口结构已整理。健康检查和用户列表使用独立路由，用户列表支持分页。</p>
+        <div class="tool-summary">
+          <div class="tool-line">${icon('Check')}<span>读取项目说明</span><code>Read README.md</code><span class="good">成功</span></div>
+          <div class="tool-line">${icon('Check')}<span>写入接口入口</span><code>Write src/app.ts</code><span class="good">成功</span></div>
+          <div class="tool-line">${icon('CircleAlert')}<span>运行测试</span><code>Bash pnpm test</code><span class="bad">失败</span></div>
+          ${btn('查看执行详情','tools','Terminal')}
+        </div>
+        <p class="muted">文件已准备好。测试尚未通过：尚未配置测试脚本。</p>
+        <div class="files">${Object.keys(fileContents).map(f=>btn(esc(f),'file:'+f,'FileText','file-chip')).join('')}</div>
+        <form id="question-form" class="question"><h3>用户数据先放在哪里？</h3>
+          ${s.answer?`<p class="good">${icon('Check')} 已回答：${esc(s.answer)}</p>`:
+          `<div class="choices">${['内存数据','数据库'].map(x=>`<label class="choice check"><input type="radio" name="answer" value="${x}" ${state.choice===x?'checked':''}>${x}</label>`).join('')}</div><div class="question-footer"><small>等待你的选择</small><button type="submit" id="answer-submit" class="outline" ${state.choice?'':'disabled'}>提交回答</button></div>`}
+        </form></div></article>`;
+    }
+    function workbench(){
+      const s=currentSession();
+      return `<div class="workbench"><aside class="sessions panel" aria-label="会话列表"><div class="row spread"><h2>会话</h2><span class="caption">${data.sessions.length}</span></div>
+        ${btn('新建会话','new-session','Plus','outline')}<div class="nav-label">最近</div><div class="session-list">${sessionItems()}</div><div class="session-foot">当前智能体<br><strong>通用智能体</strong></div></aside>
+        <section class="conversation panel"><header class="conversation-head"><div class="row grow">${iconBtn('切换会话','sessions','MessageSquare').replace('class="icon"','class="icon mobile-only"')}<div class="grow"><h1>${esc(s.title)}</h1><div class="subtitle muted">通用智能体 <span aria-hidden="true"> / </span> ${s.sample&&!s.answer?'等待回答':'会话'}</div></div></div>
+          <div class="row head-actions">${btn('<span class="button-text">文件</span>','files','Folder','','aria-label="打开文件" title="打开文件"')}${btn('<span class="button-text">执行详情</span>','tools','Activity','','aria-label="打开执行详情" title="打开执行详情"')}</div></header>
+          <div class="transcript" id="transcript">${s.sample?sampleConversation(s):(!s.messages.length?empty('开始一项工作','把要完成的任务发给通用智能体。','MessageSquare'):'')}${s.messages.map(m=>message(m.role,m.text)).join('')}</div>
+          <div class="composer-wrap"><form id="message-form" class="composer"><label><span class="caption" hidden>消息</span><textarea id="message-input" aria-label="消息" placeholder="继续描述你的任务…" rows="2"></textarea></label><div class="composer-bottom"><span class="caption">通用智能体</span><button class="primary icon" id="send-message" aria-label="发送消息" title="发送消息" disabled>${icon('ArrowUp')}</button></div></form></div>
+        </section></div>`;
+    }
+    function field(label,key,value,type='text'){return `<label>${label}<input data-field="${key}" type="${type}" value="${esc(value)}" ${type==='number'?'min="1" max="100"':''}></label>`;}
+    function area(label,key,value,rows=5){return `<label>${label}<textarea data-field="${key}" rows="${rows}">${esc(value)}</textarea></label>`;}
+    function agentPage(){
+      if(!state.detail) return page('智能体','选择一个智能体开始工作，或调整它的职责与能力。',
+        `<div class="toolbar"><input id="agent-search" type="search" aria-label="搜索智能体" placeholder="搜索智能体" value="${esc(state.agentQuery)}"></div><div class="agent-list" id="agent-list">${agentRows()}</div>`,
+        btn('创建智能体','create-agent','Plus','primary'));
+      const a=currentAgent();
+      return page(esc(a.name),a.published?'发布样例已生成，未发布到平台':'草稿尚未发布',
+        agentSection(a),btn('返回列表','agent-list','ArrowLeft','outline'),
+        tabs(agentTabs,state.agentTab,'agent-tab'),
+        `<footer class="savebar"><span id="save-status" class="muted">${a.saved?'原型草稿已保存':'修改自动保留为本地草稿'}</span><div class="row">${btn('辅助编辑','assist','Sparkles','outline')}${btn('保存草稿','save-agent','Save','primary')}</div></footer>`);
+    }
+    function agentRows(){return data.agents.filter(a=>a.name.includes(state.agentQuery)).map(a=>`<article class="agent-row"><div class="agent-avatar">${icon('Bot')}</div><div class="grow"><h2>${esc(a.name)} ${a.id>1?'<span class="pill">样例</span>':''}</h2><p>${esc(a.description)}</p></div>${btn('查看配置','agent:'+a.id,'ChevronRight','outline')}</article>`).join('')||empty('没有匹配的智能体','试试其他名称。','Search');}
+    function agentSection(a){
+      if(state.agentTab==='配置') return `<h2>定义它要完成的工作</h2><p class="help-line">职责、指令与运行偏好</p><div class="form-grid">${field('名称','name',a.name)}${field('描述','description',a.description)}<div class="full">${area('系统指令','prompt',a.prompt,6)}</div><label>模型<select data-field="model"><option>默认模型</option><option ${a.model==='质量优先'?'selected':''}>质量优先</option><option ${a.model==='速度优先'?'selected':''}>速度优先</option></select></label><label>努力级别<select data-field="effort">${['标准','低','高'].map(x=>`<option ${x===a.effort?'selected':''}>${x}</option>`).join('')}</select></label>${field('最大轮次','turns',a.turns,'number')}</div>`;
+      if(state.agentTab==='能力') return `<h2>工具与协作</h2><p class="help-line">按任务需要开放能力。</p><h3 class="section-heading">内置工具</h3>${[['read','读取文件'],['write','写入文件'],['bash','执行命令']].map(([key,label])=>`<label class="check"><input type="checkbox" data-field="${key}" ${a[key]?'checked':''}>${label}</label>`).join('')}<div class="divider"></div>${area('技能说明','skills',a.skills||'',3)}<div class="form-grid">${area('外部工具服务','mcp',a.mcp||'',3)}${area('子智能体职责','subagents',a.subagents||'',3)}</div>`;
+      if(state.agentTab==='知识') return `<div class="row spread"><h2>知识文档</h2>${btn('添加文档','add-knowledge','Plus','outline')}</div>${a.knowledge.length?a.knowledge.map((d,i)=>`<div class="knowledge-item"><div class="row spread"><strong>${esc(d.title)}</strong>${iconBtn('删除文档','remove-knowledge:'+i,'X')}</div><p style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(d.content)}</p></div>`).join(''):empty('尚未添加知识文档','添加与这个智能体相关的资料。','BookOpen')}`;
+      if(state.agentTab==='安全与契约') return `<h2>控制执行边界</h2><div class="form-grid"><label class="full">审批方式<select data-field="approval">${['危险操作需审批','每次执行需审批'].map(x=>`<option ${a.approval===x?'selected':''}>${x}</option>`).join('')}</select></label>${area('输入结构（JSON）','input',a.input)}${area('输出结构（JSON）','output',a.output)}<div class="full">${area('验证规则','verify',a.verify||'',3)}</div></div>`;
+      if(state.agentTab==='评测') return `<h2>检查交付标准</h2><p class="help-line">样例用例：健康检查与用户列表接口应有对应测试。</p><div class="inline-actions">${btn('检查样例结果','eval-agent','Activity','outline')}</div>${a.evaluated?`<div class="notice warning">${icon('CircleAlert')}评测样例未通过</div><pre>尚未配置测试脚本</pre>`:empty('尚无评测结果','选择检查样例结果查看失败说明。','Activity')}`;
+      return `<h2>发布与分享</h2><div class="notice">当前版本：${a.published?'发布样例':'草稿'}</div><label>可见范围<select data-field="visibility">${['仅自己','指定用户','用户组','公开'].map(x=>`<option ${a.visibility===x?'selected':''}>${x}</option>`).join('')}</select></label><div class="form-grid">${field('分享对象','principal',a.principal||'')}</div><div class="inline-actions">${btn('生成发布样例','publish-agent','Send','primary')}</div>${a.published?'<p class="notice good">发布样例已生成。未向平台发布，也未授予真实访问权限。</p>':'<p class="notice">先保存草稿，再检查发布信息。</p>'}`;
+    }
+    function runsPage(){
+      const list=runs.filter(r=>(state.source==='全部来源'||r.source===state.source)&&(state.status==='全部状态'||r.status===state.status));
+      return page('运行记录','按一次执行检查输入、输出与失败原因。',
+        `<div class="toolbar"><label>来源<select id="run-source">${['全部来源','工作台','接口调用','评测'].map(x=>`<option ${state.source===x?'selected':''}>${x}</option>`).join('')}</select></label><label>状态<select id="run-status">${['全部状态','成功','失败'].map(x=>`<option ${state.status===x?'selected':''}>${x}</option>`).join('')}</select></label><span class="caption">${list.length} 条样例记录</span></div><div class="data-list"><div class="data-row table-head"><span>任务</span><span class="source">来源</span><span>状态</span><span></span></div>${list.map(r=>`<button class="data-row" data-action="run:${runs.indexOf(r)}"><span><strong>${r.title}</strong><small>通用智能体</small></span><span class="source">${r.source}</span><span class="${r.status==='成功'?'good':'bad'}">${r.status}</span>${icon('ChevronRight')}</button>`).join('')||empty('没有匹配的运行','调整来源或状态筛选。','Activity')}</div>`);
+    }
+    function snippet(){return `# 交互样例：地址与密钥不可用于真实调用\ncurl -X POST 'https://example.invalid/api/agents/demo-${state.apiAgent}/invoke' \\\n  -H 'Authorization: Bearer demo_NOT_VALID' \\\n  -H 'Content-Type: application/json' \\\n  -d '{"input":"整理接口说明"}'`;}
+    function apiPage(){
+      let body;
+      if(state.apiTab==='调用与密钥') body=`<h2>调用智能体</h2><div class="form-grid"><label>选择智能体<select id="api-agent">${data.agents.map(a=>`<option value="${a.id}" ${a.id===state.apiAgent?'selected':''}>${esc(a.name)}</option>`).join('')}</select></label></div><div class="row spread section-heading"><h3>调用片段</h3>${btn('复制片段','copy-snippet','Copy','outline')}</div><pre id="api-snippet">${esc(snippet())}</pre><div class="row spread section-heading"><h2>接入密钥</h2>${btn('签发样例密钥','create-key','Plus','outline')}</div><p class="muted">样例密钥不可调用接口。</p>${data.keys.length?data.keys.map(k=>`<div class="knowledge-item row spread wrap"><div><strong>${esc(k.name)}</strong><br><code>${esc(k.value)}</code><p class="caption">关联智能体：${esc(k.agent)}</p></div>${btn('撤销','revoke-key:'+k.id,'X','outline')}</div>`).join(''):empty('尚无密钥','为选中的智能体签发一枚样例密钥。','KeyRound')}`;
+      else body=`<h2>结果回调</h2><form id="webhook-form"><div class="form-grid"><label class="full">回调地址<input name="url" type="url" placeholder="https://example.invalid/webhook" value="${esc(data.webhook)}" required></label></div><div class="inline-actions"><button class="primary">${icon('Save')}保存配置</button>${btn('检查样例投递','webhook-test','Send','outline')}</div></form><h3 class="section-heading">投递记录</h3>${data.delivery?`<div class="notice warning">样例投递未发送</div><p>目标：<code>${esc(data.webhook)}</code></p><p class="muted">等待真实运行结果；本次仅检查回调配置。</p>`:empty('暂无投递','尚未向任何地址发送请求。','Send')}`;
+      return page('接口接入','管理程序调用和运行结果回调。',body,'',tabs(['调用与密钥','回调与投递'],state.apiTab,'api-tab'));
+    }
+    function billingPage(){
+      const metrics='<div class="metrics"><div class="metric"><span class="caption">可用金额</span><strong>¥ 0</strong></div><div class="metric"><span class="caption">冻结金额</span><strong>¥ 0</strong></div><div class="metric"><span class="caption">已结算</span><strong>¥ 0</strong></div></div>';
+      let body='';
+      if(state.billingTab==='分析') body=metrics+empty('暂无计费用量','样例对话不会产生模型调用费用。','Activity');
+      if(state.billingTab==='流水') body=empty('暂无账户流水','没有扣费、冻结或退款记录。','Wallet');
+      if(state.billingTab==='充值与订单') body=metrics+`<h2>充值订单</h2><form id="order-form"><div class="form-grid"><label>金额（元）<input type="number" name="amount" min="1" max="100000" step="1" value="100" required></label></div><div class="inline-actions"><button class="primary">预览订单</button></div></form>${data.orders.map((o,i)=>`<div class="knowledge-item row spread wrap"><span>样例订单 ${i+1}<br><small>¥ ${o.amount}</small><br><small>${o.cancelled?'已取消':'待支付（未发起）'}</small></span>${!o.cancelled?btn('取消订单','cancel-order:'+i,'X','outline'):''}</div>`).join('')}`;
+      if(state.billingTab==='价格') body=empty('暂无已发布价格','模型价格尚未配置；不会按样例数值计费。','Wallet');
+      return page('用量与费用','用量反映使用情况，流水记录实际结算。',body,'',tabs(billingTabs,state.billingTab,'billing-tab'));
+    }
+    function adminPage(){
+      let body;
+      if(state.adminTab==='账号')body=`<div class="notice">${icon('Shield')}样例管理员身份</div><div class="data-list"><div class="knowledge-item row spread"><span>${esc(data.accountName)}<br><small>管理员</small></span>${btn('查看权限','admin-permissions','Shield','outline')}</div></div>`;
+      if(state.adminTab==='模型与算力')body=empty('尚未配置模型与算力','当前没有可管理的模型供应商或运行节点。','Bot');
+      if(state.adminTab==='计费')body=empty('暂无计费规则','尚未发布价格，也没有结算记录。','Wallet');
+      if(state.adminTab==='运营审计')body=data.logs.length?`<div class="details-list">${data.logs.map((l,i)=>`<details><summary>${esc(l)}</summary><p class="muted">记录 ${i+1}</p><p class="muted">操作人：样例管理员</p></details>`).join('')}</div>`:empty('暂无运营审计记录','样例管理操作会显示在这里。','Activity');
+      return page('平台管理','样例管理员可查看平台范围的配置。',body,'',tabs(['账号','模型与算力','计费','运营审计'],state.adminTab,'admin-tab'));
+    }
+    function accountPage(){
+      const body=state.accountTab==='账号安全'?`<h2>个人资料</h2><form id="account-form"><div class="form-grid"><label>显示名称<input name="name" value="${esc(data.accountName)}" maxlength="30" required></label><label>身份<input value="样例管理员" readonly></label></div><div class="inline-actions"><button class="primary">${icon('Save')}保存资料</button></div></form><h3 class="section-heading">登录安全</h3><p class="muted">当前为交互样例身份，没有真实密码或登录设备。</p>`:
+        (data.logs.length?`<div class="details-list">${data.logs.map(l=>`<details><summary>${esc(l)}</summary><p class="muted">本地样例操作，未写入平台日志。</p></details>`).join('')}</div>`:empty('暂无操作日志','在原型中的保存操作会显示在这里。','Activity'));
+      return page('账号设置','个人身份与账号安全',body,'',tabs(['账号安全','操作日志'],state.accountTab,'account-tab'));
+    }
+    let modalInvoker=null,drawerInvoker=null;
+    function openDialog(title,body,drawer=false){
+      const target=drawer?$('#drawer'):$('#modal');
+      if(!target.open){if(drawer)drawerInvoker=document.activeElement;else modalInvoker=document.activeElement;}
+      target.innerHTML=`<div class="dialog-head"><h2 id="${drawer?'drawer':'modal'}-title">${title}</h2>${iconBtn('关闭',drawer?'close-drawer':'close-modal','X')}</div><div class="dialog-body">${body}</div>`;
+      if(!target.open)target.showModal();
+    }
+    function closeDialogs(){for(const id of ['modal','drawer'])if($('#'+id).open)$('#'+id).close();}
+    $('#modal').addEventListener('close',()=>modalInvoker?.isConnected&&modalInvoker.focus({preventScroll:true}));
+    $('#drawer').addEventListener('close',()=>drawerInvoker?.isConnected&&drawerInvoker.focus({preventScroll:true}));
+    for(const id of ['modal','drawer']){
+      $('#'+id).addEventListener('keydown',event=>{
+        if(event.key==='Escape'){event.preventDefault();event.stopPropagation();event.currentTarget.close();}
+      });
+    }
+    function filesDrawer(file){
+      if(!currentSession().sample){openDialog('会话文件',empty('暂无文件','当前会话尚未生成文件。'),true);return;}
+      if(file)state.file=file;
+      openDialog('会话文件',`<div class="details-list"><details open><summary>3 份交付文件</summary>${Object.keys(fileContents).map(f=>`<button class="search-result" data-action="file:${f}">${icon('FileText')}<span class="grow">${f}</span>${f===state.file?icon('Check'):''}</button>`).join('')}</details></div><h3 class="section-heading">${esc(state.file)}</h3><pre>${esc(fileContents[state.file])}</pre>${btn('下载文件','download','Download','outline')}`,true);
+    }
+    function toolsDrawer(){
+      openDialog('执行详情',!currentSession().sample?empty('暂无执行记录','消息保留为本地草稿，尚未执行。','Terminal'):
+      `<span class="pill">交互样例</span><div class="details-list">${[['Read README.md','成功','已读取项目说明。'],['Write src/app.ts','成功','已写入健康检查与用户列表路由入口。'],['Bash pnpm test','失败','尚未配置测试脚本']].map(([name,status,text])=>`<details ${status==='失败'?'open':''}><summary>${name} <span class="${status==='成功'?'good':'bad'}">${status}</span></summary><pre>${text}</pre></details>`).join('')}</div>`,true);
+    }
+    function openSearch(){
+      openDialog('搜索目的地',`<input id="destination-search" type="search" aria-label="搜索目的地" placeholder="搜索工作台、智能体、费用…" autofocus><div id="search-results"></div>`);
+      searchResults('');$('#destination-search').focus();
+    }
+    function searchResults(query){
+      const all=[...nav,['admin','平台管理','Shield'],['account','账号设置','UserRound']];
+      $('#search-results').innerHTML=all.filter(([,label])=>label.includes(query)).map(([id,label,name])=>`<button class="search-result" data-action="nav:${id}"><span class="row">${icon(name)}${label}</span>${icon('ChevronRight')}</button>`).join('')||empty('没有匹配的目的地','试试“费用”或“智能体”。','Search');
+    }
+    async function copyText(text){
+      try{await navigator.clipboard.writeText(text);toast('已复制');}
+      catch{openDialog('复制内容',`<label>可复制内容<textarea id="copy-content" readonly rows="8">${esc(text)}</textarea></label>`);$('#copy-content').select();}
+    }
+    document.addEventListener('click',event=>{
+      const control=event.target.closest('[data-action]');if(!control)return;
+      const [action,...parts]=control.dataset.action.split(':');const value=parts.join(':');
+      if(action==='nav')go(value);
+      else if(action==='navigation')openDialog('工作空间',`<nav class="mobile-menu">${navigationHTML()}</nav>`);
+      else if(action==='search')openSearch();
+      else if(action==='close-modal')$('#modal').close();
+      else if(action==='close-drawer')$('#drawer').close();
+      else if(action==='account-menu')openDialog('个人账号',`<p class="muted">${esc(data.accountName)}</p>${btn('账号安全','account-section:账号安全','UserRound','nav-item')}${btn('操作日志','account-section:操作日志','Activity','nav-item')}`);
+      else if(action==='account-section'){state.accountTab=value;go('account');}
+      else if(action==='sessions')openDialog('会话',`${btn('新建会话','new-session','Plus','outline')}<div class="session-list">${sessionItems()}</div>`);
+      else if(action==='session'){state.session=Number(value);state.choice='';closeDialogs();render();}
+      else if(action==='new-session'){const id=Date.now();data.sessions.unshift({id,title:'新会话',sample:false,messages:[],answer:''});state.session=id;state.choice='';persist();go('workbench');$('#message-input').focus();}
+      else if(action==='files'||action==='file')filesDrawer(value);
+      else if(action==='tools')toolsDrawer();
+      else if(action==='download'){const url=URL.createObjectURL(new Blob([fileContents[state.file]],{type:'text/plain;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=state.file.split('/').pop();a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('已下载样例文件');}
+      else if(action==='agent'){state.agent=Number(value);state.detail=true;state.agentTab='配置';render();}
+      else if(action==='agent-list'){state.detail=false;render();}
+      else if(action==='create-agent')openDialog('创建智能体',`<form id="create-agent-form"><label>名称<input name="name" required maxlength="40" autofocus></label><label>职责<textarea name="description" required rows="3"></textarea></label><div class="dialog-actions"><button class="primary">创建草稿</button></div></form>`);
+      else if(action==='agent-tab'){state.agentTab=value;render();}
+      else if(action==='save-agent')saveAgent();
+      else if(action==='assist')openDialog('辅助编辑',`<p class="muted">建议将交付标准补充到系统指令中。</p><pre>完成任务后，列出交付文件、验证步骤与未解决的问题。</pre><div class="dialog-actions">${btn('加入系统指令','apply-assist','Plus','primary')}</div>`);
+      else if(action==='apply-assist'){const a=currentAgent();a.prompt+='\n完成任务后，列出交付文件、验证步骤与未解决的问题。';a.saved=false;persist();closeDialogs();state.agentTab='配置';render();toast('建议已加入草稿');}
+      else if(action==='add-knowledge')openDialog('添加知识文档',`<form id="knowledge-form"><label>文档名称<input name="title" required maxlength="100"></label><label>文档内容<textarea name="content" required rows="7"></textarea></label><div class="dialog-actions"><button class="primary">添加到草稿</button></div></form>`);
+      else if(action==='remove-knowledge'){currentAgent().knowledge.splice(Number(value),1);currentAgent().saved=false;persist();render();}
+      else if(action==='eval-agent'){currentAgent().evaluated=true;persist();render();}
+      else if(action==='publish-agent'){
+        if(!currentAgent().saved){toast('请先保存草稿');return;}
+        openDialog('确认发布样例',`<h3>${esc(currentAgent().name)}</h3><p class="notice">可见范围：${esc(currentAgent().visibility||'仅自己')}</p><p>仅生成发布预览，不会向平台发布。</p><div class="dialog-actions">${btn('确认生成','confirm-publish','Check','primary')}</div>`);
+      }
+      else if(action==='confirm-publish'){currentAgent().published=true;log('生成智能体发布样例');closeDialogs();render();toast('发布样例已生成');}
+      else if(action==='run'){const r=runs[Number(value)];openDialog('运行详情',`<h2>${r.title}</h2><p class="notice">来源：${r.source}</p><p class="muted">状态：${r.status}</p><h3 class="section-heading">输入</h3><p>${r.input}</p><h3 class="section-heading">${r.status==='失败'?'失败说明':'输出'}</h3><pre>${r.output}</pre>${r.source==='工作台'?btn('打开关联会话','session-run','MessageSquare','outline'):''}`,true);}
+      else if(action==='session-run'){state.session=1;go('workbench');}
+      else if(action==='api-tab'){state.apiTab=value;render();}
+      else if(action==='copy-snippet')copyText(snippet());
+      else if(action==='create-key')openDialog('签发样例密钥',`<form id="key-form"><label>密钥名称<input name="name" required maxlength="40" value="开发环境"></label><p class="notice">关联智能体：${esc(data.agents.find(a=>a.id===state.apiAgent).name)}</p><p class="muted">生成的 demo 值不可用于接口调用。</p><div class="dialog-actions"><button class="primary">签发样例</button></div></form>`);
+      else if(action==='revoke-key'){data.keys=data.keys.filter(k=>k.id!==Number(value));log('撤销样例密钥');render();toast('样例密钥已撤销');}
+      else if(action==='webhook-test'){if(!data.webhook){toast('请先保存回调地址');return;}data.delivery=true;persist();render();}
+      else if(action==='billing-tab'){state.billingTab=value;render();}
+      else if(action==='confirm-order'){data.orders.push({amount:state.orderAmount,cancelled:false});log('生成充值订单样例');closeDialogs();render();toast('订单样例已生成，未发起支付');}
+      else if(action==='cancel-order'){data.orders[Number(value)].cancelled=true;persist();render();}
+      else if(action==='admin-tab'){state.adminTab=value;render();}
+      else if(action==='admin-permissions')openDialog('管理员权限',`<p>样例身份可预览账号、模型与算力、计费与运营审计。</p><p class="notice">当前没有真实权限变更。</p>`);
+      else if(action==='account-tab'){state.accountTab=value;render();}
+    });
+    function saveAgent(){
+      const a=currentAgent();
+      if(!a.name.trim()||!a.prompt.trim()){toast('请填写名称与系统指令');return;}
+      if(!Number.isInteger(Number(a.turns))||Number(a.turns)<1||Number(a.turns)>100){toast('最大轮次需为 1 到 100 的整数');return;}
+      for(const key of ['input','output']){try{if(a[key].trim())JSON.parse(a[key]);}catch{toast((key==='input'?'输入':'输出')+'结构不是有效的 JSON');return;}}
+      if(['指定用户','用户组'].includes(a.visibility)&&!a.principal?.trim()){toast('请填写分享对象');return;}
+      a.saved=true;log('保存智能体原型草稿');render();toast('原型草稿已保存');
+    }
+    document.addEventListener('input',event=>{
+      const el=event.target;
+      if(el.dataset.field){const a=currentAgent();a[el.dataset.field]=el.type==='checkbox'?el.checked:el.value;a.saved=false;persist();if($('#save-status'))$('#save-status').textContent='草稿有修改，已在本地保留';}
+      if(el.id==='message-input')$('#send-message').disabled=!el.value.trim();
+      if(el.id==='destination-search')searchResults(el.value.trim());
+      if(el.id==='agent-search'){state.agentQuery=el.value;$('#agent-list').innerHTML=agentRows();}
+    });
+    document.addEventListener('change',event=>{
+      const el=event.target;
+      if(el.name==='answer'){state.choice=el.value;$('#answer-submit').disabled=false;}
+      if(el.id==='run-source'){state.source=el.value;render();}
+      if(el.id==='run-status'){state.status=el.value;render();}
+      if(el.id==='api-agent'){state.apiAgent=Number(el.value);render();}
+    });
+    document.addEventListener('submit',event=>{
+      event.preventDefault();const form=event.target;const values=new FormData(form);
+      if(form.id==='message-form'){const text=$('#message-input').value.trim();if(!text)return;const s=currentSession();s.messages.push({role:'你',text},{role:'通用智能体',text:'已记录这条消息。本次为交互样例，尚未执行任务。'});if(s.title==='新会话')s.title=Array.from(text).slice(0,24).join('');persist();render();$('#transcript').scrollTop=$('#transcript').scrollHeight;$('#message-input').focus();}
+      if(form.id==='question-form'){const s=currentSession();if(!state.choice||s.answer)return;s.answer=state.choice;s.messages.push({role:'你',text:state.choice},{role:'通用智能体',text:'已记录选择：'+state.choice+'。后续实现会以此为依据。'});persist();render();toast('回答已记录');}
+      if(form.id==='create-agent-form'){const a={...defaults().agents[0],id:Date.now(),name:values.get('name').trim(),description:values.get('description').trim(),knowledge:[],saved:false};if(!a.name)return;data.agents.push(a);state.agent=a.id;state.detail=true;state.agentTab='配置';persist();closeDialogs();render();}
+      if(form.id==='knowledge-form'){currentAgent().knowledge.push({title:values.get('title'),content:values.get('content')});currentAgent().saved=false;persist();closeDialogs();render();}
+      if(form.id==='key-form'){data.keys.push({id:Date.now(),name:values.get('name'),value:'demo_NOT_VALID_'+(data.keys.length+1),agent:data.agents.find(a=>a.id===state.apiAgent).name});log('签发样例密钥');closeDialogs();render();toast('样例密钥已生成，不可调用');}
+      if(form.id==='webhook-form'){data.webhook=values.get('url');data.delivery=false;log('保存回调配置样例');render();toast('回调配置已保存在原型');}
+      if(form.id==='order-form'){state.orderAmount=Number(values.get('amount'));openDialog('确认充值订单',`<p>订单金额：¥ ${state.orderAmount}</p><p class="notice">仅创建样例订单，不会发起支付或增加余额。</p><div class="dialog-actions">${btn('返回','close-modal','','outline')}${btn('创建订单样例','confirm-order','','primary')}</div>`);}
+      if(form.id==='account-form'){const name=values.get('name').trim();if(!name){toast('显示名称不能为空');return;}data.accountName=name;log('保存个人资料样例');render();toast('个人资料已保存');}
+    });
+    render();
+  </script>
+</body>
+</html>

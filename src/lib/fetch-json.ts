@@ -21,13 +21,35 @@ export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> 
       .json()
       .then((b: unknown) => (b as { error?: string } | null)?.error)
       .catch(() => undefined);
-    throw new Error(detail ?? `HTTP ${res.status}`);
+    throw new Error(detail ?? statusText(res.status));
   }
 
   return (await res.json()) as T;
 }
 
 /** 取错误的可读文案 —— catch 到的东西不一定是 Error。 */
+/**
+ * 没有错误体时的兜底文案。
+ *
+ * 【为什么不直接写 "HTTP 404"】页面上出现一行红色的 "HTTP 404",用户不知道是自己的问题
+ * 还是系统的问题、要不要重试。状态码仍然留在括号里,方便报给管理员排查。
+ */
+function statusText(status: number): string {
+  const reason =
+    status === 401
+      ? "登录已失效,请重新登录"
+      : status === 403
+        ? "没有权限"
+        : status === 404
+          ? "接口不存在或资源已删除"
+          : status === 429
+            ? "请求太频繁,稍后再试"
+            : status >= 500
+              ? "服务暂时不可用"
+              : "请求失败";
+  return `${reason}(HTTP ${status})`;
+}
+
 export function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }

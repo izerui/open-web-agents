@@ -2,6 +2,7 @@
 
 import { MessageResponse } from "@/components/ai-elements/message";
 import { SpaceShell } from "@/components/space-shell";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
@@ -15,9 +16,10 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { formatUsd, toMicroUsd } from "@/lib/modules/usage/domain/aggregate";
-import { useMe } from "@/lib/use-me";
 import { cn } from "@/lib/utils";
 import { ExternalLink, RefreshCw } from "lucide-react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 interface RunItem {
@@ -73,42 +75,86 @@ function formatCost(cost?: RunItem["cost"]): string {
 }
 
 /**
- * 运行记录:我名下的全部运行 —— 工作台里的对话,以及用我的 Key 发起的接口调用和 API 会话。
+ * 个人页查看我名下的运行;平台页由管理路由提供入口,服务端校验 scope=all 权限。
  *
  * 曾经接口调用的过程与结果只能凭 taskId 逐个去查,工作台里也看不到;
  * 这里是两个入口统一的观察窗口。
  */
-export function RunsView() {
-  const { me } = useMe();
-  const isAdmin = me?.user?.role === "admin";
-  const [agents, setAgents] = useState<{ id: string; name: string }[]>([]);
+export function RunsView({ platform = false }: { platform?: boolean } = {}) {
+  const searchParams = useSearchParams();
+  const requestedAgent = searchParams.get("agent");
+  // Changing objects resets the result list, pagination and detail together.
+  return (
+    <RunsContent
+      key={JSON.stringify([platform, requestedAgent])}
+      requestedAgent={requestedAgent}
+      platform={platform}
+    />
+  );
+}
+
+function RunsContent({
+  requestedAgent,
+  platform,
+}: { requestedAgent: string | null; platform: boolean }) {
+  const objectMode = requestedAgent !== null;
+  const [agents, setAgents] = useState<{ id: string; name: string; canRead?: boolean }[]>([]);
+  const [agentsLoaded, setAgentsLoaded] = useState(false);
+  const [agentsError, setAgentsError] = useState<string | null>(null);
   const [agentId, setAgentId] = useState("");
   const [status, setStatus] = useState("");
   const [source, setSource] = useState("");
-  const [scopeAll, setScopeAll] = useState(false);
   const [items, setItems] = useState<RunItem[]>([]);
   const [cursor, setCursor] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const seqRef = useRef(0);
+  const detailSeqRef = useRef(0);
+  const selectedAgent = objectMode ? agents.find((a) => a.id === requestedAgent) : undefined;
+  const effectiveAgentId = objectMode ? selectedAgent?.id : agentId;
+  const canLoad = !objectMode || Boolean(selectedAgent);
+  const contextError =
+    objectMode && agentsLoaded && !agentsError && !selectedAgent
+      ? requestedAgent
+        ? "找不到指定的智能体,它可能已被删除或你没有访问权限。"
+        : "链接缺少智能体 ID,请选择智能体后再查看运行。"
+      : null;
+
+  const loadAgents = useCallback(async () => {
+    setAgentsLoaded(false);
+    setAgentsError(null);
+    try {
+      const d = await fetchJson<{ agents?: { id: string; name: string; canRead?: boolean }[] }>(
+        "/api/agents",
+      );
+      setAgents(d.agents ?? []);
+    } catch (e) {
+      setAgentsError(errorText(e));
+    } finally {
+      setAgentsLoaded(true);
+    }
+  }, []);
 
   useEffect(() => {
-    void fetchJson<{ agents?: { id: string; name: string }[] }>("/api/agents")
-      .then((d) => setAgents(d.agents ?? []))
-      .catch(() => {});
-  }, []);
+    void loadAgents();
+  }, [loadAgents]);
 
   const load = useCallback(
     async (append?: string) => {
+      if (!canLoad) return;
       const seq = ++seqRef.current;
       setLoading(true);
       setError(null);
+      if (!append) {
+        setItems([]);
+        setCursor(undefined);
+      }
       const q = new URLSearchParams({ limit: "30" });
-      if (agentId) q.set("agentId", agentId);
+      if (platform) q.set("scope", "all");
+      if (effectiveAgentId) q.set("agentId", effectiveAgentId);
       if (status) q.set("status", status);
       if (source) q.set("source", source);
-      if (scopeAll) q.set("scope", "all");
       if (append) q.set("cursor", append);
       try {
         const d = await fetchJson<{ items: RunItem[]; nextCursor?: string }>(`/api/runs?${q}`);
@@ -121,157 +167,203 @@ export function RunsView() {
         if (seq === seqRef.current) setLoading(false);
       }
     },
-    [agentId, status, source, scopeAll],
+    [canLoad, effectiveAgentId, status, source, platform],
   );
 
   useEffect(() => {
     void load();
+    return () => {
+      seqRef.current++;
+      detailSeqRef.current++;
+    };
   }, [load]);
 
   async function openDetail(id: string) {
+    const seq = ++detailSeqRef.current;
     try {
       const d = await fetchJson<{ run: RunDetail }>(`/api/runs/${id}`);
-      setDetail(d.run);
+      if (seq === detailSeqRef.current) setDetail(d.run);
     } catch (e) {
-      setError(errorText(e));
+      if (seq === detailSeqRef.current) setError(errorText(e));
     }
   }
 
   return (
     <SpaceShell
-      title="运行记录"
-      subtitle="工作台对话,以及用你的 Key 发起的接口调用与 API 会话"
+      title={platform ? "平台运行" : objectMode ? "运行记录" : "全部运行"}
+      area={platform ? "admin" : "personal"}
+      subtitle={
+        platform
+          ? objectMode
+            ? "此智能体在全平台的运行"
+            : "全平台运行,包括工作台、接口调用与评测"
+          : objectMode
+            ? "此智能体下计费在你名下的运行"
+            : "计费在你名下的全部运行,包括工作台、接口调用与评测"
+      }
+      object={
+        objectMode && selectedAgent
+          ? { ...selectedAgent, tab: "runs", canReadConfig: selectedAgent.canRead !== false }
+          : undefined
+      }
+      width={objectMode ? "full" : "wide"}
       actions={
-        <Button size="sm" variant="outline" onClick={() => void load()} disabled={loading}>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => void load()}
+          disabled={!canLoad || loading}
+        >
           <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
           刷新
         </Button>
       }
     >
-      <div className="flex flex-wrap gap-2">
-        <NativeSelect
-          className="h-8 w-44 text-xs"
-          aria-label="按智能体筛选"
-          value={agentId}
-          onChange={(e) => setAgentId(e.target.value)}
-        >
-          <option value="">全部智能体</option>
-          {agents.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.name}
-            </option>
-          ))}
-        </NativeSelect>
-        <NativeSelect
-          className="h-8 w-32 text-xs"
-          aria-label="按状态筛选"
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-        >
-          <option value="">全部状态</option>
-          {Object.entries(STATUS_META).map(([k, v]) => (
-            <option key={k} value={k}>
-              {v.label}
-            </option>
-          ))}
-        </NativeSelect>
-        <NativeSelect
-          className="h-8 w-32 text-xs"
-          aria-label="按来源筛选"
-          value={source}
-          onChange={(e) => setSource(e.target.value)}
-        >
-          <option value="">全部来源</option>
-          {Object.entries(SOURCE_LABEL).map(([k, v]) => (
-            <option key={k} value={k}>
-              {v}
-            </option>
-          ))}
-        </NativeSelect>
-        {isAdmin && (
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={scopeAll}
-              onChange={(e) => setScopeAll(e.target.checked)}
-            />
-            全平台
-          </label>
-        )}
-      </div>
-
-      {error && <p className="text-xs text-destructive">加载失败:{error}</p>}
-
-      <div className="overflow-hidden rounded-lg border border-border">
-        <table className="w-full text-xs">
-          <thead className="bg-muted/40 text-left text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 font-medium">时间</th>
-              <th className="px-3 py-2 font-medium">智能体</th>
-              <th className="px-3 py-2 font-medium">来源</th>
-              <th className="px-3 py-2 font-medium">状态</th>
-              <th className="px-3 py-2 font-medium">输入</th>
-              <th className="px-3 py-2 text-right font-medium">耗时</th>
-              <th className="px-3 py-2 text-right font-medium">花费</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((r) => (
-              <tr
-                key={r.id}
-                tabIndex={0}
-                className="cursor-pointer border-t border-border hover:bg-muted/30 focus-visible:bg-muted/30 focus-visible:outline-none"
-                onClick={() => void openDetail(r.id)}
-                onKeyDown={(e) => e.key === "Enter" && void openDetail(r.id)}
+      {agentsError && (
+        <Alert variant="destructive" className="flex flex-wrap items-center gap-2">
+          智能体列表加载失败:{agentsError}
+          <Button size="sm" variant="outline" onClick={() => void loadAgents()}>
+            重试
+          </Button>
+        </Alert>
+      )}
+      {contextError && (
+        <Alert variant="destructive">
+          <AlertDescription>{contextError}</AlertDescription>
+        </Alert>
+      )}
+      {objectMode && !selectedAgent && (
+        <div className="flex flex-wrap gap-3 text-sm">
+          {!agentsLoaded && <p className="text-muted-foreground">正在加载智能体…</p>}
+          <Link href="/agents" className="underline">
+            选择智能体
+          </Link>
+          <Link href={platform ? "/admin/runs" : "/settings/runs"} className="underline">
+            {platform ? "查看全部平台运行" : "查看我的全部运行"}
+          </Link>
+        </div>
+      )}
+      {canLoad && (
+        <>
+          <div className="flex flex-wrap gap-2">
+            {!objectMode && (
+              <NativeSelect
+                className="h-8 w-44 text-xs"
+                aria-label="按智能体筛选"
+                value={effectiveAgentId}
+                disabled={!agentsLoaded || Boolean(agentsError)}
+                onChange={(e) => setAgentId(e.target.value)}
               >
-                <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
-                  {new Date(r.createdAt).toLocaleString()}
-                </td>
-                <td className="max-w-40 truncate px-3 py-2">
-                  {r.agentName ?? r.agentId}
-                  <span className="ml-1 text-muted-foreground">
-                    {r.agentVersion ? `v${r.agentVersion}` : "草稿"}
-                  </span>
-                </td>
-                <td className="px-3 py-2">{SOURCE_LABEL[r.source]}</td>
-                <td className="px-3 py-2">
-                  <Badge className={cn("border-0", STATUS_META[r.status].className)}>
-                    {STATUS_META[r.status].label}
-                  </Badge>
-                </td>
-                <td className="max-w-80 truncate px-3 py-2 text-muted-foreground">
-                  {r.promptPreview}
-                </td>
-                <td className="whitespace-nowrap px-3 py-2 text-right">
-                  {formatDuration(r.durationMs)}
-                </td>
-                <td className="whitespace-nowrap px-3 py-2 text-right">{formatCost(r.cost)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {loading && items.length === 0 && (
-          <div className="space-y-2 p-3" aria-busy>
-            {[0, 1, 2].map((i) => (
-              <Skeleton key={i} className="h-7 w-full" />
-            ))}
+                <option value="">全部智能体</option>
+                {agents.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </NativeSelect>
+            )}
+            <NativeSelect
+              className="h-8 w-32 text-xs"
+              aria-label="按状态筛选"
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+            >
+              <option value="">全部状态</option>
+              {Object.entries(STATUS_META).map(([k, v]) => (
+                <option key={k} value={k}>
+                  {v.label}
+                </option>
+              ))}
+            </NativeSelect>
+            <NativeSelect
+              className="h-8 w-32 text-xs"
+              aria-label="按来源筛选"
+              value={source}
+              onChange={(e) => setSource(e.target.value)}
+            >
+              <option value="">全部来源</option>
+              {Object.entries(SOURCE_LABEL).map(([k, v]) => (
+                <option key={k} value={k}>
+                  {v}
+                </option>
+              ))}
+            </NativeSelect>
           </div>
-        )}
-        {!loading && items.length === 0 && !error && (
-          <p className="p-6 text-center text-xs text-muted-foreground">没有符合条件的运行</p>
-        )}
-      </div>
 
-      {cursor && (
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={loading}
-          onClick={() => void load(cursor)}
-          className="self-start"
-        >
-          加载更多
-        </Button>
+          {error && <p className="text-xs text-destructive">加载失败:{error}</p>}
+
+          <div className="overflow-x-auto rounded-lg border border-border">
+            <table className="w-full text-xs">
+              <thead className="bg-muted/40 text-left text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 font-medium">时间</th>
+                  <th className="px-3 py-2 font-medium">智能体</th>
+                  <th className="px-3 py-2 font-medium">来源</th>
+                  <th className="px-3 py-2 font-medium">状态</th>
+                  <th className="px-3 py-2 font-medium">输入</th>
+                  <th className="px-3 py-2 text-right font-medium">耗时</th>
+                  <th className="px-3 py-2 text-right font-medium">花费</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((r) => (
+                  <tr
+                    key={r.id}
+                    tabIndex={0}
+                    className="cursor-pointer border-t border-border hover:bg-muted/30 focus-visible:bg-muted/30 focus-visible:outline-none"
+                    onClick={() => void openDetail(r.id)}
+                    onKeyDown={(e) => e.key === "Enter" && void openDetail(r.id)}
+                  >
+                    <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
+                      {new Date(r.createdAt).toLocaleString()}
+                    </td>
+                    <td className="max-w-40 truncate px-3 py-2">
+                      {r.agentName ?? r.agentId}
+                      <span className="ml-1 text-muted-foreground">
+                        {r.agentVersion ? `v${r.agentVersion}` : "草稿"}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2">{SOURCE_LABEL[r.source]}</td>
+                    <td className="px-3 py-2">
+                      <Badge className={cn("border-0", STATUS_META[r.status].className)}>
+                        {STATUS_META[r.status].label}
+                      </Badge>
+                    </td>
+                    <td className="max-w-80 truncate px-3 py-2 text-muted-foreground">
+                      {r.promptPreview}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right">
+                      {formatDuration(r.durationMs)}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right">{formatCost(r.cost)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {loading && items.length === 0 && (
+              <div className="space-y-2 p-3" aria-busy>
+                {[0, 1, 2].map((i) => (
+                  <Skeleton key={i} className="h-7 w-full" />
+                ))}
+              </div>
+            )}
+            {!loading && items.length === 0 && !error && (
+              <p className="p-6 text-center text-xs text-muted-foreground">没有符合条件的运行</p>
+            )}
+          </div>
+
+          {cursor && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={loading}
+              onClick={() => void load(cursor)}
+              className="self-start"
+            >
+              加载更多
+            </Button>
+          )}
+        </>
       )}
 
       <Sheet open={detail !== null} onOpenChange={(o) => !o && setDetail(null)}>

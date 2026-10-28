@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Open Web Agents 功能布局方案</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#141517;color:#dfe1e5;font:16px/1.6 system-ui,"PingFang SC",sans-serif;letter-spacing:0}header,main,footer{max-width:1560px;margin:auto;padding:28px}header{padding-bottom:14px}h1{font-size:26px;margin:0 0 8px;font-weight:600}p{margin:0;color:#a7abb3}header p{max-width:850px}.toolbar{display:flex;align-items:center;gap:8px;margin-top:24px;flex-wrap:wrap}button,a{font:inherit}button{min-height:44px;padding:8px 16px;color:#dfe1e5;background:transparent;border:1px solid #4e5157;border-radius:6px;cursor:pointer}button[aria-pressed=true]{background:#2e436e;border-color:#548af7}a{color:#a9c5ff;text-underline-offset:4px}a:focus-visible,button:focus-visible{outline:2px solid #7ca6ff;outline-offset:3px}.toolbar>a{margin-left:auto}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px}article{min-width:0}article a.preview{display:block;background:#1e1f22;border:1px solid #393b40;border-radius:8px;overflow:hidden;aspect-ratio:1.6}img{width:100%;height:100%;object-fit:contain;display:block}.label{display:flex;align-items:center;gap:10px;margin:16px 0 8px}h2{font-size:20px;margin:0;font-weight:600}.letter{width:28px;height:28px;display:grid;place-items:center;background:#2b2d30;border-radius:4px;font-size:14px}article p{font-size:14px;line-height:1.8;min-height:50px}.links{display:flex;gap:16px;margin-top:16px}.links a{min-height:44px;display:inline-flex;align-items:center}.tradeoff{margin-top:14px;font-size:14px;padding-top:14px;border-top:1px solid #393b40;color:#a7abb3}.tradeoff b{color:#dfe1e5;font-weight:500}footer{font-size:14px;color:#a7abb3;padding-top:0}footer p{margin-top:8px}.comparison{margin-top:40px;overflow:auto}table{width:100%;border-collapse:collapse;text-align:left;font-size:14px;min-width:680px}th,td{padding:14px 12px;border-bottom:1px solid #393b40;vertical-align:top}th{font-weight:500;color:#a7abb3}td:first-child{color:#a7abb3;width:130px}h3{font-size:18px;margin:0 0 12px}@media(max-width:1000px){.grid{grid-template-columns:1fr}article p{min-height:0}.label{margin-top:12px}.tradeoff{margin-bottom:16px}header,main,footer{padding:20px}.toolbar>a{margin-left:0}.links{margin-top:4px}h1{font-size:22px}}@media(prefers-reduced-motion:no-preference){a.preview:hover{border-color:#548af7}}
+</style>
+</head>
+<body>
+<header>
+<h1>Open Web Agents 功能布局</h1>
+<p>三个可操作原型，使用同一套内容、深灰色板和圆角。比较任务入口、智能体配置和执行详情的位置。</p>
+<div class="toolbar" role="group" aria-label="预览页面">
+<button type="button" data-screen="workbench" aria-pressed="true">工作台</button>
+<button type="button" data-screen="agent" aria-pressed="false">智能体详情</button>
+<button type="button" data-screen="mobile" aria-pressed="false">手机</button>
+<a href="thumbs.html">查看六个候选</a>
+</div>
+</header>
+<main>
+<div class="grid">
+<article>
+<a class="preview" href="dir-1.html" aria-label="打开任务分区原型"><img src="dir-1-workbench.png" data-dir="1" alt="任务分区原型：左侧任务导航、会话列表和主内容区"></a>
+<div class="label"><span class="letter">A</span><h2>任务分区</h2></div>
+<p>工作台、智能体、运行、API、费用各有明确入口。对话详情按需展开，取消重复标签和窗口条。</p>
+<div class="links"><a href="dir-1.html">打开原型</a><a class="image-link" data-dir="1" href="dir-1-workbench.png">查看大图</a></div>
+<div class="tradeoff"><b>更容易找到功能。</b> 适合同时服务日常使用者、创建者和管理人员。跨区域时需要保留智能体上下文。</div>
+</article>
+<article>
+<a class="preview" href="dir-2.html" aria-label="打开对象工作区原型"><img src="dir-2-workbench.png" data-dir="2" alt="对象工作区原型：智能体对象树与对象内工作区"></a>
+<div class="label"><span class="letter">B</span><h2>对象工作区（已选）</h2></div>
+<p>先选智能体，再进入它的对话、配置、运行和接入。会话属于智能体，全局费用与管理单独放置。</p>
+<div class="links"><a href="dir-2.html">打开原型</a><a class="image-link" data-dir="2" href="dir-2-workbench.png">查看大图</a></div>
+<div class="tradeoff"><b>智能体上下文最连续。</b> 适合频繁调试、发布和接入的创建者。跨智能体排查走全局运行。</div>
+</article>
+<article>
+<a class="preview" href="dir-3.html" aria-label="打开聚焦对话原型"><img src="dir-3-workbench.png" data-dir="3" alt="聚焦对话原型：顶部任务导航与单一对话主面板"></a>
+<div class="label"><span class="letter">C</span><h2>聚焦对话</h2></div>
+<p>顶部切换任务，主屏留给对话。历史会话和执行详情分别按需打开，常驻控件最少。</p>
+<div class="links"><a href="dir-3.html">打开原型</a><a class="image-link" data-dir="3" href="dir-3-workbench.png">查看大图</a></div>
+<div class="tradeoff"><b>正文空间最大。</b> 适合长时间聊天与移动使用。频繁切历史会话需要多开一次抽屉。</div>
+</article>
+</div>
+<section class="comparison">
+<h3>同一个任务，三种路径</h3>
+<table><caption style="text-align:left;color:#a7abb3;padding-bottom:12px">共享能力不变，主要差异在信息的归属和显示时机。</caption><thead><tr><th scope="col">任务</th><th scope="col">A 任务分区</th><th scope="col">B 对象工作区</th><th scope="col">C 聚焦对话</th></tr></thead><tbody>
+<tr><td>继续历史对话</td><td>会话列表直接选择</td><td>智能体下选择会话</td><td>打开历史抽屉后选择</td></tr>
+<tr><td>修改智能体</td><td>智能体区域内选择与编辑</td><td>当前智能体切到配置</td><td>顶部进入智能体页编辑</td></tr>
+<tr><td>查看执行细节</td><td>对话内打开详情</td><td>当前会话打开详情</td><td>对话内打开详情抽屉</td></tr>
+<tr><td>接入一个智能体</td><td>API 接入选择智能体</td><td>当前智能体切到接入</td><td>顶部 API 接入选择智能体</td></tr>
+<tr><td>费用与管理</td><td>任务导航下独立区域</td><td>对象树底部全局区域</td><td>顶部费用与账号菜单</td></tr>
+</tbody></table>
+</section>
+</main>
+<footer><p>原型中的消息、运行与 Key 都是交互样例。本轮已选择 B 对象工作区，现有应用组件已按此落地。</p><p><a href="implementation/README.md">生产实现与验证</a>　<a href="verification.md">原型验证记录</a>　<a href="directions.md">方向来源与取舍</a>　<a href="../information-architecture-audit.md">功能梳理</a></p></footer>
+<script>
+for(const button of document.querySelectorAll('[data-screen]')){
+button.addEventListener('click',()=>{
+const screen=button.dataset.screen;
+for(const item of document.querySelectorAll('[data-screen]'))item.setAttribute('aria-pressed',String(item===button));
+for(const image of document.querySelectorAll('img[data-dir]'))image.src=`dir-${image.dataset.dir}-${screen}.png`;
+for(const link of document.querySelectorAll('.image-link'))link.href=`dir-${link.dataset.dir}-${screen}.png`;
+});
+}
+</script>
+</body>
+</html>

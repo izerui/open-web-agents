@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Open Web Agents · 对象工作区 · 交互样例</title>
+<style>
+:root{color-scheme:dark;--bg:#1e1f22;--panel:#2b2d30;--line:#393b40;--blue:#3574f0;--light:#548af7;--select:#2e436e;--text:#dfe1e5;--muted:#a7abb3;--green:#5fb865;--red:#db5c5c}
+*{box-sizing:border-box;letter-spacing:0}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}
+button,input,select,textarea{font:inherit;color:inherit}button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:8px 12px;border:1px solid transparent;border-radius:6px;background:transparent;cursor:pointer}
+button:hover{background:#36383d}button:disabled,button:disabled:hover{opacity:1;cursor:not-allowed;background:#393b40;color:#dfe1e5;border-color:#51545b}button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var(--light);outline-offset:2px}
+svg{flex:none;vertical-align:middle}input,select,textarea{background:var(--bg);border:1px solid #51545b;border-radius:6px;padding:10px 12px;min-height:44px;width:100%;outline:none}
+input:focus,select:focus,textarea:focus{border-color:var(--light);box-shadow:0 0 0 1px var(--light)}textarea{resize:vertical;min-height:110px}input[type=checkbox],input[type=radio]{width:18px;min-height:18px;accent-color:var(--blue)}
+h1,h2,h3,p{margin:0}h1{font-size:18px;font-weight:600}h2{font-size:20px}h3{font-size:15px}p{margin:8px 0 16px}small,.muted{color:var(--muted)}small{font-size:12px}code,pre{font:13px/1.8 ui-monospace,SFMono-Regular,Consolas,monospace}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--bg);padding:18px;border:1px solid var(--line);border-radius:6px;margin:12px 0}
+.top{height:56px;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--line)}.mark{background:var(--select);color:white;font-size:14px;font-weight:750;border-radius:6px;width:32px;height:32px;display:grid;place-items:center}
+.badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);padding:2px 8px;border:1px solid #51545b;border-radius:4px;white-space:nowrap}.spacer{flex:1}.icon{width:44px;padding:0;flex:none}.primary{background:var(--blue);color:#fff}.primary:hover{background:#2864dc}.outline{border-color:#51545b}.active{background:var(--select)!important;color:#eef3ff}.good{color:var(--green)}.bad{color:#f18a8a}.blue{color:#83aaff}
+.shell{height:calc(100dvh - 56px);display:grid;grid-template-columns:264px minmax(0,1fr);gap:6px;padding:6px}.tree,.workspace{border:1px solid var(--line);border-radius:12px;overflow:hidden;min-width:0}
+.tree{background:var(--panel);display:flex;flex-direction:column;padding:10px 8px}.tree-title{display:flex;align-items:center;padding-left:10px;margin-bottom:14px}.tree-title strong{font-weight:600}.tree-scroll{flex:1;overflow:auto}.tree button{width:100%;justify-content:flex-start;text-align:left}.tree-title button{width:44px;justify-content:center}
+.agent-row{margin-top:4px}.agent-row svg{color:var(--light)}.agent-row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sessions{margin:0 4px 14px 18px;padding-left:8px;border-left:1px solid #51545b}.sessions button{font-size:13px;line-height:1.5;gap:8px}.sessions svg{width:15px}.tree-bottom{border-top:1px solid var(--line);padding-top:8px}.tree-bottom button{color:var(--muted)}.tree-bottom .account{border-top:1px solid var(--line);margin-top:8px;padding-top:12px}
+.workspace{display:flex;flex-direction:column;background:var(--bg)}.object-header{display:flex;align-items:center;gap:12px;padding:18px 24px 12px;background:var(--panel)}.object-symbol{width:38px;height:38px;display:grid;place-items:center;color:#83aaff;background:var(--select);border-radius:6px}
+.tabs{display:flex;gap:6px;padding:0 22px;background:var(--panel);border-bottom:1px solid var(--line)}.tabs button{border-radius:0;border-bottom:2px solid transparent;min-width:88px;padding:10px 12px}.tabs button.selected{border-bottom-color:var(--light);color:white}.content{flex:1;min-height:0;overflow:auto}
+.chat{height:100%;display:flex;flex-direction:column}.chat-title{padding:16px 28px;display:flex;gap:10px;align-items:center;border-bottom:1px solid var(--line)}.chat-title h2{font-size:15px}.transcript{flex:1;overflow:auto;padding:24px max(28px,calc((100% - 850px)/2));scrollbar-gutter:stable}.message{margin-bottom:24px}.speaker{font-size:13px;display:flex;align-items:center;gap:8px;margin-bottom:9px;color:var(--muted)}.avatar{width:24px;height:24px;border-radius:4px;background:#393b40;display:grid;place-items:center;color:var(--text);font-size:12px}
+.message p{margin:0;line-height:1.9}.reply{padding-left:32px}.tools{margin:15px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}details{border-bottom:1px solid var(--line)}details:last-child{border:0}summary{cursor:pointer;min-height:44px;padding:9px 0;color:var(--muted)}summary span{float:right;font-size:12px}details pre{margin:0 0 12px}.files{display:flex;gap:6px;flex-wrap:wrap;margin-top:16px}.file{border:1px solid var(--line);background:var(--panel);font:12px ui-monospace,monospace}
+.question{border-left:2px solid var(--light);padding-left:16px;margin-top:22px}.choices{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px}.choice{display:flex;align-items:center;gap:8px;min-height:44px;padding:8px 12px;border:1px solid var(--line);border-radius:6px;cursor:pointer}
+.composer{padding:8px max(28px,calc((100% - 850px)/2)) 14px}.compose-box{border:1px solid #51545b;border-radius:12px;background:var(--panel);padding:8px 12px}.compose-box textarea{border:0;box-shadow:none;background:transparent;resize:none;min-height:36px;height:36px;padding:2px}.compose-actions{display:flex;align-items:center;gap:8px}.footnote{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:8px}.compose-actions .primary{min-height:44px;width:44px}
+.transcript{padding-top:16px;padding-bottom:16px}.message{margin-bottom:16px}.question{margin-top:14px}.chat-title{padding-top:12px;padding-bottom:12px}.page{padding:28px 32px;max-width:1100px;margin:auto}.page-head{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:24px}.subnav{display:flex;gap:6px;flex-wrap:wrap;padding-bottom:16px;border-bottom:1px solid var(--line);margin-bottom:24px}.subnav button{padding:8px 14px}.form-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}.field{display:block;margin:0 0 20px}.field>span{display:block;margin-bottom:8px}.field small{display:block;margin-top:6px}.wide{grid-column:1/-1}.section{padding:20px 0;border-bottom:1px solid var(--line)}.section:first-child{padding-top:0}.row{display:flex;align-items:center;gap:12px;justify-content:space-between;min-height:52px}.checkline{display:flex;gap:10px;align-items:center;min-height:44px}.savebar{display:flex;align-items:center;gap:12px;margin-top:24px}.notice{padding:12px 0;color:var(--muted)}.empty{text-align:center;padding:65px 12px;color:var(--muted)}.empty svg{width:28px;height:28px;margin-bottom:12px}.empty h3{color:var(--text);margin-bottom:8px}
+.filters{display:flex;gap:12px;margin-bottom:16px}.filters label{display:flex;align-items:center;gap:8px}.filters select{width:150px}.runlist{border-top:1px solid var(--line)}.runrow{width:100%;display:grid;grid-template-columns:1fr 130px 100px 24px;text-align:left;border-radius:0;border-bottom:1px solid var(--line);padding:16px 10px;gap:12px}.runrow small{display:block}.stats{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid var(--line);padding:10px 0 28px;gap:20px}.stats strong{display:block;font-size:32px;font-weight:500;margin-top:8px}
+dialog{width:min(660px,calc(100% - 32px));max-height:85dvh;overflow:auto;border:1px solid #51545b;border-radius:12px;background:var(--panel);color:var(--text);padding:24px}dialog::backdrop{background:#0009}.dialog-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;gap:12px}.search-results button{display:flex;width:100%;justify-content:space-between;margin-top:6px}.mobile-only{display:none}.statusline{min-height:26px;color:#a8c1ff;font-size:13px}.account-avatar{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:#42454b;font-size:12px;color:white}
+@media(max-width:760px){body{font-size:16px}.top{padding:0 8px;gap:8px}.top .brand-name{font-size:14px}.top .badge{font-size:12px}.shell{grid-template-columns:1fr;padding:6px;height:calc(100dvh - 56px)}.tree{display:none}.tree.mobile-open{display:flex;position:fixed;z-index:5;top:62px;bottom:6px;left:6px;width:264px;box-shadow:40px 0 0 100vw #0008}.mobile-only{display:inline-flex}.object-header{padding:12px;gap:10px}.object-header h1{font-size:16px}.object-header .badge{display:none}.tabs{padding:0 6px;gap:0}.tabs button{min-width:0;flex:1;padding:10px 8px;font-size:14px;gap:6px}.chat-title{padding:12px;align-items:flex-start}.chat-title h2{font-size:14px}.chat-title small{font-size:12px}.transcript{padding:18px 14px}.reply{padding-left:0}.message p{font-size:16px}.composer{padding:8px 12px 12px}.footnote{font-size:12px}.footnote span:last-child{display:none}.page{padding:20px 16px}.page-head{align-items:flex-start;flex-wrap:wrap;gap:10px}.page-head h2{font-size:19px}.form-grid{grid-template-columns:1fr;gap:0}.subnav{gap:4px}.subnav button{font-size:14px;padding:8px 10px}.runrow{grid-template-columns:1fr 66px;gap:8px}.runrow .source,.runrow>svg{display:none}.filters{gap:8px;flex-wrap:wrap}.filters select{width:112px}.filters label{font-size:14px}.choices{align-items:stretch}.question .primary{width:100%}.files{display:grid;grid-template-columns:1fr}.file{justify-content:flex-start;font-size:13px}.row{flex-wrap:wrap;padding:8px 0}.savebar{flex-wrap:wrap}.compose-box textarea{font-size:16px}.stats strong{font-size:28px}dialog{padding:16px}.dialog-head h2{font-size:18px}pre{font-size:12px}.speaker{font-size:13px}.tree .sessions button{font-size:14px}}
+</style>
+</head>
+<body>
+<header class="top"><button class="icon mobile-only" data-action="tree" aria-label="打开智能体树" title="智能体树"><i data-icon="PanelLeft"></i></button><div class="mark">OW</div><strong class="brand-name">Open Web Agents</strong><span class="badge">交互样例</span><div class="spacer"></div><button class="icon" data-action="search" aria-label="搜索目的地" title="搜索目的地"><i data-icon="Search"></i></button></header>
+<div class="shell"><aside class="tree" aria-label="智能体与会话"></aside><main class="workspace" id="workspace"></main></div>
+<dialog id="modal" closedby="any" aria-labelledby="dialog-title"></dialog>
+<script>
+// Official Lucide React output is embedded at build time; no runtime dependencies.
+const ICONS = {
+  "Bot": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-bot\" aria-hidden=\"true\"><path d=\"M12 8V4H8\"></path><rect width=\"16\" height=\"12\" x=\"4\" y=\"8\" rx=\"2\"></rect><path d=\"M2 14h2\"></path><path d=\"M20 14h2\"></path><path d=\"M15 13v2\"></path><path d=\"M9 13v2\"></path></svg>",
+  "MessageSquare": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-message-square\" aria-hidden=\"true\"><path d=\"M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z\"></path></svg>",
+  "Plus": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-plus\" aria-hidden=\"true\"><path d=\"M5 12h14\"></path><path d=\"M12 5v14\"></path></svg>",
+  "Search": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-search\" aria-hidden=\"true\"><path d=\"m21 21-4.34-4.34\"></path><circle cx=\"11\" cy=\"11\" r=\"8\"></circle></svg>",
+  "ChevronRight": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-chevron-right\" aria-hidden=\"true\"><path d=\"m9 18 6-6-6-6\"></path></svg>",
+  "ChevronDown": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-chevron-down\" aria-hidden=\"true\"><path d=\"m6 9 6 6 6-6\"></path></svg>",
+  "Play": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-play\" aria-hidden=\"true\"><path d=\"M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z\"></path></svg>",
+  "Settings2": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-settings2 lucide-settings-2\" aria-hidden=\"true\"><path d=\"M14 17H5\"></path><path d=\"M19 7h-9\"></path><circle cx=\"17\" cy=\"17\" r=\"3\"></circle><circle cx=\"7\" cy=\"7\" r=\"3\"></circle></svg>",
+  "Plug": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-plug\" aria-hidden=\"true\"><path d=\"M12 22v-5\"></path><path d=\"M15 8V2\"></path><path d=\"M17 8a1 1 0 0 1 1 1v4a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1z\"></path><path d=\"M9 8V2\"></path></svg>",
+  "Activity": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-activity\" aria-hidden=\"true\"><path d=\"M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2\"></path></svg>",
+  "Wallet": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-wallet\" aria-hidden=\"true\"><path d=\"M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1\"></path><path d=\"M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4\"></path></svg>",
+  "Shield": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-shield\" aria-hidden=\"true\"><path d=\"M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z\"></path></svg>",
+  "User": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-user\" aria-hidden=\"true\"><path d=\"M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2\"></path><circle cx=\"12\" cy=\"7\" r=\"4\"></circle></svg>",
+  "PanelLeft": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-panel-left\" aria-hidden=\"true\"><rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\"></rect><path d=\"M9 3v18\"></path></svg>",
+  "X": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-x\" aria-hidden=\"true\"><path d=\"M18 6 6 18\"></path><path d=\"m6 6 12 12\"></path></svg>",
+  "ArrowUp": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-arrow-up\" aria-hidden=\"true\"><path d=\"m5 12 7-7 7 7\"></path><path d=\"M12 19V5\"></path></svg>",
+  "FileCode": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-file-code\" aria-hidden=\"true\"><path d=\"M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z\"></path><path d=\"M14 2v5a1 1 0 0 0 1 1h5\"></path><path d=\"M10 12.5 8 15l2 2.5\"></path><path d=\"m14 12.5 2 2.5-2 2.5\"></path></svg>",
+  "FileText": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-file-text\" aria-hidden=\"true\"><path d=\"M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z\"></path><path d=\"M14 2v5a1 1 0 0 0 1 1h5\"></path><path d=\"M10 9H8\"></path><path d=\"M16 13H8\"></path><path d=\"M16 17H8\"></path></svg>",
+  "Check": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-check\" aria-hidden=\"true\"><path d=\"M20 6 9 17l-5-5\"></path></svg>",
+  "CircleAlert": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-circle-alert\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"></circle><line x1=\"12\" x2=\"12\" y1=\"8\" y2=\"12\"></line><line x1=\"12\" x2=\"12.01\" y1=\"16\" y2=\"16\"></line></svg>",
+  "Folder": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-folder\" aria-hidden=\"true\"><path d=\"M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z\"></path></svg>",
+  "Save": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-save\" aria-hidden=\"true\"><path d=\"M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z\"></path><path d=\"M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7\"></path><path d=\"M7 3v4a1 1 0 0 0 1 1h7\"></path></svg>",
+  "Sparkles": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-sparkles\" aria-hidden=\"true\"><path d=\"M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z\"></path><path d=\"M20 2v4\"></path><path d=\"M22 4h-4\"></path><circle cx=\"4\" cy=\"20\" r=\"2\"></circle></svg>",
+  "Copy": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-copy\" aria-hidden=\"true\"><rect width=\"14\" height=\"14\" x=\"8\" y=\"8\" rx=\"2\" ry=\"2\"></rect><path d=\"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2\"></path></svg>",
+  "KeyRound": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-key-round\" aria-hidden=\"true\"><path d=\"M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z\"></path><circle cx=\"16.5\" cy=\"7.5\" r=\".5\" fill=\"currentColor\"></circle></svg>",
+  "Download": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-download\" aria-hidden=\"true\"><path d=\"M12 15V3\"></path><path d=\"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4\"></path><path d=\"m7 10 5 5 5-5\"></path></svg>"
+};
+const icon = name => ICONS[name] || '';
+const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const key = 'owa-ia-v2-direction-b';
+const configSections = ['配置','能力','知识','安全与契约','评测','发布与分享'];
+const makeAgent = (id,name) => ({id,name,config:{prompt:'你是一个可靠的通用智能体。理解需求，完成任务，并提供可验证的交付文件。',model:'sonnet',effort:'medium',turns:20,tools:true,mcp:false,knowledge:'',approval:true,input:'{}',output:'{}',share:'仅自己',webhook:''},sessions:[]});
+const initial = {agents:[makeAgent('general','通用智能体'),makeAgent('api','接口开发助手'),makeAgent('docs','文档整理助手')],logs:[],orders:[],display:'样例管理员'};
+initial.agents[0].sessions=[{id:'rest',name:'创建一个简单的 REST API',sample:true,messages:[],choice:'',answer:''},{id:'notes',name:'整理接口说明',messages:[],sample:false}];
+let data;
+try{data=JSON.parse(localStorage.getItem(key)) || initial}catch{data=initial}
+let current=data.agents[0].id,sessionId=data.agents[0].sessions[0]?.id,tab='对话',globalPage='',section='配置',billing='分析',admin='账号',account='账号安全',apiView='cURL',source='',status='',drafts={},savedMessage='',mobileOpen=false;
+const $=s=>document.querySelector(s);
+const agent=()=>data.agents.find(a=>a.id===current);
+const session=()=>agent().sessions.find(s=>s.id===sessionId);
+const cfg=()=>drafts[current] ||= structuredClone(agent().config);
+function persist(){try{localStorage.setItem(key,JSON.stringify(data));return true}catch{savedMessage='浏览器未允许保存，当前草稿仍保留在本页。';return false}}
+function log(text){data.logs.unshift(text);persist()}
+const btn=(text,action,ico='',cls='',extra='')=>`<button class="${cls}" data-action="${action}" ${extra}>${icon(ico)}${text}</button>`;
+const badge=(text,cls='')=>`<span class="badge ${cls}">${text}</span>`;
+function tree(){
+ $('.tree').classList.toggle('mobile-open',mobileOpen);
+ $('.tree').innerHTML=`<div class="tree-title"><strong>智能体</strong><span class="spacer"></span>${btn('','create-agent','Plus','icon','aria-label="新建智能体" title="新建智能体"')}</div><div class="tree-scroll">${data.agents.map(a=>`${btn(`${icon(a.id===current?'ChevronDown':'ChevronRight')}<span>${esc(a.name)}</span>`,`agent:${a.id}`,'Bot',`agent-row ${a.id===current&&!globalPage?'active':''}`)}${a.id===current?`<div class="sessions">${a.sessions.map(s=>btn(esc(s.name),`session:${s.id}`,'MessageSquare',s.id===sessionId&&tab==='对话'&&!globalPage?'active':'')).join('')}${btn('新建会话','new-session','Plus')}</div>`:''}`).join('')}</div><div class="tree-bottom">${btn('全部运行','global:全部运行','Activity',globalPage==='全部运行'?'active':'')}${btn('用量与费用','global:用量与费用','Wallet',globalPage==='用量与费用'?'active':'')}${btn('平台管理','global:平台管理','Shield',globalPage==='平台管理'?'active':'')}${btn(`<span class="account-avatar">管</span><span>${esc(data.display)}<br><small>账号设置</small></span>`,'global:账号设置','','account')}</div>`;
+}
+function render(){
+ tree();
+ const name=globalPage || agent().name;
+ $('#workspace').innerHTML=`<div class="object-header"><div class="object-symbol">${icon(globalPage?'Folder':'Bot')}</div><div><h1>${esc(name)}</h1><small>${globalPage?'平台空间':'智能体工作区'}</small></div><span class="spacer"></span>${badge(globalPage?'样例管理员':agent().published?'样例已发布':'草稿')}${globalPage?btn('返回工作区','home','ChevronRight'):btn('','new-session','Plus','icon mobile-only','title="新建会话" aria-label="新建会话"')}</div>${!globalPage?`<nav class="tabs" aria-label="当前智能体工作区">${['对话','配置','运行','接入'].map((t,i)=>btn(t,`tab:${t}`,['MessageSquare','Settings2','Activity','Plug'][i],tab===t?'selected':'',`aria-current="${tab===t?'page':'false'}"`)).join('')}</nav>`:''}<div class="content">${globalPage?globalContent():tab==='对话'?chat():tab==='配置'?configPage():tab==='运行'?runs(false):integration()}</div>`;
+}
+function chat(){
+ const s=session();
+ return `<section class="chat">
+ <div class="chat-title"><div><h2>${esc(s?.name || '新会话')}</h2>
+ <small>${s?.sample?'运行 R-001':'本地草稿'}</small></div><span class="spacer"></span>
+ ${s?.sample?btn('','run:0','Activity','icon','title="查看运行详情" aria-label="查看运行详情"'):''}
+ ${s?.sample?btn('','files','Folder','icon','title="查看交付文件" aria-label="查看交付文件"'):''}</div>
+ <div class="transcript" id="transcript">${s?.sample?`
+ <article class="message"><div class="speaker"><span class="avatar">你</span>你</div>
+ <div class="reply"><p>创建一个简单的 REST API，包含健康检查和用户列表接口。</p></div></article>
+ <article class="message"><div class="speaker"><span class="avatar blue">${icon('Bot')}</span>${esc(agent().name)}</div>
+ <div class="reply"><p>接口结构已整理。健康检查和用户列表使用独立路由，用户列表支持分页。</p>
+ <div class="tools">
+ <details><summary>Read <code>README.md</code><span class="good">成功</span></summary><p>读取项目说明，确认接口范围与交付目录。</p></details>
+ <details><summary>Write <code>src/app.ts</code><span class="good">成功</span></summary><p>已准备健康检查路由与用户列表入口。</p></details>
+ <details><summary>Bash <code>pnpm test</code><span class="bad">失败</span></summary><p>尚未配置测试脚本</p></details>
+ </div>
+ <div class="files">${Object.keys(files).map((f,i)=>btn(esc(f),`file:${i}`,i===2?'FileText':'FileCode','file')).join('')}</div>
+ <div class="question"><h3>用户数据先放在哪里？</h3>
+ ${s.answer?`<p class="blue">已选择：${esc(s.answer)}</p>`:`
+ <div class="choices">${['内存数据','数据库'].map(x=>`<label class="choice"><input type="radio" name="storage" value="${x}" ${s.choice===x?'checked':''}>${x}</label>`).join('')}
+ ${btn('提交选择','answer','','primary',s.choice?'':'disabled')}</div>`}
+ </div></div></article>`:`
+ <div class="empty">${icon('MessageSquare')}<h3>开始新的任务</h3><p>${esc(agent().name)}</p></div>`}
+ ${(s?.messages||[]).map(m=>`<article class="message"><div class="speaker"><span class="avatar">${m.role==='user'?'你':icon('Bot')}</span>${m.role==='user'?'你':'样例回复'}</div><div class="reply"><p>${esc(m.text)}</p></div></article>`).join('')}</div>
+ <form class="composer" id="message-form"><div class="compose-box">
+ <textarea name="message" aria-label="发送消息" placeholder="继续描述你的任务…" required></textarea>
+ <div class="compose-actions"><small>${esc(agent().name)}</small><span class="spacer"></span>
+ <button class="primary icon" type="submit" aria-label="发送消息" title="发送消息">${icon('ArrowUp')}</button>
+ </div></div></form></section>`;
+}
+const files={'src/app.ts':"import express from 'express';\nimport users from './routes/users';\n\nconst app = express();\napp.get('/health', (_req, res) => {\n  res.json({ status: 'ok' });\n});\napp.use('/users', users);\nexport default app;",'src/routes/users.ts':"import { Router } from 'express';\nconst router = Router();\nconst users = [];\nrouter.get('/', (req, res) => {\n  const page = Math.max(1, Number(req.query.page) || 1);\n  res.json({ page, data: users.slice((page - 1) * 20, page * 20) });\n});\nexport default router;",'README.md':'# REST API · 交互样例\n\nGET /health  健康检查\nGET /users?page=1  分页用户列表\n\n测试状态：尚未配置测试脚本。\n文件用于原型预览，不代表已完成生产验证。'};
+function field(label,name,value,type='text',hint=''){
+ return `<label class="field"><span>${label}</span>${type==='textarea'?`<textarea data-config="${name}">${esc(value)}</textarea>`:`<input data-config="${name}" type="${type}" value="${esc(value)}" ${type==='number'?'min="1" max="100"':''}>`}${hint?`<small>${hint}</small>`:''}</label>`;
+}
+function selectField(label,name,options,value){return `<label class="field"><span>${label}</span><select data-config="${name}">${options.map(x=>`<option ${x===value?'selected':''}>${x}</option>`).join('')}</select></label>`}
+function configPage(){
+ const c=cfg();let body='';
+ if(section==='配置')body=`<div class="form-grid"><div>${field('智能体名称','name',c.name??agent().name)}${selectField('模型别名','model',['sonnet','opus','haiku'],c.model)}</div><div>${selectField('努力级别','effort',['low','medium','high'],c.effort)}${field('最大轮次','turns',c.turns,'number')}</div></div>${field('系统提示词','prompt',c.prompt,'textarea')}<small>修改仅影响当前智能体草稿。</small>`;
+ if(section==='能力')body=`<h3>工具与扩展</h3><div class="section"><label class="checkline"><input type="checkbox" data-config="tools" ${c.tools?'checked':''}>启用 Read、Write、Bash 工具</label><label class="checkline"><input type="checkbox" data-config="mcp" ${c.mcp?'checked':''}>启用 MCP 配置草稿</label></div>${field('技能列表','skills',c.skills||'','textarea','每行一个技能名称')}${field('子智能体说明','subagents',c.subagents||'','textarea')}`;
+ if(section==='知识')body=`<h3>知识文档</h3><p class="muted">当前智能体的参考资料</p>${field('文档标题','knowledgeTitle',c.knowledgeTitle||'')}${field('文档内容','knowledge',c.knowledge,'textarea')}<small>文档随智能体草稿保存。</small>`;
+ if(section==='安全与契约')body=`<label class="checkline"><input type="checkbox" data-config="approval" ${c.approval?'checked':''}>工具执行前需要人工审批</label><div class="form-grid" style="margin-top:20px">${field('输入 Schema','input',c.input,'textarea')}${field('输出 Schema','output',c.output,'textarea')}</div>${field('校验规则','verify',c.verify||'','textarea')}`;
+ if(section==='评测')body=`<h3>评测用例</h3><p class="muted">样例检查只验证当前草稿是否包含系统提示词。</p>${field('测试输入','testInput',c.testInput||'创建健康检查接口','textarea')}${btn('检查草稿','evaluate','Play','outline')}<div id="evaluation" role="status" class="notice">${c.evalResult||'尚未检查'}</div>`;
+ if(section==='发布与分享')body=`${selectField('可见范围','share',['仅自己','指定用户','用户组','公开'],c.share)}${['指定用户','用户组'].includes(c.share)?field('授权对象','principal',c.principal||''):''}<div class="section"><h3>发布状态</h3><p>${agent().published?'样例版本已发布，未发布到平台。':'当前为本地草稿，尚未发布。'}</p>${btn('发布样例版本','publish','Check','outline')}</div>`;
+ return `<div class="page"><div class="page-head"><div><h2>智能体配置</h2><small>${esc(agent().name)} / ${section}</small></div>${btn('AI 辅助编辑','ai','Sparkles','outline')}</div><nav class="subnav" aria-label="配置分区">${configSections.map(s=>btn(s,`section:${s}`,'',s===section?'active':'')).join('')}</nav>${body}<div class="savebar">${btn('保存草稿','save','Save','primary')}<span id="save-status" class="statusline" role="status">${esc(savedMessage)}</span></div></div>`;
+}
+const runData=[
+ {id:'R-001',agent:'general',source:'工作台',status:'成功',name:'创建一个简单的 REST API',input:'创建一个简单的 REST API，包含健康检查和用户列表接口。',output:'接口结构已整理。健康检查和用户列表使用独立路由，用户列表支持分页。',session:'创建一个简单的 REST API'},
+ {id:'R-002',agent:'api',source:'接口调用',status:'成功',name:'生成接口契约',input:'生成用户列表接口契约。',output:'{"route":"/users","method":"GET","pagination":true}',session:'接口调用独立会话'},
+ {id:'R-003',agent:'docs',source:'评测',status:'失败',name:'检查文档完整性',input:'校验接口说明。',output:'失败：缺少预期的 outputSchema 字段。',session:'评测独立会话'}
+];
+function runs(all){
+ const rows=runData.map((r,i)=>({...r,index:i})).filter(r=>(all||r.agent===current)&&(!source||r.source===source)&&(!status||r.status===status));
+ return `<div class="page"><div class="page-head"><div><h2>${all?'全部运行':'智能体运行'}</h2><small>交互样例 · ${rows.length} 条记录</small></div></div><div class="filters"><label>来源<select id="source-filter">${['','工作台','接口调用','评测'].map(s=>`<option value="${s}" ${s===source?'selected':''}>${s||'全部来源'}</option>`).join('')}</select></label><label>状态<select id="status-filter">${['','成功','失败'].map(s=>`<option value="${s}" ${s===status?'selected':''}>${s||'全部状态'}</option>`).join('')}</select></label></div><div class="runlist">${rows.map(r=>`<button class="runrow" data-action="run:${r.index}"><span>${r.name}<small>${r.id} · ${esc(data.agents.find(a=>a.id===r.agent)?.name||'样例智能体')}</small></span><span class="source muted">${r.source}</span><span class="${r.status==='成功'?'good':'bad'}">${r.status}</span>${icon('ChevronRight')}</button>`).join('')||'<div class="empty"><h3>没有匹配的运行</h3><p>调整来源或状态后查看。</p></div>'}</div></div>`;
+}
+function snippet(){
+ const endpoint=`https://example.invalid/api/agents/${current}/invoke`;
+ if(apiView==='JavaScript')return `// 交互样例：域名与 Key 不可调用\nconst response = await fetch('${endpoint}', {\n  method: 'POST',\n  headers: { Authorization: 'Bearer demo_not_callable',\n    'Content-Type': 'application/json' },\n  body: JSON.stringify({ prompt: '创建一个简单的 REST API' })\n});\nconst { taskId } = await response.json();`;
+ if(apiView==='查询结果')return `# 交互样例：替换为实际部署地址后使用\ncurl 'https://example.invalid/api/agents/demo_task_id/result' \\\n  -H 'Authorization: Bearer demo_not_callable'`;
+ return `# ${agent().name} · 不可调用的交互样例\ncurl '${endpoint}' \\\n  -X POST \\\n  -H 'Authorization: Bearer demo_not_callable' \\\n  -H 'Content-Type: application/json' \\\n  -d '{"prompt":"创建一个简单的 REST API"}'`;
+}
+function integration(){
+ return `<div class="page"><div class="page-head"><div><h2>接入 ${esc(agent().name)}</h2><small>接口调用创建独立会话与运行</small></div></div><div class="section"><div class="row"><h3>API Key</h3>${btn('签发样例 Key','issue-key','KeyRound','outline')}</div>${agent().demoKey?`<pre>demo_not_callable_${esc(current)}</pre><small>不可调用的 demo 值</small> ${btn('撤销样例 Key','revoke-key','X')}`:'<p class="muted">尚未签发样例 Key。</p>'}</div><div class="section"><div class="row"><h3>调用片段</h3>${btn('','copy-snippet','Copy','icon','title="复制调用片段" aria-label="复制调用片段"')}</div><nav class="subnav">${['cURL','JavaScript','查询结果'].map(v=>btn(v,`api:${v}`,'',v===apiView?'active':'')).join('')}</nav><pre id="snippet">${esc(snippet())}</pre><div id="copy-status" class="statusline" role="status"></div></div><div class="section"><h3>Webhook</h3><p class="muted">运行终态通知</p>${field('接收地址','webhook',cfg().webhook,'url')}${btn('保存接入草稿','save-webhook','Save','outline')} ${btn('预览样例投递','webhook','Play','outline')}<div id="webhook-status" role="status" class="statusline"></div></div></div>`;
+}
+function globalContent(){
+ if(globalPage==='全部运行')return runs(true);
+ if(globalPage==='用量与费用')return `<div class="page"><div class="page-head"><h2>用量与费用</h2>${badge('无计费记录')}</div><nav class="subnav">${['分析','流水','充值与订单','价格'].map(x=>btn(x,`billing:${x}`,'',x===billing?'active':'')).join('')}</nav><div class="stats"><div><small>可用余额</small><strong>0</strong></div><div><small>冻结金额</small><strong>0</strong></div></div>${billing==='充值与订单'?`<div class="section"><div class="row"><h3>充值订单</h3>${btn('创建样例订单','order','Plus','outline')}</div>${data.orders.map(o=>`<div class="row"><span>样例订单 · ${o} 元</span>${badge('未支付')}</div>`).join('')||'<p class="muted">暂无订单</p>'}</div>`:`<div class="empty">${icon('Wallet')}<h3>${billing==='价格'?'暂无已配置价格':billing==='流水'?'暂无资金流水':'暂无实际用量'}</h3><p>${billing==='价格'?'模型价格以平台实际配置为准。':'交互样例不产生费用。'}</p></div>`}</div>`;
+ if(globalPage==='平台管理')return `<div class="page"><div class="page-head"><h2>平台管理</h2>${badge('样例管理员')}</div><nav class="subnav">${['账号','模型与算力','计费','运营审计'].map(x=>btn(x,`admin:${x}`,'',x===admin?'active':'')).join('')}</nav>${admin==='账号'?`<div class="row"><div>${esc(data.display)}<br><small>样例身份 · 管理员</small></div>${btn('查看权限','permissions','Shield','outline')}</div>`:admin==='模型与算力'?`<div class="section"><h3>模型与算力</h3><p class="muted">未连接模型服务商，无可用算力记录。</p>${btn('预览模型配置','model','Settings2','outline')}</div>`:admin==='计费'?`<div class="section"><h3>计费设置</h3><p class="muted">未配置真实费率。</p>${btn('查看价格','view-prices','Wallet','outline')}</div>`:`<h3>本地样例操作</h3>${logsView()}`}</div>`;
+ return `<div class="page"><div class="page-head"><h2>账号设置</h2>${badge('样例身份')}</div><nav class="subnav">${['账号安全','操作日志'].map(x=>btn(x,`account:${x}`,'',x===account?'active':'')).join('')}</nav>${account==='账号安全'?`<form id="account-form"><label class="field"><span>显示名称</span><input name="display" value="${esc(data.display)}" maxlength="40" required></label><div class="section"><h3>登录安全</h3><p class="muted">样例账号未绑定邮箱、密码或双重验证。</p></div><div class="savebar"><button class="primary" type="submit">${icon('Save')}保存账号草稿</button><span id="account-status" class="statusline" role="status"></span></div></form>`:`<h3>本地操作日志</h3>${logsView()}`}</div>`;
+}
+function logsView(){return data.logs.length?data.logs.map(l=>`<div class="row">${esc(l)}${badge('本地')}</div>`).join(''):'<div class="empty">暂无本地操作记录</div>'}
+const modal=$('#modal');let opener;
+function openModal(title,html){
+ opener=document.activeElement;modal.innerHTML=`<div class="dialog-head"><h2 id="dialog-title">${esc(title)}</h2>${btn('','close','X','icon','aria-label="关闭" title="关闭"')}</div>${html}`;
+ modal.showModal();
+}
+modal.addEventListener('close',()=>{if(opener?.isConnected)opener.focus();else $('[data-action="search"]').focus()});
+if(!('closedBy' in HTMLDialogElement.prototype))modal.addEventListener('click',e=>{const r=modal.getBoundingClientRect();if(e.target===modal&&(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom))modal.close()});
+function navigate(){mobileOpen=false;savedMessage='';render()}
+function saveConfig(){
+ const c=cfg();if(c.name!==undefined&&!c.name.trim())return '名称不能为空。';
+ if(!Number.isFinite(Number(c.turns))||Number(c.turns)<1||Number(c.turns)>100)return '最大轮次应为 1 至 100。';
+ try{for(const s of ['input','output']){const v=JSON.parse(c[s]);if(!v||typeof v!=='object'||Array.isArray(v))throw Error()}}catch{return '输入与输出 Schema 必须是有效的 JSON 对象。'}
+ agent().config=structuredClone(c);if(c.name)agent().name=c.name.trim();
+ log(`保存 ${agent().name} 的配置草稿`);return persist()?'已保存到本地草稿':savedMessage;
+}
+async function act(action){
+ const [type,value]=action.split(':');
+ if(type==='tree'){mobileOpen=!mobileOpen;tree();return}
+ if(type==='close'){modal.close();return}
+ if(type==='agent'){current=value;sessionId=agent().sessions[0]?.id;globalPage='';source='';status='';navigate();return}
+ if(type==='session'){sessionId=value;tab='对话';globalPage='';navigate();return}
+ if(type==='tab'){tab=value;globalPage='';source='';status='';navigate();return}
+ if(type==='global'){globalPage=value;source='';status='';navigate();return}
+ if(type==='home'){globalPage='';tab='对话';navigate();return}
+ if(type==='section'){section=value;render();return}
+ if(type==='billing'){billing=value;render();return}
+ if(type==='admin'){admin=value;render();return}
+ if(type==='account'){account=value;render();return}
+ if(type==='api'){apiView=value;render();return}
+ if(type==='new-session'){const s={id:'s-'+Date.now(),name:'新会话',messages:[]};agent().sessions.push(s);sessionId=s.id;tab='对话';globalPage='';persist();navigate();return}
+ if(type==='create-agent'){openModal('新建智能体',`<form id="create-agent"><label class="field"><span>智能体名称</span><input name="name" maxlength="40" required autofocus placeholder="例如：接口评审助手"></label><button class="primary" type="submit">${icon('Plus')}创建本地草稿</button></form>`);return}
+ if(type==='answer'){const s=session();if(!s.choice)return;s.answer=s.choice;s.messages.push({role:'assistant',text:`已记录选择：${s.answer}。这条样例不会启动模型运行。`});persist();render();return}
+ if(type==='files'){openModal('会话交付文件',`<p class="muted">创建一个简单的 REST API · 交互样例</p>${Object.keys(files).map((f,i)=>btn(esc(f),`file:${i}`,'FileCode','file')).join(' ')}`);return}
+ if(type==='file'){const f=Object.keys(files)[Number(value)];if(modal.open)modal.close();openModal(f,`${badge('交互样例')}<pre>${esc(files[f])}</pre>${btn('下载样例文件',`download:${value}`,'Download','outline')}`);return}
+ if(type==='download'){const f=Object.keys(files)[Number(value)],url=URL.createObjectURL(new Blob([files[f]],{type:'text/plain'}));const a=document.createElement('a');a.href=url;a.download=f.split('/').pop();a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);return}
+ if(type==='run'){const r=runData[Number(value)];openModal(`运行 ${r.id}`,`${badge('交互样例')}<p>${esc(data.agents.find(a=>a.id===r.agent)?.name)} / ${r.session}</p><div class="row"><span>来源：${r.source}</span><span class="${r.status==='失败'?'bad':'good'}">${r.status}</span></div><h3>输入</h3><pre>${esc(r.input)}</pre><h3>输出</h3><pre>${esc(r.output)}</pre>${r.id==='R-001'?'<details><summary>工具失败说明</summary><pre>Bash pnpm test：尚未配置测试脚本</pre></details>':''}`);return}
+ if(type==='save'){savedMessage=saveConfig();render();return}
+ if(type==='evaluate'){cfg().evalResult=cfg().prompt.trim()?'样例检查通过：系统提示词非空。未调用模型。':'样例检查失败：系统提示词为空。';render();return}
+ if(type==='publish'){savedMessage=saveConfig();if(!savedMessage.startsWith('已保存')){render();return}agent().published=true;log(`发布 ${agent().name} 的样例版本`);savedMessage='样例版本已发布，仅保存在本机。';render();return}
+ if(type==='ai'){openModal('AI 辅助编辑',`<p>${esc(agent().name)} / 系统提示词</p><p class="muted">预置编辑建议 · 交互样例</p><pre>先明确输入与验收条件，再执行任务。交付时列出文件路径、验证结果与尚未完成的事项。</pre>${btn('应用到当前草稿','apply-ai','Check','primary')}`);return}
+ if(type==='apply-ai'){cfg().prompt+='\\n先明确输入与验收条件，再执行任务。交付时列出文件路径、验证结果与尚未完成的事项。'.replace('\\n','\n');modal.close();section='配置';savedMessage='建议已应用，待保存。';render();return}
+ if(type==='issue-key'){agent().demoKey=true;log(`签发 ${agent().name} 的样例 Key`);render();return}
+ if(type==='revoke-key'){agent().demoKey=false;log(`撤销 ${agent().name} 的样例 Key`);render();return}
+ if(type==='copy-snippet'){try{await navigator.clipboard.writeText(snippet());$('#copy-status').textContent='已复制样例调用片段'}catch{$('#copy-status').textContent='无法自动复制，请在调用片段中选择文本。'}return}
+ if(type==='save-webhook'){try{if(cfg().webhook&&!['https:','http:'].includes(new URL(cfg().webhook).protocol))throw Error();agent().config.webhook=cfg().webhook;$('#webhook-status').textContent=persist()?'接入草稿已保存。':savedMessage}catch{$('#webhook-status').textContent='请输入有效的 HTTP 或 HTTPS 地址。'}return}
+ if(type==='webhook'){openModal('Webhook 样例投递',`<p>目标：${esc(cfg().webhook||'未配置')}</p><pre>${esc(JSON.stringify({event:'run.completed',taskId:'demo_task_id',status:'success'},null,2))}</pre><p class="muted">仅预览通知内容，没有发起网络请求。</p>`);return}
+ if(type==='order'){openModal('确认样例订单',`<form id="order-form"><label class="field"><span>金额（元）</span><input name="amount" type="number" min="1" max="100000" step="1" value="100" required></label><p class="muted">订单保持未支付状态，余额不会变化。</p><button type="submit" class="primary">确认样例订单</button></form>`);return}
+ if(type==='permissions'){openModal('账号权限',`<h3>${esc(data.display)}</h3><p>角色：样例管理员</p><div class="row">账号管理${badge('样例权限')}</div><div class="row">模型与算力管理${badge('样例权限')}</div><div class="row">计费与审计${badge('样例权限')}</div><p class="muted">原型不授予真实平台权限。</p>`);return}
+ if(type==='model'){openModal('模型配置预览','<p>当前模型别名：sonnet、opus、haiku</p><p class="muted">尚未绑定服务商或真实模型 ID。</p><pre>凭证：未配置\n连接状态：未连接\n可用算力：无记录</pre>');return}
+ if(type==='view-prices'){globalPage='用量与费用';billing='价格';navigate();return}
+ if(type==='search'){openModal('搜索目的地','<input id="destination-search" aria-label="搜索目的地" placeholder="搜索智能体、配置、运行…" autofocus><div class="search-results" id="search-results"></div>');search('');return}
+ if(type==='destination'){modal.close();if(configSections.includes(value)){globalPage='';tab='配置';section=value}else if(['对话','运行','接入'].includes(value)){globalPage='';tab=value}else globalPage=value;navigate();return}
+}
+function search(query){const items=['对话','配置','能力','知识','安全与契约','评测','发布与分享','运行','接入','全部运行','用量与费用','平台管理','账号设置'];$('#search-results').innerHTML=items.filter(x=>x.includes(query.trim())).map(x=>btn(`${x}${icon('ChevronRight')}`,`destination:${x}`)).join('')||'<p class="muted">没有匹配的目的地</p>'}
+document.addEventListener('click',e=>{const b=e.target.closest('[data-action]');if(b)act(b.dataset.action);else if(mobileOpen&&!e.target.closest('.tree')){mobileOpen=false;tree()}});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&mobileOpen){mobileOpen=false;tree();$('[data-action="tree"]').focus()}});
+document.addEventListener('input',e=>{
+ const el=e.target;if(el.dataset.config){cfg()[el.dataset.config]=el.type==='checkbox'?el.checked:el.value;const s=$('#save-status');if(s)s.textContent='有未保存的修改';}
+ if(el.id==='destination-search')search(el.value);
+});
+document.addEventListener('change',e=>{
+ if(e.target.name==='storage'){session().choice=e.target.value;persist();$('[data-action="answer"]').disabled=false}
+ if(e.target.id==='source-filter'){source=e.target.value;render()}
+ if(e.target.id==='status-filter'){status=e.target.value;render()}
+ if(e.target.dataset.config==='share')render();
+});
+document.addEventListener('submit',e=>{
+ e.preventDefault();const form=e.target,values=new FormData(form);
+ if(form.id==='message-form'){
+  const text=String(values.get('message')).trim();if(!text)return;
+  if(!session()){const s={id:'s-'+Date.now(),name:text.slice(0,30),messages:[]};agent().sessions.push(s);sessionId=s.id}
+  const s=session();if(s.name==='新会话')s.name=text.slice(0,30);
+  s.messages.push({role:'user',text},{role:'assistant',text:'已保存你的消息。这是本地交互样例，尚未执行新的模型任务。'});persist();render();$('#transcript').scrollTop=$('#transcript').scrollHeight;
+ }
+ if(form.id==='create-agent'){const name=String(values.get('name')).trim();if(!name)return;const a=makeAgent('draft-'+Date.now(),name);data.agents.push(a);current=a.id;sessionId=undefined;tab='配置';section='配置';globalPage='';log(`创建智能体草稿：${name}`);modal.close();navigate()}
+ if(form.id==='account-form'){const name=String(values.get('display')).trim();if(!name)return;data.display=name;log('修改账号显示名称');render();$('#account-status').textContent='账号草稿已保存。'}
+ if(form.id==='order-form'){const amount=Number(values.get('amount'));if(!Number.isInteger(amount)||amount<1||amount>100000)return;data.orders.push(amount);log(`创建 ${amount} 元样例订单，未支付`);modal.close();render()}
+});
+document.querySelectorAll('[data-icon]').forEach(el=>el.outerHTML=icon(el.dataset.icon));
+render();
+</script>
+</body>
+</html>

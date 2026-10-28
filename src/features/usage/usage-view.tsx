@@ -161,7 +161,7 @@ export function UsageView({ scope = "self" }: { scope?: "self" | "all" }) {
           </div>
 
           {(data.queue.pending > 0 || data.queue.running > 0) && (
-            <Card className="border-blue-500/20 bg-blue-500/10">
+            <Card className="border-info/20 bg-info/10">
               <CardContent className="px-3 py-2 text-xs">
                 队列:{data.queue.pending} 个排队 · {data.queue.running} 个在跑
                 {data.queue.pending > 10 && " —— 积压偏高,考虑加 worker"}

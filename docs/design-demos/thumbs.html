@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Open Web Agents · 六个候选缩略图</title>
+<style>
+  :root {
+    --bg: #1e1f22; --panel: #2b2d30; --line: #393b40; --sel: #2e436e; --text: #dfe1e5; --dim: #8c8f96;
+    --blue: #3574f0; --link: #548af7; --green: #5fb865; --yellow: #e0b153; --red: #db5c5c; --cyan: #2aacb8; --purple: #c77dbb;
+    --stage: #141518;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0f1012; color: var(--text); font: 13px/1.5 Inter, -apple-system, "PingFang SC", sans-serif; }
+  .page { padding: 28px 32px 40px; }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+  .lead { color: var(--dim); margin: 0 0 20px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 480px); gap: 22px 20px; }
+  figure { margin: 0; }
+  figcaption { margin-top: 8px; line-height: 1.55; }
+  figcaption b { font-weight: 600; }
+  figcaption span { color: var(--dim); display: block; font-size: 12px; }
+  .pick { color: var(--link); font-size: 12px; margin-left: 6px; }
+  .t { width: 480px; height: 300px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; position: relative; background: var(--bg); font-size: 9px; }
+  .mono { font-family: "JetBrains Mono", Menlo, monospace; }
+  .row { display: flex; } .col { display: flex; flex-direction: column; }
+  .f1 { flex: 1; min-width: 0; }
+  .bar { height: 18px; display: flex; align-items: center; gap: 6px; padding: 0 7px; border-bottom: 1px solid var(--line); background: var(--panel); flex: none; }
+  .dim { color: var(--dim); }
+  .ln { height: 5px; border-radius: 2px; background: #4a4d55; margin: 4px 0; }
+  .ln.s { width: 40%; } .ln.m { width: 65%; } .ln.l { width: 88%; }
+  .item { height: 13px; display: flex; align-items: center; padding: 0 6px; gap: 4px; }
+  .item.on { background: var(--sel); }
+  .ico { width: 8px; height: 8px; border: 1px solid var(--dim); border-radius: 2px; flex: none; }
+  .dot { width: 5px; height: 5px; border-radius: 50%; flex: none; }
+  .chip { display: inline-block; border: 1px solid var(--line); border-radius: 8px; padding: 0 5px; margin-right: 3px; }
+  .btn { display: inline-block; background: var(--blue); color: #fff; border-radius: 3px; padding: 0 5px; }
+  .bubble { align-self: flex-end; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px; margin: 6px 0; }
+  .input { border: 1px solid #4e5157; border-radius: 4px; background: var(--panel); height: 26px; margin: 6px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>六个候选 · 缩略图</h1>
+  <p class="lead">语境统一为 JetBrains IDE 暗色;差异在骨架。标「完整版」的三张已做成可交互原型,另外三张是备选。</p>
+  <div class="grid">
+
+    <!-- 1 IDE 外壳 -->
+    <figure>
+      <div class="t col">
+        <div class="bar" style="height:20px"><span class="btn" style="background:#3c3f45">通用智能体 ▾</span><span class="dim">创建一个简单的 REST API</span><span class="f1"></span><span class="dot" style="background:var(--green)"></span><span class="dim">空闲</span><span class="dim">⌘K</span></div>
+        <div class="row f1">
+          <div class="col" style="width:16px;background:var(--panel);border-right:1px solid var(--line);align-items:center;gap:6px;padding-top:6px"><span class="ico" style="border-color:var(--text)"></span><span class="ico"></span><span class="ico"></span><span class="ico"></span></div>
+          <div class="col" style="width:96px;background:var(--panel);border-right:1px solid var(--line)"><div class="item dim">今天</div><div class="item on">REST API</div><div class="item">hello.py</div><div class="item">架构分析</div></div>
+          <div class="col f1">
+            <div class="row" style="height:16px;background:var(--panel);border-bottom:1px solid var(--line)"><div class="item" style="border-bottom:1px solid var(--blue)">REST API ×</div><div class="item dim">hello.py ×</div></div>
+            <div class="col f1" style="padding:4px 10px"><div class="bubble">创建一个简单的 REST API</div><div class="dim">▸ Ran 13 tools · 1 failed</div><div class="ln l"></div><div class="ln m"></div><div class="ln s"></div></div>
+            <div class="input"></div>
+          </div>
+          <div class="col" style="width:80px;background:var(--panel);border-left:1px solid var(--line)"><div class="item dim">工作空间</div><div class="item">▾ src</div><div class="item">  route.ts</div></div>
+        </div>
+        <div class="bar" style="height:12px;border-top:1px solid var(--line);border-bottom:0"><span class="dim">● 已连接</span><span class="f1"></span><span class="dim">gpt-6-astra</span><span class="dim">积分 0.00</span></div>
+      </div>
+      <figcaption><b>1 · IDE 外壳</b><span class="pick">完整版 dir-1</span><span>最佳设计师 · JetBrains New UI 团队。会话即 tab,工具窗口条 + 状态栏,设置做成设置窗口。</span></figcaption>
+    </figure>
+
+    <!-- 2 控制台主从 -->
+    <figure>
+      <div class="t col">
+        <div class="bar"><b>OWA</b><span style="border-bottom:1px solid var(--blue)">工作台</span><span class="dim">智能体</span><span class="dim">设置</span><span class="dim">平台管理</span><span class="f1"></span><span class="dim">⌘K</span></div>
+        <div class="row f1">
+          <div class="col" style="width:90px;background:var(--panel);border-right:1px solid var(--line)"><div class="item dim">今天</div><div class="item on">REST API</div><div class="item">hello.py</div></div>
+          <div class="col f1" style="padding:4px 10px"><div class="bubble">创建一个简单的 REST API</div><div style="color:var(--link)">▸ Ran 13 tools · 1 failed</div><div class="ln l"></div><div class="ln m"></div><div class="ln l"></div><div class="ln s"></div><span class="f1"></span><div class="input" style="margin:0"></div></div>
+          <div class="col mono" style="width:150px;background:var(--panel);border-left:1px solid var(--line)">
+            <div class="item dim">运行树</div>
+            <div class="item">▾ 第 1 轮</div>
+            <div class="item"><span style="color:var(--green)">✓</span> EnterPlanMode<span class="f1"></span><span class="dim">120ms</span></div>
+            <div class="item on"><span style="color:var(--green)">✓</span> Agent<span class="f1"></span><span class="dim">8.2s</span></div>
+            <div class="item">&nbsp;&nbsp;<span style="color:var(--green)">✓</span> Read route.ts</div>
+            <div class="item"><span style="color:var(--red)">✗</span> Bash pnpm test<span class="f1"></span><span class="dim">3.1s</span></div>
+            <div class="item"><span style="color:var(--red)">✗</span> TaskCreate</div>
+            <div style="border-top:1px solid var(--line);margin-top:auto;padding:4px 6px" class="dim">输入/输出 详情…</div>
+          </div>
+        </div>
+      </div>
+      <figcaption><b>2 · 控制台 · 主从</b><span class="pick">完整版 dir-2</span><span>现实参照 · DataGrip / Services 工具窗口。常驻运行树,管理页是真表格 + 右侧详情抽屉。</span></figcaption>
+    </figure>
+
+    <!-- 3 Fleet 静谧 -->
+    <figure>
+      <div class="t col" style="background:var(--stage);padding:5px;gap:4px">
+        <div class="row" style="height:14px;align-items:center;justify-content:center;gap:6px"><span>通用智能体</span><span class="dim">· 创建一个简单的 REST API</span></div>
+        <div class="row f1" style="gap:4px">
+          <div class="col" style="width:86px;background:var(--bg);border:1px solid var(--line);border-radius:6px;overflow:hidden"><div class="item dim">会话</div><div class="item on">REST API</div><div class="item">hello.py</div></div>
+          <div class="col f1" style="background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 40px;position:relative"><div class="bubble">创建一个简单的 REST API</div><div class="dim" style="margin:4px 0">Ran 13 tools</div><div class="ln l"></div><div class="ln l"></div><div class="ln m"></div><div style="position:absolute;left:30px;right:30px;bottom:8px;height:20px;border:1px solid #4e5157;border-radius:10px;background:var(--panel)"></div></div>
+          <div class="col" style="width:80px;background:var(--bg);border:1px solid var(--line);border-radius:6px"><div class="item dim">文件</div><div class="item">route.ts</div><div class="item">hello.py</div></div>
+        </div>
+      </div>
+      <figcaption><b>3 · Fleet 静谧</b><span class="pick">完整版 dir-3</span><span>最佳设计师 · JetBrains Fleet 团队。浮面板、无常驻导航、⌘K 主导,对话节奏放慢。</span></figcaption>
+    </figure>
+
+    <!-- 4 AI Assistant 侧窗 -->
+    <figure>
+      <div class="t col">
+        <div class="bar"><span>open-web-agents</span><span class="f1"></span><span class="dim">⌘K</span></div>
+        <div class="row f1">
+          <div class="col" style="width:90px;background:var(--panel);border-right:1px solid var(--line)"><div class="item dim">工作空间</div><div class="item">▾ src</div><div class="item on">route.ts</div><div class="item">hello.py</div></div>
+          <div class="col f1 mono" style="padding:6px 8px;gap:2px"><div class="item" style="border-bottom:1px solid var(--blue);width:60px">route.ts</div><div><span style="color:#cf8e6d">export async function</span> <span style="color:var(--link)">GET</span>() {</div><div>&nbsp;&nbsp;<span style="color:#cf8e6d">return</span> Response.json(items)</div><div>}</div></div>
+          <div class="col" style="width:170px;background:var(--panel);border-left:1px solid var(--line);padding:4px 6px"><div class="dim">AI Assistant · 通用智能体</div><div class="bubble">创建一个简单的 REST API</div><div class="dim">▸ Ran 13 tools</div><div class="ln l"></div><div class="ln m"></div><span class="f1"></span><div class="input" style="margin:0"></div></div>
+        </div>
+      </div>
+      <figcaption><b>4 · AI Assistant 侧窗</b><span class="pick" style="color:var(--dim)">备选</span><span>现实参照 · JetBrains AI Assistant。主区是文件,对话在右侧。对"主要是对话"的产品主次倒置。</span></figcaption>
+    </figure>
+
+    <!-- 5 暗色双色侧栏(轮盘 #11) -->
+    <figure>
+      <div class="t row">
+        <div class="col" style="width:150px;padding:14px 12px;gap:6px;border-right:1px solid var(--line)"><b style="font-size:11px">账号设置</b><div style="color:var(--link)">— 运行记录</div><div class="dim">— 接入中心</div><div class="dim">— 审计日志</div><div class="dim">— token 用量</div><div class="dim">— 积分账户</div></div>
+        <div class="col f1" style="padding:14px 18px;gap:5px"><b style="font-size:12px">运行记录</b><div class="dim">工作台对话,以及用你的 Key 发起的接口调用</div><div class="ln l"></div><div class="ln l"></div><div class="ln m"></div><b style="font-size:12px;margin-top:8px">接入中心</b><div class="ln l"></div><div class="ln s"></div></div>
+      </div>
+      <figcaption><b>5 · 长文档设置</b><span class="pick" style="color:var(--dim)">备选</span><span>秒数轮盘 · 网页 #10 不兼容顺延 #11 暗色双色侧栏。设置页做成锚点长文档,撑不起工作台。</span></figcaption>
+    </figure>
+
+    <!-- 6 节气色谱(轮盘 东亚 #7) -->
+    <figure>
+      <div class="t col">
+        <div class="bar"><span class="f1"></span><span class="dim">⌘K</span></div>
+        <div class="row f1">
+          <div class="col" style="width:120px;background:var(--panel);border-right:1px solid var(--line)">
+            <div class="item"><span class="dot" style="background:#789262"></span>通用智能体</div>
+            <div class="item on"><span class="dot" style="background:#5e7987"></span>代码评审</div>
+            <div class="item"><span class="dot" style="background:#c6a46c"></span>合同助手</div>
+            <div class="item"><span class="dot" style="background:#8a6e8f"></span>发票抽取</div>
+          </div>
+          <div class="col f1" style="padding:8px 10px"><div class="row" style="gap:3px;margin-bottom:4px"><span class="chip" style="border-color:#5e7987">代码评审</span><span class="chip">竹青 #789262</span><span class="chip">天水碧 #5e7987</span></div><div class="bubble">审一下这个 PR</div><div class="ln l"></div><div class="ln m"></div></div>
+        </div>
+      </div>
+      <figcaption><b>6 · 节气色谱身份色</b><span class="pick" style="color:var(--dim)">备选</span><span>秒数轮盘 · 东亚 #6 不兼容顺延 #7。每个智能体一个低饱和传统色,可叠加到任何方向上。</span></figcaption>
+    </figure>
+
+  </div>
+</div>
+</body>
+</html>

@@ -6,5 +6,5 @@ import { redirect } from "next/navigation";
  * 会看到一个和高亮项对不上的页面。
  */
 export default function Page() {
-  redirect("/settings/keys");
+  redirect("/settings/account");
 }

@@ -1,5 +1,7 @@
 "use client";
 
+import { BEFORE_CLIENT_NAVIGATION } from "@/components/ide/client-navigation";
+import { IdeFrame } from "@/components/ide/ide-frame";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,7 +24,6 @@ import { errorText, fetchJson } from "@/lib/fetch-json";
 import type { DesignDraft, DesignResource } from "@/lib/modules/agent/domain/design";
 import type { SnapshotChange } from "@/lib/modules/agent/domain/snapshot-diff";
 import {
-  ArrowLeft,
   Check,
   ChevronDown,
   ChevronRight,
@@ -132,7 +133,39 @@ export function DesignWorkspace({ initialSessionId }: { initialSessionId?: strin
       if (dirty) event.preventDefault();
     };
     window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
+    const guardLink = (event: MouseEvent) => {
+      if (
+        !dirty ||
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      )
+        return;
+      const link =
+        event.target instanceof Element ? event.target.closest<HTMLAnchorElement>("a[href]") : null;
+      if (!link || link.target === "_blank") return;
+      const next = new URL(link.href, window.location.href);
+      if (next.pathname === window.location.pathname && next.search === window.location.search)
+        return;
+      if (!window.confirm("设计草稿有未保存的修改，确定离开？")) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    document.addEventListener("click", guardLink, true);
+    const guardNavigation = (event: Event) => {
+      if (!dirty || event.defaultPrevented) return;
+      if (!window.confirm("设计草稿有未保存的修改，确定离开？")) event.preventDefault();
+    };
+    window.addEventListener(BEFORE_CLIENT_NAVIGATION, guardNavigation);
+    return () => {
+      window.removeEventListener(BEFORE_CLIENT_NAVIGATION, guardNavigation);
+      window.removeEventListener("beforeunload", warn);
+      document.removeEventListener("click", guardLink, true);
+    };
   }, [dirty]);
 
   const refresh = useCallback(async () => {
@@ -320,34 +353,41 @@ export function DesignWorkspace({ initialSessionId }: { initialSessionId?: strin
   }
 
   return (
-    <main className="flex h-dvh min-w-0 flex-col overflow-hidden bg-background">
-      <header className="flex min-h-14 flex-wrap items-center gap-3 border-b px-4 py-2">
-        <Link href="/agents" aria-label="返回智能体" className="rounded p-2 hover:bg-muted">
-          <ArrowLeft className="size-4" />
-        </Link>
-        <h1 className="text-base font-semibold">AI 编辑</h1>
-        <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
-          {view?.targetName ?? "新智能体"}
-        </span>
-        <span className="text-xs text-muted-foreground">平台算力</span>
-        {view?.targetId && (
+    <IdeFrame
+      object={
+        view?.targetId
+          ? { id: view.targetId, name: view.targetName ?? "智能体", tab: "config" }
+          : undefined
+      }
+      context={
+        <nav aria-label="位置" className="flex min-w-0 items-center gap-1 text-sm">
           <Link
-            className="text-sm underline"
-            href={`/agents?id=${encodeURIComponent(view.targetId)}`}
+            href="/agents"
+            className="shrink-0 rounded px-1 text-muted-foreground hover:text-foreground"
           >
-            配置与发布
+            我的智能体
           </Link>
-        )}
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={blocked || dirty}
-          onClick={() => void create()}
-        >
-          <Plus className="size-4" />
-          新建设计
-        </Button>
-      </header>
+          <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/60" />
+          <span className="shrink-0 px-1 font-medium">AI 编辑</span>
+          <span className="min-w-0 truncate text-muted-foreground">
+            {view?.targetName ?? "新智能体"}
+          </span>
+        </nav>
+      }
+      widgets={
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="hidden text-xs text-muted-foreground lg:inline">平台算力</span>
+          {view?.targetId && (
+            <Link
+              className="hidden h-7 items-center rounded-md px-2 text-sm text-brand hover:bg-accent sm:flex"
+              href={`/agents?id=${encodeURIComponent(view.targetId)}`}
+            >
+              配置与发布
+            </Link>
+          )}
+        </div>
+      }
+    >
       {error && (
         <div
           aria-live="assertive"
@@ -360,24 +400,11 @@ export function DesignWorkspace({ initialSessionId }: { initialSessionId?: strin
         </div>
       )}
       <div className="flex min-h-0 flex-1">
-        <aside className="hidden w-52 shrink-0 overflow-y-auto border-r p-3 lg:block">
-          <h2 className="mb-3 text-xs font-medium text-muted-foreground">设计记录</h2>
-          {history.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              disabled={busy || dirty}
-              onClick={() => selectSession(item.id)}
-              aria-current={id === item.id ? "page" : undefined}
-              className={`mb-1 w-full truncate rounded px-3 py-2 text-left text-sm hover:bg-muted disabled:opacity-50 ${id === item.id ? "bg-muted" : ""}`}
-            >
-              {item.title ?? "设计会话"}
-            </button>
-          ))}
-        </aside>
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex items-center gap-2 border-b p-2 lg:hidden">
+          <div className="flex items-center gap-2 border-b p-2">
+            <span className="hidden shrink-0 px-2 text-sm font-medium md:inline">AI 辅助编辑</span>
             <NativeSelect
+              className="max-w-xs"
               aria-label="设计记录"
               value={id}
               disabled={busy || dirty}
@@ -391,6 +418,17 @@ export function DesignWorkspace({ initialSessionId }: { initialSessionId?: strin
               ))}
             </NativeSelect>
             <Button
+              variant="ghost"
+              size="icon"
+              aria-label="新建设计"
+              title="新建设计"
+              disabled={blocked || dirty}
+              onClick={() => void create()}
+            >
+              <Plus />
+            </Button>
+            <Button
+              className="md:hidden"
               variant={mobileTab === "chat" ? "secondary" : "ghost"}
               size="icon"
               title="设计对话"
@@ -399,6 +437,7 @@ export function DesignWorkspace({ initialSessionId }: { initialSessionId?: strin
               <MessageSquare className="size-4" />
             </Button>
             <Button
+              className="md:hidden"
               variant={mobileTab === "draft" ? "secondary" : "ghost"}
               size="icon"
               title="设计草稿"
@@ -408,10 +447,16 @@ export function DesignWorkspace({ initialSessionId }: { initialSessionId?: strin
             </Button>
           </div>
           {!id ? (
-            <div className="flex flex-1 items-center justify-center">
+            // 空着的时候说清这一页是干什么的 —— 改造前是整屏黑底中间一个按钮
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+              <MessageSquare className="size-10 text-muted-foreground/30" />
+              <h2 className="text-base font-medium">用对话设计一个智能体</h2>
+              <p className="max-w-sm text-sm text-muted-foreground">
+                描述它要干什么活,AI 会起草系统提示词、技能和工具配置,你确认后再保存。
+              </p>
               <Button onClick={() => void create()} disabled={busy}>
                 <Plus className="size-4" />
-                创建智能体
+                开始新设计
               </Button>
             </div>
           ) : loading ? (
@@ -439,6 +484,7 @@ export function DesignWorkspace({ initialSessionId }: { initialSessionId?: strin
                   )}
                 </div>
                 <ApprovalBar
+                  key={id}
                   sessionId={id || null}
                   running={running}
                   onQuestionsChange={setPendingQuestions}
@@ -569,7 +615,12 @@ export function DesignWorkspace({ initialSessionId }: { initialSessionId?: strin
                           <Input
                             id="design-description"
                             value={draft.description}
-                            onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+                            onChange={(e) =>
+                              setDraft({
+                                ...draft,
+                                description: e.target.value,
+                              })
+                            }
                           />
                         </div>
                         <div className="space-y-1">
@@ -580,7 +631,12 @@ export function DesignWorkspace({ initialSessionId }: { initialSessionId?: strin
                             id="design-system"
                             value={draft.systemPrompt}
                             className="min-h-48"
-                            onChange={(e) => setDraft({ ...draft, systemPrompt: e.target.value })}
+                            onChange={(e) =>
+                              setDraft({
+                                ...draft,
+                                systemPrompt: e.target.value,
+                              })
+                            }
                           />
                         </div>
                         <div className="space-y-1">
@@ -865,7 +921,7 @@ export function DesignWorkspace({ initialSessionId }: { initialSessionId?: strin
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </main>
+    </IdeFrame>
   );
 }
 

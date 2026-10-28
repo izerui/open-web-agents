@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadError } from "@/components/load-error";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
 import { errorText, fetchJson } from "@/lib/fetch-json";
@@ -171,11 +172,13 @@ export function ChargeSummary({
           </Button>
         </div>
       </div>
-      {error && <p className="mb-3 text-sm text-destructive">{error}</p>}
+      {error && <LoadError compact what="消耗汇总" message={error} />}
       {!rows || rows.length === 0 ? (
-        <p className="py-5 text-sm text-muted-foreground">
-          {loading || !rows ? "载入中…" : "这段时间没有运行"}
-        </p>
+        error ? null : (
+          <p className="py-5 text-sm text-muted-foreground">
+            {loading || !rows ? "载入中…" : "这段时间没有运行"}
+          </p>
+        )
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs" data-testid="charge-summary">

@@ -80,7 +80,7 @@ function formatWorkingTimerNow(startIso: string): string {
 
 const SHELL_TOOLS = new Set(["bash", "bashoutput"]);
 
-function toolIcon(toolName: string) {
+export function toolIcon(toolName: string) {
   const lower = toolName.toLowerCase();
   if (SHELL_TOOLS.has(lower)) return TerminalIcon;
   if (lower.includes("agent") || lower.includes("task") || lower.includes("delegate")) return Bot;
@@ -99,7 +99,15 @@ function toolGroupSummary(calls: ToolCall[]): string {
   return `${parts.slice(0, 2).join(", ")} +${parts.length - 2}`;
 }
 
-function summarizeToolInput(tool: string, input: unknown): string {
+/**
+ * 工作目录下的绝对路径在一行摘要里只剩开头可见,有用的却是结尾的文件名:
+ * 超过三段的路径只留最后两段。完整参数在展开后的详情里。
+ */
+export function shortenPaths(text: string): string {
+  return text.replace(/(?:\/[^\s/]+){3,}\/([^\s/]+\/[^\s/]+)/g, "…/$1");
+}
+
+export function summarizeToolInput(tool: string, input: unknown): string {
   if (["EnterPlanMode", "ExitPlanMode"].includes(tool)) return "";
   if (!input || typeof input !== "object") return "";
   const values = input as Record<string, unknown>;
@@ -115,17 +123,18 @@ function summarizeToolInput(tool: string, input: unknown): string {
 }
 
 function summarizeThinking(text: string): string {
-  const oneLine = text.replace(/\s+/g, " ").trim();
+  // 模型的思考摘要常带 **标题** 这样的 markdown 记号,单行摘要里原样露出来就是一串星号
+  const oneLine = text.replace(/\*\*/g, " ").replace(/\s+/g, " ").trim();
   return oneLine.length > 100 ? `${oneLine.slice(0, 100)}...` : oneLine;
 }
 
-function toolNameClass(tool: string): string {
-  if (tool === "Bash") return "text-amber-500";
-  if (["Write", "Edit", "NotebookEdit"].includes(tool)) return "text-emerald-500";
-  if (["Read", "Glob", "Grep"].includes(tool)) return "text-sky-500";
-  if (["Agent", "Task"].includes(tool)) return "text-cyan-500";
-  if (["EnterPlanMode", "ExitPlanMode"].includes(tool)) return "text-violet-500";
-  if (tool === "AskUserQuestion") return "text-yellow-500";
+export function toolNameClass(tool: string): string {
+  if (tool === "Bash") return "text-warning";
+  if (["Write", "Edit", "NotebookEdit"].includes(tool)) return "text-success";
+  if (["Read", "Glob", "Grep"].includes(tool)) return "text-info";
+  if (["Agent", "Task"].includes(tool)) return "text-ide-cyan";
+  if (["EnterPlanMode", "ExitPlanMode"].includes(tool)) return "text-ide-purple";
+  if (tool === "AskUserQuestion") return "text-warning";
   return "text-muted-foreground";
 }
 
@@ -445,8 +454,16 @@ const ToolCallRow = memo(function ToolCallRow({
         }}
         aria-expanded={hasDetails ? expanded : undefined}
       >
+        {/*
+          状态只在"有话要说"时出现:失败给红叉、运行中给转圈,成功不画。
+          曾经每行都有一个小圆点表示状态,一列看下去像无序列表的项目符号。
+        */}
         <span className="flex size-6 shrink-0 items-center justify-center">
-          <span aria-hidden className={cn("size-1 rounded-full opacity-80", statusDotClass)} />
+          {call.result?.isError ? (
+            <X className="size-3.5 text-destructive" aria-label="失败" />
+          ) : !call.result && running ? (
+            <span aria-label="运行中" className={cn("size-1.5 rounded-full", statusDotClass)} />
+          ) : null}
         </span>
         <CallIcon className="size-4 shrink-0 stroke-[1.8] text-muted-foreground/60" />
         <span
@@ -468,11 +485,11 @@ const ToolCallRow = memo(function ToolCallRow({
           {(inputSummary || resultSummary) && (
             <code
               className={cn(
-                "ml-1 font-mono text-xs text-muted-foreground/80",
+                "ml-2 font-mono text-xs text-muted-foreground/80",
                 running && !call.result && "live-activity-focus",
               )}
             >
-              ({inputSummary || resultSummary})
+              {shortenPaths(inputSummary || resultSummary)}
             </code>
           )}
           {call.result?.isError && <span className="ml-1 text-xs text-destructive">failed</span>}
@@ -523,22 +540,21 @@ const ThinkingRow = memo(function ThinkingRow({
         onClick={() => setExpanded((current) => !current)}
         aria-expanded={expanded}
       >
+        {/* 和工具行一样:只有进行中才画状态点,完成的不画 —— 否则一列看下去像项目符号 */}
         <span className="flex size-6 shrink-0 items-center justify-center">
-          <span
-            aria-hidden
-            className={cn(
-              "size-1 rounded-full opacity-80",
-              running
-                ? "border border-brand/70 bg-transparent activity-status-dot-running"
-                : "bg-muted-foreground/50",
-            )}
-          />
+          {running && (
+            <span
+              aria-hidden
+              className="size-1.5 rounded-full border border-brand/70 bg-transparent activity-status-dot-running"
+            />
+          )}
         </span>
         <Brain className="size-4 shrink-0 stroke-[1.8] text-muted-foreground/60" />
         <span className={cn("min-w-0 flex-1 truncate", running && "live-activity-focus")}>
           Thinking
           {summary && (
-            <code className="ml-1 font-mono text-xs text-muted-foreground/80">({summary})</code>
+            // 思考摘要是一句话,不是代码:用正文字体,不加括号
+            <span className="ml-2 text-muted-foreground/70">{summary}</span>
           )}
         </span>
       </button>
@@ -592,8 +608,15 @@ const ActivitySection = memo(function ActivitySection({
             failedCount > 0 ? ` · ${failedCount} failed` : ""
           }`
       : "Thinking";
-  const SummaryIcon =
-    latestItem?.kind === "thinking"
+  // 跑完之后图标跟着"做了什么"走;只有进行中才跟着"正在做什么"(最后一项)走。
+  // 曾经一律看最后一项,于是"Ran 13 tools"前面挂着一个思考的大脑图标
+  const SummaryIcon = !live
+    ? calls.length === 1
+      ? toolIcon(calls[0]?.call.tool ?? "")
+      : calls.length > 1
+        ? Wrench
+        : Brain
+    : latestItem?.kind === "thinking"
       ? Brain
       : latestItem?.kind === "tool"
         ? toolIcon(latestItem.call.tool)
@@ -773,14 +796,33 @@ function QuestionBlock({
 
   const badge = STATE_BADGE[state.kind];
   return (
-    <Card className="border-blue-500/25 bg-blue-500/[0.04]" data-testid="question-card">
+    <Card className="gap-0 border-border bg-card py-0" data-testid="question-card">
       <CardContent className="space-y-3 p-3">
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <HelpCircle className="h-3 w-3" />
           <span>智能体的提问</span>
-          <Badge variant={badge.variant} className="text-[10px]" data-testid="question-state">
+          {/* 状态是一个带色点的词,不是胶囊:和运行组件、状态栏的状态写法一致 */}
+          <span
+            data-testid="question-state"
+            className={cn(
+              "inline-flex items-center gap-1.5",
+              badge.variant === "warning" && "text-warning",
+              badge.variant === "success" && "text-success",
+            )}
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "size-1.5 rounded-full",
+                badge.variant === "warning"
+                  ? "bg-warning"
+                  : badge.variant === "success"
+                    ? "bg-success"
+                    : "bg-muted-foreground/60",
+              )}
+            />
             {badge.text}
-          </Badge>
+          </span>
           {pending && (
             <span className="tabular-nums">
               剩余 {formatLeft(pending.expiresAt - now)},超时后智能体会自行判断
@@ -809,12 +851,18 @@ function QuestionBlock({
                       <Button
                         key={o.label}
                         type="button"
-                        variant={on ? "default" : "outline"}
+                        variant="outline"
                         size="sm"
+                        aria-pressed={on}
                         disabled={!interactive || busy}
                         title={o.description}
                         onClick={() => toggle(qi, o.label, q.multiSelect === true)}
-                        className="rounded-full"
+                        // 选中是"蓝框 + 选中底色",不是实心主按钮 —— 实心蓝色会和下面的"提交回答"抢主次
+                        className={cn(
+                          "font-normal dark:bg-background",
+                          on &&
+                            "border-primary bg-sidebar-active hover:bg-sidebar-active dark:bg-sidebar-active",
+                        )}
                       >
                         {o.label}
                       </Button>
@@ -824,7 +872,7 @@ function QuestionBlock({
                 {interactive && (
                   <input
                     type="text"
-                    className="h-8 w-full rounded-md border bg-background px-2 text-sm"
+                    className="h-8 w-full max-w-md rounded-md border border-input bg-background px-2.5 text-sm outline-none placeholder:text-muted-foreground focus:border-ring"
                     placeholder={q.multiSelect ? "其他(可补充,自己填写)" : "其他(自己填写)"}
                     aria-label={`其他回答:${q.question}`}
                     maxLength={2000}
@@ -839,11 +887,19 @@ function QuestionBlock({
         ))}
         {interactive ? (
           <div className="flex flex-wrap items-center gap-2">
+            {/*
+              没答完时用虚线描边而不是半透明的主按钮 —— 半透明的蓝色按钮读起来像"能点,
+              只是颜色淡",人会去点;虚线框是 IDE 里"还不可用"的样子。
+            */}
             <Button
               type="button"
               onClick={() => void submit()}
               disabled={!complete || busy}
               size="sm"
+              variant={complete ? "default" : "outline"}
+              className={cn(
+                !complete && "border-dashed text-muted-foreground disabled:opacity-100",
+              )}
             >
               {!complete ? "请先回答每个问题" : pending ? "提交回答" : "作为新消息发送"}
             </Button>
@@ -898,6 +954,7 @@ const TurnView = memo(function TurnView({
   onAnswerAction,
   pendingQuestions,
   submitAnswer,
+  agentName,
 }: {
   turn: Turn;
   turnKey: string;
@@ -908,6 +965,7 @@ const TurnView = memo(function TurnView({
   onAnswerAction?: (text: string) => void;
   pendingQuestions?: readonly PendingAsk[];
   submitAnswer?: SubmitAnswer;
+  agentName?: string;
 }) {
   const { usage, blocks, questions, questionResults, questionAnswers, resultEvent, allText } =
     useMemo(() => {
@@ -968,12 +1026,31 @@ const TurnView = memo(function TurnView({
         <p className="pb-1 text-xs text-muted-foreground">⑂ 从上文某轮分叉重跑</p>
       )}
 
-      {/* 用户消息 — t3code 风格右对齐圆角气泡 */}
-      <div className="flex justify-end pb-4">
-        <div className="max-w-[80%] whitespace-pre-wrap break-words rounded-2xl bg-message px-4 py-2.5 text-sm text-foreground">
-          {turn.prompt}
+      {agentName ? (
+        <div>
+          <div className="mb-2 flex items-center gap-2 text-sm text-muted-foreground">
+            <span className="flex size-6 items-center justify-center rounded bg-accent text-xs text-foreground">
+              你
+            </span>
+            <span>你</span>
+          </div>
+          <p className="whitespace-pre-wrap break-words pl-8 text-sm leading-[1.9] max-md:pl-0 max-md:text-base">
+            {turn.prompt}
+          </p>
+          <div className="mb-2 mt-6 flex items-center gap-2 text-sm text-muted-foreground">
+            <span className="flex size-6 items-center justify-center rounded bg-accent">
+              <Bot className="size-4" />
+            </span>
+            <span>{agentName}</span>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="flex justify-end pb-4">
+          <div className="max-w-[80%] whitespace-pre-wrap break-words rounded-lg bg-message px-3.5 py-2 text-[0.875rem] leading-[1.7] text-foreground">
+            {turn.prompt}
+          </div>
+        </div>
+      )}
 
       {/* Working for Xs — t3code 风格分隔线 + 计时 */}
       {turn.running && turn.startedAt && (
@@ -990,6 +1067,25 @@ const TurnView = memo(function TurnView({
       {blocks.map((block, blockIndex) => {
         const blockId = `${turnKey}:${blockIndex}:${block.kind}`;
         if (block.kind === "activity") {
+          if (agentName) {
+            return (
+              <div
+                key={blockId}
+                className="workspace-activity mb-4 ml-8 divide-y divide-border border-y border-border max-md:ml-0"
+              >
+                {block.items.map((item, index) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: activity items append in stream order
+                  <div key={index}>
+                    {item.kind === "thinking" ? (
+                      <ThinkingRow text={item.text} running={turn.running} />
+                    ) : (
+                      <ToolCallRow call={item.call} running={turn.running} />
+                    )}
+                  </div>
+                ))}
+              </div>
+            );
+          }
           if (block.items.length === 1) {
             const item = block.items[0];
             if (item?.kind === "thinking") {
@@ -1047,7 +1143,7 @@ const TurnView = memo(function TurnView({
               </span>
               <div
                 className={cn(
-                  "max-w-[80%] whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2 text-sm",
+                  "max-w-[80%] whitespace-pre-wrap break-words rounded-lg px-3.5 py-2 text-sm",
                   block.outcome === "delivered"
                     ? "bg-message text-foreground"
                     : "border border-dashed border-border text-muted-foreground",
@@ -1076,13 +1172,15 @@ const TurnView = memo(function TurnView({
           // biome-ignore lint/suspicious/noArrayIndexKey: process blocks append in event order
           <div key={`text-${blockIndex}`} className="group/assistant pb-4">
             <div className="flex min-w-0 items-start gap-1.5 px-0.5">
-              <span className="flex size-6 shrink-0 items-center justify-center">
-                <span
-                  aria-hidden
-                  className="size-1 rounded-full bg-muted-foreground/50 opacity-80"
-                />
-              </span>
-              <div className="relative min-w-0 flex-1 py-0.5">
+              {/* 留出和工具行图标同宽的空位,正文与工具名左缘对齐 */}
+              <span aria-hidden className="w-6 shrink-0" />
+              {/* 正文比界面大一号、行距放宽:界面是扫的,回答是读的 */}
+              <div
+                className={cn(
+                  "chat-md relative min-w-0 flex-1 py-0.5 text-[0.875rem] leading-[1.7]",
+                  agentName && "max-md:text-base",
+                )}
+              >
                 <MessageResponse isAnimating={turn.running}>{block.text}</MessageResponse>
               </div>
             </div>
@@ -1148,7 +1246,7 @@ const TurnView = memo(function TurnView({
       {/* 终态(仅失败/未知/结构化) */}
       {resultEvent && (
         <div className="pb-4">
-          <Card className="overflow-hidden">
+          <Card className="gap-0 overflow-hidden py-0">
             <CardContent className="flex items-start gap-2 p-2 text-sm">
               <Badge
                 variant={
@@ -1194,10 +1292,13 @@ const TurnView = memo(function TurnView({
         </div>
       )}
 
-      {/* 用量页脚 — pill 样式 */}
+      {/* 用量页脚:一行灰色等宽小字,和正文左缘对齐 */}
       {!turn.running && (usage.input > 0 || usage.output > 0) && (
         <div className="pb-2">
-          <span className="inline-flex items-center rounded-full border border-border/60 px-2 py-0.5 text-[11px] tabular-nums text-muted-foreground">
+          <span
+            className="pl-1.5 font-mono text-[11px] tabular-nums text-muted-foreground/70"
+            title="本轮输入 / 输出 token"
+          >
             ↑{formatTokens(usage.input)} ↓{formatTokens(usage.output)}
           </span>
         </div>
@@ -1220,6 +1321,7 @@ export function ChatThread({
   onAnswerAction,
   pendingQuestions,
   submitAnswerAction,
+  agentName,
 }: {
   turns: Turn[];
   onRerunAction?: (runId: string, prompt: string) => void;
@@ -1227,6 +1329,7 @@ export function ChatThread({
   /** 运行在等回答的提问(按 toolUseId 对到卡片上) */
   pendingQuestions?: readonly PendingAsk[];
   submitAnswerAction?: SubmitAnswer;
+  agentName?: string;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollMode, setScrollMode] = useState<ScrollMode>("following");
@@ -1246,8 +1349,8 @@ export function ChatThread({
     estimateSize: () => 280,
     overscan: 4,
     scrollPaddingStart: 24,
-    paddingEnd: 176,
-    scrollPaddingEnd: 176,
+    paddingEnd: agentName ? 24 : 176,
+    scrollPaddingEnd: agentName ? 24 : 176,
     anchorTo: "end",
     followOnAppend: scrollMode === "following" && !anchorAppendedTurn ? "auto" : false,
     scrollEndThreshold: 48,
@@ -1354,7 +1457,7 @@ export function ChatThread({
         className="h-full min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
       >
         <div
-          className="relative mx-auto w-full max-w-3xl"
+          className={cn("relative mx-auto w-full", agentName ? "max-w-[850px]" : "max-w-[760px]")}
           style={{ height: `${virtualizer.getTotalSize()}px` }}
         >
           {virtualItems.map((virtualRow) => {
@@ -1379,6 +1482,7 @@ export function ChatThread({
                   onAnswerAction={onAnswerAction}
                   pendingQuestions={pendingQuestions}
                   submitAnswer={submitAnswerAction}
+                  agentName={agentName}
                 />
               </div>
             );
@@ -1386,38 +1490,40 @@ export function ChatThread({
         </div>
       </div>
 
-      <nav
-        aria-label="对话轮次导航"
-        className="absolute left-1 top-1/2 z-10 hidden max-h-48 -translate-y-1/2 flex-col gap-1 overflow-y-auto rounded bg-background/80 p-1 backdrop-blur-sm md:flex"
-      >
-        {minimapIndexes.map((index) => {
-          const turn = turns[index];
-          if (!turn) return null;
-          return (
-            <button
-              key={turn.runId ?? `turn-${index}`}
-              type="button"
-              className={cn(
-                "size-1.5 shrink-0 rounded-full bg-muted-foreground/30 transition-[transform,background-color] hover:scale-150 hover:bg-foreground/70",
-                turn.running && "bg-brand",
-              )}
-              title={`第 ${index + 1} 轮: ${turn.prompt.slice(0, 40)}`}
-              aria-label={`跳到第 ${index + 1} 轮`}
-              onClick={() => {
-                enterFreeScrolling();
-                virtualizer.scrollToIndex(index, { align: "start", behavior: "smooth" });
-              }}
-            />
-          );
-        })}
-      </nav>
+      {turns.length > 3 && (
+        <nav
+          aria-label="对话轮次导航"
+          className="absolute left-1 top-1/2 z-10 hidden max-h-48 -translate-y-1/2 flex-col gap-1 overflow-y-auto rounded bg-background/80 p-1 backdrop-blur-sm md:flex"
+        >
+          {minimapIndexes.map((index) => {
+            const turn = turns[index];
+            if (!turn) return null;
+            return (
+              <button
+                key={turn.runId ?? `turn-${index}`}
+                type="button"
+                className={cn(
+                  "size-1.5 shrink-0 rounded-full bg-muted-foreground/30 transition-[transform,background-color] hover:scale-150 hover:bg-foreground/70",
+                  turn.running && "bg-brand",
+                )}
+                title={`第 ${index + 1} 轮: ${turn.prompt.slice(0, 40)}`}
+                aria-label={`跳到第 ${index + 1} 轮`}
+                onClick={() => {
+                  enterFreeScrolling();
+                  virtualizer.scrollToIndex(index, { align: "start", behavior: "smooth" });
+                }}
+              />
+            );
+          })}
+        </nav>
+      )}
 
       {scrollMode !== "following" && (
         <Button
           type="button"
           size="icon"
           variant="secondary"
-          className="absolute bottom-36 right-5 z-20 size-9 rounded-full shadow-md"
+          className="absolute bottom-36 right-5 z-20 size-8 rounded-md shadow-md"
           title="回到最新消息"
           aria-label="回到最新消息"
           onClick={() => scrollToEnd(true)}

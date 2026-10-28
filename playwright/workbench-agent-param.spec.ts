@@ -27,7 +27,7 @@ async function createAgent(ctx: BrowserContext, name: string) {
   return id;
 }
 
-const picker = (page: Page) => page.getByTitle("切换智能体");
+const picker = (page: Page) => page.getByRole("heading", { level: 1 });
 
 test.describe("工作台 ?agent= 参数", () => {
   test("默认智能体可见时,带 ?agent= 打开选中指定的智能体;不带参数仍是默认智能体", async ({

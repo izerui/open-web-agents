@@ -33,10 +33,10 @@ export function DiffView({ title, changes }: { title: string; changes: Change[] 
             <span
               className={
                 c.kind === "added"
-                  ? "text-emerald-600"
+                  ? "text-success"
                   : c.kind === "removed"
                     ? "text-destructive"
-                    : "text-amber-600"
+                    : "text-warning"
               }
             >
               {c.kind === "added" ? "+ 新增" : c.kind === "removed" ? "- 删除" : "~ 修改"}
@@ -56,7 +56,7 @@ export function DiffView({ title, changes }: { title: string; changes: Change[] 
                     key={i}
                     className={
                       l.op === "add"
-                        ? "bg-emerald-500/10 text-emerald-700"
+                        ? "bg-success/10 text-success"
                         : l.op === "del"
                           ? "bg-destructive/10 text-destructive line-through"
                           : "text-muted-foreground"
@@ -303,7 +303,7 @@ export function ReleasePanel({
         )}
         {evals && hasChanges && (
           <p
-            className={`text-xs ${evalPassed ? "text-emerald-700" : "text-amber-700"}`}
+            className={`text-xs ${evalPassed ? "text-success" : "text-warning"}`}
             data-testid="draft-eval"
           >
             {draftEvalText(evals.draft)}
@@ -335,7 +335,7 @@ export function ReleasePanel({
                 </span>
                 {evals && (
                   <span
-                    className={`shrink-0 ${evals.versions[v.version]?.state === "passed" ? "text-emerald-700" : "text-muted-foreground"}`}
+                    className={`shrink-0 ${evals.versions[v.version]?.state === "passed" ? "text-success" : "text-muted-foreground"}`}
                     data-testid="version-eval"
                   >
                     {versionEvalText(evals.versions[v.version])}

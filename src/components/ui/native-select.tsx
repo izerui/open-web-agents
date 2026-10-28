@@ -11,7 +11,7 @@ import { type SelectHTMLAttributes, forwardRef } from "react";
  */
 const CHEVRON = `data:image/svg+xml;utf8,${encodeURIComponent(
     // 颜色写原始 '#',交给 encodeURIComponent 去编码 —— 这里先写成 '%23' 会被二次编码成 '%2523'
-  '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9299a1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>',
+  '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8c8f96" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>',
 )}`;
 
 const NativeSelect = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSelectElement>>(
@@ -19,7 +19,7 @@ const NativeSelect = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSele
     return (
       <select
         className={cn(
-          "flex h-9 w-full appearance-none items-center rounded-md border border-input bg-background bg-no-repeat py-1 pl-3 pr-8 text-sm text-foreground shadow-sm transition-colors",
+          "flex h-8 w-full appearance-none items-center rounded-md border border-input bg-background bg-no-repeat py-1 pl-2.5 pr-8 text-sm text-foreground transition-colors",
           "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
           "disabled:cursor-not-allowed disabled:opacity-50",
           // 展开后的选项列表也归我们管,否则又是一整块白

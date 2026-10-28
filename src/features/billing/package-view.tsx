@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import type { CreditOrder, CreditPackage } from "@/lib/modules/billing/package-ports";
@@ -47,6 +48,7 @@ const fresh = (): Draft => ({
 });
 
 export function PackageView({ admin = false }: { admin?: boolean }) {
+  const [view, setView] = useState("catalog");
   const [packages, setPackages] = useState<CreditPackage[] | null>(null);
   const [orders, setOrders] = useState<OrderPage | null>(null);
   const [catalogError, setCatalogError] = useState("");
@@ -177,6 +179,7 @@ export function PackageView({ admin = false }: { admin?: boolean }) {
       });
       requestKey.current = null;
       setPurchase(null);
+      setView("orders");
       toast.success(result.replayed ? "已找到原订单,未重复创建" : "订单已创建,等待人工处理");
       await loadOrders();
     });
@@ -211,11 +214,12 @@ export function PackageView({ admin = false }: { admin?: boolean }) {
   return (
     <SpaceShell
       area={admin ? "admin" : "personal"}
-      title={admin ? "套餐与订单" : "积分套餐"}
+      title={admin ? "套餐与订单" : "充值与订单"}
       actions={
         admin ? (
           <Button
             onClick={() => {
+              setView("catalog");
               setDraft(fresh());
               setActionError("");
             }}
@@ -234,158 +238,178 @@ export function PackageView({ admin = false }: { admin?: boolean }) {
           查看积分账户
         </Link>
       </div>
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-semibold">{admin ? "套餐目录" : "选择积分包"}</h2>
-        <Button
-          size="icon"
-          variant="ghost"
-          title="刷新套餐"
-          disabled={busy}
-          onClick={() => void loadCatalog()}
-        >
-          <RefreshCw className="size-4" />
-        </Button>
-      </div>
-      {catalogError ? (
-        <p aria-live="polite" className="text-sm text-destructive">
-          {catalogError}
-        </p>
-      ) : packages === null ? (
-        <p className="text-sm text-muted-foreground">载入中…</p>
-      ) : packages.length === 0 ? (
-        <p className="py-6 text-sm text-muted-foreground">暂无上架套餐</p>
-      ) : (
-        <ul className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {packages.map((pack) => (
-            <li key={pack.id} className="flex min-w-0 flex-col rounded-md border p-4">
-              <div className="mb-3 flex items-center gap-2">
-                <Package className="size-4 text-muted-foreground" />
-                <h3 className="min-w-0 break-words text-sm font-semibold">{pack.name}</h3>
-              </div>
-              <p className="break-all text-2xl font-medium">
-                {formatCredits(pack.creditsMicro)}{" "}
-                <span className="text-sm text-muted-foreground">积分</span>
-              </p>
-              <p className="mt-2 break-all font-mono text-lg">
-                {formatPrice(pack.priceMinor, pack.currency)}
-              </p>
-              {pack.description && (
-                <p className="mt-3 break-words text-sm text-muted-foreground">{pack.description}</p>
-              )}
-              <p className="my-3 text-xs text-muted-foreground">
-                v{pack.version} · 长期有效{admin ? ` · ${pack.enabled ? "已上架" : "未上架"}` : ""}
-              </p>
-              <Button
-                className="mt-auto"
-                variant={admin ? "outline" : "default"}
-                disabled={busy}
-                onClick={() => {
-                  setActionError("");
-                  if (admin) edit(pack);
-                  else setPurchase(pack);
-                }}
-              >
-                {admin ? <Pencil className="size-4" /> : <ShoppingCart className="size-4" />}
-                {admin ? "编辑套餐" : "创建订单"}
-              </Button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <section className="mt-8 border-t pt-5">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold">{admin ? "订单管理" : "我的订单"}</h2>
-          <Button
-            size="icon"
-            variant="ghost"
-            title="刷新订单"
-            disabled={busy || loadingOrders}
-            onClick={() => void loadOrders()}
-          >
-            <RefreshCw className="size-4" />
-          </Button>
-        </div>
-        {ordersError ? (
-          <p aria-live="polite" className="text-sm text-destructive">
-            {ordersError}
-          </p>
-        ) : orders === null ? (
-          <p className="text-sm text-muted-foreground">载入中…</p>
-        ) : orders.items.length === 0 ? (
-          <p className="py-5 text-sm text-muted-foreground">暂无订单</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <caption className="sr-only">积分套餐订单</caption>
-              <thead>
-                <tr className="border-b text-muted-foreground">
-                  {["套餐 / 订单", ...(admin ? ["账号"] : []), "金额", "积分", "状态", "操作"].map(
-                    (title) => (
-                      <th scope="col" key={title} className="px-2 py-3">
-                        {title}
-                      </th>
-                    ),
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {orders.items.map((order) => (
-                  <tr key={order.id} className="border-b align-top">
-                    <td className="max-w-64 px-2 py-3">
-                      <p className="break-words font-medium">
-                        {order.packageName} · v{order.packageVersion}
-                      </p>
-                      <p className="mt-1 break-all text-muted-foreground">{order.id}</p>
-                      <p className="mt-1 whitespace-nowrap text-muted-foreground">
-                        {new Date(order.createdAt).toLocaleString()}
-                      </p>
-                    </td>
-                    {admin && (
-                      <td className="max-w-48 break-all px-2 py-3">
-                        {order.accountEmail ?? order.accountId}
-                      </td>
-                    )}
-                    <td className="whitespace-nowrap px-2 py-3">
-                      {formatPrice(order.priceMinor, order.currency)}
-                    </td>
-                    <td className="whitespace-nowrap px-2 py-3 font-mono">
-                      {formatCredits(order.creditsMicro)}
-                    </td>
-                    <td className="whitespace-nowrap px-2 py-3">{STATUS[order.status]}</td>
-                    <td className="px-2 py-3">
-                      {order.status === "pending" && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={busy}
-                          onClick={() => {
-                            setActionError("");
-                            setReason("");
-                            setAction({ order, kind: admin ? "confirm" : "cancel" });
-                          }}
-                        >
-                          {admin ? <Check className="size-3" /> : <X className="size-3" />}
-                          {admin ? "人工确认" : "取消订单"}
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <Tabs value={view} onValueChange={setView}>
+        <TabsList aria-label={admin ? "套餐与订单管理" : "充值与订单"} className="mb-5">
+          <TabsTrigger value="catalog">{admin ? "套餐目录" : "选择积分包"}</TabsTrigger>
+          <TabsTrigger value="orders">{admin ? "订单管理" : "我的订单"}</TabsTrigger>
+        </TabsList>
+        <TabsContent value="catalog">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold">{admin ? "套餐目录" : "选择积分包"}</h2>
+            <Button
+              size="icon"
+              variant="ghost"
+              title="刷新套餐"
+              aria-label="刷新套餐"
+              disabled={busy}
+              onClick={() => void loadCatalog()}
+            >
+              <RefreshCw className="size-4" />
+            </Button>
           </div>
-        )}
-        {orders?.nextCursor && (
-          <Button
-            variant="outline"
-            className="mt-4"
-            disabled={loadingOrders}
-            onClick={() => void loadOrders(orders.nextCursor)}
-          >
-            加载更早订单
-          </Button>
-        )}
-      </section>
+          {catalogError ? (
+            <p aria-live="polite" className="text-sm text-destructive">
+              {catalogError}
+            </p>
+          ) : packages === null ? (
+            <p className="text-sm text-muted-foreground">载入中…</p>
+          ) : packages.length === 0 ? (
+            <p className="py-6 text-sm text-muted-foreground">暂无上架套餐</p>
+          ) : (
+            <ul className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {packages.map((pack) => (
+                <li key={pack.id} className="flex min-w-0 flex-col rounded-md border p-4">
+                  <div className="mb-3 flex items-center gap-2">
+                    <Package className="size-4 text-muted-foreground" />
+                    <h3 className="min-w-0 break-words text-sm font-semibold">{pack.name}</h3>
+                  </div>
+                  <p className="break-all text-2xl font-medium">
+                    {formatCredits(pack.creditsMicro)}{" "}
+                    <span className="text-sm text-muted-foreground">积分</span>
+                  </p>
+                  <p className="mt-2 break-all font-mono text-lg">
+                    {formatPrice(pack.priceMinor, pack.currency)}
+                  </p>
+                  {pack.description && (
+                    <p className="mt-3 break-words text-sm text-muted-foreground">
+                      {pack.description}
+                    </p>
+                  )}
+                  <p className="my-3 text-xs text-muted-foreground">
+                    v{pack.version} · 长期有效
+                    {admin ? ` · ${pack.enabled ? "已上架" : "未上架"}` : ""}
+                  </p>
+                  <Button
+                    className="mt-auto"
+                    variant={admin ? "outline" : "default"}
+                    disabled={busy}
+                    onClick={() => {
+                      setActionError("");
+                      if (admin) edit(pack);
+                      else setPurchase(pack);
+                    }}
+                  >
+                    {admin ? <Pencil className="size-4" /> : <ShoppingCart className="size-4" />}
+                    {admin ? "编辑套餐" : "创建订单"}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </TabsContent>
+        <TabsContent value="orders">
+          <section>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-semibold">{admin ? "订单管理" : "我的订单"}</h2>
+              <Button
+                size="icon"
+                variant="ghost"
+                title="刷新订单"
+                aria-label="刷新订单"
+                disabled={busy || loadingOrders}
+                onClick={() => void loadOrders()}
+              >
+                <RefreshCw className="size-4" />
+              </Button>
+            </div>
+            {ordersError ? (
+              <p aria-live="polite" className="text-sm text-destructive">
+                {ordersError}
+              </p>
+            ) : orders === null ? (
+              <p className="text-sm text-muted-foreground">载入中…</p>
+            ) : orders.items.length === 0 ? (
+              <p className="py-5 text-sm text-muted-foreground">暂无订单</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <caption className="sr-only">积分套餐订单</caption>
+                  <thead>
+                    <tr className="border-b text-muted-foreground">
+                      {[
+                        "套餐 / 订单",
+                        ...(admin ? ["账号"] : []),
+                        "金额",
+                        "积分",
+                        "状态",
+                        "操作",
+                      ].map((title) => (
+                        <th scope="col" key={title} className="px-2 py-3">
+                          {title}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {orders.items.map((order) => (
+                      <tr key={order.id} className="border-b align-top">
+                        <td className="max-w-64 px-2 py-3">
+                          <p className="break-words font-medium">
+                            {order.packageName} · v{order.packageVersion}
+                          </p>
+                          <p className="mt-1 break-all text-muted-foreground">{order.id}</p>
+                          <p className="mt-1 whitespace-nowrap text-muted-foreground">
+                            {new Date(order.createdAt).toLocaleString()}
+                          </p>
+                        </td>
+                        {admin && (
+                          <td className="max-w-48 break-all px-2 py-3">
+                            {order.accountEmail ?? order.accountId}
+                          </td>
+                        )}
+                        <td className="whitespace-nowrap px-2 py-3">
+                          {formatPrice(order.priceMinor, order.currency)}
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-3 font-mono">
+                          {formatCredits(order.creditsMicro)}
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-3">{STATUS[order.status]}</td>
+                        <td className="px-2 py-3">
+                          {order.status === "pending" && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={busy}
+                              onClick={() => {
+                                setActionError("");
+                                setReason("");
+                                setAction({ order, kind: admin ? "confirm" : "cancel" });
+                              }}
+                            >
+                              {admin ? <Check className="size-3" /> : <X className="size-3" />}
+                              {admin ? "人工确认" : "取消订单"}
+                            </Button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {orders?.nextCursor && (
+              <Button
+                variant="outline"
+                className="mt-4"
+                disabled={loadingOrders}
+                onClick={() => void loadOrders(orders.nextCursor)}
+              >
+                加载更早订单
+              </Button>
+            )}
+          </section>
+        </TabsContent>
+      </Tabs>
       <Dialog
         open={draft !== null}
         onOpenChange={(open) => {

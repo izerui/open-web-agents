@@ -23,6 +23,7 @@ test("上传多个文件、看结果,再做检索测试", async ({ page, context
   });
   const agentId = ((await created.json()) as { agent: { id: string } }).agent.id;
   await page.goto(`${BASE}/agents?id=${agentId}`);
+  await page.getByRole("tab", { name: "知识", exact: true }).click();
 
   await page.getByLabel("上传知识库文件").setInputFiles([
     {

@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadError } from "@/components/load-error";
 import { Button } from "@/components/ui/button";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { creditsAmount, creditsExact } from "@/lib/modules/billing/domain/credits-display";
@@ -97,9 +98,11 @@ export function RunChargeList({
           </Button>
         </p>
       )}
-      {error && <p className="mb-3 text-sm text-destructive">{error}</p>}
+      {error && <LoadError compact what="运行消耗" message={error} />}
       {items.length === 0 ? (
-        <p className="py-5 text-sm text-muted-foreground">{loading ? "载入中…" : "暂无运行"}</p>
+        error ? null : (
+          <p className="py-5 text-sm text-muted-foreground">{loading ? "载入中…" : "暂无运行"}</p>
+        )
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">

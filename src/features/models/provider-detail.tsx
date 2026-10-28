@@ -423,7 +423,7 @@ function EndpointCard({
           {probe && (
             <p
               aria-live="polite"
-              className={`text-sm ${probe.ok ? "text-emerald-600" : "text-destructive"}`}
+              className={`text-sm ${probe.ok ? "text-success" : "text-destructive"}`}
             >
               {probe.ok
                 ? "连接成功"

@@ -90,7 +90,7 @@ export function McpCheck({
       {result?.ok && (
         <div className="rounded-md border p-2 text-xs" data-testid="mcp-check-ok">
           <p className="flex flex-wrap items-center gap-1.5">
-            <CheckCircle2 className="size-3.5 text-emerald-600" />
+            <CheckCircle2 className="size-3.5 text-success" />
             <span>
               连接成功{result.server.name ? `:${result.server.name}` : ""}
               {result.server.version ? ` ${result.server.version}` : ""}

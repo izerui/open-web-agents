@@ -94,6 +94,40 @@ describe("isAdminView", () => {
 });
 
 describe("共享登录态", () => {
+  it("登出后迟到的身份响应不能重新填回缓存", async () => {
+    let resolve!: (response: Response) => void;
+    vi.stubGlobal(
+      "fetch",
+      () =>
+        new Promise<Response>((done) => {
+          resolve = done;
+        }),
+    );
+    const pending = refreshMe();
+    clearMe();
+    resolve(Response.json({ authenticated: true, user: { email: "old@x.io" } }));
+    await pending;
+    expect(peekMe()).toBeNull();
+  });
+
+  it("先前账号的慢响应不能覆盖新账号", async () => {
+    let resolve!: (response: Response) => void;
+    vi.stubGlobal(
+      "fetch",
+      () =>
+        new Promise<Response>((done) => {
+          resolve = done;
+        }),
+    );
+    const pending = refreshMe();
+    clearMe();
+    stubAuth("new@x.io");
+    await refreshMe();
+    resolve(Response.json({ authenticated: true, user: { email: "old@x.io" } }));
+    await pending;
+    expect(peekMe()?.user?.email).toBe("new@x.io");
+  });
+
   it("账号响应不再需要模型地址或密钥掩码", async () => {
     const user = {
       id: "account",

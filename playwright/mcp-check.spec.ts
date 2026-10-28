@@ -77,6 +77,7 @@ test.describe("MCP 测试连接", () => {
     const id = ((await created.json()) as { agent: { id: string } }).agent.id;
 
     await page.goto(`${BASE}/agents?id=${id}`);
+    await page.getByRole("tab", { name: "能力", exact: true }).click();
     await page.getByRole("button", { name: "测试连接 docs" }).click();
     const ok = page.getByTestId("mcp-check-ok");
     await expect(ok).toContainText("连接成功:pw-mcp 2.0.0");

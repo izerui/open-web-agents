@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import type { SummaryWindow } from "@/lib/modules/billing/domain/charge-summary";
@@ -44,8 +45,16 @@ type Statement = {
 };
 type Account = { id: string; email: string; disabled?: boolean };
 const KIND = { credit: "人工入账", reserve: "冻结", settle: "结算", refund: "多扣退还" } as const;
+type AccountView = "overview" | "runs" | "ledger";
+type AdminView = "overview" | "accounts" | "reconciliation";
 
 export function BillingView({ admin = false }: { admin?: boolean }) {
+  const [adminView, setAdminView] = useState<AdminView>("overview");
+  const [visitedAdmin, setVisitedAdmin] = useState<AdminView[]>(["overview"]);
+  const [accountView, setAccountView] = useState<AccountView>("overview");
+  const [visitedAccount, setVisitedAccount] = useState<AccountView[]>(admin ? [] : ["overview"]);
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [batchVisited, setBatchVisited] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [accountId, setAccountId] = useState("");
   const [statement, setStatement] = useState<Statement | null>(null);
@@ -63,6 +72,16 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
   const [drill, setDrill] = useState<ChargeDrill | null>(null);
   /** 账号汇总的初始时间范围:从全平台汇总点账号进来时沿用那边的,其余默认本月 */
   const [accountRange, setAccountRange] = useState<SummaryWindow>("this_month");
+
+  function openAdminView(view: AdminView) {
+    setAdminView(view);
+    setVisitedAdmin((previous) => (previous.includes(view) ? previous : [...previous, view]));
+  }
+
+  function openAccountView(view: AccountView) {
+    setAccountView(view);
+    setVisitedAccount((previous) => (previous.includes(view) ? previous : [...previous, view]));
+  }
 
   const loadAccounts = useCallback(async () => {
     try {
@@ -182,65 +201,39 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
       requestSeq.current++;
       setStatement(null);
       setAccountId(id);
+      setVisitedAccount([]);
     }
     setAccountRange(range);
     setDrill(next);
+    openAdminView("accounts");
+    openAccountView(next ? "runs" : "overview");
     setReceipt("");
     creditAttempt.current = null;
   }
 
   const selected = accounts.find((account) => account.id === accountId);
   return (
-    <SpaceShell area={admin ? "admin" : "personal"} title={admin ? "积分管理" : "积分账户"}>
-      {admin && <ReconciliationView />}
+    <SpaceShell area={admin ? "admin" : "personal"} title={admin ? "计费管理" : "用量与费用"}>
       {admin && (
-        <ChargeSummary
-          platform
-          onSelectAccount={(id, range) =>
-            // 明细也只看这段时间,和刚才那笔汇总对得上
-            selectAccount(id, range, {
-              label: `${WINDOW_LABEL[range]} · 该账号全部运行`,
-              params: { window: range },
-            })
-          }
-        />
-      )}
-      {admin && <BatchCreditForm onDone={() => load()} />}
-      {admin && <PendingCharges onSelectAccount={(id) => selectAccount(id)} />}
-      {statement && (
-        <div className="mb-5 border-b pb-4 text-sm text-muted-foreground">
-          每次运行发起时先冻结积分,结束后按实际用量扣除,多余的退回可用余额。
-        </div>
-      )}
-      {admin && (
-        <div className="mb-5 flex flex-wrap items-end gap-3">
-          <label className="min-w-0 flex-1 space-y-1 text-sm" htmlFor="billing-account">
-            <span>账号</span>
-            <NativeSelect
-              id="billing-account"
-              value={accountId}
-              disabled={busy}
-              onChange={(event) => selectAccount(event.target.value)}
+        <nav aria-label="计费管理分区" className="mb-6 flex flex-wrap gap-2 border-b pb-3">
+          {(
+            [
+              ["overview", "概览"],
+              ["accounts", "账户"],
+              ["reconciliation", "对账"],
+            ] as const
+          ).map(([view, label]) => (
+            <Button
+              key={view}
+              variant={adminView === view ? "secondary" : "ghost"}
+              aria-pressed={adminView === view}
+              aria-controls={`billing-${view}`}
+              onClick={() => openAdminView(view)}
             >
-              <option value="">选择账号</option>
-              {accounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.email}
-                  {account.disabled ? "（已停用）" : ""}
-                </option>
-              ))}
-            </NativeSelect>
-          </label>
-          <Button
-            variant="ghost"
-            size="icon"
-            title="刷新账号列表"
-            onClick={() => void loadAccounts()}
-            disabled={busy}
-          >
-            <RefreshCw className="size-4" />
-          </Button>
-        </div>
+              {label}
+            </Button>
+          ))}
+        </nav>
       )}
       {error && !confirm && (
         <p aria-live="assertive" className="mb-4 text-sm text-destructive">
@@ -248,181 +241,300 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
         </p>
       )}
       {receipt && (
-        <output className="mb-4 block break-words text-sm text-emerald-600">{receipt}</output>
+        <output className="mb-4 block break-words text-sm text-success">{receipt}</output>
       )}
-      {statement ? (
-        <dl className="mb-6 grid grid-cols-2 gap-6 border-y py-5">
-          <div className="min-w-0">
-            <dt className="text-xs text-muted-foreground">可用</dt>
-            <dd
-              data-testid="balance-available"
-              className="mt-2 break-all font-mono text-2xl"
-              title={`${creditsExact(statement.balance.availableMicroCredits)} 积分`}
-            >
-              {creditsBalance(statement.balance.availableMicroCredits)}
-            </dd>
-          </div>
-          <div className="min-w-0">
-            <dt className="text-xs text-muted-foreground">冻结中</dt>
-            <dd
-              data-testid="balance-reserved"
-              className="mt-2 break-all font-mono text-2xl"
-              title={`${creditsExact(statement.balance.reservedMicroCredits)} 积分`}
-            >
-              {creditsAmount(statement.balance.reservedMicroCredits)}
-            </dd>
-          </div>
-          {statement.month && (
-            <p className="col-span-2 text-xs text-muted-foreground">
-              本月已用 {creditsAmount(statement.month.usedMicroCredits)} 积分
-              {statement.month.limitMicroCredits !== null &&
-                ` / 月度上限 ${creditsAmount(statement.month.limitMicroCredits)} 积分`}
-              {statement.month.limitPending &&
-                " · 原月度上限待管理员按积分重新设置,设置前不能发起运行"}
-            </p>
-          )}
-        </dl>
-      ) : loading ? (
-        <p className="py-5 text-sm text-muted-foreground">载入中…</p>
-      ) : admin && !accountId ? (
-        <div className="py-8 text-center text-sm text-muted-foreground">
-          <Wallet className="mx-auto mb-3 size-8" />
-          选择账号查看余额与流水
+      {admin && (
+        <div id="billing-overview" hidden={adminView !== "overview"}>
+          <ChargeSummary
+            platform
+            onSelectAccount={(id, range) =>
+              // 明细也只看这段时间,和刚才那笔汇总对得上
+              selectAccount(id, range, {
+                label: `${WINDOW_LABEL[range]} · 该账号全部运行`,
+                params: { window: range },
+              })
+            }
+          />
         </div>
-      ) : null}
-
-      {admin && accountId && (
-        <form
-          className="mb-6 space-y-3 border-b pb-5"
-          onSubmit={(event) => {
-            event.preventDefault();
-            reviewCredit();
-          }}
-        >
-          <h2 className="text-sm font-semibold">人工发放积分</h2>
-          <fieldset
-            disabled={busy}
-            className="grid gap-3 sm:grid-cols-[12rem_1fr_auto] sm:items-end"
-          >
-            <label className="space-y-1 text-sm" htmlFor="credit-amount">
-              <span>积分数量</span>
-              <Input
-                id="credit-amount"
-                required
-                inputMode="decimal"
-                value={credits}
-                onChange={(event) => setCredits(event.target.value)}
-              />
+      )}
+      {admin && (
+        <div id="billing-reconciliation" hidden={adminView !== "reconciliation"}>
+          {visitedAdmin.includes("reconciliation") && (
+            <>
+              <ReconciliationView />
+              <PendingCharges onSelectAccount={(id) => selectAccount(id)} />
+            </>
+          )}
+        </div>
+      )}
+      <div id="billing-accounts" hidden={admin && adminView !== "accounts"}>
+        {admin && (
+          <div className="mb-5 flex flex-wrap items-end gap-3">
+            <label className="min-w-0 flex-1 space-y-1 text-sm" htmlFor="billing-account">
+              <span>账号</span>
+              <NativeSelect
+                id="billing-account"
+                value={accountId}
+                disabled={busy}
+                onChange={(event) => selectAccount(event.target.value)}
+              >
+                <option value="">选择账号</option>
+                {accounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.email}
+                    {account.disabled ? "（已停用）" : ""}
+                  </option>
+                ))}
+              </NativeSelect>
             </label>
-            <label className="space-y-1 text-sm" htmlFor="credit-reason">
-              <span>入账说明</span>
-              <Textarea
-                id="credit-reason"
-                required
-                maxLength={500}
-                className="min-h-9 resize-y"
-                value={reason}
-                onChange={(event) => setReason(event.target.value)}
-              />
-            </label>
-            <Button type="submit" disabled={busy}>
-              <ArrowDownToLine className="size-4" />
-              发放积分
-            </Button>
-          </fieldset>
-        </form>
-      )}
-      {statement && (
-        <ChargeSummary
-          key={admin ? `${accountId}:${accountRange}` : "self"}
-          accountId={admin ? accountId : undefined}
-          initialRange={accountRange}
-          onDrill={setDrill}
-        />
-      )}
-      {statement && (
-        <RunChargeList
-          accountId={admin ? accountId : undefined}
-          drill={drill}
-          onClearDrill={() => setDrill(null)}
-        />
-      )}
-      {statement && (
-        <section>
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold">账户流水</h2>
             <Button
               variant="ghost"
               size="icon"
-              title="刷新流水"
-              disabled={loading || busy}
-              onClick={() => void load()}
+              title="刷新账号列表"
+              aria-label="刷新账号列表"
+              onClick={() => void loadAccounts()}
+              disabled={busy}
             >
               <RefreshCw className="size-4" />
             </Button>
-          </div>
-          {statement.items.length === 0 ? (
-            <p className="py-5 text-sm text-muted-foreground">暂无流水</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <caption className="sr-only">积分账户流水</caption>
-                <thead>
-                  <tr className="border-b text-muted-foreground">
-                    {["时间", "类型", "积分", "可用余额", "说明 / 关联"].map((title) => (
-                      <th scope="col" key={title} className="px-2 py-3">
-                        {title}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {statement.items.map((entry) => (
-                    <tr key={entry.id} className="border-b align-top">
-                      <td className="whitespace-nowrap px-2 py-3">
-                        {new Date(entry.createdAt).toLocaleString()}
-                      </td>
-                      <td className="whitespace-nowrap px-2 py-3">
-                        {entry.kind === "settle" && entry.amountMicroCredits === "0"
-                          ? "释放冻结"
-                          : KIND[entry.kind]}
-                      </td>
-                      <td className="whitespace-nowrap px-2 py-3 font-mono">
-                        {entry.kind === "credit" || entry.kind === "refund"
-                          ? "+"
-                          : entry.kind === "settle" && entry.amountMicroCredits !== "0"
-                            ? "-"
-                            : ""}
-                        {creditsExact(entry.amountMicroCredits)}
-                      </td>
-                      <td className="whitespace-nowrap px-2 py-3 font-mono">
-                        {creditsExact(entry.availableAfter)}
-                        <p className="mt-1 text-muted-foreground">
-                          冻结 {creditsExact(entry.reservedAfter)}
-                        </p>
-                      </td>
-                      <td className="min-w-40 max-w-sm break-words px-2 py-3">
-                        {entry.reason || entry.reference}
-                        <p className="mt-1 break-all text-muted-foreground">{entry.id}</p>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          {statement.nextCursor && (
             <Button
               variant="outline"
-              className="mt-4"
-              disabled={loading}
-              onClick={() => void load(statement.nextCursor)}
+              aria-expanded={batchOpen}
+              aria-controls="billing-batch-credit"
+              onClick={() => {
+                setBatchVisited(true);
+                setBatchOpen((open) => !open);
+              }}
             >
-              加载更早流水
+              <ArrowDownToLine className="size-4" />
+              批量发放积分
             </Button>
-          )}
-        </section>
-      )}
+          </div>
+        )}
+        {admin && (
+          <div id="billing-batch-credit" hidden={!batchOpen}>
+            {batchVisited && <BatchCreditForm onDone={() => load()} />}
+          </div>
+        )}
+        <Tabs value={accountView} onValueChange={(view) => openAccountView(view as AccountView)}>
+          <TabsList aria-label="账户明细" className="mb-5 max-w-full">
+            <TabsTrigger value="overview">账户概览</TabsTrigger>
+            <TabsTrigger value="runs">运行消耗</TabsTrigger>
+            <TabsTrigger value="ledger">账户流水</TabsTrigger>
+          </TabsList>
+          {/* 首次访问才挂载；保留已访问面板的游标、筛选、错误和重试状态。 */}
+          <TabsContent value="overview" forceMount className="data-[state=inactive]:hidden">
+            {statement && (
+              <div className="mb-4 text-sm text-muted-foreground">
+                每次运行发起时先冻结积分,结束后按实际用量扣除,多余的退回可用余额。
+              </div>
+            )}
+            {statement ? (
+              <dl className="mb-6 grid grid-cols-2 gap-6 border-y py-5">
+                <div className="min-w-0">
+                  <dt className="text-xs text-muted-foreground">可用</dt>
+                  <dd
+                    data-testid="balance-available"
+                    className="mt-2 break-all font-mono text-2xl"
+                    title={`${creditsExact(statement.balance.availableMicroCredits)} 积分`}
+                  >
+                    {creditsBalance(statement.balance.availableMicroCredits)}
+                  </dd>
+                </div>
+                <div className="min-w-0">
+                  <dt className="text-xs text-muted-foreground">冻结中</dt>
+                  <dd
+                    data-testid="balance-reserved"
+                    className="mt-2 break-all font-mono text-2xl"
+                    title={`${creditsExact(statement.balance.reservedMicroCredits)} 积分`}
+                  >
+                    {creditsAmount(statement.balance.reservedMicroCredits)}
+                  </dd>
+                </div>
+                {statement.month && (
+                  <p className="col-span-2 text-xs text-muted-foreground">
+                    本月已用 {creditsAmount(statement.month.usedMicroCredits)} 积分
+                    {statement.month.limitMicroCredits !== null &&
+                      ` / 月度上限 ${creditsAmount(statement.month.limitMicroCredits)} 积分`}
+                    {statement.month.limitPending &&
+                      " · 原月度上限待管理员按积分重新设置,设置前不能发起运行"}
+                  </p>
+                )}
+              </dl>
+            ) : loading ? (
+              <p className="py-5 text-sm text-muted-foreground">载入中…</p>
+            ) : admin && !accountId ? (
+              <div className="py-8 text-center text-sm text-muted-foreground">
+                <Wallet className="mx-auto mb-3 size-8" />
+                选择账号查看余额与流水
+              </div>
+            ) : null}
+
+            {admin && accountId && (
+              <form
+                className="mb-6 space-y-3 border-b pb-5"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  reviewCredit();
+                }}
+              >
+                <h2 className="text-sm font-semibold">人工发放积分</h2>
+                <fieldset
+                  disabled={busy}
+                  className="grid gap-3 sm:grid-cols-[12rem_1fr_auto] sm:items-end"
+                >
+                  <label className="space-y-1 text-sm" htmlFor="credit-amount">
+                    <span>积分数量</span>
+                    <Input
+                      id="credit-amount"
+                      required
+                      inputMode="decimal"
+                      value={credits}
+                      onChange={(event) => setCredits(event.target.value)}
+                    />
+                  </label>
+                  <label className="space-y-1 text-sm" htmlFor="credit-reason">
+                    <span>入账说明</span>
+                    <Textarea
+                      id="credit-reason"
+                      required
+                      maxLength={500}
+                      className="min-h-9 resize-y"
+                      value={reason}
+                      onChange={(event) => setReason(event.target.value)}
+                    />
+                  </label>
+                  <Button type="submit" disabled={busy}>
+                    <ArrowDownToLine className="size-4" />
+                    发放积分
+                  </Button>
+                </fieldset>
+              </form>
+            )}
+            {statement && visitedAccount.includes("overview") && (
+              <ChargeSummary
+                key={admin ? `${accountId}:${accountRange}` : "self"}
+                accountId={admin ? accountId : undefined}
+                initialRange={accountRange}
+                onDrill={(next) => {
+                  setDrill(next);
+                  openAccountView("runs");
+                }}
+              />
+            )}
+          </TabsContent>
+          <TabsContent value="runs" forceMount className="data-[state=inactive]:hidden">
+            {statement && visitedAccount.includes("runs") && (
+              <RunChargeList
+                accountId={admin ? accountId : undefined}
+                drill={drill}
+                onClearDrill={() => setDrill(null)}
+              />
+            )}
+            {!statement && (
+              <p className="py-5 text-sm text-muted-foreground">
+                {loading
+                  ? "载入中…"
+                  : admin && !accountId
+                    ? "选择账号查看运行消耗"
+                    : error
+                      ? "暂时无法载入账户"
+                      : "暂无账户数据"}
+              </p>
+            )}
+          </TabsContent>
+          <TabsContent value="ledger">
+            {statement && (
+              <section>
+                <div className="mb-3 flex items-center justify-between">
+                  <h2 className="text-sm font-semibold">账户流水</h2>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    title="刷新流水"
+                    aria-label="刷新流水"
+                    disabled={loading || busy}
+                    onClick={() => void load()}
+                  >
+                    <RefreshCw className="size-4" />
+                  </Button>
+                </div>
+                {statement.items.length === 0 ? (
+                  <p className="py-5 text-sm text-muted-foreground">暂无流水</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <caption className="sr-only">积分账户流水</caption>
+                      <thead>
+                        <tr className="border-b text-muted-foreground">
+                          {["时间", "类型", "积分", "可用余额", "说明 / 关联"].map((title) => (
+                            <th scope="col" key={title} className="px-2 py-3">
+                              {title}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {statement.items.map((entry) => (
+                          <tr key={entry.id} className="border-b align-top">
+                            <td className="whitespace-nowrap px-2 py-3">
+                              {new Date(entry.createdAt).toLocaleString()}
+                            </td>
+                            <td className="whitespace-nowrap px-2 py-3">
+                              {entry.kind === "settle" && entry.amountMicroCredits === "0"
+                                ? "释放冻结"
+                                : KIND[entry.kind]}
+                            </td>
+                            <td className="whitespace-nowrap px-2 py-3 font-mono">
+                              {entry.kind === "credit" || entry.kind === "refund"
+                                ? "+"
+                                : entry.kind === "settle" && entry.amountMicroCredits !== "0"
+                                  ? "-"
+                                  : ""}
+                              {creditsExact(entry.amountMicroCredits)}
+                            </td>
+                            <td className="whitespace-nowrap px-2 py-3 font-mono">
+                              {creditsExact(entry.availableAfter)}
+                              <p className="mt-1 text-muted-foreground">
+                                冻结 {creditsExact(entry.reservedAfter)}
+                              </p>
+                            </td>
+                            <td className="min-w-40 max-w-sm break-words px-2 py-3">
+                              {entry.reason || entry.reference}
+                              <p className="mt-1 break-all text-muted-foreground">{entry.id}</p>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {statement.nextCursor && (
+                  <Button
+                    variant="outline"
+                    className="mt-4"
+                    disabled={loading}
+                    onClick={() => void load(statement.nextCursor)}
+                  >
+                    加载更早流水
+                  </Button>
+                )}
+              </section>
+            )}
+            {!statement && (
+              <p className="py-5 text-sm text-muted-foreground">
+                {loading
+                  ? "载入中…"
+                  : admin && !accountId
+                    ? "选择账号查看账户流水"
+                    : error
+                      ? "暂时无法载入账户"
+                      : "暂无账户数据"}
+              </p>
+            )}
+          </TabsContent>
+        </Tabs>
+      </div>
       <Dialog
         open={confirm}
         onOpenChange={(open) => {

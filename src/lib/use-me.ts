@@ -29,6 +29,7 @@ export interface Me {
 let cache: Me | null = null;
 /** 正在飞的请求。首屏两个组件同时挂载时共享它,而不是各发一个。 */
 let inflight: Promise<Me> | null = null;
+let generation = 0;
 const listeners = new Set<(m: Me | null) => void>();
 
 function emit(): void {
@@ -36,16 +37,25 @@ function emit(): void {
 }
 
 async function load(): Promise<Me> {
-  inflight ??= fetchJson<Me>("/api/auth").finally(() => {
-    inflight = null;
-  });
-  cache = await inflight;
-  emit();
-  return cache;
+  const requestGeneration = generation;
+  if (!inflight) {
+    const request = fetchJson<Me>("/api/auth").finally(() => {
+      if (inflight === request) inflight = null;
+    });
+    inflight = request;
+  }
+  const result = await inflight;
+  // A response from before logout or a newer refresh no longer owns the cache.
+  if (requestGeneration === generation) {
+    cache = result;
+    emit();
+  }
+  return result;
 }
 
 /** 重新拉一次并通知所有订阅者。账号或 webhook 签名配置变化后调用。 */
 export async function refreshMe(): Promise<void> {
+  generation += 1;
   inflight = null;
   await load().catch(() => {
     // 刷新失败保留旧值:显示稍旧的邮箱,好过整块 UI 突然空掉
@@ -60,6 +70,7 @@ export async function refreshMe(): Promise<void> {
  * 侧栏可能还挂着上一个人的邮箱 —— 在多人共用的机器上这是真的会出事。
  */
 export function clearMe(): void {
+  generation += 1;
   cache = null;
   inflight = null;
   emit();
@@ -72,6 +83,7 @@ export function peekMe(): Me | null {
 
 /** 仅供测试:重置模块级状态。 */
 export function __resetMe(): void {
+  generation += 1;
   cache = null;
   inflight = null;
   listeners.clear();

@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+/*
+ * Streamdown(对话里的 Markdown 渲染)把样式写成 Tailwind 类名,但 Tailwind 不扫 node_modules ——
+ * 不声明的话,只有项目自己碰巧也用过的类才会生成。曾经有序列表的序号就因此不显示
+ * (list-decimal 没生成,被 preflight 的 list-style:none 盖掉),代码块和表格也缺样式。
+ */
+@source "../../node_modules/streamdown/dist/*.js";
+@source "../../node_modules/@streamdown/*/dist/*.js";
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -35,6 +43,10 @@
   --color-brand-dim: var(--brand-dim);
   --color-success: var(--success);
   --color-warning: var(--warning);
+  --color-info: var(--info);
+  /* IDE 语法高亮色:给工具类别等需要区分但不表达成败的地方用 */
+  --color-ide-cyan: var(--ide-cyan);
+  --color-ide-purple: var(--ide-purple);
   --font-sans: var(--font-sans), ui-sans-serif, system-ui, "PingFang SC", sans-serif;
   --font-mono: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
   --radius-sm: calc(var(--radius) - 4px);
@@ -42,47 +54,62 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
   --radius-2xl: calc(var(--radius) + 8px);
+
+  /* IDE 的紧凑排版:正文 13px、辅助 12px(Tailwind 默认是 14 / 12) */
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.25rem;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.125rem;
+  /* IDE 控件是平的:只有浮起来的弹层才有投影 */
+  --shadow-xs: 0 0 #0000;
+  --shadow-sm: 0 0 #0000;
+  --shadow-lg: var(--shadow-popup, 0 10px 28px rgb(0 0 0 / 45%));
+  --shadow-md: var(--shadow-popup, 0 10px 28px rgb(0 0 0 / 45%));
 }
 
-/* ── Light theme (kept for future toggle) ── */
+/* ── Light theme:JetBrains New UI 亮色(暂未启用,与暗色同一套语义) ── */
 :root {
   color-scheme: light;
-  --radius: 0.625rem;
-  --brand: oklch(0.68 0.145 62);
-  --brand-dim: oklch(0.68 0.145 62 / 12%);
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.141 0.005 285.823);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.141 0.005 285.823);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.141 0.005 285.823);
-  --primary: oklch(0.21 0.006 285.885);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.21 0.006 285.885);
-  --muted: oklch(0.967 0.001 286.375);
-  --muted-foreground: oklch(0.552 0.016 285.938);
-  --accent: oklch(0.94 0.001 286.375);
-  --accent-foreground: oklch(0.21 0.006 285.885);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.92 0.004 286.32);
-  --input: oklch(0.92 0.004 286.32);
-  --ring: oklch(0.705 0.015 286.067);
-  --success: oklch(0.62 0.19 145);
-  --warning: oklch(0.68 0.16 75);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.141 0.005 285.823);
-  --sidebar-primary: oklch(0.21 0.006 285.885);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.967 0.001 286.375);
-  --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
-  --sidebar-border: oklch(0.92 0.004 286.32);
-  --sidebar-ring: oklch(0.705 0.015 286.067);
-  --sidebar-active: oklch(0.948 0.002 286.32);
-  --sidebar-active-foreground: oklch(0.21 0.006 285.885);
+  --radius: 0.5rem;
+  --brand: #3574f0;
+  --brand-dim: rgb(53 116 240 / 12%);
+  --background: #ffffff;
+  --foreground: #1e1f22;
+  --card: #f7f8fa;
+  --card-foreground: #1e1f22;
+  --popover: #ffffff;
+  --popover-foreground: #1e1f22;
+  --primary: #3574f0;
+  --primary-foreground: #ffffff;
+  --secondary: #ebecf0;
+  --secondary-foreground: #1e1f22;
+  --muted: #f7f8fa;
+  --muted-foreground: #6c707e;
+  --accent: #dfe1e5;
+  --accent-foreground: #1e1f22;
+  --destructive: #db3b4b;
+  --border: #ebecf0;
+  --input: #c9ccd6;
+  --ring: rgb(53 116 240 / 70%);
+  --success: #208a3c;
+  --warning: #c27d04;
+  --info: #3574f0;
+  --ide-cyan: #00627a;
+  --ide-purple: #871094;
+  --sidebar: #f7f8fa;
+  --sidebar-foreground: #1e1f22;
+  --sidebar-primary: #3574f0;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #dfe1e5;
+  --sidebar-accent-foreground: #1e1f22;
+  --sidebar-border: #ebecf0;
+  --sidebar-ring: rgb(53 116 240 / 70%);
+  --sidebar-active: #d4e2ff;
+  --sidebar-active-foreground: #1e1f22;
+  --shadow-popup: 0 8px 24px rgb(0 0 0 / 15%);
 }
 
-/* ── Dark theme (matches open-agents) ── */
+/* ── Dark theme:JetBrains New UI 暗色(对齐 imux/docs/prototypes 的 IDE 风格) ── */
 .dark {
   /**
    * 告诉浏览器这是暗色界面。
@@ -93,44 +120,51 @@
    */
   color-scheme: dark;
 
-  /* 冷蓝灰底 + 琥珀铜强调:agent 运行是"有热度的过程",热信号比常见的荧光绿更贴题 */
-  --background: oklch(0.155 0.011 252);
-  --foreground: oklch(0.97 0.003 250);
-  --card: oklch(0.198 0.013 252);
-  --card-foreground: oklch(0.97 0.003 250);
-  --popover: oklch(0.215 0.014 252);
-  --popover-foreground: oklch(0.97 0.003 250);
+  /* 中性灰两层:主区是编辑器底 #1e1f22,侧栏 / 卡片 / 弹层是工具窗口面板 #2b2d30 */
+  --background: #1e1f22;
+  --foreground: #dfe1e5;
+  --card: #2b2d30;
+  --card-foreground: #dfe1e5;
+  --popover: #2b2d30;
+  --popover-foreground: #dfe1e5;
 
-  /* 全站唯一的强色锚点 —— 只用在运行态、焦点、主操作上 */
-  --brand: oklch(0.79 0.145 68);
-  --brand-dim: oklch(0.79 0.145 68 / 14%);
-  --primary: oklch(0.79 0.145 68);
-  --primary-foreground: oklch(0.19 0.03 60);
+  /* 强调色是 IDE 的主按钮蓝;链接、运行态用更亮的 #548af7 */
+  --brand: #548af7;
+  --brand-dim: rgb(84 138 247 / 14%);
+  --primary: #3574f0;
+  --primary-foreground: #ffffff;
 
-  --secondary: oklch(0.255 0.013 252);
-  --secondary-foreground: oklch(0.97 0.003 250);
-  --muted: oklch(0.255 0.013 252);
-  --muted-foreground: oklch(0.68 0.014 252);
-  --accent: oklch(0.285 0.015 252);
-  --accent-foreground: oklch(0.98 0.003 250);
-  --destructive: oklch(0.68 0.185 22);
-  --success: oklch(0.74 0.125 188);
-  --warning: oklch(0.8 0.145 78);
+  --secondary: #393b40;
+  --secondary-foreground: #dfe1e5;
+  --muted: #2b2d30;
+  --muted-foreground: #8c8f96;
+  /* 悬停底色;选中用 sidebar-active 的蓝 */
+  --accent: #393b40;
+  --accent-foreground: #dfe1e5;
+  --destructive: #db5c5c;
+  --success: #5fb865;
+  --warning: #e0b153;
+  --info: #548af7;
+  --ide-cyan: #2aacb8;
+  --ide-purple: #c77dbb;
 
-  --border: oklch(1 0 0 / 7%);
-  --input: oklch(1 0 0 / 11%);
-  --ring: oklch(0.79 0.145 68 / 55%);
+  --border: #393b40;
+  --input: #4e5157;
+  --ring: rgb(53 116 240 / 70%);
 
-  --sidebar: oklch(0.175 0.012 252);
-  --sidebar-foreground: oklch(0.97 0.003 250);
-  --sidebar-primary: oklch(0.79 0.145 68);
-  --sidebar-primary-foreground: oklch(0.19 0.03 60);
-  --sidebar-accent: oklch(0.25 0.014 252);
-  --sidebar-accent-foreground: oklch(0.98 0.003 250);
-  --sidebar-border: oklch(1 0 0 / 6%);
-  --sidebar-ring: oklch(0.79 0.145 68 / 55%);
-  --sidebar-active: oklch(0.79 0.145 68 / 12%);
-  --sidebar-active-foreground: oklch(0.97 0.003 250);
+  --sidebar: #2b2d30;
+  --sidebar-foreground: #dfe1e5;
+  --sidebar-primary: #3574f0;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #393b40;
+  --sidebar-accent-foreground: #dfe1e5;
+  --sidebar-border: #393b40;
+  --sidebar-ring: rgb(53 116 240 / 70%);
+  --sidebar-active: #2e436e;
+  --sidebar-active-foreground: #dfe1e5;
+
+  /* 弹出菜单 / 对话框的重投影,和原型的 popup 一致 */
+  --shadow-popup: 0 10px 28px rgb(0 0 0 / 45%);
 }
 
 /* ── Base layer: scrollbar, borders, body ── */
@@ -138,8 +172,10 @@
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
     @apply bg-background text-foreground;
+    font-size: 13px;
   }
 
   /* Styled scrollbar (matches open-agents) */
@@ -147,20 +183,24 @@
     width: 10px;
     height: 10px;
   }
+
   ::-webkit-scrollbar-track {
     background: transparent;
   }
+
   ::-webkit-scrollbar-thumb {
-    background: var(--border);
+    background: rgb(140 143 150 / 35%);
     border-radius: 9999px;
     border: 2px solid transparent;
     background-clip: content-box;
   }
+
   ::-webkit-scrollbar-thumb:hover {
-    background: var(--muted-foreground);
+    background: rgb(140 143 150 / 55%);
     border: 2px solid transparent;
     background-clip: content-box;
   }
+
   ::-webkit-scrollbar-corner {
     background: transparent;
   }
@@ -172,13 +212,16 @@
   scrollbar-color: transparent transparent;
   transition: scrollbar-color 0.3s;
 }
+
 .scrollbar-fade:hover,
 .scrollbar-fade:focus-within {
   scrollbar-color: var(--border) transparent;
 }
+
 .scrollbar-fade::-webkit-scrollbar-thumb {
   background: transparent;
 }
+
 .scrollbar-fade:hover::-webkit-scrollbar-thumb,
 .scrollbar-fade:focus-within::-webkit-scrollbar-thumb {
   background: var(--border);
@@ -191,10 +234,12 @@
 .message-actions {
   transition: opacity 80ms ease;
 }
+
 @media (hover: hover) {
   .group > .message-actions {
     opacity: 0;
   }
+
   .group:hover > .message-actions,
   .group:focus-within > .message-actions {
     opacity: 1;
@@ -210,9 +255,11 @@
     transform: translateX(160%);
   }
 }
+
 .run-line {
   position: relative;
 }
+
 .run-line::after {
   content: "";
   position: absolute;
@@ -227,7 +274,7 @@
 
 /* ── 面板内高光:让分栏有厚度,而不是被线切开的平面 ── */
 .panel-edge {
-  box-shadow: inset 0 1px 0 oklch(1 0 0 / 5%);
+  box-shadow: none;
 }
 
 /* ── 内容进场:流式输出时每轮浮上来,而不是硬闪 ── */
@@ -241,6 +288,7 @@
     transform: none;
   }
 }
+
 .rise-in {
   animation: rise-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
@@ -251,6 +299,7 @@
     width: 100%;
     opacity: 0.5;
   }
+
   .rise-in {
     animation: none;
   }
@@ -301,10 +350,83 @@
   .activity-status-dot-running {
     animation: none;
   }
+
   .live-activity-focus {
     animation: none;
     background-position: 50% 0;
   }
+}
+
+.object-frame {
+  --text-sm: 0.875rem;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+}
+
+.dark .object-frame {
+  --muted-foreground: #a7abb3;
+}
+
+.object-frame [data-conversation-shell] [data-slot="input-group"] {
+  border-radius: 12px;
+}
+
+.object-frame [data-testid="question-card"] {
+  border: 0;
+  border-left: 2px solid var(--info);
+  border-radius: 0;
+  background: transparent;
+  padding: 0 0 0 16px;
+  box-shadow: none;
+}
+
+.object-frame [data-testid="question-card"] [data-slot="card-content"] {
+  padding: 0;
+}
+
+.object-frame [data-testid="question-card"] button {
+  min-height: 44px;
+}
+
+.object-frame .workspace-activity button {
+  min-height: 44px;
+}
+
+.ide-layout {
+  gap: 6px;
+  padding: 6px;
+}
+
+.ide-layout > aside,
+.ide-layout > main {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.ide-layout > main,
+.ide-layout .workbench-chat-panel {
+  background: var(--background);
+}
+
+.ide-layout .workbench-chat-panel,
+.ide-layout .workbench-files-panel {
+  overflow: hidden;
+  border-radius: 0;
+}
+
+.ide-layout .workbench-files-panel {
+  border-left: 1px solid var(--border);
+}
+
+.ide-layout .workbench-panel-handle {
+  width: 1px;
+  flex-shrink: 0;
+  background: transparent;
+}
+
+.ide-layout .workbench-panel-handle:hover,
+.ide-layout .workbench-panel-handle:focus-visible {
+  background: var(--border);
 }
 
 /* 小屏保留聊天主任务，工作空间通过顶部抽屉访问。 */
@@ -312,6 +434,7 @@
   .workbench-chat-panel {
     flex: 1 1 100% !important;
   }
+
   .workbench-files-panel,
   .workbench-panel-handle {
     display: none !important;
@@ -320,10 +443,72 @@
 
 /* ── t3code 风格：消息气泡背景 ── */
 .bg-message {
-  background: var(--accent);
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--border);
 }
 
 /* ── t3code 风格：滚动条间距 ── */
 .scrollbar-gutter-both {
   scrollbar-gutter: stable both-edges;
+}
+
+/* ── 对话正文的排版 ──
+   Streamdown 自带的列表是 list-inside + 每项 py-1,配上 14px / 1.7 的正文,项目符号挤进文字列、
+   段落之间又空出一整行,读起来是散的。这里统一成:段落间距 0.6em、列表符号悬挂在文字列外、
+   行内代码比正文小一号并带细边框(和工具参数、文件名的等宽样式一致)。 */
+.chat-md > * + * {
+  margin-top: 0.6em;
+}
+
+.chat-md p {
+  margin: 0;
+}
+
+.chat-md ul,
+.chat-md ol {
+  list-style-position: outside;
+  padding-left: 1.25em;
+}
+
+.chat-md li {
+  padding: 0.1em 0;
+}
+
+.chat-md li > ul,
+.chat-md li > ol {
+  margin-top: 0.2em;
+  padding-left: 1.25em;
+}
+
+.chat-md li::marker {
+  color: var(--muted-foreground);
+}
+
+.chat-md [data-streamdown="inline-code"] {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--card);
+  padding: 0 0.35em;
+  font-size: 0.78rem;
+  word-break: break-all;
+}
+
+.chat-md h1,
+.chat-md h2,
+.chat-md h3 {
+  margin-top: 1em;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.chat-md h1 {
+  font-size: 1.125rem;
+}
+
+.chat-md h2 {
+  font-size: 1rem;
+}
+
+.chat-md h3 {
+  font-size: 0.875rem;
 }

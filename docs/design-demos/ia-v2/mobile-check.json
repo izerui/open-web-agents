@@ -1,0 +1,31 @@
+[
+  {
+    "path": "/Users/liuyuhua/github/open-web-agents/docs/design-demos/ia-v2/dir-1.html",
+    "red": [],
+    "yellow": [
+      "模板装饰：等宽小字标签 6 处",
+      "标题字体是 -apple-system（UI 小字体当 display）"
+    ],
+    "families": [],
+    "look": "深·近黑底 #1E1F22，无衬线标题（-apple-system），正文 -apple-system"
+  },
+  {
+    "path": "/Users/liuyuhua/github/open-web-agents/docs/design-demos/ia-v2/dir-2.html",
+    "red": [],
+    "yellow": [
+      "模板装饰：等宽小字标签 6 处",
+      "标题字体是 -apple-system（UI 小字体当 display）"
+    ],
+    "families": [],
+    "look": "深·近黑底 #1E1F22，无衬线标题（-apple-system），正文 -apple-system"
+  },
+  {
+    "path": "/Users/liuyuhua/github/open-web-agents/docs/design-demos/ia-v2/dir-3.html",
+    "red": [],
+    "yellow": [
+      "标题字体是 -apple-system（UI 小字体当 display）"
+    ],
+    "families": [],
+    "look": "深·近黑底 #1E1F22，无衬线标题（-apple-system），正文 -apple-system"
+  }
+]

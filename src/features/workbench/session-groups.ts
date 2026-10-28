@@ -84,3 +84,13 @@ export function groupSessions(
     sessions: (byBucket.get(bucket) ?? []).sort((a, b) => activityOf(b) - activityOf(a)),
   }));
 }
+
+/**
+ * 会话在界面上的名字:有标题用标题,没有就用 id 前 8 位。
+ *
+ * 【为什么要一个函数】列表、标签、工具栏、命令面板曾经各截各的(12 位、8 位、8 位加省略号),
+ * 同一个会话在一屏里长成三个样子,看不出是同一个。
+ */
+export function sessionLabel(s: { id: string; title?: string | null }): string {
+  return s.title || s.id.slice(0, 8);
+}

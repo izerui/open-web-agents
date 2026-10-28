@@ -83,8 +83,8 @@ export function VariablePrompt({
   return (
     <>
       {missing.length > 0 && (
-        <div className="mx-auto mb-3 flex max-w-2xl items-center gap-3 rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3 text-sm">
-          <KeyRound className="size-4 shrink-0 text-yellow-600" />
+        <div className="mx-auto mb-3 flex max-w-2xl items-center gap-3 rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm">
+          <KeyRound className="size-4 shrink-0 text-warning" />
           <span>需要填写 {missing.length} 个必填变量才能运行此智能体</span>
           <Button
             size="sm"

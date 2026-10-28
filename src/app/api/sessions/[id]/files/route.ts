@@ -171,10 +171,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   }
 }
 
-type RangeResult =
-  | { ok: true; start: number; end: number }
-  | { ok: false }
-  | null;
+type RangeResult = { ok: true; start: number; end: number } | { ok: false } | null;
 
 function parseRange(header: string | null, size: number): RangeResult {
   if (!header) return null;

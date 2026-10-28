@@ -42,17 +42,21 @@ export function ContextWindowMeter({
   return (
     <Popover>
       <PopoverTrigger asChild>
+        {/*
+          环旁边写上百分比。只有一个细环时,它和"加载中"的转圈长得一模一样,
+          人会以为输入框还没准备好。
+        */}
         <Button
           variant="ghost"
-          size="icon"
-          className="size-7 shrink-0 rounded-full text-muted-foreground hover:text-muted-foreground"
+          size="sm"
+          className="h-7 shrink-0 gap-1.5 px-1.5 font-mono text-xs font-normal text-muted-foreground hover:text-foreground"
           aria-label={
             percentageStr
               ? `上下文窗口已用 ${percentageStr}`
               : `上下文 ${formatContextWindowTokens(usedTokens)} tokens`
           }
         >
-          <span className="relative flex size-5 items-center justify-center">
+          <span className="relative flex size-3.5 items-center justify-center">
             <svg
               viewBox="0 0 24 24"
               className="absolute inset-0 size-full -rotate-90 transform-gpu"
@@ -80,6 +84,7 @@ export function ContextWindowMeter({
               />
             </svg>
           </span>
+          {percentageStr ?? formatContextWindowTokens(usedTokens)}
         </Button>
       </PopoverTrigger>
       <PopoverContent side="top" align="end" className="w-64 max-w-none p-0">
