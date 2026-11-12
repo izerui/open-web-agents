@@ -8,6 +8,7 @@ import {
   studioBadges,
   studioCounts,
   studioKind,
+  studioSource,
   validateNewAgentId,
 } from "@/features/studio/studio-model";
 import { describe, expect, it } from "vitest";
@@ -85,6 +86,15 @@ describe("filterStudio / studioCounts", () => {
   });
   it("计数", () => {
     expect(studioCounts(list)).toEqual({ mine: 2, shared: 1, all: 4 });
+  });
+});
+
+describe("studioSource", () => {
+  it("来源文案", () => {
+    expect(studioSource(a("x"))).toBe("我建的");
+    expect(studioSource(a("default", { isOwner: false }))).toBe("平台内置");
+    expect(studioSource(a("y", { isOwner: false }))).toBe("分享给我的");
+    expect(studioSource(a("z", { isOwner: false, isPublic: true }))).toBe("公开");
   });
 });
 

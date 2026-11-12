@@ -19,6 +19,10 @@ export type StudioAgent = AgentSummary & {
 };
 
 export type StudioTab = "mine" | "shared" | "all";
+
+/** 新建弹层的四种方式:智能体设计器 / 空白 / 从市场克隆 / 模板库 */
+export type NewMode = "ai" | "blank" | "clone" | "tpl";
+export const NEW_MODES: readonly NewMode[] = ["ai", "blank", "clone", "tpl"];
 export type StudioKind = "mine" | "shared" | "builtin";
 
 /**
@@ -30,6 +34,14 @@ export const BUILT_IN_AGENT_IDS: readonly string[] = ["default", "agent-architec
 export function studioKind(a: StudioAgent): StudioKind {
   if (BUILT_IN_AGENT_IDS.includes(a.id)) return "builtin";
   return a.isOwner ? "mine" : "shared";
+}
+
+/** 列表视图「来源」列;所有者是谁不在接口里(不向别人暴露账号),只说明怎么来的 */
+export function studioSource(a: StudioAgent): string {
+  const kind = studioKind(a);
+  if (kind === "builtin") return "平台内置";
+  if (kind === "mine") return "我建的";
+  return a.isPublic ? "公开" : "分享给我的";
 }
 
 /** 只有市场使用权的条目不是「我的」智能体(Builder 列表同样排除) */
@@ -112,7 +124,7 @@ const ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,35}$/;
 export function validateNewAgentId(id: string, taken: readonly string[]): string | null {
   const v = id.trim();
   if (!v) return null;
-  if (!ID_PATTERN.test(v)) return "ID 只能用小写字母、数字和短横线,2 到 36 位,不能以短横线开头";
+  if (!ID_PATTERN.test(v)) return "ID 只能用小写字母、数字和短横线，2 到 36 位，不能以短横线开头";
   if (taken.includes(v)) return "ID 已被占用";
   return null;
 }
