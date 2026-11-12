@@ -40,6 +40,8 @@ interface RunItem {
 
 interface RunDetail extends RunItem {
   prompt: string;
+  /** 会话是私有的:管理员看别人的运行时为 false(见 /api/runs/[id]) */
+  canOpenSession?: boolean;
   finalText?: string;
   structured?: unknown;
 }
@@ -242,7 +244,7 @@ function RunsContent({
           <Link href="/agents" className="underline">
             选择智能体
           </Link>
-          <Link href={platform ? "/admin/runs" : "/developer/runs"} className="underline">
+          <Link href={platform ? "/admin/ops?tab=runs" : "/developer/runs"} className="underline">
             {platform ? "查看全部平台运行" : "查看我的全部运行"}
           </Link>
         </div>
@@ -420,16 +422,29 @@ function RunsContent({
                     </div>
                   </section>
                 )}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() =>
-                    window.open(`/chat?session=${encodeURIComponent(detail.sessionId)}`, "_blank")
-                  }
-                >
-                  <ExternalLink className="size-3.5" />
-                  在工作台查看完整过程
-                </Button>
+                {platform && detail.canOpenSession === false ? (
+                  // 平台运行:别人的会话是私有的,管理员也打不开 —— 按钮留着但禁用,说明原因
+                  <div className="space-y-1.5">
+                    <Button size="sm" variant="outline" disabled>
+                      <ExternalLink className="size-3.5" />
+                      在对话里查看
+                    </Button>
+                    <p className="text-xs text-muted-foreground">
+                      会话是私有的:这次运行属于别的账号,管理员也不能打开它的对话。
+                    </p>
+                  </div>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      window.open(`/chat?session=${encodeURIComponent(detail.sessionId)}`, "_blank")
+                    }
+                  >
+                    <ExternalLink className="size-3.5" />
+                    {platform ? "在对话里查看" : "在工作台查看完整过程"}
+                  </Button>
+                )}
                 <p className="font-mono text-[11px] text-muted-foreground">taskId: {detail.id}</p>
               </div>
             </>
