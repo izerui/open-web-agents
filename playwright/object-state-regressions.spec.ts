@@ -8,7 +8,7 @@ const account = {
 let authCookies: Parameters<BrowserContext["addCookies"]>[0] = [];
 /** 构建页(编排 › 档案):提示词一节默认展开;没有保存按钮,停顿约 800ms 自动保存 */
 const prompt = (page: Page) => page.getByRole("textbox", { name: "系统提示词", exact: true });
-/** 「名称」在「名称与头像」一节里,已有智能体默认收起,先展开 */
+/** 「名称」在「名称与头像」一节里,默认收起(新建时九节都收起),先展开 */
 async function nameField(page: Page) {
   const head = page.locator('[data-sec="identity"] > button');
   if ((await head.getAttribute("aria-expanded")) !== "true") await head.click();
@@ -212,7 +212,7 @@ test("新建态（智能体设计器）里没存下的档案也能取消搜索�
     }),
   );
   await page.goto("/agents/new?designer=review-design");
-  await page.getByRole("textbox", { name: "名称", exact: true }).fill("未保存的设计");
+  await (await nameField(page)).fill("未保存的设计");
   await expect(saveStatus(page, /暂停保存：提示词为空/)).toBeVisible();
   await openSearch(page, "运行记录");
   page.once("dialog", (dialog) => dialog.dismiss());
@@ -349,6 +349,11 @@ test("删除 A 期间切到 B，删除完成不清空 B 编辑器", async ({ pag
   await expect(prompt(page)).toHaveValue("审查智能体 A 已保存提示词");
   await page.getByRole("button", { name: "更多操作", exact: true }).click();
   await page.getByRole("menuitem", { name: "删除智能体", exact: true }).click();
+  // 删除要先输入智能体 ID
+  await page
+    .getByRole("dialog")
+    .getByLabel(/输入智能体 ID/)
+    .fill("review-a");
   await page.getByRole("dialog").getByRole("button", { name: "删除智能体", exact: true }).click();
   await expect.poll(() => Boolean(pending)).toBe(true);
   await page.goBack();

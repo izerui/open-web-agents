@@ -1,8 +1,10 @@
 "use client";
 
 // 只读视图(有读权限、没写权限):只读提示、脱敏后的配置 JSON、知识清单、克隆一份来改、在对话里使用。
+// 克隆规则不变(只能克隆已上架且已发布的,取舍 3):不满足时按钮禁用并写明原因,可点时先确认再克隆。
 
 import { AgentAvatar } from "@/components/agent-avatar";
+import { useConfirm } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { KnowledgePanel } from "@/features/builder/knowledge-panel";
 import { cloneAgent } from "@/features/studio/readonly-drawer";
@@ -13,33 +15,62 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
+import { canCloneAgent } from "./build-model";
 import { Banner, CodeBlock, Seg } from "./ui";
 import type { BuildAgent } from "./use-build-data";
 
-export function useClone(agentId: string) {
+/** 克隆入口:能不能克隆、为什么不能、点了先确认 */
+export function useClone(
+  agent: {
+    id: string;
+    name: string;
+    marketListed?: boolean;
+    publishedVersion?: number | null;
+  } | null,
+) {
   const router = useRouter();
+  const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
+  const rule = agent ? canCloneAgent(agent) : { ok: false as const, reason: "" };
   return {
     busy,
-    clone: async () => {
-      setBusy(true);
-      try {
-        const copy = await cloneAgent(agentId);
-        toast.success(`已克隆为「${copy.name}」`);
-        router.push(agentHref({ id: copy.id }));
-      } catch (e) {
-        toast.error(`克隆失败：${errorText(e)}`);
-      } finally {
-        setBusy(false);
-      }
+    can: rule.ok,
+    reason: rule.ok ? "" : rule.reason,
+    dialog: confirm.dialog,
+    clone: () => {
+      if (!agent || !rule.ok) return;
+      confirm.ask({
+        title: `克隆「${agent.name}」？`,
+        description:
+          "按它当前的发布版复制一份到你名下（连同知识文档），成为你的新智能体草稿；配置里的密钥和回调地址不会带过来。",
+        confirmLabel: "克隆",
+        onConfirm: async () => {
+          setBusy(true);
+          try {
+            const copy = await cloneAgent(agent.id);
+            toast.success(`已克隆为「${copy.name}」`);
+            router.push(agentHref({ id: copy.id }));
+          } catch (e) {
+            toast.error(`克隆失败：${errorText(e)}`);
+          } finally {
+            setBusy(false);
+          }
+        },
+      });
     },
   };
 }
 
+/** 只读的智能体是怎么到你这里的(接口不暴露所有者账号,只说明来源) */
+export function shareModeText(a: { id: string; isPublic?: boolean }): string {
+  if (a.id === "default" || a.id === "agent-architect") return "平台内置";
+  return a.isPublic ? "公开给所有账号" : "分享给你";
+}
+
 export function ReadonlyView({ agent }: { agent: BuildAgent }) {
   const [tab, setTab] = useState<"json" | "kb">("json");
-  const { busy, clone } = useClone(agent.id);
-  const { publishedVersion, isPublic } = agent;
+  const clone = useClone(agent);
+  const { publishedVersion } = agent;
   return (
     <div className="flex min-h-0 flex-1 gap-4 p-4 max-lg:flex-col max-lg:overflow-y-auto max-md:p-3">
       <div className="flex w-[380px] shrink-0 flex-col gap-3 max-lg:w-full">
@@ -48,19 +79,32 @@ export function ReadonlyView({ agent }: { agent: BuildAgent }) {
             <AgentAvatar id={agent.id} icon={agent.icon} size={48} />
             <div className="min-w-0">
               <div className="truncate font-display text-xl font-bold">{agent.name}</div>
-              <div className="text-[13px] text-muted-foreground">
-                {isPublic ? "公开给所有账号，只读" : "分享给你，只读"}
-              </div>
+              <div className="text-[13px] text-muted-foreground">{shareModeText(agent)}，只读</div>
             </div>
           </div>
           {agent.description && (
             <p className="my-3 text-sm text-muted-foreground">{agent.description}</p>
           )}
+          <dl className="m-0 mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[13px]">
+            <dt className="text-muted-foreground">所有者</dt>
+            <dd className="m-0">
+              {agent.id === "default" || agent.id === "agent-architect"
+                ? "平台"
+                : "另一个账号（不对你显示账号）"}
+            </dd>
+            <dt className="text-muted-foreground">分享方式</dt>
+            <dd className="m-0">{shareModeText(agent)}，只读</dd>
+          </dl>
           <Banner icon={<Lock />} className="mt-3 mb-3 text-[13px]">
-            这是只读智能体，你可以查看配置和资料清单、直接使用，但不能修改。要改请联系所有者，或克隆一份来改。
+            这是只读智能体，你可以查看配置和资料清单、直接使用，但不能修改。
+            {clone.can ? "要改请联系所有者，或克隆一份来改。" : "要改请联系所有者。"}
           </Banner>
           <div className="flex flex-wrap gap-2">
-            <Button disabled={busy} onClick={() => void clone()}>
+            <Button
+              disabled={clone.busy || !clone.can}
+              title={clone.reason || undefined}
+              onClick={clone.clone}
+            >
               <Copy />
               克隆一份来改
             </Button>
@@ -71,6 +115,10 @@ export function ReadonlyView({ agent }: { agent: BuildAgent }) {
               </Link>
             </Button>
           </div>
+          {!clone.can && (
+            <p className="mt-2 mb-0 text-[13px] text-muted-foreground">{clone.reason}</p>
+          )}
+          {clone.dialog}
         </div>
         <div className="rounded-2xl border border-border bg-card px-5 py-[18px] text-sm">
           <div className="text-[13px] text-muted-foreground">发布状态</div>

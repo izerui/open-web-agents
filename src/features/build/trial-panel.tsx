@@ -14,12 +14,19 @@ import { createEventBatcher } from "@/features/workbench/event-batcher";
 import type { Turn } from "@/features/workbench/types";
 import { updateTurnByLocalId } from "@/features/workbench/workbench.logic";
 import { fetchJson } from "@/lib/fetch-json";
+import { creditsAmount } from "@/lib/modules/billing/domain/credits-display";
 import type { FileUIPart } from "ai";
 import { Check, Plus, RotateCcw } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 import { CaseForm } from "./case-form";
-import { caseFormFromTrial, turnAnswer, turnDurationText } from "./trial-model";
+import {
+  caseFormFromTrial,
+  markTrialCase,
+  trialCaseNote,
+  turnAnswer,
+  turnDurationText,
+} from "./trial-model";
 import { Tag, TextButton } from "./ui";
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -58,6 +65,8 @@ export function TrialPanel({
   hasInputSchema,
   beforeSend,
   onCaseSaved,
+  credits,
+  onTurnFinished,
 }: {
   /** 草稿还没建好时为 null */
   agentId: string | null;
@@ -71,7 +80,13 @@ export function TrialPanel({
   /** 发送前先把档案里没落盘的修改存掉;存不了返回 false */
   beforeSend: () => Promise<boolean>;
   onCaseSaved: () => void;
+  /** 运行 id → 微积分(本智能体近 7 天用量);回复下的元信息显示这一轮花了多少积分 */
+  credits: ReadonlyMap<string, string>;
+  /** 一轮结束(页面据此刷新用量) */
+  onTurnFinished: () => void;
 }) {
+  const finishedCb = useRef(onTurnFinished);
+  finishedCb.current = onTurnFinished;
   const [sessionId, setSessionId] = useState<string | null>(null);
   const sessionRef = useRef<string | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -129,6 +144,8 @@ export function TrialPanel({
         setFinished((m) => ({ ...m, [localId]: Date.now() }));
         setRunning(false);
         runRef.current = null;
+        // 积分在运行结算后才进用量,稍等一下再读
+        setTimeout(() => finishedCb.current(), 1500);
       }
     },
     [],
@@ -279,18 +296,21 @@ export function TrialPanel({
 
   const keyOf = (t: Turn) => t.localId ?? t.runId ?? t.prompt;
 
-  const renderExtra = (t: Turn) => {
+  /** 回复下那一行:耗时、积分,以及「存为评测用例」(和 token、复制、重跑同一行) */
+  const renderMeta = (t: Turn) => {
     if (t.running || !agentId) return null;
     const k = keyOf(t);
     const dur = turnDurationText(t, finished[k]);
-    const ans = turnAnswer(t);
+    const micro = t.runId ? credits.get(t.runId) : undefined;
     const result = t.events.find((e) => e.kind === "result");
     const failed = result?.kind === "result" && result.status !== "success";
     return (
-      <div className="mt-1 pl-[46px] max-md:pl-0">
-        <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-          {dur && <span>耗时 {dur}</span>}
-          <span className="flex-1" />
+      <>
+        {dur && <span className="mr-1.5 tabular-nums">耗时 {dur}</span>}
+        {micro !== undefined && (
+          <span className="mr-1.5 tabular-nums">{creditsAmount(micro)} 积分</span>
+        )}
+        <span className="ml-auto">
           {saved.has(k) ? (
             <Tag tone="ok">
               <Check />
@@ -307,30 +327,40 @@ export function TrialPanel({
               </TextButton>
             )
           )}
-        </div>
-        {formFor === k && (
-          <CaseForm
-            className="mt-2.5"
-            agentId={agentId}
-            hasInputSchema={hasInputSchema}
-            initial={caseFormFromTrial({
-              prompt: t.prompt,
-              answer: ans.text,
-              structured: ans.structured,
-              hasInputSchema,
-            })}
-            title="存为评测用例"
-            note="已按这次的提问和回答预填，可以再改"
-            footnote="每个用例运行时会真实调用一次模型并计费"
-            onCancel={() => setFormFor(null)}
-            onSaved={() => {
-              setSaved((s) => new Set(s).add(k));
-              setFormFor(null);
-              toast.success("已存为评测用例");
-              onCaseSaved();
-            }}
-          />
-        )}
+        </span>
+      </>
+    );
+  };
+
+  const renderExtra = (t: Turn) => {
+    if (t.running || !agentId) return null;
+    const k = keyOf(t);
+    if (formFor !== k) return null;
+    const ans = turnAnswer(t);
+    return (
+      <div className="mt-1 pl-[46px] max-md:pl-0">
+        <CaseForm
+          className="mt-1.5"
+          agentId={agentId}
+          hasInputSchema={hasInputSchema}
+          initial={caseFormFromTrial({
+            prompt: t.prompt,
+            answer: ans.text,
+            structured: ans.structured,
+            hasInputSchema,
+          })}
+          title="存为评测用例"
+          note={trialCaseNote({ structured: ans.structured })}
+          footnote="每个用例运行时会真实调用一次模型并计费"
+          onCancel={() => setFormFor(null)}
+          onSaved={(caseId) => {
+            if (caseId) markTrialCase(agentId, caseId);
+            setSaved((s) => new Set(s).add(k));
+            setFormFor(null);
+            toast.success("已存为评测用例");
+            onCaseSaved();
+          }}
+        />
       </div>
     );
   };
@@ -395,6 +425,7 @@ export function TrialPanel({
               submitAnswerAction={submitAnswer}
               awaitingTools={awaitingTools}
               renderTurnExtra={renderExtra}
+              renderTurnMeta={renderMeta}
             />
           </div>
         )}

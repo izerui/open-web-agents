@@ -3,6 +3,7 @@ import {
   type EvalSummary,
   type LaunchInput,
   assertionText,
+  canCloneAgent,
   draftEvalText,
   launchChecklist,
   railStatus,
@@ -58,11 +59,12 @@ describe("stageBadges:页头五个阶段的状态徽标", () => {
       runs: { text: "214 次", tone: "" },
     });
   });
-  it("编排未完成显示已填节数;只读", () => {
-    expect(stageBadges({ ...base, ready: false, filled: 2 }).orch).toEqual({
+  it("编排九节没填满时显示已填节数(名称和提示词齐了也不算完整);只读", () => {
+    expect(stageBadges({ ...base, filled: 2 }).orch).toEqual({
       text: "2/9 节",
       tone: "",
     });
+    expect(stageBadges({ ...base, filled: 4 }).orch).toEqual({ text: "4/9 节", tone: "" });
     expect(stageBadges({ ...base, readOnly: true }).orch).toEqual({ text: "只读", tone: "" });
   });
   it.each([
@@ -207,6 +209,40 @@ describe("评测结论文案", () => {
   });
 });
 
+describe("stageBadges:评测运行进度与运行次数口径", () => {
+  const base = {
+    readOnly: false,
+    filled: 9,
+    caseCount: 6,
+    draftEval: { state: "running" } as EvalSummary,
+    publishedVersion: null,
+    hasUnpublishedChanges: false,
+    changeCount: null,
+    keyCount: 0,
+    runs7d: null,
+  };
+  it("评测运行中带进度", () => {
+    expect(stageBadges({ ...base, evalProgress: { done: 2, total: 6 } }).eval).toEqual({
+      text: "运行中 2/6",
+      tone: "warn",
+    });
+  });
+  it("运行次数还没读到", () => {
+    expect(stageBadges(base).runs).toEqual({ text: "…", tone: "" });
+  });
+});
+
+describe("canCloneAgent:克隆入口统一(取舍 3)", () => {
+  it("已上架且已发布才能克隆", () => {
+    expect(canCloneAgent({ marketListed: true, publishedVersion: 2 })).toEqual({ ok: true });
+    expect(canCloneAgent({ marketListed: false, publishedVersion: 2 })).toEqual({
+      ok: false,
+      reason: "只有已上架市场的智能体可以克隆",
+    });
+    expect(canCloneAgent({ marketListed: true, publishedVersion: null }).ok).toBe(false);
+  });
+});
+
 describe("railStatus:左栏每个智能体的状态", () => {
   it.each([
     [
@@ -218,11 +254,10 @@ describe("railStatus:左栏每个智能体的状态", () => {
     [{ id: "a", isOwner: true, publishedVersion: null }, "草稿，未发布", ""],
     [{ id: "a", isOwner: false, canWrite: false }, "分享给我，只读", ""],
     [{ id: "a", isOwner: false, canWrite: true }, "分享给我，可编辑", ""],
-    [
-      { id: "default", isOwner: false, publishedVersion: 1, canWrite: false },
-      "内置，已发布 v1",
-      "ok",
-    ],
+    [{ id: "default", isOwner: false, publishedVersion: 1, canWrite: false }, "内置，只读", ""],
+    [{ id: "default", isOwner: false, publishedVersion: null, canWrite: false }, "内置，只读", ""],
+    [{ id: "a", isOwner: false, canWrite: false, isPublic: true }, "公开，只读", ""],
+    [{ id: "default", isOwner: true, publishedVersion: 1 }, "内置，已发布 v1", "ok"],
   ])("%j", (a, text, tone) => {
     expect(railStatus(a)).toEqual({ text, tone });
   });

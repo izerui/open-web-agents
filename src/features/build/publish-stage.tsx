@@ -19,6 +19,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { notifyAgentCatalogChanged } from "@/lib/agent-catalog";
 import { errorText, fetchJson } from "@/lib/fetch-json";
+import { formatTime } from "@/lib/format-time";
 import { PUBLIC_PRINCIPAL } from "@/lib/modules/access/domain/grants";
 import type { SnapshotChange } from "@/lib/modules/agent/domain/snapshot-diff";
 import { cn } from "@/lib/utils";
@@ -35,8 +36,7 @@ import {
   User,
   Users,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   type EvalSummary,
@@ -45,6 +45,7 @@ import {
   launchChecklist,
   versionEvalText,
 } from "./build-model";
+import { useDeleteAgent } from "./delete-agent";
 import { DiffCounts, DiffList } from "./diff-view";
 import {
   type ListingState,
@@ -70,12 +71,6 @@ interface Group {
 }
 
 const BUILT_IN = ["default", "agent-architect"];
-
-const fmtTime = (ms: number) => {
-  const d = new Date(ms);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-};
 
 export function PublishStage({
   agentId,
@@ -126,15 +121,8 @@ export function PublishStage({
   /** 「去修复」:跳到评测并请设计器修复 */
   onFix: () => void;
 }) {
-  const router = useRouter();
   const confirm = useConfirm();
-  const aliveRef = useRef(true);
-  useEffect(() => {
-    aliveRef.current = true;
-    return () => {
-      aliveRef.current = false;
-    };
-  }, []);
+  const del = useDeleteAgent(agentId, agentName);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [justPublished, setJustPublished] = useState<number | null>(null);
@@ -144,7 +132,12 @@ export function PublishStage({
     sub?: string;
     changes: SnapshotChange[];
   } | null>(null);
-  const [snapshot, setSnapshot] = useState<{ title: string; body: string } | null>(null);
+  const [snapshot, setSnapshot] = useState<{
+    title: string;
+    body: string;
+    version: number;
+    note?: string;
+  } | null>(null);
   const base = agentId ? `/api/agents/${encodeURIComponent(agentId)}` : "";
   const next = (versions?.[0]?.version ?? 0) + 1;
 
@@ -218,12 +211,17 @@ export function PublishStage({
     }
   }
 
-  async function showSnapshot(v: number) {
+  async function showSnapshot(v: number, note?: string) {
     try {
       const d = await fetchJson<{
         version: { config: unknown; name?: string; description?: string };
       }>(`${base}/versions/${v}`);
-      setSnapshot({ title: `v${v} 快照`, body: JSON.stringify(d.version, null, 2) });
+      setSnapshot({
+        title: `v${v} 快照`,
+        body: JSON.stringify(d.version, null, 2),
+        version: v,
+        note,
+      });
     } catch (e) {
       toast.error(`读取快照失败：${errorText(e)}`);
     }
@@ -263,8 +261,8 @@ export function PublishStage({
         }
       />
       {justPublished !== null && (
-        <div className="mb-[18px] flex items-center gap-4 rounded-2xl border border-[#CFE0D3] bg-[#F3F8F4] px-5 py-[18px] max-md:flex-wrap">
-          <span className="grid size-[46px] shrink-0 place-items-center rounded-full bg-success text-white">
+        <div className="rise-in mb-[18px] flex items-center gap-4 rounded-2xl border border-[#CFE0D3] bg-[#F3F8F4] px-5 py-[18px] max-md:flex-wrap">
+          <span className="grid size-[46px] shrink-0 animate-in place-items-center rounded-full bg-success text-white duration-500 zoom-in-50 fade-in motion-reduce:animate-none">
             <Check className="size-6" strokeWidth={2.6} />
           </span>
           <div className="min-w-0 flex-1">
@@ -382,9 +380,9 @@ export function PublishStage({
             <span className="min-w-0 flex-1 truncate text-muted-foreground">
               {v.note || "（无说明）"}
             </span>
-            <span className="text-xs text-muted-foreground">{fmtTime(v.createdAt)}</span>
+            <span className="text-xs text-muted-foreground">{formatTime(v.createdAt)}</span>
             <div className="flex w-full flex-wrap gap-0.5 pl-12 max-md:pl-0">
-              <TextButton onClick={() => void showSnapshot(v.version)}>
+              <TextButton onClick={() => void showSnapshot(v.version, v.note)}>
                 <Eye />
                 查看快照
               </TextButton>
@@ -483,26 +481,7 @@ export function PublishStage({
           agentId={agentId}
           publishedVersion={publishedVersion}
           listed={listed}
-          onDelete={() =>
-            confirm.ask({
-              title: `删除「${agentName}」？`,
-              description:
-                "删除后：接口调用、分享立即失效，绑定它的 API Key 也调不通了；历史会话与运行记录保留。此操作不能在界面上撤销。",
-              confirmLabel: "删除智能体",
-              destructive: true,
-              onConfirm: async () => {
-                try {
-                  await fetchJson(base, { method: "DELETE" });
-                  notifyAgentCatalogChanged();
-                  toast.success(`已删除「${agentName}」`);
-                  // 请求期间已经切到别的智能体:不再把页面带回工作室
-                  if (aliveRef.current) router.push("/agents");
-                } catch (e) {
-                  toast.error(`删除失败：${errorText(e)}`);
-                }
-              },
-            })
-          }
+          onDelete={del.ask}
           deletable={!BUILT_IN.includes(agentId)}
         />
       ) : (
@@ -534,11 +513,23 @@ export function PublishStage({
             {snapshot?.body}
           </CodeBlock>
           <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                const s = snapshot;
+                if (!s) return;
+                setSnapshot(null);
+                void compare(String(s.version), "draft", `v${s.version} 与当前草稿的差异`, s.note);
+              }}
+            >
+              对比草稿
+            </Button>
             <Button onClick={() => setSnapshot(null)}>关闭</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
       {confirm.dialog}
+      {del.dialog}
     </div>
   );
 }

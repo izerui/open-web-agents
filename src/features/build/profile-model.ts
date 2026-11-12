@@ -351,8 +351,28 @@ export function parseSchemaText(text: string): SchemaParse {
     if (!isObj(v)) return { ok: false, error: "顶层必须是 JSON 对象" };
     return { ok: true, value: v };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "JSON 解析失败" };
+    return { ok: false, error: jsonErrorText(e, text) };
   }
+}
+
+/** JSON.parse 的报错是英文(还随浏览器变):换成中文,带上出错的行号 */
+export function jsonErrorText(e: unknown, text: string): string {
+  const msg = e instanceof Error ? e.message : "";
+  const m = /position (\d+)/.exec(msg);
+  let where = "";
+  if (m) {
+    const pos = Number(m[1]);
+    const line = text.slice(0, pos).split("\n").length;
+    where = `（第 ${line} 行附近）`;
+  }
+  const reason = /Unexpected end|Unterminated/i.test(msg)
+    ? "内容没写完，可能少了 } 或 ]"
+    : /property name|Expected ',' or '}'|Expected ',' or ']'|trailing comma/i.test(msg)
+      ? "键名要用双引号，最后一项后面不能有逗号"
+      : /Unexpected token|Unexpected non-whitespace/i.test(msg)
+        ? "有多余或不认识的字符"
+        : "请检查引号、逗号和括号";
+  return `JSON 格式有误${where}：${reason}`;
 }
 
 /** 表单没有的参数:approvalRules.all 与不认识的键(逃生舱、旧 skills 不显示) */
@@ -706,4 +726,17 @@ export function newFilePathError(path: string, files: Record<string, string>): s
   if (p.startsWith("/")) return "不能用绝对路径";
   if (!isSafeSkillPath(p)) return "只允许字母、数字、._- 和 /";
   return findPathConflict([...Object.keys(files), p]);
+}
+
+/** 把 ins 插在光标(选区)处;不知道光标时追加到末尾 */
+export function insertAtCursor(
+  text: string,
+  start: number | null,
+  end: number | null,
+  ins: string,
+): { text: string; cursor: number } {
+  if (start === null || end === null) return { text: text + ins, cursor: text.length + ins.length };
+  const a = Math.max(0, Math.min(start, text.length));
+  const b = Math.max(a, Math.min(end, text.length));
+  return { text: text.slice(0, a) + ins + text.slice(b), cursor: a + ins.length };
 }

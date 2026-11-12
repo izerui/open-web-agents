@@ -1,9 +1,11 @@
 "use client";
 
 // Skills / MCP 来源:从你能编辑的其他智能体引用技能包与 MCP(原 AI 编辑右栏的资源引用)。
-// 引用记在设计会话里;勾选后设计器把它列成「能力」节的待确认改动,应用时内容复制进本智能体。
+// 引用记在设计会话里;勾选后设计器把它列成「能力」节的待确认改动,应用时内容复制进本智能体
+// (后端是复制语义,与原型的「只读引用」是有意偏差,见 FIXPLAN 取舍 5;复制进来的条目在能力节标「来自 X」)。
 
 import { AgentAvatar } from "@/components/agent-avatar";
+import type { ConfirmRequest } from "@/components/confirm-dialog";
 import { NativeSelect } from "@/components/ui/native-select";
 import { McpCheck } from "@/features/builder/mcp-check";
 import { cn } from "@/lib/utils";
@@ -17,7 +19,10 @@ export function DesignSources({
   inlineSkills,
   inlineMcps,
   canStart,
+  ask,
 }: {
+  /** 应用内确认框(没有设计会话时,加来源前先说明会新建一段设计记录) */
+  ask: (r: ConfirmRequest) => void;
   designer: Designer;
   sources: { id: string; name: string; icon?: string }[];
   inlineSkills: string[];
@@ -49,8 +54,20 @@ export function DesignSources({
             value=""
             disabled={!canStart || disabled || avail.length === 0}
             onChange={(e) => {
-              if (e.target.value)
-                void designer.changeSources([...(v?.resourceAgentIds ?? []), e.target.value]);
+              const id = e.target.value;
+              if (!id) return;
+              const add = () => designer.changeSources([...(v?.resourceAgentIds ?? []), id]);
+              if (designer.sessionId) void add();
+              else
+                ask({
+                  title: `从「${nameOf(id)}」引用 Skills / MCP？`,
+                  description:
+                    "引用记在智能体设计器的设计记录里。这个智能体还没有设计记录，会先新建一段（不调用模型、不扣积分）；勾选的条目要在设计器里确认后，才会复制进本智能体。",
+                  confirmLabel: "新建设计记录并添加",
+                  onConfirm: async () => {
+                    await add();
+                  },
+                });
             }}
           >
             <option value="">{avail.length ? "添加来源智能体…" : "没有更多可选的智能体"}</option>
@@ -66,7 +83,8 @@ export function DesignSources({
       </SubHead>
       <p className="-mt-1 mb-2 text-[13px] text-muted-foreground">
         从你能编辑的其他智能体引用技能包和
-        MCP。勾选后智能体设计器会把它列成「能力」的待确认改动，应用到草稿时把内容复制进本智能体；和本智能体里同名的定义冲突，不能同时引用。
+        MCP。勾选后智能体设计器会把它列成「能力」的待确认改动，应用到草稿时把内容复制进本智能体（之后来源更新不会跟着变，复制进来的条目标「来自
+        X」）；和本智能体里同名的定义冲突，不能同时引用。
       </p>
       {!canStart && (
         <p className="m-0 text-sm text-muted-foreground">填好名称和提示词、草稿建好后就能引用。</p>

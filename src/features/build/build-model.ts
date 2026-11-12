@@ -42,9 +42,7 @@ export type Badge = { text: string; tone: Tone };
 
 export interface BadgeInput {
   readOnly: boolean;
-  /** 名称与提示词都填了 */
-  ready: boolean;
-  /** 已填的节数(满 9) */
+  /** 已填的节数(满 9 才算「完整」) */
   filled: number;
   caseCount: number;
   /** 草稿的评测结论;还没读到为 null */
@@ -54,10 +52,17 @@ export interface BadgeInput {
   /** 草稿与发布版的差异条数;没读到为 null */
   changeCount: number | null;
   keyCount: number;
-  runs7d: number;
+  /** 近 7 天运行次数(与运行阶段统计卡同一口径);还没读到为 null */
+  runs7d: number | null;
+  /** 评测阶段正在跑的进度(只有评测页开着时知道) */
+  evalProgress?: { done: number; total: number } | null;
 }
 
-function evalBadge(e: EvalSummary | null, cases: number): Badge {
+function evalBadge(
+  e: EvalSummary | null,
+  cases: number,
+  progress?: { done: number; total: number } | null,
+): Badge {
   if (!e) return { text: cases ? `${cases} 个用例` : "无用例", tone: "" };
   switch (e.state) {
     case "no_cases":
@@ -67,7 +72,10 @@ function evalBadge(e: EvalSummary | null, cases: number): Badge {
         ? { text: "需重跑", tone: "warn" }
         : { text: `${cases} 个未运行`, tone: "" };
     case "running":
-      return { text: "运行中", tone: "warn" };
+      return {
+        text: progress ? `运行中 ${progress.done}/${progress.total}` : "运行中",
+        tone: "warn",
+      };
     case "cases_changed":
       return { text: "用例已改动", tone: "warn" };
     case "failed":
@@ -82,10 +90,10 @@ export function stageBadges(i: BadgeInput): Record<Stage, Badge> {
   return {
     orch: i.readOnly
       ? { text: "只读", tone: "" }
-      : i.ready
+      : i.filled >= 9
         ? { text: "完整", tone: "ok" }
         : { text: `${i.filled}/9 节`, tone: "" },
-    eval: evalBadge(i.draftEval, i.caseCount),
+    eval: evalBadge(i.draftEval, i.caseCount, i.evalProgress),
     publish:
       v === null
         ? { text: "未发布", tone: "" }
@@ -96,7 +104,7 @@ export function stageBadges(i: BadgeInput): Record<Stage, Badge> {
             }
           : { text: `v${v} 已发布`, tone: "ok" },
     access: i.keyCount > 0 ? { text: "Key 已签发", tone: "ok" } : { text: "未签 Key", tone: "" },
-    runs: { text: `${i.runs7d} 次`, tone: "" },
+    runs: { text: i.runs7d === null ? "…" : `${i.runs7d} 次`, tone: "" },
   };
 }
 
@@ -261,10 +269,16 @@ export function railStatus(a: {
   canWrite?: boolean;
   publishedVersion?: number | null;
   hasUnpublishedChanges?: boolean;
+  isPublic?: boolean;
 }): Badge {
   const builtin = a.id === "default" || a.id === "agent-architect";
-  if (!builtin && !a.isOwner)
-    return { text: a.canWrite === false ? "分享给我，只读" : "分享给我，可编辑", tone: "" };
+  // 只读者看不到草稿,「草稿，未发布」对他没有意义
+  if (builtin && a.canWrite === false) return { text: "内置，只读", tone: "" };
+  if (!builtin && !a.isOwner) {
+    if (a.canWrite === false)
+      return { text: a.isPublic ? "公开，只读" : "分享给我，只读", tone: "" };
+    return { text: "分享给我，可编辑", tone: "" };
+  }
   const v = a.publishedVersion;
   const prefix = builtin ? "内置，" : "";
   if (!v) return { text: `${prefix}草稿，未发布`, tone: "" };
@@ -302,4 +316,17 @@ export function runStats(u: {
     failRate: runs ? `${((failed / runs) * 100).toFixed(1)}%` : "—",
     microCredits: micro.toString(),
   };
+}
+
+/** 克隆规则(服务端 /api/agents/[id]/clone):只能克隆已上架市场、且已发布的智能体 */
+export function canCloneAgent(a: {
+  id?: string;
+  marketListed?: boolean;
+  publishedVersion?: number | null;
+}): { ok: true } | { ok: false; reason: string } {
+  if (a.id === "default" || a.id === "agent-architect")
+    return { ok: false, reason: "平台内置的智能体不能克隆" };
+  return a.marketListed && a.publishedVersion
+    ? { ok: true }
+    : { ok: false, reason: "只有已上架市场的智能体可以克隆" };
 }
