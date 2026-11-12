@@ -324,7 +324,48 @@ function AccountsPanel({
               运营要做的是"扫一遍、挑出异常的那几个",这需要一行一个、列对齐。
               改额度、改角色、停用这些写操作在右侧详情里。
             */}
-            <table className="w-full min-w-[860px] border-collapse text-sm">
+            {/* 窄屏:卡片列表,邮箱、角色、状态和本月消耗都看得到 */}
+            <ul className="divide-y divide-line-soft sm:hidden" aria-label="账号列表">
+              {shown.map((a) => {
+                const active = a.id === selectedId;
+                return (
+                  <li key={a.id}>
+                    <button
+                      type="button"
+                      aria-pressed={active}
+                      aria-label={`查看 ${a.email} 的详情`}
+                      onClick={() => setSelectedId(active ? null : a.id)}
+                      className={cn(
+                        "flex w-full flex-col gap-1.5 px-4 py-3 text-left",
+                        active && "bg-[#F4F2EC]",
+                        a.disabled && "text-muted-foreground",
+                      )}
+                    >
+                      <span className="flex w-full items-center gap-2">
+                        <Initial text={a.email} />
+                        <span className="min-w-0 flex-1 break-all font-medium">{a.email}</span>
+                        {a.disabled ? <Badge>已停用</Badge> : <Badge variant="success">启用</Badge>}
+                      </span>
+                      <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                        {a.role === "admin" ? (
+                          <Badge variant="dark">管理员</Badge>
+                        ) : (
+                          <span>普通账号</span>
+                        )}
+                        {a.id === selfId && <Badge variant="outline">你自己</Badge>}
+                        <span className={cn(isOver(a) && "font-medium text-warning-text")}>
+                          本月 {creditsAmount(a.monthUsedMicroCredits)} 积分
+                        </span>
+                        <span>
+                          上限 <LimitCell a={a} />
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+            <table className="w-full min-w-[860px] border-collapse text-sm max-sm:hidden">
               <thead>
                 <tr>
                   <th className={TH}>邮箱</th>

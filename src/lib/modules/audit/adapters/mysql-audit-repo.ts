@@ -35,6 +35,7 @@ export class MysqlAuditRepo implements AuditRepo {
       f.visibleTo !== undefined
         ? or(eq(auditLogs.ownerId, f.visibleTo), eq(auditLogs.actorId, f.visibleTo))
         : undefined,
+      f.actorId !== undefined ? eq(auditLogs.actorId, f.actorId) : undefined,
       f.action !== undefined ? eq(auditLogs.action, f.action) : undefined,
       f.resourceType !== undefined ? eq(auditLogs.resourceType, f.resourceType) : undefined,
       f.resourceId !== undefined ? eq(auditLogs.resourceId, f.resourceId) : undefined,

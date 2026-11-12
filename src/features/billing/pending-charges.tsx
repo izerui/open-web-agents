@@ -1,6 +1,7 @@
 "use client";
 
 import { LoadError } from "@/components/load-error";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { formatTime } from "@/lib/format-time";
@@ -147,7 +148,9 @@ export function PendingCharges({ onSelectAccount }: { onSelectAccount?: (id: str
                     <p className="mt-1 break-all text-muted-foreground">{c.runId}</p>
                   </td>
                   <td className="whitespace-nowrap px-2 py-2" title={REASON[c.reason].hint}>
-                    {REASON[c.reason].label}
+                    <Badge variant={c.reason === "owed" ? "destructive" : "warning"}>
+                      {REASON[c.reason].label}
+                    </Badge>
                   </td>
                   <td
                     className="whitespace-nowrap px-2 py-2 font-mono"

@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  batchSummary,
   billingTab,
   chargeStatus,
+  countEmails,
+  creditsToYuan,
   ledgerKind,
   monthShare,
   orderStats,
+  reconTotals,
   shareOf,
   sortByCredits,
 } from "../billing-display";
@@ -163,6 +167,57 @@ describe("orderStats:订单页签顶部四张统计卡", () => {
       creditedMicro: "26000000000",
       cnyMinor: "22800",
       usdMinor: "1500",
+    });
+  });
+});
+
+describe("countEmails:批量发放实时显示已识别的邮箱数", () => {
+  it("按换行、逗号、分号和空白拆分,空的不算", () => {
+    expect(countEmails("a@x.cn\nb@x.cn, c@x.cn；d@x.cn  \n\n")).toBe(4);
+    expect(countEmails("   ")).toBe(0);
+  });
+});
+
+describe("batchSummary:批量发放预览汇总", () => {
+  it("可发放人数、跳过人数、合计积分", () => {
+    const lines = [
+      { email: "a@x.cn", status: "ready" as const, accountId: "a" },
+      { email: "b@x.cn", status: "ready" as const, accountId: "b" },
+      { email: "c@x.cn", status: "not_found" as const },
+      { email: "a@x.cn", status: "duplicate" as const },
+    ];
+    expect(batchSummary(lines, "8.8")).toEqual({ ready: 2, skipped: 2, totalMicro: "17600000" });
+  });
+  it("积分填错时合计为 null", () => {
+    expect(batchSummary([], "abc").totalMicro).toBeNull();
+  });
+});
+
+describe("creditsToYuan:1 元 = 100 积分", () => {
+  it("整元不带小数,带千分位;不足一分舍去", () => {
+    expect(creditsToYuan("386000000000")).toBe("3,860");
+    expect(creditsToYuan("150000000")).toBe("1.50");
+    expect(creditsToYuan("999999")).toBe("0");
+  });
+});
+
+describe("reconTotals:对账表的合计行", () => {
+  const line = (runs: number, complete: number, cost: string, est: string, charged: string) => ({
+    runs,
+    counts: { complete } as Record<string, number>,
+    tokens: { input: 10, output: 2, cacheRead: 1, cacheWrite: 0 },
+    costMicro: cost,
+    estimatedMicro: est,
+    chargedMicro: charged,
+  });
+  it("各列相加,不完整数据 = 运行数 - 完整数", () => {
+    expect(reconTotals([line(5, 4, "100", "200", "190"), line(3, 3, "50", "80", "80")])).toEqual({
+      runs: 8,
+      incomplete: 1,
+      tokens: { input: 20, output: 4, cacheRead: 2, cacheWrite: 0 },
+      costMicro: "150",
+      estimatedMicro: "280",
+      chargedMicro: "270",
     });
   });
 });

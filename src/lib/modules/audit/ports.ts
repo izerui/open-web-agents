@@ -30,6 +30,8 @@ export interface AuditEvent {
 export interface AuditFilter {
   /** 只看与该用户相关的:他是归属人或操作者。不传 = 全部(仅管理员) */
   visibleTo?: string;
+  /** 只看这个操作者做的(账号 id 或 Key id) */
+  actorId?: string;
   action?: string;
   resourceType?: string;
   resourceId?: string;

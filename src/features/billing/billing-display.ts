@@ -2,6 +2,7 @@
 
 import { creditsAmount } from "@/lib/modules/billing/domain/credits-display";
 import type { LedgerEntry } from "@/lib/modules/billing/ports";
+import { parseCredits } from "@/lib/modules/capabilities/domain/catalog";
 
 export const BILLING_TABS = ["overview", "packages", "ledger", "runs"] as const;
 export type BillingTab = (typeof BILLING_TABS)[number];
@@ -133,5 +134,71 @@ export function orderStats(
     creditedMicro: credited.toString(),
     cnyMinor: paid.CNY.toString(),
     usdMinor: paid.USD.toString(),
+  };
+}
+
+/** 批量发放:输入框里已识别的邮箱个数(拆分规则同服务端 parseEmailList) */
+export function countEmails(text: string): number {
+  return text.split(/[\s,;，；]+/).filter((s) => s.trim()).length;
+}
+
+/** 批量发放预览汇总:可发放人数、跳过人数、合计积分(微积分;积分填错为 null) */
+export function batchSummary(
+  lines: { status: string }[],
+  credits: string,
+): { ready: number; skipped: number; totalMicro: string | null } {
+  const ready = lines.filter((l) => l.status === "ready").length;
+  let totalMicro: string | null = null;
+  try {
+    totalMicro = (BigInt(parseCredits(credits.trim())) * BigInt(ready)).toString();
+  } catch {
+    totalMicro = null;
+  }
+  return { ready, skipped: lines.length - ready, totalMicro };
+}
+
+/** 积分折合人民币(1 元 = 100 积分),到分为止;整元不带小数 */
+export function creditsToYuan(micro: string): string {
+  const cents = BigInt(micro) / 1_000_000n;
+  const yuan = (cents / 100n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const rest = cents % 100n;
+  return rest === 0n ? yuan : `${yuan}.${rest.toString().padStart(2, "0")}`;
+}
+
+/** 对账表的合计行:各列相加;不完整数据 = 运行数 - 完整数 */
+export function reconTotals(
+  lines: {
+    runs: number;
+    counts: Partial<Record<string, number>>;
+    tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
+    costMicro: string;
+    estimatedMicro: string;
+    chargedMicro: string;
+  }[],
+) {
+  const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  let runs = 0;
+  let complete = 0;
+  let cost = 0n;
+  let est = 0n;
+  let charged = 0n;
+  for (const l of lines) {
+    runs += l.runs;
+    complete += l.counts.complete ?? 0;
+    tokens.input += l.tokens.input;
+    tokens.output += l.tokens.output;
+    tokens.cacheRead += l.tokens.cacheRead;
+    tokens.cacheWrite += l.tokens.cacheWrite;
+    cost += BigInt(l.costMicro);
+    est += BigInt(l.estimatedMicro);
+    charged += BigInt(l.chargedMicro);
+  }
+  return {
+    runs,
+    incomplete: runs - complete,
+    tokens,
+    costMicro: cost.toString(),
+    estimatedMicro: est.toString(),
+    chargedMicro: charged.toString(),
   };
 }

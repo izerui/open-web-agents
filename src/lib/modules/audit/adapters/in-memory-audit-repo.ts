@@ -17,6 +17,7 @@ export class InMemoryAuditRepo implements AuditRepo {
       .filter(
         (e) =>
           (f.visibleTo === undefined || e.ownerId === f.visibleTo || e.actor.id === f.visibleTo) &&
+          (f.actorId === undefined || e.actor.id === f.actorId) &&
           (f.action === undefined || e.action === f.action) &&
           (f.resourceType === undefined || e.resource.type === f.resourceType) &&
           (f.resourceId === undefined || e.resource.id === f.resourceId) &&
