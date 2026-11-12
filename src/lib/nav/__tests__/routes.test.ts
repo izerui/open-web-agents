@@ -27,7 +27,11 @@ describe("legacyRedirect:旧地址落到新位置并保留参数", () => {
     ["/settings/account", "", "/account/security"],
     ["/settings/credentials", "", "/account/prices"],
     ["/settings/billing", "", "/account/billing"],
-    ["/settings/packages", "", "/account/packages"],
+    ["/settings/packages", "", "/account/billing?tab=packages"],
+    ["/account/packages", "", "/account/billing?tab=packages"],
+    ["/developer/keys", "agent=x", "/agents/x?stage=access"],
+    ["/developer/keys", "agent=x&tab=docs", "/agents/x?tab=docs&stage=access"],
+    ["/developer/runs", "agent=x", "/agents/x?stage=runs"],
     ["/settings/usage", "", "/account/usage"],
     ["/usage", "", "/account/usage"],
     ["/settings/audit", "", "/account/audit"],
@@ -41,6 +45,9 @@ describe("legacyRedirect:旧地址落到新位置并保留参数", () => {
     expect(go("/agents")).toBeNull();
     expect(go("/market/x")).toBeNull();
     expect(go("/chat", "session=s")).toBeNull();
+    expect(go("/developer/keys")).toBeNull();
+    expect(go("/developer/runs", "status=failed")).toBeNull();
+    expect(go("/account/billing", "tab=packages")).toBeNull();
   });
 
   it("参数里的特殊字符原样带过去", () => {
@@ -166,7 +173,6 @@ describe("paletteEntries:⌘K 里能跳的页面", () => {
       "/developer/keys",
       "/developer/runs",
       "/account/billing",
-      "/account/packages",
       "/account/usage",
       "/account/prices",
       "/account/security",
@@ -175,6 +181,8 @@ describe("paletteEntries:⌘K 里能跳的页面", () => {
       expect(h).toContain(p);
     }
     expect(h.some((x) => x.startsWith("/admin"))).toBe(false);
+    // 充值与订单已并入「积分与套餐」的页签,不再单列
+    expect(h).not.toContain("/account/packages");
   });
 
   it("管理员能跳到全部管理页", () => {
@@ -188,7 +196,7 @@ describe("paletteEntries:⌘K 里能跳的页面", () => {
     expect(keys?.label).toBe("API Key 与签名密钥");
     expect(keys?.keywords).toContain("开发者");
     const billing = paletteEntries(user).find((e) => e.href === "/account/billing");
-    expect(billing?.label).toBe("积分与消耗");
+    expect(billing?.label).toBe("积分与套餐");
     expect(billing?.keywords).toContain("账户");
     const accounts = paletteEntries(admin).find((e) => e.href === "/admin/accounts");
     expect(accounts?.label).toBe("账号");

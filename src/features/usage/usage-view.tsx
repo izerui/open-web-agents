@@ -1,19 +1,24 @@
 "use client";
 
+import { AgentAvatar } from "@/components/agent-avatar";
+import { LoadError } from "@/components/load-error";
 import { SpaceShell } from "@/components/space-shell";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { NativeSelect as Select } from "@/components/ui/native-select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Banner, CardHead, SpacePage, StatCard, tb } from "@/features/settings/space-page";
+import { shortTime } from "@/features/settings/time-format";
+import { creditsAmount } from "@/lib/modules/billing/domain/credits-display";
 import {
   type UsageBucket,
   type UsageTotals,
   formatUsd,
 } from "@/lib/modules/usage/domain/aggregate";
 import type { PublicCreditEstimate } from "@/lib/modules/usage/domain/public-estimate";
-import { AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { ChevronRight, Info } from "lucide-react";
+import Link from "next/link";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { barWidths, compactCount, dayTicks, fillDays, successRate } from "./usage-display";
 
 interface RunDetail {
   runId: string;
@@ -40,37 +45,77 @@ interface UsageData {
   creditEstimateNote?: string;
 }
 
-function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <Card>
-      <CardContent className="p-3">
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="text-lg font-semibold">{value}</p>
-        {hint && <p className="text-xs text-muted-foreground/70">{hint}</p>}
-      </CardContent>
-    </Card>
-  );
-}
+const WINDOWS = [1, 7, 30, 90] as const;
 
-/** 简易横向条:不引图表库,够看趋势就行。 */
-function Bar({ value, max }: { value: number; max: number }) {
-  const pct = max > 0 ? Math.max(2, Math.round((value / max) * 100)) : 0;
-  return (
-    <div className="h-1.5 flex-1 rounded bg-muted">
-      <div className="h-full rounded bg-foreground/40" style={{ width: `${pct}%` }} />
-    </div>
-  );
-}
+const RUN_STATUS: Record<
+  string,
+  { label: string; variant: "success" | "destructive" | "outline" }
+> = {
+  success: { label: "成功", variant: "success" },
+  failed: { label: "失败", variant: "destructive" },
+  cancelled: { label: "已取消", variant: "outline" },
+};
 
 /**
- * 用量看板。
+ * 用量分析。
  *
- * 【为什么 scope 由外部固定,而不是页内切换】改造后「我的用量」和「全平台用量」
- * 是两个不同的页面(个人区 / 管理员区),范围由所在位置决定。
- * 再留一个页内下拉,等于同一个页面能变成另一个页面 —— 面包屑和地址都会说谎。
+ * 【为什么 scope 由外部固定,而不是页内切换】「我的用量」和「全平台用量」
+ * 是两个不同的页面(账户 / 平台管理),范围由所在位置决定。
+ * 个人页直接用 AppShell(SpacePage);平台页仍在 SpaceShell 里,阶段 7 再换。
  */
 export function UsageView({ scope = "self" }: { scope?: "self" | "all" }) {
-  const [days, setDays] = useState(7);
+  const [days, setDays] = useState(30);
+  const windowPicker = <WindowPicker days={days} onChange={setDays} />;
+  const body = <UsageContent scope={scope} days={days} />;
+  if (scope === "all") {
+    return (
+      <SpaceShell
+        area="admin"
+        title="全平台 token 用量"
+        subtitle="所有用户的运行,按 UTC 日期统计"
+        actions={windowPicker}
+      >
+        {body}
+      </SpaceShell>
+    );
+  }
+  return (
+    <SpacePage
+      side="account"
+      title="用量分析"
+      subtitle="你名下运行的 token 用量与模型成本估算，按 UTC 日期统计。"
+      actions={windowPicker}
+    >
+      {body}
+    </SpacePage>
+  );
+}
+
+function WindowPicker({ days, onChange }: { days: number; onChange: (d: number) => void }) {
+  return (
+    <fieldset
+      className="inline-flex max-w-full rounded-full bg-secondary p-[3px]"
+      aria-label="时间窗"
+    >
+      {WINDOWS.map((d) => (
+        <button
+          key={d}
+          type="button"
+          aria-pressed={days === d}
+          onClick={() => onChange(d)}
+          className={cn(
+            "h-[30px] rounded-full px-3.5 text-[13px] whitespace-nowrap text-muted-foreground max-md:h-10 max-md:px-3",
+            days === d && "bg-card font-semibold text-foreground shadow-xs",
+          )}
+        >
+          最近 {d} 天
+        </button>
+      ))}
+    </fieldset>
+  );
+}
+
+function UsageContent({ scope, days }: { scope: "self" | "all"; days: number }) {
   const [data, setData] = useState<UsageData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -97,129 +142,228 @@ export function UsageView({ scope = "self" }: { scope?: "self" | "all" }) {
     void load();
   }, [load]);
 
-  const maxDayCost = Math.max(1, ...(data?.byDay.map((b) => b.costMicroUsd) ?? [0]));
-  const maxAsstCost = Math.max(1, ...(data?.byAgent.map((b) => b.costMicroUsd) ?? [0]));
   const t = data?.totals;
-  const successRate = t && t.runs > 0 ? Math.round((t.succeeded / t.runs) * 100) : null;
+  const rate = t ? successRate(t) : null;
+  const shown = data?.days ?? days;
 
   return (
-    <SpaceShell
-      area={scope === "all" ? "admin" : "personal"}
-      title={scope === "all" ? "全平台 token 用量" : "token 用量"}
-      subtitle={`${scope === "all" ? "所有用户的会话" : "仅我的会话"} · 最近 ${data?.days ?? days} 天`}
-      actions={
-        <Select
-          className="h-7 w-auto text-xs"
-          value={days}
-          onChange={(e) => setDays(Number(e.target.value))}
-        >
-          {[1, 7, 30, 90].map((d) => (
-            <option key={d} value={d}>
-              最近 {d} 天
-            </option>
-          ))}
-        </Select>
-      }
-    >
+    <div aria-busy={loading}>
+      <Banner icon={<Info />}>
+        <span data-testid="usage-billing-note">
+          这里是按模型价目估算的成本（美元），用来看用量趋势；<b>实际扣费以积分页为准</b>，见
+          <Link
+            className="mx-1 underline decoration-[#C9C4B8] underline-offset-[3px]"
+            href={scope === "all" ? "/admin/billing" : "/account/billing?tab=runs"}
+          >
+            {scope === "all" ? "计费" : "积分与套餐的运行消耗"}
+          </Link>
+          。
+        </span>
+      </Banner>
+
+      {error && <LoadError what="用量" message={error} onRetryAction={() => void load()} />}
+
       {loading && !data && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4" aria-busy>
+        <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
           {[0, 1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-16" />
+            <Skeleton key={i} className="h-28 rounded-2xl" />
           ))}
         </div>
       )}
 
-      <p className="mb-4 text-xs text-muted-foreground" data-testid="usage-billing-note">
-        这里是 token 用量,用于了解智能体的使用情况;实际扣费以
-        <a
-          className="mx-1 underline underline-offset-2"
-          href={scope === "all" ? "/admin/billing" : "/account/billing"}
-        >
-          积分页
-        </a>
-        为准。
-      </p>
-
-      {error && (
-        <Alert variant="destructive">
-          <AlertTriangle />
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
-
-      {t && (
+      {t && data && (
         <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Stat label="总花费" value={formatUsd(t.costMicroUsd)} />
-            <Stat
-              label="运行次数"
-              value={String(t.runs)}
-              hint={successRate === null ? undefined : `成功率 ${successRate}%`}
+          <dl className="mb-4 grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard
+              label="总花费（估算）"
+              value={formatUsd(t.costMicroUsd)}
+              hint="按模型价目估算，不含积分加价"
             />
-            <Stat label="输入 tokens" value={t.inputTokens.toLocaleString()} />
-            <Stat label="输出 tokens" value={t.outputTokens.toLocaleString()} />
+            <StatCard
+              label="运行次数"
+              value={t.runs.toLocaleString()}
+              hint={
+                <>
+                  {rate !== null && (
+                    <>
+                      成功率 <b className="text-success-text">{rate}%</b>
+                    </>
+                  )}
+                  {rate !== null && "，"}现在排队 {data.queue.pending}、在跑 {data.queue.running}
+                  {data.queue.pending > 10 && "，积压偏高，考虑加 worker"}
+                </>
+              }
+            />
+            <StatCard
+              label="输入 tokens"
+              value={
+                <span title={t.inputTokens.toLocaleString()}>{compactCount(t.inputTokens)}</span>
+              }
+              hint="含缓存读写，明细见下表"
+            />
+            <StatCard
+              label="输出 tokens"
+              value={
+                <span title={t.outputTokens.toLocaleString()}>{compactCount(t.outputTokens)}</span>
+              }
+              hint={`最近 ${shown} 天`}
+            />
+          </dl>
+
+          <div className="mb-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
+            <ByAgent buckets={data.byAgent} />
+            <ByDay buckets={data.byDay} days={shown} />
           </div>
 
-          {(data.queue.pending > 0 || data.queue.running > 0) && (
-            <Card className="border-info/20 bg-info/10">
-              <CardContent className="px-3 py-2 text-xs">
-                队列:{data.queue.pending} 个排队 · {data.queue.running} 个在跑
-                {data.queue.pending > 10 && " —— 积压偏高,考虑加 worker"}
-              </CardContent>
-            </Card>
-          )}
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-medium">按智能体</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {data.byAgent.length === 0 && (
-                <p className="text-xs text-muted-foreground">窗口内没有运行记录</p>
-              )}
-              {data.byAgent.map((b) => (
-                <div key={b.key} className="flex items-center gap-3 text-xs">
-                  <span className="w-32 truncate">{b.label}</span>
-                  <Bar value={b.costMicroUsd} max={maxAsstCost} />
-                  <span className="w-16 text-right font-mono">{formatUsd(b.costMicroUsd)}</span>
-                  <Badge
-                    variant={b.failed > 0 ? "destructive" : "secondary"}
-                    className="w-24 justify-center text-[10px]"
-                  >
-                    {b.runs} 次 · {b.failed > 0 ? `${b.failed} 失败` : "全成功"}
-                  </Badge>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-medium">按天(UTC)</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {data.byDay.length === 0 && (
-                <p className="text-xs text-muted-foreground">窗口内没有运行记录</p>
-              )}
-              {data.byDay.map((b) => (
-                <div key={b.key} className="flex items-center gap-3 text-xs">
-                  <span className="w-24 font-mono">{b.key}</span>
-                  <Bar value={b.costMicroUsd} max={maxDayCost} />
-                  <span className="w-16 text-right font-mono">{formatUsd(b.costMicroUsd)}</span>
-                  <span className="w-16 text-right text-muted-foreground">{b.runs} 次</span>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          {data.runs && data.runs.length > 0 && <RunDetailSection runs={data.runs} />}
+          <RunDetailSection runs={data.runs ?? []} scope={scope} />
         </>
       )}
-    </SpaceShell>
+    </div>
   );
 }
 
-function RunDetailSection({ runs }: { runs: RunDetail[] }) {
+function Legend({ items }: { items: [string, string][] }) {
+  return (
+    <div className="ml-auto flex gap-3.5 text-xs text-muted-foreground">
+      {items.map(([label, color]) => (
+        <span key={label} className="inline-flex items-center gap-1.5">
+          <i className="inline-block size-2.5 rounded-[3px]" style={{ background: color }} />
+          {label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+const OK_COLOR = "#6F6A60";
+const BAD_COLOR = "var(--destructive)";
+
+function ByAgent({ buckets }: { buckets: UsageBucket[] }) {
+  const max = Math.max(0, ...buckets.map((b) => b.runs));
+  return (
+    <section
+      aria-label="按智能体"
+      className="min-w-0 rounded-2xl border border-border bg-card px-[22px] py-5 max-md:px-4"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-base font-semibold">按智能体</h2>
+        <Legend
+          items={[
+            ["未失败", OK_COLOR],
+            ["失败", BAD_COLOR],
+          ]}
+        />
+      </div>
+      {buckets.length === 0 ? (
+        <p className="mt-3 text-sm text-muted-foreground">窗口内没有运行记录</p>
+      ) : (
+        <ul>
+          {buckets.map((b) => {
+            const w = barWidths(b, max);
+            return (
+              <li
+                key={b.key}
+                className="mt-3 grid grid-cols-[minmax(0,128px)_minmax(0,1fr)_auto] items-center gap-2.5 text-sm max-sm:grid-cols-[minmax(0,1fr)_auto]"
+              >
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <AgentAvatar id={b.key} size={20} />
+                  <span className="truncate" title={b.label}>
+                    {b.label}
+                  </span>
+                </span>
+                <span
+                  className="flex h-3.5 overflow-hidden rounded bg-[#F1EFEA] max-sm:order-last max-sm:col-span-2"
+                  title={`${b.label}:${b.runs} 次,失败 ${b.failed} 次`}
+                >
+                  <span className="flex h-full" style={{ width: `${w.total}%` }}>
+                    <span className="h-full" style={{ width: `${w.ok}%`, background: OK_COLOR }} />
+                    <span
+                      className="h-full"
+                      style={{ width: `${w.failed}%`, background: BAD_COLOR }}
+                    />
+                  </span>
+                </span>
+                <span className="text-right whitespace-nowrap tabular-nums">
+                  {b.runs.toLocaleString()} 次
+                  {b.failed > 0 && <span className="text-destructive">，{b.failed} 失败</span>}
+                  <span className="block text-xs text-muted-foreground">
+                    {formatUsd(b.costMicroUsd)}
+                  </span>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function ByDay({ buckets, days }: { buckets: UsageBucket[]; days: number }) {
+  const series = fillDays(buckets, days, Date.now());
+  const max = Math.max(1, ...series.map((d) => d.runs));
+  const ticks = dayTicks(series.map((d) => d.key));
+  const empty = buckets.length === 0;
+  return (
+    <section
+      aria-label="按天"
+      className="min-w-0 rounded-2xl border border-border bg-card px-[22px] py-5 max-md:px-4"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-base font-semibold">按天（UTC）</h2>
+        <Legend
+          items={[
+            ["运行", OK_COLOR],
+            ["其中失败", BAD_COLOR],
+          ]}
+        />
+      </div>
+      {empty ? (
+        <p className="mt-3 text-sm text-muted-foreground">窗口内没有运行记录</p>
+      ) : (
+        <>
+          <figure
+            className={cn(
+              "mt-3.5 flex h-[170px] items-end border-b border-border pb-0.5",
+              series.length > 40 ? "gap-px" : "gap-[3px]",
+            )}
+            aria-label={`最近 ${days} 天每天运行次数`}
+          >
+            {series.map((d) => (
+              <div
+                key={d.key}
+                className="group flex h-full min-w-0 flex-1 flex-col justify-end"
+                title={`${d.key}:${d.runs} 次,失败 ${d.failed}`}
+              >
+                <i
+                  className="block rounded-t-[3px] group-hover:opacity-80"
+                  style={{ height: `${(d.failed / max) * 100}%`, background: BAD_COLOR }}
+                />
+                <i
+                  className={cn(
+                    "block min-h-0.5 group-hover:opacity-80",
+                    d.failed === 0 && "rounded-t-[3px]",
+                  )}
+                  style={{ height: `${((d.runs - d.failed) / max) * 100}%`, background: OK_COLOR }}
+                />
+              </div>
+            ))}
+          </figure>
+          <div className="mt-1.5 flex justify-between text-xs text-muted-foreground">
+            {ticks.map((k, i) => (
+              <span key={k}>
+                {k.slice(5)}
+                {i === ticks.length - 1 && "（今天）"}
+              </span>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function RunDetailSection({ runs, scope }: { runs: RunDetail[]; scope: "self" | "all" }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggle = (id: string) =>
     setExpanded((prev) => {
@@ -230,21 +374,37 @@ function RunDetailSection({ runs }: { runs: RunDetail[] }) {
     });
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-sm font-medium">运行明细</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+    <section aria-label="运行明细" className="rounded-2xl border border-border bg-card">
+      <CardHead title="运行明细" meta="点一行展开每个模型的 tokens" />
+      {runs.length === 0 ? (
+        <p className="px-[22px] pb-5 text-sm text-muted-foreground">窗口内没有运行记录</p>
+      ) : (
+        <div className={tb.wrap}>
+          <table className={cn(tb.table, "min-w-[760px]")}>
             <caption className="sr-only">运行明细</caption>
             <thead>
-              <tr className="border-b text-muted-foreground">
-                {["", "时间", "智能体", "状态", "输入", "输出"].map((h) => (
-                  <th scope="col" key={h} className="px-2 py-2">
-                    {h}
-                  </th>
-                ))}
+              <tr>
+                <th scope="col" className={cn(tb.th, tb.first, "w-9")}>
+                  <span className="sr-only">展开</span>
+                </th>
+                <th scope="col" className={tb.th}>
+                  时间
+                </th>
+                <th scope="col" className={tb.th}>
+                  智能体
+                </th>
+                <th scope="col" className={tb.th}>
+                  状态
+                </th>
+                <th scope="col" className={cn(tb.th, tb.right)}>
+                  模型数
+                </th>
+                <th scope="col" className={cn(tb.th, tb.right)}>
+                  输入 / 输出
+                </th>
+                <th scope="col" className={cn(tb.th, tb.right, tb.last)}>
+                  估算成本
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -252,10 +412,11 @@ function RunDetailSection({ runs }: { runs: RunDetail[] }) {
                 const est = r.estimatedCredits;
                 const open = expanded.has(r.runId);
                 const hasModels = est.models.length > 0;
+                const st = RUN_STATUS[r.status] ?? { label: r.status, variant: "outline" as const };
                 return (
                   <Fragment key={r.runId}>
                     <tr
-                      className={`border-b align-top ${hasModels ? "cursor-pointer hover:bg-muted/50" : ""}`}
+                      className={cn(hasModels && tb.clickRow)}
                       onClick={() => hasModels && toggle(r.runId)}
                       onKeyDown={(e) => {
                         if (hasModels && (e.key === "Enter" || e.key === " ")) {
@@ -264,80 +425,128 @@ function RunDetailSection({ runs }: { runs: RunDetail[] }) {
                         }
                       }}
                       tabIndex={hasModels ? 0 : undefined}
-                      role={hasModels ? "button" : undefined}
+                      aria-expanded={hasModels ? open : undefined}
                     >
-                      <td className="px-2 py-2">
-                        {hasModels &&
-                          (open ? (
-                            <ChevronDown className="size-3" />
-                          ) : (
-                            <ChevronRight className="size-3" />
-                          ))}
+                      <td className={cn(tb.td, tb.first)}>
+                        {hasModels && (
+                          <ChevronRight
+                            className={cn(
+                              "size-[15px] text-muted-foreground transition-transform",
+                              open && "rotate-90",
+                            )}
+                          />
+                        )}
                       </td>
-                      <td className="whitespace-nowrap px-2 py-2">
-                        {new Date(r.at).toLocaleString()}
+                      <td className={cn(tb.td, tb.num)}>
+                        <span title={new Date(r.at).toLocaleString()}>{shortTime(r.at)}</span>
                       </td>
-                      <td className="max-w-40 truncate px-2 py-2">{r.agentName ?? r.agentId}</td>
-                      <td className="px-2 py-2">
-                        <Badge
-                          variant={
-                            r.status === "success"
-                              ? "secondary"
-                              : r.status === "failed"
-                                ? "destructive"
-                                : "outline"
-                          }
-                          className="text-[10px]"
-                        >
-                          {r.status}
-                        </Badge>
+                      <td className={tb.td}>
+                        <span className="flex items-center gap-2">
+                          <AgentAvatar id={r.agentId} size={22} />
+                          <span className="max-w-48 truncate">{r.agentName ?? r.agentId}</span>
+                        </span>
                       </td>
-                      <td className="whitespace-nowrap px-2 py-2 font-mono">
-                        {r.inputTokens.toLocaleString()}
+                      <td className={cn(tb.td, "whitespace-nowrap")}>
+                        <Badge variant={st.variant}>{st.label}</Badge>
+                        {!est.complete && (
+                          <Badge variant="warning" className="ml-1" title="有模型没回报用量">
+                            部分
+                          </Badge>
+                        )}
                       </td>
-                      <td className="whitespace-nowrap px-2 py-2 font-mono">
-                        {r.outputTokens.toLocaleString()}
+                      <td className={cn(tb.td, tb.num, tb.right)}>{est.models.length}</td>
+                      <td className={cn(tb.td, tb.num, tb.right)}>
+                        {compactCount(r.inputTokens)} / {compactCount(r.outputTokens)}
+                      </td>
+                      <td className={cn(tb.td, tb.num, tb.right, tb.last)}>
+                        {formatUsd(r.costMicroUsd)}
                       </td>
                     </tr>
-                    {open &&
-                      est.models.map((m, i) => (
-                        <tr
-                          key={`${r.runId}-${m.model ?? "unknown"}-${i}`}
-                          className="border-b bg-muted/30 text-muted-foreground"
-                        >
-                          <td className="px-2 py-1" />
-                          <td colSpan={2} className="truncate px-2 py-1 text-[11px]">
-                            {m.name}
-                            {m.version !== null && (
-                              <span className="ml-1 text-[10px]">v{m.version}</span>
-                            )}
-                          </td>
-                          <td className="px-2 py-1" />
-                          <td className="whitespace-nowrap px-2 py-1 font-mono">
-                            {m.inputTokens.toLocaleString()}
-                            {m.cacheReadTokens > 0 && (
-                              <span className="ml-1 text-[10px]">
-                                (缓存读 {m.cacheReadTokens.toLocaleString()})
-                              </span>
-                            )}
-                          </td>
-                          <td className="whitespace-nowrap px-2 py-1 font-mono">
-                            {m.outputTokens.toLocaleString()}
-                            {m.cacheWriteTokens > 0 && (
-                              <span className="ml-1 text-[10px]">
-                                (缓存写 {m.cacheWriteTokens.toLocaleString()})
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
+                    {open && (
+                      <tr>
+                        <td colSpan={7} className="border-b border-line-soft bg-[#FAF9F6] p-0">
+                          <table className="w-full text-[13px]">
+                            <thead>
+                              <tr className="text-xs text-muted-foreground">
+                                <th className="py-2 pr-3 pl-14 text-left font-medium">模型</th>
+                                <th className="px-3 py-2 text-right font-medium">输入</th>
+                                <th className="px-3 py-2 text-right font-medium">输出</th>
+                                <th className="px-3 py-2 text-right font-medium">缓存读</th>
+                                <th className="px-3 py-2 text-right font-medium">缓存写</th>
+                                <th className="py-2 pr-[22px] pl-3 text-right font-medium">
+                                  积分估算
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {est.models.map((m, i) => (
+                                <tr
+                                  key={`${r.runId}-${m.model ?? "unknown"}-${i}`}
+                                  className="border-t border-line-soft"
+                                >
+                                  <td className="py-2 pr-3 pl-14 font-mono text-[12.5px]">
+                                    {m.name}
+                                    {m.version !== null && (
+                                      <span className="ml-1 text-muted-foreground">
+                                        v{m.version}
+                                      </span>
+                                    )}
+                                  </td>
+                                  {[
+                                    m.inputTokens,
+                                    m.outputTokens,
+                                    m.cacheReadTokens,
+                                    m.cacheWriteTokens,
+                                  ].map((v, j) => (
+                                    <td
+                                      // biome-ignore lint/suspicious/noArrayIndexKey: 固定的四列
+                                      key={j}
+                                      className="px-3 py-2 text-right tabular-nums"
+                                    >
+                                      {v.toLocaleString()}
+                                    </td>
+                                  ))}
+                                  <td className="py-2 pr-[22px] pl-3 text-right tabular-nums">
+                                    {m.unpriced || m.microCredits === null ? (
+                                      <span className="text-muted-foreground">未定价</span>
+                                    ) : (
+                                      creditsAmount(m.microCredits)
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                              {!est.complete && (
+                                <tr className="border-t border-line-soft">
+                                  <td
+                                    colSpan={6}
+                                    className="py-2 pr-3 pl-14 text-xs text-warning-text"
+                                  >
+                                    有模型调用没有回报用量，按已知部分统计。
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </td>
+                      </tr>
+                    )}
                   </Fragment>
                 );
               })}
             </tbody>
           </table>
         </div>
-      </CardContent>
-    </Card>
+      )}
+      {scope === "self" && (
+        <div className="flex justify-center p-3.5">
+          <Link
+            className="text-xs underline decoration-[#C9C4B8] underline-offset-[3px]"
+            href="/developer/runs"
+          >
+            在运行记录里看全部运行
+          </Link>
+        </div>
+      )}
+    </section>
   );
 }

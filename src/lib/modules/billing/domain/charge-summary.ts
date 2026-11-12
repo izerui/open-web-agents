@@ -21,7 +21,7 @@ export type ChargeSource = (typeof CHARGE_SOURCES)[number];
 export const CHARGE_SOURCE_LABEL: Record<ChargeSource, string> = {
   web: "网页对话",
   api: "API 调用",
-  design: "AI 编辑",
+  design: "智能体设计器",
   eval: "评测",
   other: "其他",
 };

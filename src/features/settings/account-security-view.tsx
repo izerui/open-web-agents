@@ -1,11 +1,10 @@
 "use client";
 
-import { SpaceShell } from "@/components/space-shell";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { SpacePage } from "@/features/settings/space-page";
 import { errorText, fetchJson } from "@/lib/fetch-json";
-import { useMe } from "@/lib/use-me";
+import { isAdminView, useMe } from "@/lib/use-me";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -16,11 +15,16 @@ export function AccountSecurityView() {
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
   const mismatch = confirm.length > 0 && confirm !== next;
   const tooShort = next.length > 0 && next.length < 8;
 
   async function submit() {
-    if (!current || !next || mismatch || tooShort || busy) return;
+    if (busy) return;
+    if (!current) return setError("请输入当前密码");
+    if (next.length < 8) return setError("新密码至少 8 位");
+    if (next !== confirm) return setError("两次输入的密码不一致");
+    setError("");
     setBusy(true);
     try {
       await fetchJson("/api/me/password", {
@@ -33,72 +37,78 @@ export function AccountSecurityView() {
       setNext("");
       setConfirm("");
     } catch (e) {
-      toast.error(`修改失败:${errorText(e)}`);
+      setError(`修改失败:${errorText(e)}`);
     } finally {
       setBusy(false);
     }
   }
 
+  const who = me?.user
+    ? `${me.user.email}，${me.user.role === "admin" ? "管理员" : "普通账号"}`
+    : isAdminView(me)
+      ? "本地模式（未开启登录），没有可修改的密码"
+      : undefined;
+
   return (
-    <SpaceShell title="账号安全" subtitle={me?.user?.email} width="narrow">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">修改登录密码</CardTitle>
-          <CardDescription>至少 8 位。管理员给你的初始密码请尽快在这里改掉。</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {/* 密码框不需要 700px 宽:限宽后标签、输入框、按钮在一条视线上 */}
-          <form
-            className="max-w-sm space-y-4"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void submit();
-            }}
-          >
-            <label className="block space-y-1">
-              <span className="text-xs text-muted-foreground">当前密码</span>
-              <Input
-                type="password"
-                autoComplete="current-password"
-                required
-                value={current}
-                onChange={(e) => setCurrent(e.target.value)}
-              />
-            </label>
-            <label className="block space-y-1">
-              <span className="text-xs text-muted-foreground">新密码</span>
-              <Input
-                type="password"
-                autoComplete="new-password"
-                required
-                aria-invalid={tooShort}
-                value={next}
-                onChange={(e) => setNext(e.target.value)}
-              />
-              {tooShort && <span className="text-xs text-destructive">至少 8 位</span>}
-            </label>
-            <label className="block space-y-1">
-              <span className="text-xs text-muted-foreground">再次输入新密码</span>
-              <Input
-                type="password"
-                autoComplete="new-password"
-                required
-                aria-invalid={mismatch}
-                value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
-              />
-              {mismatch && <span className="text-xs text-destructive">两次输入不一致</span>}
-            </label>
-            <Button
-              type="submit"
-              size="sm"
-              disabled={busy || !current || !next || mismatch || tooShort}
-            >
-              {busy ? "保存中…" : "修改密码"}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-    </SpaceShell>
+    <SpacePage side="account" title="账号安全" subtitle={who}>
+      <section
+        aria-label="修改密码"
+        className="max-w-[520px] rounded-2xl border border-border bg-card px-[26px] py-6 max-md:px-4"
+      >
+        <h2 className="mb-1 text-base font-semibold">修改密码</h2>
+        <p className="mb-[18px] text-sm text-muted-foreground">
+          至少 8 位。管理员给你的初始密码请尽快在这里改掉。
+        </p>
+        <form
+          className="space-y-3.5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void submit();
+          }}
+        >
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[13px] text-muted-foreground">当前密码</span>
+            <Input
+              type="password"
+              autoComplete="current-password"
+              required
+              value={current}
+              onChange={(e) => setCurrent(e.target.value)}
+            />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[13px] text-muted-foreground">新密码</span>
+            <Input
+              type="password"
+              autoComplete="new-password"
+              placeholder="至少 8 位"
+              required
+              aria-invalid={tooShort}
+              value={next}
+              onChange={(e) => setNext(e.target.value)}
+            />
+            {tooShort && <span className="text-xs text-destructive">至少 8 位</span>}
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[13px] text-muted-foreground">再次输入新密码</span>
+            <Input
+              type="password"
+              autoComplete="new-password"
+              required
+              aria-invalid={mismatch}
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+            />
+            {mismatch && <span className="text-xs text-destructive">两次输入的密码不一致</span>}
+          </label>
+          <p aria-live="polite" className="min-h-[18px] text-xs text-destructive">
+            {error}
+          </p>
+          <Button type="submit" disabled={busy || !me?.user}>
+            {busy ? "保存中…" : "修改密码"}
+          </Button>
+        </form>
+      </section>
+    </SpacePage>
   );
 }
