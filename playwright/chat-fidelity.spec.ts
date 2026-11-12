@@ -11,7 +11,6 @@ const OUT = path.join(
 const shot = (page: Page, name: string) =>
   page.screenshot({ path: path.join(OUT, `${name}.png`), animations: "disabled" });
 
-
 const NOW = Date.now();
 const iso = (ms: number) => new Date(ms).toISOString();
 
