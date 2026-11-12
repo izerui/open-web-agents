@@ -1,36 +1,15 @@
 "use client";
 
 import { Kbd } from "@/components/ui/kbd";
-import { fetchJson } from "@/lib/fetch-json";
-import { creditsBalance } from "@/lib/modules/billing/domain/credits-display";
 import { navFor, spaceOf } from "@/lib/nav/routes";
 import { useMe } from "@/lib/use-me";
 import { cn } from "@/lib/utils";
 import { Coins, Menu, Search } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
 import { BrandMark } from "./brand-mark";
 import { MeMenu } from "./me-menu";
-
-/**
- * 可用积分。
- * 每次换页(外壳重新挂载)读一次就够 —— 精确数字在积分页;读不到(未登录、接口出错)就不显示。
- */
-function useBalance(enabled: boolean): string | null {
-  const [balance, setBalance] = useState<string | null>(null);
-  useEffect(() => {
-    if (!enabled) return;
-    let alive = true;
-    fetchJson<{ balance: { availableMicroCredits: string } }>("/api/billing?limit=1")
-      .then((r) => alive && setBalance(creditsBalance(r.balance.availableMicroCredits)))
-      .catch(() => alive && setBalance(null));
-    return () => {
-      alive = false;
-    };
-  }, [enabled]);
-  return balance;
-}
+import { useBalance } from "./use-balance";
 
 const PILL =
   "flex h-[34px] items-center gap-2 rounded-full border border-border bg-card px-3.5 text-[13px] text-foreground hover:border-[#C9C4B8]";
@@ -92,14 +71,14 @@ export function TopNav({
           <span className="text-muted-foreground max-md:hidden">搜索</span>
           <Kbd className="max-md:hidden">⌘K</Kbd>
         </button>
-        {balance !== null && (
+        {balance.status === "ok" && (
           <Link href="/account/billing" className={cn(PILL, "max-sm:hidden")} title="积分与套餐">
             <Coins className="size-4" />
-            <b className="font-semibold">{balance}</b>
+            <b className="font-semibold">{balance.available}</b>
             <span className="text-muted-foreground">积分</span>
           </Link>
         )}
-        <MeMenu />
+        <MeMenu balance={balance} />
       </div>
     </header>
   );

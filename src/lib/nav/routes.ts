@@ -97,9 +97,40 @@ export function spaceOf(pathname: string): Space {
   if (pathname === "/chat" || pathname.startsWith("/chat/")) return "chat";
   if (pathname === "/agents" || pathname.startsWith("/agents/")) return "studio";
   if (pathname.startsWith("/developer")) return "developer";
-  if (pathname.startsWith("/account")) return "account";
+  // 「我的」聚合页是手机入口;桌面上打开时归到账户空间(有账户侧栏可去各页)
+  if (pathname.startsWith("/account") || pathname === "/me") return "account";
   if (pathname.startsWith("/admin")) return "admin";
   return "explore";
+}
+
+export type MobileTab = "explore" | "chat" | "studio" | "me";
+
+/**
+ * 手机(窄屏)底部标签栏(取舍 11,原型 mobile.html)。只在窄屏显示,不进桌面一级导航。
+ * 「我的」是聚合页 /me:积分、订单、账号相关的入口都从这里进。
+ */
+export const MOBILE_TABS: readonly { key: MobileTab; label: string; href: string }[] = [
+  { key: "explore", label: "探索", href: "/" },
+  { key: "chat", label: "对话", href: "/chat" },
+  { key: "studio", label: "工作室", href: "/agents" },
+  { key: "me", label: "我的", href: "/me" },
+];
+
+/**
+ * 哪些页面显示底部标签栏。对话页(底部是输入框)和设计器会话页是全屏的工作区,
+ * 原型里也不带标签栏;其余页面都带。
+ */
+export function mobileTabsVisible(pathname: string): boolean {
+  if (pathname === "/chat" || pathname.startsWith("/chat/")) return false;
+  if (pathname === "/agents/design" || pathname.startsWith("/agents/design/")) return false;
+  return pathname !== "/login";
+}
+
+/** 当前页高亮哪个标签:开发者、账户、管理都从「我的」进,算在它下面 */
+export function mobileTabOf(pathname: string): MobileTab {
+  const space = spaceOf(pathname);
+  if (space === "chat" || space === "studio" || space === "explore") return space;
+  return "me";
 }
 
 /** 平台运行三合一:旧的独立页面 → /admin/ops 的页签 */
@@ -237,12 +268,16 @@ export function stageOfLegacyTab(tab: string): AgentStage | null | undefined {
 export type MeMenuItem = { label: string; href?: string; action?: "logout" };
 
 /** 头像菜单:身份相关的低频入口;平台管理在顶栏已有,这里给管理员留一个快捷入口 */
-export function meMenuItems(me: Me | null): MeMenuItem[] {
+export function meMenuItems(
+  me: Me | null,
+  /** credits:false = 读不到积分账户(本地模式的匿名管理员没有),隐藏积分入口;没给 = 照常显示 */
+  opts: { credits?: boolean } = {},
+): MeMenuItem[] {
   // 关闭登录的本地模式:接口返回 authenticated:false + authRequired:false,后端按匿名 admin 放行
   const local = me?.authRequired === false;
   if (me && !me.authenticated && !local) return [{ label: "去登录", href: "/login" }];
   const items: MeMenuItem[] = [
-    { label: "积分与套餐", href: "/account/billing" },
+    ...(opts.credits === false ? [] : [{ label: "积分与套餐", href: "/account/billing" }]),
     { label: "账号安全", href: "/account/security" },
     { label: "操作日志", href: "/account/audit" },
   ];
@@ -272,14 +307,17 @@ export function paletteEntries(me: Me | null): PaletteEntry[] {
     }
   }
   entries.push({ group: "操作", label: "新建智能体", href: "/agents/new", keywords: "工作室" });
+  // 对话页不带会话 = 新会话;带个 new 参数和「对话」空间入口区分开(地址去重时不合并)
+  entries.push({ group: "操作", label: "新会话", href: "/chat?new=1", keywords: "对话 新建" });
   for (const s of spaces) {
     const same = entries.find((e) => e.href === s.href);
     if (same) same.keywords = `${same.keywords} ${s.label}`;
     else entries.push({ group: "空间", label: s.label, href: s.href, keywords: "" });
   }
-  // 空间排在最前:没输入时先看到的是去哪个区
-  return [
-    ...entries.filter((e) => e.group === "空间"),
-    ...entries.filter((e) => e.group !== "空间"),
-  ];
+  // 与原型一致:没输入时先看到「操作」(新建智能体、新会话),再是去哪个区
+  const order = (g: string) => (g === "操作" ? 0 : g === "空间" ? 1 : 2);
+  return entries
+    .map((e, i) => [e, i] as const)
+    .sort(([a, i], [b, j]) => order(a.group) - order(b.group) || i - j)
+    .map(([e]) => e);
 }

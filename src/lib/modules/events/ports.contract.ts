@@ -24,6 +24,20 @@ async function waitFor(cond: () => boolean, timeoutMs = 5000): Promise<void> {
 
 export function busContract(name: string, harness: BusHarness): void {
   describe(`BusPort 契约:${name}`, () => {
+    it("recent 按旧→新给出最近 N 条,不同 topic 互不相干", async () => {
+      const bus = await harness.makeBus();
+      if (!bus.recent) return;
+      const t = harness.topic("recent");
+      await bus.ready?.();
+      for (const text of ["a", "b", "c"]) await bus.publish(t, { kind: "text", text });
+      await bus.publish(harness.topic("recent-other"), { kind: "text", text: "x" });
+      expect(await bus.recent(t, 2)).toEqual([
+        { kind: "text", text: "b" },
+        { kind: "text", text: "c" },
+      ]);
+      expect(await bus.recent(harness.topic("recent-empty"), 5)).toEqual([]);
+    });
+
     it("投递给同 topic 的订阅者", async () => {
       const bus = await harness.makeBus();
       const t = harness.topic("same");

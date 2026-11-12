@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  MOBILE_TABS,
   agentHref,
   agentRoute,
   legacyRedirect,
   meMenuItems,
+  mobileTabOf,
+  mobileTabsVisible,
   navFor,
   paletteEntries,
   spaceOf,
@@ -182,6 +185,17 @@ describe("meMenuItems:头像菜单", () => {
     expect(labels(local)).toEqual(["积分与套餐", "账号安全", "操作日志", "平台管理"]);
   });
 
+  it("没有积分账户(本地模式读不到余额)时隐藏积分入口", () => {
+    const local = { authenticated: false, authRequired: false };
+    expect(meMenuItems(local, { credits: false }).map((i) => i.label)).toEqual([
+      "账号安全",
+      "操作日志",
+      "平台管理",
+    ]);
+    // 余额还在读(undefined)时照常显示
+    expect(meMenuItems(user, {}).map((i) => i.label)).toContain("积分与套餐");
+  });
+
   it("登录态还没读到(或读取失败)时不显示登出", () => {
     expect(labels(null)).not.toContain("登出");
   });
@@ -251,8 +265,54 @@ describe("paletteEntries:⌘K 里能跳的页面", () => {
     expect(accounts?.keywords).toContain("管理");
   });
 
+  it("「操作」组排第一:新建智能体、新会话", () => {
+    const list = paletteEntries(user);
+    expect(list[0]?.group).toBe("操作");
+    const ops = list.filter((e) => e.group === "操作").map((e) => e.label);
+    expect(ops).toEqual(["新建智能体", "新会话"]);
+    // 新会话不和「对话」空间入口合并:两个都在
+    expect(list.find((e) => e.label === "新会话")?.href).toMatch(/^\/chat\?/);
+    expect(list.some((e) => e.group === "空间" && e.label === "对话")).toBe(true);
+  });
+
   it("同一个地址只出现一次", () => {
     const h = hrefs(admin);
     expect(new Set(h).size).toBe(h.length);
+  });
+});
+
+describe("手机底部标签栏", () => {
+  it("四个标签:探索 / 对话 / 工作室 / 我的", () => {
+    expect(MOBILE_TABS.map((t) => [t.label, t.href])).toEqual([
+      ["探索", "/"],
+      ["对话", "/chat"],
+      ["工作室", "/agents"],
+      ["我的", "/me"],
+    ]);
+  });
+
+  it.each([
+    ["/", "explore"],
+    ["/market/x", "explore"],
+    ["/chat", "chat"],
+    ["/agents/abc", "studio"],
+    ["/me", "me"],
+    ["/account/billing", "me"],
+    ["/developer/keys", "me"],
+    ["/admin/accounts", "me"],
+  ])("%s 高亮 %s", (path, tab) => {
+    expect(mobileTabOf(path)).toBe(tab);
+  });
+
+  it("对话页、设计器会话页、登录页不显示标签栏,其余显示", () => {
+    for (const p of ["/chat", "/agents/design", "/login"]) expect(mobileTabsVisible(p)).toBe(false);
+    for (const p of ["/", "/agents", "/agents/abc", "/me", "/account/billing", "/market/x"]) {
+      expect(mobileTabsVisible(p)).toBe(true);
+    }
+  });
+
+  it("「我的」不进桌面一级导航,/me 在桌面上归到账户空间", () => {
+    expect(navFor(null).some((s) => s.href === "/me")).toBe(false);
+    expect(spaceOf("/me")).toBe("account");
   });
 });

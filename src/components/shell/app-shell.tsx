@@ -8,6 +8,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { CommandPalette } from "./command-palette";
+import { MobileTabBar } from "./mobile-tab-bar";
 import { type SideKind, SideNav } from "./side-nav";
 import { TopNav } from "./top-nav";
 
@@ -17,7 +18,7 @@ import { TopNav } from "./top-nav";
  * - side:开发者 / 账户 / 平台管理三个空间有自己的页面清单,放在左侧栏
  * - fullBleed:对话页、构建页自己管分栏和滚动,主区不加内边距也不滚动
  * - onSearchAction:页面有自己的命令面板(对话页)时由它接管 ⌘K 与搜索按钮
- * - 窄屏(<768px)顶栏的空间导航与左侧栏收进左侧抽屉
+ * - 窄屏(<768px)顶栏的空间导航与左侧栏收进左侧抽屉;底部加标签栏(探索 / 对话 / 工作室 / 我的)
  */
 export function AppShell({
   side,
@@ -79,6 +80,7 @@ export function AppShell({
           {children}
         </main>
       </div>
+      <MobileTabBar pathname={pathname} />
       <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
         <SheetContent
           side="left"

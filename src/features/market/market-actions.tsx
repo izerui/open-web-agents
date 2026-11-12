@@ -9,7 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { chatHref } from "@/features/explore/explore-logic";
+import { chatHref, startedText } from "@/features/explore/explore-logic";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { agentHref } from "@/lib/nav/routes";
 import { cn } from "@/lib/utils";
@@ -27,14 +27,21 @@ import { toast } from "sonner";
 export async function startAgentSession(
   agentId: string,
   mode: "market" | "own" = "market",
-): Promise<string> {
-  if (mode === "market") await fetchJson(`/api/market/${encodeURIComponent(agentId)}`);
+): Promise<{ id: string; name?: string; version?: number | null }> {
+  const market =
+    mode === "market"
+      ? (
+          await fetchJson<{ agent: { name: string; publishedVersion?: number | null } }>(
+            `/api/market/${encodeURIComponent(agentId)}`,
+          )
+        ).agent
+      : null;
   const result = await fetchJson<{ session: { id: string } }>("/api/sessions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(mode === "market" ? { agentId, versionMode: "published" } : { agentId }),
   });
-  return result.session.id;
+  return { id: result.session.id, name: market?.name, version: market?.publishedVersion };
 }
 
 /** 立即使用 / 克隆 的进行中状态与动作;同一时刻只允许一个请求在路上。 */
@@ -57,23 +64,41 @@ export function useAgentActions() {
 
   return {
     busy,
-    start: (agentId: string, opts: { mode?: "market" | "own"; question?: string } = {}) =>
+    /**
+     * name / version:提示「已用「X」vN 新建会话」用。市场入口以接口返回的发布版为准,
+     * 自己的智能体(不锁版本)由调用方给名字。
+     */
+    start: (
+      agentId: string,
+      opts: {
+        mode?: "market" | "own";
+        question?: string;
+        name?: string;
+        version?: number | null;
+      } = {},
+    ) =>
       guard("start", async () => {
         try {
-          const id = await startAgentSession(agentId, opts.mode);
-          router.push(chatHref(id, opts.question));
+          const s = await startAgentSession(agentId, opts.mode);
+          toast.success(
+            startedText(
+              s.name ?? opts.name,
+              opts.mode === "own" ? null : (s.version ?? opts.version),
+            ),
+          );
+          router.push(chatHref(s.id, opts.question));
         } catch (error) {
           toast.error(`创建会话失败：${errorText(error)}`);
         }
       }),
-    clone: (agentId: string) =>
+    clone: (agentId: string, name?: string) =>
       guard("clone", async () => {
         try {
           const result = await fetchJson<{ agent: { id: string; name: string } }>(
             `/api/agents/${encodeURIComponent(agentId)}/clone`,
             { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
           );
-          toast.success(`已克隆为「${result.agent.name}」`);
+          toast.success(cloneDoneText(name, result.agent.name));
           router.push(agentHref({ id: result.agent.id }));
         } catch (error) {
           toast.error(`克隆失败：${errorText(error)}`);
@@ -82,7 +107,12 @@ export function useAgentActions() {
   };
 }
 
-/** 克隆前的确认:说清复制了什么、之后不会同步。 */
+/** 克隆成功的提示(原型:已克隆「X」到我的智能体);不知道原名时说新草稿的名字 */
+export function cloneDoneText(sourceName: string | undefined, copyName: string): string {
+  return sourceName ? `已克隆「${sourceName}」到我的智能体` : `已克隆为「${copyName}」`;
+}
+
+/** 克隆前的确认:说清复制了什么、新草稿叫什么、之后不会同步。 */
 export function CloneDialog({
   open,
   onOpenChangeAction,
@@ -104,12 +134,15 @@ export function CloneDialog({
         <DialogHeader>
           <DialogTitle>克隆「{name}」</DialogTitle>
           <DialogDescription className="text-[15px] leading-relaxed text-[#3C3A35]">
-            把{version ? `发布版 v${version} ` : "当前发布版"}的配置复制成你名下的新草稿。
+            把{version ? `发布版 v${version} ` : "当前发布版"}
+            复制成你名下的新草稿「{name}（副本）」，ID 由系统新生成。
           </DialogDescription>
         </DialogHeader>
-        <p className="text-sm text-muted-foreground">
-          提示词、能力、契约一并复制；原作者之后的更新不会同步过来。克隆后进入编排，可以直接改。
-        </p>
+        <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+          <li>提示词、能力、契约和知识一并复制。</li>
+          <li>密钥类变量不会复制，需要的话在新草稿里重新填写。</li>
+          <li>原作者之后的更新不会同步过来。克隆后进入编排，可以直接改。</li>
+        </ul>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChangeAction(false)} disabled={busy}>
             取消
@@ -187,7 +220,7 @@ export function MarketActions({
         name={name}
         version={version}
         busy={busy === "clone"}
-        onConfirmAction={() => void clone(agentId).then(() => setConfirm(false))}
+        onConfirmAction={() => void clone(agentId, name).then(() => setConfirm(false))}
       />
     </div>
   );

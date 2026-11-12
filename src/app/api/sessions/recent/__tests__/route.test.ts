@@ -4,6 +4,7 @@ import type { FileNode } from "@/lib/modules/artifacts/ports";
 import type { LatestRun } from "@/lib/modules/run/adapters/mysql-run-query";
 import { InMemorySessionRepo } from "@/lib/modules/session/adapters/in-memory-session-repo";
 import type { SessionListFilter } from "@/lib/modules/session/ports";
+import type { AgentEvent } from "@/lib/shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "../route";
 
@@ -31,7 +32,16 @@ function build() {
   const latest = new Map<string, LatestRun>();
   const lastRunAt = new Map<string, number>();
   const trees = new Map<string, FileNode[] | Error>();
+  const streams = new Map<string, AgentEvent[] | Error>();
+  const recentSpy = vi.fn(async (topic: string, _count: number) => {
+    const s = ctx.streams.get(topic);
+    if (s instanceof Error) throw s;
+    return s ?? [];
+  });
   return {
+    streams,
+    recentSpy,
+    bus: { recent: recentSpy },
     sessions,
     agents,
     listSpy,
@@ -170,5 +180,60 @@ describe("GET /api/sessions/recent", () => {
     const { json } = await body();
     expect(json.sessions[0]).toMatchObject({ agent: { id: "a2", name: "公开名称" } });
     expect(JSON.stringify(json)).not.toContain("Draft secret");
+  });
+
+  it("正在工作的会话带回最近 3 条步骤;没在跑的不读事件流,读失败不报错", async () => {
+    await ctx.sessions.create({ id: "r1", agentId: "a1", workspaceDir: "/w/r1", ownerId: "u1" });
+    await ctx.sessions.create({ id: "r2", agentId: "a1", workspaceDir: "/w/r2", ownerId: "u1" });
+    await ctx.sessions.create({ id: "d1", agentId: "a1", workspaceDir: "/w/d1", ownerId: "u1" });
+    ctx.lastRunAt.set("r1", 3000);
+    ctx.lastRunAt.set("r2", 2000);
+    ctx.lastRunAt.set("d1", 1000);
+    ctx.latest.set("r1", {
+      sessionId: "r1",
+      runId: "run-1",
+      status: "running",
+      promptPreview: "初审发票",
+      createdAt: 3000,
+    });
+    ctx.latest.set("r2", {
+      sessionId: "r2",
+      runId: "run-2",
+      status: "running",
+      promptPreview: "x",
+      createdAt: 2000,
+    });
+    ctx.latest.set("d1", {
+      sessionId: "d1",
+      runId: "run-3",
+      status: "success",
+      promptPreview: "y",
+      replyPreview: "好",
+      createdAt: 1000,
+    });
+    ctx.streams.set("session:r1:run:run-1", [
+      { kind: "tool_use", tool: "Read", input: { file_path: "/w/发票.pdf" }, toolUseId: "1" },
+      { kind: "tool_result", toolUseId: "1", text: "ok" },
+      { kind: "tool_use", tool: "Grep", input: { pattern: "金额" }, toolUseId: "2" },
+    ]);
+    ctx.streams.set("session:r2:run:run-2", new Error("redis down"));
+
+    const { status, json } = await body();
+    expect(status).toBe(200);
+    const by = new Map(json.sessions.map((s) => [s.id, s]));
+    expect(by.get("r1")).toMatchObject({
+      lastRun: {
+        steps: [
+          { label: "读取 发票.pdf", state: "done" },
+          { label: "搜索「金额」", state: "running" },
+        ],
+      },
+    });
+    expect(by.get("r2")).toMatchObject({ status: "running", lastRun: { steps: [] } });
+    expect((by.get("d1")?.lastRun as Record<string, unknown>).steps).toBeUndefined();
+    expect(ctx.recentSpy.mock.calls.map((c) => c[0]).sort()).toEqual([
+      "session:r1:run:run-1",
+      "session:r2:run:run-2",
+    ]);
   });
 });

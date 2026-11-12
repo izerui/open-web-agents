@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { KnowledgePanel } from "@/features/builder/knowledge-panel";
+import { CloneDialog, cloneDoneText } from "@/features/market/market-actions";
 import { notifyAgentCatalogChanged } from "@/lib/agent-catalog";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { agentHref } from "@/lib/nav/routes";
@@ -40,6 +41,8 @@ export function ReadonlyDrawer({
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  // 取舍 3:可克隆时先确认再克隆(与市场同一个确认框)
+  const [confirm, setConfirm] = useState(false);
   const pending = useRef(false);
   const cloneable = agent?.marketListed === true && !!agent.publishedVersion;
 
@@ -49,7 +52,8 @@ export function ReadonlyDrawer({
     setBusy(true);
     try {
       const copy = await cloneAgent(agent.id);
-      toast.success(`已克隆为「${copy.name}」`);
+      setConfirm(false);
+      toast.success(cloneDoneText(agent.name, copy.name));
       router.push(agentHref({ id: copy.id }));
     } catch (e) {
       toast.error(`克隆失败：${errorText(e)}`);
@@ -116,7 +120,7 @@ export function ReadonlyDrawer({
               <div className="ml-auto flex flex-col items-end gap-1">
                 <Button
                   disabled={!cloneable || busy}
-                  onClick={() => void clone()}
+                  onClick={() => setConfirm(true)}
                   className="max-md:h-11"
                 >
                   <Copy />
@@ -129,6 +133,14 @@ export function ReadonlyDrawer({
                 )}
               </div>
             </div>
+            <CloneDialog
+              open={confirm}
+              onOpenChangeAction={setConfirm}
+              name={agent.name}
+              version={agent.publishedVersion}
+              busy={busy}
+              onConfirmAction={() => void clone()}
+            />
           </>
         )}
       </SheetContent>

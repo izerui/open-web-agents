@@ -113,18 +113,16 @@ export function AskPanel() {
               if (picked) toast.info("附件会在对话里上传：选好智能体、进入对话后再把文件拖进去");
             }}
           />
-          {!file && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="max-md:h-11"
-              onClick={() => fileRef.current?.click()}
-            >
-              <Paperclip />
-              添加文件
-            </Button>
-          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="max-md:h-11"
+            onClick={() => fileRef.current?.click()}
+          >
+            <Paperclip />
+            {file ? "换一个文件" : "添加文件"}
+          </Button>
           <span className="text-xs text-muted-foreground max-md:hidden">
             回车发送，Shift＋回车换行
           </span>
@@ -140,7 +138,7 @@ export function AskPanel() {
         </div>
       </div>
 
-      {result.state !== "idle" && <Suggestions result={result} />}
+      {result.state !== "idle" && <Suggestions result={result} file={file?.name ?? null} />}
 
       <div className="mt-4 flex max-w-[820px] flex-wrap justify-center gap-2">
         {EXAMPLES.map((t) => (
@@ -161,7 +159,14 @@ export function AskPanel() {
   );
 }
 
-function Suggestions({ result }: { result: Exclude<Result, { state: "idle" }> }) {
+function Suggestions({
+  result,
+  file,
+}: {
+  result: Exclude<Result, { state: "idle" }>;
+  /** 首页选的附件:会话建好之前没有地方放,只能进对话后再传,这里写明 */
+  file: string | null;
+}) {
   const { busy, start } = useAgentActions();
   return (
     <section
@@ -198,6 +203,12 @@ function Suggestions({ result }: { result: Exclude<Result, { state: "idle" }> })
                 ? "或者先交给现成的智能体"
                 : "市场里暂时没有直接对应的智能体"}
           </p>
+          {file && (
+            <p className="mx-3 mt-1.5 mb-1 rounded-lg bg-[#F6F5F1] px-3 py-2 text-[13px] text-[#4D4A43]">
+              附件「{file}
+              」不会自动带过去：进对话后再把文件拖进输入框；设计器不收附件，可以把要点写进描述。
+            </p>
+          )}
           {result.items.map((a) => (
             <div
               key={a.id}
@@ -216,7 +227,13 @@ function Suggestions({ result }: { result: Exclude<Result, { state: "idle" }> })
                 size="sm"
                 className={cn("max-sm:h-11 max-sm:w-full")}
                 disabled={busy !== null}
-                onClick={() => void start(a.id, { mode: a.mine ? "own" : "market" })}
+                onClick={() =>
+                  void start(a.id, {
+                    mode: a.mine ? "own" : "market",
+                    question: result.text,
+                    name: a.name,
+                  })
+                }
               >
                 {busy === "start" ? "创建中…" : "立即使用"}
               </Button>

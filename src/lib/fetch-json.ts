@@ -50,6 +50,17 @@ function statusText(status: number): string {
   return `${reason}(HTTP ${status})`;
 }
 
+/**
+ * 浏览器断网 / 连不上服务时 fetch 抛的 TypeError,各家说法不同:
+ * Chrome「Failed to fetch」、Firefox「NetworkError when attempting to fetch resource.」、
+ * Safari「Load failed」。原样显示给用户就是一行英文,统一翻成中文。
+ */
+const NETWORK_ERROR =
+  /^(Failed to fetch|NetworkError when attempting to fetch resource\.?|Load failed)$/i;
+
+export const NETWORK_ERROR_TEXT = "网络异常，连不上服务";
+
 export function errorText(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
+  const msg = e instanceof Error ? e.message : String(e);
+  return NETWORK_ERROR.test(msg.trim()) ? NETWORK_ERROR_TEXT : msg;
 }

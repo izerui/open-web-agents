@@ -5,6 +5,7 @@ import {
   designerHref,
   filterMarket,
   sortMarket,
+  startedText,
   workStatusLabel,
 } from "../explore-logic";
 
@@ -90,5 +91,18 @@ describe("workStatusLabel", () => {
     expect(workStatusLabel("failed")).toEqual({ label: "失败", tone: "destructive" });
     expect(workStatusLabel("cancelled")).toEqual({ label: "已停止", tone: "muted" });
     expect(workStatusLabel("idle")).toEqual({ label: "还没开始", tone: "muted" });
+  });
+});
+
+describe("startedText", () => {
+  it("带版本号", () => {
+    expect(startedText("周报助手", 3)).toBe("已用「周报助手」v3 新建会话");
+  });
+  it("没有发布版(自己的草稿)时不写版本", () => {
+    expect(startedText("周报助手", null)).toBe("已用「周报助手」新建会话");
+    expect(startedText("周报助手")).toBe("已用「周报助手」新建会话");
+  });
+  it("没有名字时退回通用说法", () => {
+    expect(startedText(undefined, 2)).toBe("已新建会话");
   });
 });

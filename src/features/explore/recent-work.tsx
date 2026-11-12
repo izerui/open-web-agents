@@ -4,7 +4,8 @@ import { AgentAvatar } from "@/components/agent-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { errorText, fetchJson } from "@/lib/fetch-json";
-import type { WorkStatus } from "@/lib/modules/session/domain/recent-work";
+import { formatTime } from "@/lib/format-time";
+import type { WorkStatus, WorkStep } from "@/lib/modules/session/domain/recent-work";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, Check, Eye, FileText, MessageSquare, RefreshCw } from "lucide-react";
 import Link from "next/link";
@@ -17,7 +18,14 @@ interface RecentSession {
   agent: { id: string; name: string; icon: string | null };
   lastActiveAt: number;
   status: WorkStatus;
-  lastRun: { status: string; prompt: string; reply: string | null; at: number } | null;
+  lastRun: {
+    status: string;
+    prompt: string;
+    reply: string | null;
+    at: number;
+    /** 正在工作时最近 3 条步骤(工具调用或计划);读不到事件流时为空或没有 */
+    steps?: WorkStep[];
+  } | null;
   file: { name: string; path: string; size: number | null } | null;
 }
 
@@ -34,15 +42,6 @@ const TONE_TEXT: Record<Tone, string> = {
   destructive: "text-destructive",
   muted: "text-muted-foreground",
 };
-
-function when(ms: number): string {
-  const d = new Date(ms);
-  const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return d.toDateString() === now.toDateString()
-    ? `${pad(d.getHours())}:${pad(d.getMinutes())}`
-    : `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
 
 function sizeText(n: number | null): string | null {
   if (n === null) return null;
@@ -186,7 +185,7 @@ function WorkBoard({
                       <StatusIcon status={x.status} />
                       <span className={cn("shrink-0", TONE_TEXT[label.tone])}>{label.label}</span>
                       <span className="ml-1.5 truncate text-muted-foreground">
-                        {x.agent.name}，{when(x.lastActiveAt)}
+                        {x.agent.name}，{formatTime(x.lastActiveAt)}
                       </span>
                     </span>
                   </span>
@@ -252,6 +251,53 @@ function StatusIcon({ status }: { status: WorkStatus }) {
   return null;
 }
 
+const STEP_STATE: Record<WorkStep["state"], string> = {
+  done: "已完成",
+  running: "进行中",
+  error: "出错",
+  pending: "未开始",
+};
+
+/** 正在工作的步骤清单:已完成的打勾,当前步骤转圈(原型 .steps) */
+function Steps({ steps }: { steps: WorkStep[] }) {
+  return (
+    <ol
+      aria-label="最近的步骤"
+      className="mt-2 flex flex-col gap-1.5 rounded-[14px] border border-border bg-card px-3.5 py-2.5"
+    >
+      {steps.map((step, i) => (
+        <li
+          // biome-ignore lint/suspicious/noArrayIndexKey: 同一刻的步骤清单,标签可能重复
+          key={i}
+          className={cn(
+            "flex items-center gap-2 text-[13px]",
+            step.state === "done" ? "text-foreground" : "text-muted-foreground",
+            step.state === "error" && "text-destructive",
+          )}
+        >
+          {step.state === "running" ? (
+            <span
+              aria-hidden="true"
+              className="size-3 shrink-0 animate-spin rounded-full border-[1.5px] border-[#D9D5CB] border-t-foreground"
+            />
+          ) : step.state === "done" ? (
+            <Check className="size-3.5 shrink-0" strokeWidth={2} aria-hidden="true" />
+          ) : step.state === "error" ? (
+            <AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />
+          ) : (
+            <span
+              aria-hidden="true"
+              className="size-3 shrink-0 rounded-full border-[1.5px] border-[#D9D5CB]"
+            />
+          )}
+          <span className="min-w-0 truncate">{step.label}</span>
+          <span className="sr-only">（{STEP_STATE[step.state]}）</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 function Reply({ s }: { s: RecentSession }) {
   const reply = s.lastRun?.reply;
   const text = reply ? (
@@ -265,6 +311,7 @@ function Reply({ s }: { s: RecentSession }) {
     return (
       <>
         {text ?? <p className="text-[15px] text-muted-foreground">正在处理这件事…</p>}
+        {s.lastRun?.steps && s.lastRun.steps.length > 0 && <Steps steps={s.lastRun.steps} />}
         <div className="mt-3">
           <Button variant="outline" size="sm" asChild className="max-md:h-11">
             <Link href={chatHref(s.id)}>

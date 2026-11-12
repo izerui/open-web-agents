@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { cloneDoneText } from "@/features/market/market-actions";
 import { type AvatarStyle, formatAvatarIcon } from "@/lib/agent-avatar";
 import { notifyAgentCatalogChanged } from "@/lib/agent-catalog";
 import { errorText, fetchJson } from "@/lib/fetch-json";
@@ -272,7 +273,7 @@ export function NewAgentDialog({
       if (!cloneSel) return setError("先选一个要克隆的智能体");
       void run(async () => {
         const copy = await cloneAgent(cloneSel);
-        toast.success(`已克隆为「${copy.name}」`);
+        toast.success(cloneDoneText(market?.find((m) => m.id === cloneSel)?.name, copy.name));
         router.push(agentHref({ id: copy.id }));
       });
       return;
@@ -513,8 +514,9 @@ export function NewAgentDialog({
                             ) : null}
                           </span>
                           <span className="block truncate text-xs text-muted-foreground">
-                            {categoryName(m.category)}
-                            {m.description ? `，${m.description}` : ""}
+                            {[m.author, categoryName(m.category), m.description]
+                              .filter(Boolean)
+                              .join("，")}
                           </span>
                         </span>
                         <span
@@ -530,7 +532,8 @@ export function NewAgentDialog({
                 )}
               </fieldset>
               <p className="text-xs text-muted-foreground">
-                克隆的是发布版配置，原作者之后的更新不会同步过来。
+                克隆的是发布版，提示词、能力、契约和知识一并复制，ID
+                由系统新生成；密钥类变量不复制，要重新填写；原作者之后的更新不会同步过来。
               </p>
             </>
           )}
@@ -582,6 +585,7 @@ export function NewAgentDialog({
                     );
                   })}
                 </fieldset>
+                {template && <p className="mt-1 text-[13px] font-semibold">将预填</p>}
                 {template && (
                   <div className="grid gap-3 md:grid-cols-[200px_minmax(0,1fr)]">
                     <Field label="名称" htmlFor="nw-tn">

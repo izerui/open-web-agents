@@ -18,16 +18,28 @@ const state = vi.hoisted(() => ({
   taken: new Set<string>(),
   activityCalls: [] as { ids: string[]; since: number }[],
   upserts: [] as Record<string, unknown>[],
+  authRequired: true,
 }));
 
 vi.mock("@/lib/container", () => ({
   getContainer: () => ({
     auth: {
-      resolveWeb: async () => ({ type: "web", userId: "me", role: "user" }),
-      subjectOf: async () => ({ userId: "me", role: "user" }),
+      // 本地模式下 resolveWeb 给的是匿名管理员(与 Authorizer 一致)
+      resolveWeb: async () => ({
+        type: "web",
+        userId: "me",
+        role: state.authRequired ? "user" : "admin",
+      }),
+      subjectOf: async () => ({ userId: "me", role: state.authRequired ? "user" : "admin" }),
       assertCanManageAgents: () => {},
     },
-    env: { allowStdioMcp: false, webhookAllowPrivate: false },
+    env: {
+      allowStdioMcp: false,
+      webhookAllowPrivate: false,
+      get authRequired() {
+        return state.authRequired;
+      },
+    },
     grants: {
       listForType: async () => state.grants,
       listForResource: async () => state.grants,
@@ -70,6 +82,7 @@ beforeEach(() => {
   state.taken = new Set();
   state.activityCalls = [];
   state.upserts = [];
+  state.authRequired = true;
 });
 
 async function list() {
@@ -115,6 +128,15 @@ describe("GET /api/agents —— 工作室字段", () => {
     const since = state.activityCalls[0]?.since ?? 0;
     expect(since).toBeGreaterThanOrEqual(before - 7 * DAY - 1000);
     expect(since).toBeLessThanOrEqual(Date.now() - 7 * DAY);
+  });
+
+  it("本地模式(不要求登录)下匿名管理员算所有者:工作室不会把全部智能体都算成「分享给我的」", async () => {
+    state.authRequired = false;
+    state.agents = [mk("mine", "me"), mk("someone-elses", "other")];
+    const { agents } = await list();
+    const by = new Map(agents.map((a) => [a.id, a]));
+    expect(by.get("mine")).toMatchObject({ isOwner: true });
+    expect(by.get("someone-elses")).toMatchObject({ isOwner: true });
   });
 
   it("没有可见的智能体时不查运行统计", async () => {

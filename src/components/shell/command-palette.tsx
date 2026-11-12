@@ -16,9 +16,24 @@ import { agentHref } from "@/lib/nav/routes";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { NavigationCommands } from "./nav-commands";
+import { agentStatusText, sessionMeta, sessionTitle } from "./palette-logic";
 
-type AgentLite = { id: string; name: string; icon?: string | null };
-type SessionLite = { id: string; title?: string | null; agentId: string };
+type AgentLite = {
+  id: string;
+  name: string;
+  icon?: string | null;
+  publishedVersion?: number | null;
+  hasUnpublishedChanges?: boolean;
+  /** false = 只有市场使用权,不是「我的」智能体 */
+  canRead?: boolean;
+};
+type SessionLite = {
+  id: string;
+  title?: string | null;
+  agentId: string;
+  createdAt?: number;
+  runCount?: number;
+};
 
 /**
  * 全站 ⌘K:页面、我的智能体、最近会话。
@@ -39,7 +54,7 @@ export function CommandPalette({
     if (!open) return;
     let alive = true;
     void fetchJson<{ agents?: AgentLite[] }>("/api/agents")
-      .then((d) => alive && setAgents(d.agents ?? []))
+      .then((d) => alive && setAgents((d.agents ?? []).filter((a) => a.canRead !== false)))
       .catch(() => alive && setAgents([]));
     void fetchJson<{ sessions?: SessionLite[] }>("/api/sessions")
       .then((d) => alive && setSessions((d.sessions ?? []).slice(0, 8)))
@@ -79,6 +94,9 @@ export function CommandPalette({
                 >
                   <AgentAvatar id={a.id} icon={a.icon} size={20} />
                   <span className="truncate">{a.name}</span>
+                  <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                    {agentStatusText(a)}
+                  </span>
                 </CommandItem>
               ))}
             </CommandGroup>
@@ -91,13 +109,13 @@ export function CommandPalette({
               {sessions.map((s) => (
                 <CommandItem
                   key={s.id}
-                  value={`会话 ${s.title ?? s.id} ${agentName(s.agentId)}`}
+                  value={`会话 ${sessionTitle(s)} ${agentName(s.agentId)} ${s.id}`}
                   onSelect={() => go(`/chat?session=${encodeURIComponent(s.id)}`)}
                 >
                   <AgentAvatar id={s.agentId} size={20} />
-                  <span className="truncate">{s.title || s.id.slice(0, 8)}</span>
-                  <span className="ml-auto truncate text-xs text-muted-foreground">
-                    {agentName(s.agentId)}
+                  <span className="truncate">{sessionTitle(s)}</span>
+                  <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                    {sessionMeta(s)}
                   </span>
                 </CommandItem>
               ))}

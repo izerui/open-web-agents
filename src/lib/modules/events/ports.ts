@@ -18,4 +18,9 @@ export interface BusPort {
   ): Unsubscribe;
   /** 检查底层事件存储是否可用。 */
   ready?(): Promise<void>;
+  /**
+   * 读这个 topic 最近 count 条事件(旧→新),不订阅。探索首页「正在工作」卡片取步骤进度用;
+   * 读不到(已过期、存储不可用)时返回空数组或抛错,调用方都当作「没有步骤」。
+   */
+  recent?(topic: string, count: number): Promise<AgentEvent[]>;
 }

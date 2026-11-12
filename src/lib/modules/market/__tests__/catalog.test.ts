@@ -56,6 +56,29 @@ describe("market use-only catalog", () => {
     expect(JSON.stringify(view)).not.toMatch(/secret|private-|Draft/);
   });
 
+  it("detail lists up to 3 recent versions (≤ published) with date and note only", async () => {
+    const h = await fixture();
+    await h.market.setListing(admin, publishedAgent.id, listing);
+    for (const note of ["第二版", "第三版", "第四版", "第五版"]) {
+      const a = await h.agents.get(publishedAgent.id);
+      if (!a) throw new Error("missing agent");
+      await h.agents.upsert({ ...a, description: `${a.description} ${note}` });
+      await h.releases.publish((await h.agents.get(publishedAgent.id)) as typeof a, "owner", note);
+    }
+    // 回滚到 v4:v5 不算「已发布过的版本说明」
+    await h.releases.activate(publishedAgent.id, 4);
+    const view = await h.market.detail(user, subject, [], publishedAgent.id);
+    expect(view.recentVersions.map((v) => [v.version, v.note])).toEqual([
+      [4, "第四版"],
+      [3, "第三版"],
+      [2, "第二版"],
+    ]);
+    for (const v of view.recentVersions) {
+      expect(typeof v.createdAt).toBe("number");
+      expect(Object.keys(v).sort()).toEqual(["createdAt", "note", "version"]);
+    }
+  });
+
   it("grants invocation without granting read/write, including API keys", async () => {
     const h = await fixture();
     await h.market.setListing(admin, publishedAgent.id, listing);
