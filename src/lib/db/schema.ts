@@ -756,3 +756,32 @@ export const agentVariables = mysqlTable(
     byUser: index("idx_agent_variables_user").on(t.userId),
   }),
 );
+
+/**
+ * 市场上架申请(A13):所有者申请把已发布的智能体上架,管理员通过或驳回。
+ *
+ * pending_agent_id 只在 pending 时等于 agent_id、处理后置 NULL —— 唯一索引借 MySQL
+ * 「多个 NULL 不冲突」保证同一智能体同时最多一条待审申请,并发重复提交由库兜底。
+ */
+export const marketListingRequests = mysqlTable(
+  "market_listing_requests",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    agentId: varchar("agent_id", { length: 36 }).notNull(),
+    version: int("version").notNull(),
+    requesterId: varchar("requester_id", { length: 36 }).notNull(),
+    note: varchar("note", { length: 1024 }),
+    status: varchar("status", { length: 16 }).notNull(),
+    reason: varchar("reason", { length: 1024 }),
+    category: varchar("category", { length: 32 }),
+    pendingAgentId: varchar("pending_agent_id", { length: 36 }),
+    createdAt: bigint("created_at", { mode: "number" }).notNull(),
+    decidedAt: bigint("decided_at", { mode: "number" }),
+    decidedBy: varchar("decided_by", { length: 36 }),
+  },
+  (t) => ({
+    onePending: uniqueIndex("uniq_listing_requests_pending").on(t.pendingAgentId),
+    byAgent: index("idx_listing_requests_agent").on(t.agentId, t.createdAt),
+    byStatus: index("idx_listing_requests_status").on(t.status, t.createdAt),
+  }),
+);

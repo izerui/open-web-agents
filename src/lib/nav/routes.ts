@@ -10,7 +10,6 @@ import {
   Package,
   ReceiptText,
   ScrollText,
-  Server,
   Store,
   Users,
   Wallet,
@@ -68,20 +67,17 @@ export const SIDE_NAV: Record<"developer" | "account" | "admin", readonly SideGr
       ],
     },
   ],
-  // 阶段 7 合并为六项;阶段 1 先如实列出现有管理页
+  // 阶段 7:平台管理合并为六项(原型 admin-*.html);旧管理页地址见 legacyRedirect
   admin: [
     {
       group: "平台管理",
       items: [
         { href: "/admin/accounts", label: "账号", icon: Users },
-        { href: "/admin/providers", label: "提供者与路由", icon: Server },
-        { href: "/admin/models", label: "模型总览", icon: Cpu },
+        { href: "/admin/models", label: "模型与提供者", icon: Cpu },
         { href: "/admin/market", label: "市场上架", icon: Store },
         { href: "/admin/packages", label: "套餐与订单", icon: Package },
         { href: "/admin/billing", label: "计费", icon: Wallet },
-        { href: "/admin/usage", label: "平台用量", icon: BarChart3 },
-        { href: "/admin/runs", label: "平台运行", icon: Activity },
-        { href: "/admin/audit", label: "平台审计", icon: ScrollText },
+        { href: "/admin/ops", label: "平台运行与用量", icon: Activity },
       ],
     },
   ],
@@ -105,6 +101,13 @@ export function spaceOf(pathname: string): Space {
   if (pathname.startsWith("/admin")) return "admin";
   return "explore";
 }
+
+/** 平台运行三合一:旧的独立页面 → /admin/ops 的页签 */
+const ADMIN_OPS_TAB: Record<string, string> = {
+  "/admin/usage": "usage",
+  "/admin/runs": "runs",
+  "/admin/audit": "audit",
+};
 
 const SETTINGS_TO_ACCOUNT: Record<string, string> = {
   "/settings": "/account/security",
@@ -163,6 +166,18 @@ export function legacyRedirect(pathname: string, search: URLSearchParams): strin
     }
     if (pathname.startsWith("/developer")) return null;
     return withQuery(pathname.replace("/settings", "/developer"), q);
+  }
+  // 模型与提供者三合一:列表 → 页签,详情 → /admin/models/providers/<id>(?tab= 是详情页的类型页签,照带)
+  if (pathname === "/admin/providers" || pathname === "/admin/capabilities") {
+    if (!q.has("tab")) q.set("tab", "providers");
+    return withQuery("/admin/models", q);
+  }
+  const provider = /^\/admin\/providers\/([^/]+)$/.exec(pathname);
+  if (provider) return withQuery(`/admin/models/providers/${provider[1]}`, q);
+  const opsTab = ADMIN_OPS_TAB[pathname];
+  if (opsTab) {
+    q.set("tab", opsTab);
+    return withQuery("/admin/ops", q);
   }
   const account = SETTINGS_TO_ACCOUNT[pathname];
   return account ? withQuery(account, q) : null;

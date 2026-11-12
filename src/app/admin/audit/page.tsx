@@ -1,9 +1,10 @@
-import { AuditView } from "@/features/audit/audit-view";
+import { type PageSearchParams, redirectLegacy } from "@/lib/nav/legacy-page";
 import { requireAdmin } from "@/lib/server-guard";
 
 export const dynamic = "force-dynamic";
 
-export default async function Page() {
+/** 旧地址,已并入 /admin/ops?tab=audit(见 src/lib/nav/routes.ts);先守卫,普通账号直接被挡回 */
+export default async function Page({ searchParams }: { searchParams: PageSearchParams }) {
   await requireAdmin();
-  return <AuditView platform />;
+  return redirectLegacy("/admin/audit", searchParams);
 }

@@ -35,6 +35,7 @@ export const AUDIT_ACTIONS = [
   "group.create",
   "group.member_add",
   "group.member_remove",
+  "group.delete",
   "webhook.test",
   "webhook.redeliver",
   "eval.run",
@@ -52,6 +53,9 @@ export const AUDIT_ACTIONS = [
   "billing.order_create",
   "billing.order_cancel",
   "billing.order_confirm",
+  "market.listing_request",
+  "market.listing_approve",
+  "market.listing_reject",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

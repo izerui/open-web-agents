@@ -81,13 +81,13 @@ test.describe("模型提供者管理", () => {
     const modelName = `PW模型-${tag}`;
     const upstream = `pw-upstream-${tag}`;
     try {
-      await page.goto(`${BASE}/admin/providers`);
+      await page.goto(`${BASE}/admin/models`);
       await page.getByRole("button", { name: "添加提供者" }).click();
       await page.getByLabel("名称").fill(providerName);
-      await page.getByLabel("文本接入地址(Anthropic 协议,可稍后填)").fill(gatewayUrl);
-      await page.getByLabel("API Key(可稍后填)").fill("sk-pw-wrong-key-8765");
+      await page.getByLabel("文本接入地址（Anthropic 协议，可稍后填）").fill(gatewayUrl);
+      await page.getByLabel("API Key（可稍后填）").fill("sk-pw-wrong-key-8765");
       await page.getByRole("button", { name: "添加", exact: true }).click();
-      await page.waitForURL(/\/admin\/providers\/p-/);
+      await page.waitForURL(/\/admin\/models\/providers\/p-/);
 
       // 错误 Key:失败原因可见,但 Key 被抹掉
       await page.getByLabel("测试用模型").fill(upstream);
@@ -97,8 +97,10 @@ test.describe("模型提供者管理", () => {
       await expect(failure).toContainText("***");
       await expect(failure).not.toContainText("wrong-key");
 
+      // 已配置的 Key 先点「替换」展开输入框,再提交
+      await page.getByRole("button", { name: "替换", exact: true }).click();
       await page.getByPlaceholder("输入新 Key 以替换").fill(GOOD_KEY);
-      await page.getByRole("button", { name: "替换" }).click();
+      await page.getByRole("button", { name: "替换", exact: true }).click();
       await expect(page.getByText(/\*+4321/)).toBeVisible();
       await page.getByRole("button", { name: "测试连接" }).click();
       await expect(page.getByText("连接成功").last()).toBeVisible();

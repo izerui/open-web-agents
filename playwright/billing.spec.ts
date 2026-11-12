@@ -181,11 +181,11 @@ test.describe("积分与计费界面", () => {
       await page.getByRole("button", { name: row[0]?.email ?? "" }).click();
       const card = page.getByTestId("account-detail");
       const legacy = card.getByTestId("legacy-limit");
-      await expect(legacy).toContainText("旧上限 $5.00 待按积分重新设置");
-      await card.getByLabel("月度上限(积分)").fill("500");
-      await card.getByRole("button", { name: "保存上限" }).click();
+      await expect(legacy).toContainText("旧上限按美元设置（$5.00），还没按积分重设");
+      await card.getByLabel("月度上限（积分）").fill("500");
+      await card.getByRole("button", { name: "保存", exact: true }).click();
       await expect(legacy).toHaveCount(0);
-      await expect(card).toContainText("上限 500.00");
+      await expect(card.getByLabel("月度上限（积分）")).toHaveValue("500");
     } finally {
       if (promoted) await sql("UPDATE users SET role = 'user' WHERE id = ?", [admin.id]);
     }

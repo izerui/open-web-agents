@@ -99,8 +99,10 @@ import {
   formatContext,
   retrieve,
 } from "@/lib/modules/knowledge/domain/retrieval";
+import { MysqlListingRequestRepo } from "@/lib/modules/market/adapters/mysql-listing-request-repo";
 import { MysqlMarketStats } from "@/lib/modules/market/adapters/mysql-market-stats";
 import type { MarketStatsSource } from "@/lib/modules/market/domain/stats";
+import type { ListingRequestRepo } from "@/lib/modules/market/listing-request-ports";
 import { AnthropicHttpProbe } from "@/lib/modules/model-gateway/adapters/anthropic-probe";
 import { EnvModelGateway } from "@/lib/modules/model-gateway/adapters/env-gateway";
 import {
@@ -159,6 +161,8 @@ export interface Container {
   apiKeys: ApiKeyRepo;
   grants: GrantRepo;
   groups: GroupRepo;
+  /** 市场上架申请(A13) */
+  listingRequests: ListingRequestRepo;
   users: UserRepo;
   secrets: SecretBox;
   authService: AuthService;
@@ -696,6 +700,7 @@ function build(): Container {
     apiKeys,
     grants,
     groups: groupRepo,
+    listingRequests: new MysqlListingRequestRepo(db),
     users,
     secrets,
     authService,
