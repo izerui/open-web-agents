@@ -150,7 +150,11 @@ export function evalFixPrompt(
 ): string {
   const parts = [`评测有 ${cases.length} 个评测用例没有通过，请分析原因并修改草稿，让它们通过：`];
   for (const c of cases) {
-    const lines = [`【用例】${c.caseName}`, `【输入】\n${show(c.input)}`, `【断言】${c.assertions}`];
+    const lines = [
+      `【用例】${c.caseName}`,
+      `【输入】\n${show(c.input)}`,
+      `【断言】${c.assertions}`,
+    ];
     const o = c.output;
     if (o) {
       if (o.error) lines.push(`【运行错误】${o.error}`);
@@ -179,4 +183,35 @@ export function trialFeedbackPrompt(run: {
   if (run.error) parts.push(`【错误】\n${run.error.message ?? run.error.kind ?? "未知错误"}\n`);
   parts.push("请分析问题并修改草稿。");
   return parts.join("\n");
+}
+
+const PATH_LABEL: Record<string, string> = {
+  name: "名称",
+  description: "描述",
+  icon: "头像",
+  systemPrompt: "提示词",
+  model: "模型",
+  maxTurns: "最大轮次",
+  effort: "推理强度",
+  tools: "工具白名单",
+  skillPackages: "技能包",
+  mcpServers: "MCP 服务",
+  subagents: "子代理",
+  variables: "变量",
+  inputSchema: "输入契约",
+  outputSchema: "输出契约",
+  permissionMode: "权限模式",
+  approvalRules: "审批规则",
+  unattendedApproval: "无人值守审批",
+  starters: "开场建议",
+  escapeHatch: "逃生舱",
+};
+
+/** 差异路径 → 人能看懂的位置,如「技能包 invoice-ocr，files.SKILL.md」 */
+export function changeLabel(path: string): string {
+  const p = path.replace(/^config\./, "");
+  const m = /^([A-Za-z0-9_]+)(?:\[([^\]]+)\])?(?:\.(.*))?$/.exec(p);
+  if (!m?.[1]) return path;
+  const head = PATH_LABEL[m[1]] ?? m[1];
+  return `${head}${m[2] ? ` ${m[2]}` : ""}${m[3] ? `，${m[3]}` : ""}`;
 }

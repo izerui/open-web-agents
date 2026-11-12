@@ -1,22 +1,21 @@
-import { Builder } from "@/features/builder/builder";
-import { DesignWorkspace } from "@/features/builder/design-workspace";
-import { AccessCenterView } from "@/features/integration/access-center-view";
-import { RunsView } from "@/features/runs/runs-view";
+import { stageFromParam } from "@/features/build/build-model";
+import { BuildPage } from "@/features/build/build-page";
+import { stageOfLegacyTab } from "@/lib/nav/routes";
 import { requireLogin } from "@/lib/server-guard";
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
 /**
- * 构建页。阶段 1 按 ?stage 复用现有视图:接入 → 接入中心(单智能体),运行 → 运行记录(单智能体),
- * 带 ?designer=<设计会话> 时是智能体设计器,其余由 Builder 渲染(它从路径读出智能体)。
- * 阶段 5 这些合成一页的五个阶段。
+ * 构建页:一页五个阶段(?stage=eval|publish|access|runs,默认编排);?designer=<设计会话> 打开指定设计记录。
+ * 旧 Builder 的 ?tab= 分区换成对应阶段(评测、发布各有阶段,其余分区都在编排里)。
  */
 export default async function Page({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ designer?: string; stage?: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   await requireLogin();
   const raw = (await params).id;
@@ -26,9 +25,27 @@ export default async function Page({
   } catch {
     // 已经是解码后的值(含字面 %)时原样使用
   }
-  const { designer, stage } = await searchParams;
-  if (designer) return <DesignWorkspace initialSessionId={designer} />;
-  if (stage === "access") return <AccessCenterView agentId={id} />;
-  if (stage === "runs") return <RunsView agentId={id} />;
-  return <Builder />;
+  const sp = await searchParams;
+  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
+  const tab = one(sp.tab);
+  if (tab !== undefined) {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(sp)) {
+      const s = one(v);
+      if (k !== "tab" && s !== undefined) q.set(k, s);
+    }
+    const stage = stageOfLegacyTab(tab);
+    if (stage) q.set("stage", stage);
+    else if (stage === null) q.delete("stage");
+    const s = q.toString();
+    redirect(`/agents/${encodeURIComponent(id)}${s ? `?${s}` : ""}`);
+  }
+  return (
+    <BuildPage
+      key={id}
+      agentId={id}
+      designerSession={one(sp.designer)}
+      initialStage={stageFromParam(one(sp.stage))}
+    />
+  );
 }

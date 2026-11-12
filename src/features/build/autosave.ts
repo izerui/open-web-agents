@@ -38,12 +38,17 @@ export function autosaveStep(
   switch (e.type) {
     case "edit":
       if (s.phase === "saving") return { state: { ...s, queued: true } };
-      if (e.blocked) return { state: { ...s, phase: "blocked", error: undefined }, effect: "cancel" };
+      if (e.blocked)
+        return { state: { ...s, phase: "blocked", error: undefined }, effect: "cancel" };
       return { state: { ...s, phase: "pending", error: undefined }, effect: "schedule" };
     case "timer":
-      return s.phase === "pending" ? { state: { ...s, phase: "saving" }, effect: "save" } : { state: s };
+      return s.phase === "pending"
+        ? { state: { ...s, phase: "saving" }, effect: "save" }
+        : { state: s };
     case "flush":
-      return s.phase === "pending" ? { state: { ...s, phase: "saving" }, effect: "save" } : { state: s };
+      return s.phase === "pending"
+        ? { state: { ...s, phase: "saving" }, effect: "save" }
+        : { state: s };
     case "saved": {
       const base = { ...s, savedAt: e.at, queued: false, error: undefined };
       if (!s.queued) return { state: { ...base, phase: "idle" } };
@@ -53,6 +58,8 @@ export function autosaveStep(
     case "failed":
       return { state: { ...s, phase: "error", queued: false, error: e.error } };
     case "retry":
-      return s.phase === "error" ? { state: { ...s, phase: "saving" }, effect: "save" } : { state: s };
+      return s.phase === "error"
+        ? { state: { ...s, phase: "saving" }, effect: "save" }
+        : { state: s };
   }
 }

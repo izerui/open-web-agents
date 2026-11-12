@@ -51,12 +51,19 @@ describe("autosaveStep:字段停顿约 800ms 后保存", () => {
   });
 
   it("存完没有新改动就回到空闲并记下时间", () => {
-    const r = run([{ type: "edit", blocked: false }, { type: "timer" }, { type: "saved", at: 9, blocked: false }]);
+    const r = run([
+      { type: "edit", blocked: false },
+      { type: "timer" },
+      { type: "saved", at: 9, blocked: false },
+    ]);
     expect(r.state).toMatchObject({ phase: "idle", savedAt: 9, queued: false });
   });
 
   it("被闸门挡住(名称或提示词为空、Schema 非法……):暂停,不保存;解除后恢复", () => {
-    const r = run([{ type: "edit", blocked: false }, { type: "edit", blocked: true }]);
+    const r = run([
+      { type: "edit", blocked: false },
+      { type: "edit", blocked: true },
+    ]);
     expect(r.state.phase).toBe("blocked");
     expect(r.effects).toEqual(["schedule", "cancel"]);
     expect(run([{ type: "timer" }], r.state).effects).toEqual([]);
@@ -76,7 +83,11 @@ describe("autosaveStep:字段停顿约 800ms 后保存", () => {
   });
 
   it("失败:记下原因,可以重试;再改动也会重新排定", () => {
-    const r = run([{ type: "edit", blocked: false }, { type: "timer" }, { type: "failed", error: "409" }]);
+    const r = run([
+      { type: "edit", blocked: false },
+      { type: "timer" },
+      { type: "failed", error: "409" },
+    ]);
     expect(r.state).toMatchObject({ phase: "error", error: "409" });
     expect(run([{ type: "retry" }], r.state).effects).toEqual(["save"]);
     expect(run([{ type: "edit", blocked: false }], r.state).effects).toEqual(["schedule"]);

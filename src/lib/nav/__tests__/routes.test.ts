@@ -3,11 +3,11 @@ import {
   agentHref,
   agentRoute,
   legacyRedirect,
-  stageOfLegacyTab,
   meMenuItems,
   navFor,
   paletteEntries,
   spaceOf,
+  stageOfLegacyTab,
 } from "../routes";
 
 const go = (path: string, query = "") => legacyRedirect(path, new URLSearchParams(query));

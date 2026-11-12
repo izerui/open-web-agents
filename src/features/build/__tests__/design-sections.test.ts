@@ -1,6 +1,7 @@
 import type { DesignDraft } from "@/lib/modules/agent/domain/design";
 import { describe, expect, it } from "vitest";
 import {
+  changeLabel,
   changedSections,
   evalFixPrompt,
   groupChanges,
@@ -99,7 +100,14 @@ describe("mergeDesignSections:只取设计器提议里的某几节,其余保持�
     expect(m.name).toBe("新名");
   });
   it("changedSections 列出提议与基线不同的节", () => {
-    expect(changedSections(base, proposal)).toEqual(["identity", "prompt", "model", "ability", "contract", "approval"]);
+    expect(changedSections(base, proposal)).toEqual([
+      "identity",
+      "prompt",
+      "model",
+      "ability",
+      "contract",
+      "approval",
+    ]);
     expect(changedSections(base, base)).toEqual([]);
   });
 });
@@ -141,5 +149,18 @@ describe("提示词拼装", () => {
     expect(text).toContain("【输入】\n这张能报吗");
     expect(text).toContain("【输出】\n可以");
     expect(text).toContain("【错误】\n超时");
+  });
+});
+
+describe("changeLabel", () => {
+  it.each([
+    ["name", "名称"],
+    ["config.systemPrompt", "提示词"],
+    ["config.mcpServers[erp]", "MCP 服务 erp"],
+    ["config.skillPackages[invoice-ocr].files.SKILL.md", "技能包 invoice-ocr，files.SKILL.md"],
+    ["config.approvalRules.tools", "审批规则，tools"],
+    ["config.unknownKey", "unknownKey"],
+  ])("%s → %s", (path, label) => {
+    expect(changeLabel(path)).toBe(label);
   });
 });

@@ -54,7 +54,7 @@ interface RunDetail extends RunItem {
   structured?: unknown;
 }
 
-type AgentLite = { id: string; name: string; icon?: string; canRead?: boolean };
+export type AgentLite = { id: string; name: string; icon?: string; canRead?: boolean };
 
 const SOURCE_LABEL: Record<RunItem["source"], string> = {
   web: "工作台",
@@ -140,7 +140,7 @@ function useAgentList(): AgentList {
   return { agents, loaded, error, reload };
 }
 
-type AgentList = {
+export type AgentList = {
   agents: AgentLite[];
   loaded: boolean;
   error: string | null;

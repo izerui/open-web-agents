@@ -5,6 +5,8 @@ import {
   advancedError,
   advancedOf,
   draftFromAgent,
+  idError,
+  newFilePathError,
   orchestrationReady,
   overlayConfig,
   parseSchemaText,
@@ -36,7 +38,13 @@ const full: LoadedAgent = {
       { name: "fs", type: "stdio", command: "npx", args: ["-y", "srv"], env: { TOKEN: "{{T}}" } },
     ],
     subagents: [
-      { name: "fx", description: "换汇时", prompt: "你负责换汇", model: "haiku", background: false },
+      {
+        name: "fx",
+        description: "换汇时",
+        prompt: "你负责换汇",
+        model: "haiku",
+        background: false,
+      },
     ],
     variables: [{ name: "ERP_TOKEN", description: "令牌", required: true, secret: true }],
     inputSchema: { type: "object", properties: { amount: { type: "number" } } },
@@ -76,8 +84,11 @@ describe("draftFromAgent ↔ saveBodyOf:以已加载的完整配置为底,只覆
       approvalPatternsText: "",
       advancedText: "",
     };
-    const c = saveBodyOf(d, { loadedConfig: full.config, canManageWebhook: true, isNew: false })
-      .config;
+    const c = saveBodyOf(d, {
+      loadedConfig: full.config,
+      canManageWebhook: true,
+      isNew: false,
+    }).config;
     expect("effort" in c).toBe(false);
     expect("outputSchema" in c).toBe(false);
     expect("starters" in c).toBe(false);
@@ -116,9 +127,16 @@ describe("draftFromAgent ↔ saveBodyOf:以已加载的完整配置为底,只覆
       ...draftFromAgent(full, uid),
       advancedText: '{ "approvalRules": { "all": true } }',
     };
-    const c = saveBodyOf(d, { loadedConfig: full.config, canManageWebhook: true, isNew: false })
-      .config;
-    expect(c.approvalRules).toEqual({ tools: ["erp.submit"], commandPatterns: ["rm -rf"], all: true });
+    const c = saveBodyOf(d, {
+      loadedConfig: full.config,
+      canManageWebhook: true,
+      isNew: false,
+    }).config;
+    expect(c.approvalRules).toEqual({
+      tools: ["erp.submit"],
+      commandPatterns: ["rm -rf"],
+      all: true,
+    });
   });
 });
 
@@ -227,5 +245,31 @@ describe("九节的摘要与是否已填", () => {
   it("编排完整 = 名称与提示词非空", () => {
     expect(orchestrationReady(d)).toBe(true);
     expect(orchestrationReady({ ...d, systemPrompt: " " })).toBe(false);
+  });
+});
+
+describe("技能包附属文件路径校验", () => {
+  const files = { "SKILL.md": "x", "templates/a.json": "" };
+  it.each([
+    ["", "路径不能为空"],
+    ["SKILL.md", "不能和 SKILL.md 重名"],
+    ["templates/a.json", "已有同名文件"],
+    ["../shared/x.json", "不能包含 .."],
+    ["/etc/x", "不能用绝对路径"],
+    ["a b.md", "只允许字母、数字、._- 和 /"],
+    ["scripts/run.py", null],
+  ])("%s", (p, err) => {
+    expect(newFilePathError(p, files)).toBe(err);
+  });
+  it("和已有文件路径冲突", () => {
+    expect(newFilePathError("templates", files)).not.toBeNull();
+  });
+});
+
+describe("idError", () => {
+  it("与新建弹层同一条规则", () => {
+    expect(idError("", [])).toBe("");
+    expect(idError("Bad", [])).toContain("小写字母");
+    expect(idError("ok-id", ["ok-id"])).toBe("ID 已被占用");
   });
 });

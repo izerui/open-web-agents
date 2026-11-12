@@ -2,6 +2,7 @@
 // 组件只负责摆放;这里的判断都有单测(src/features/build/__tests__/profile-model.test.ts)。
 
 import { PERMISSION_MODES, type PermissionMode } from "@/lib/shared";
+import { findPathConflict, isSafeSkillPath } from "@/lib/shared/skill-package";
 
 export type SectionKey =
   | "identity"
@@ -577,10 +578,7 @@ export function sectionFilled(k: SectionKey, d: ProfileDraft, ctx: SectionContex
       return ctx.exists;
     case "ability":
       return Boolean(
-        d.toolsText.trim() ||
-          d.skillPackages.length ||
-          d.mcpServers.length ||
-          d.subagents.length,
+        d.toolsText.trim() || d.skillPackages.length || d.mcpServers.length || d.subagents.length,
       );
     case "knowledge":
       return ctx.knowledge.count > 0;
@@ -606,7 +604,9 @@ export function sectionSummary(k: SectionKey, d: ProfileDraft, ctx: SectionConte
         .split("\n")
         .filter((l) => /^\s*\d+[.、]/.test(l))
         .map((l) => l.replace(/^\s*\d+[.、]\s*/, "").trim());
-      return rules.length ? rules.join("；") : d.systemPrompt.replace(/\s+/g, " ").trim().slice(0, 80);
+      return rules.length
+        ? rules.join("；")
+        : d.systemPrompt.replace(/\s+/g, " ").trim().slice(0, 80);
     }
     case "model": {
       const effort = EFFORTS.find(([v]) => v === d.effort)?.[1] ?? "跟随模型默认";
@@ -641,7 +641,9 @@ export function sectionSummary(k: SectionKey, d: ProfileDraft, ctx: SectionConte
 /** 开场建议的条数提示 */
 export function startersHint(text: string): { text: string; over: boolean } {
   const n = lines(text).length;
-  return n > 4 ? { text: `共 ${n} 条，只取前 4 条`, over: true } : { text: `${n}/4 条`, over: false };
+  return n > 4
+    ? { text: `共 ${n} 条，只取前 4 条`, over: true }
+    : { text: `${n}/4 条`, over: false };
 }
 
 /** 新建技能包/MCP/子代理/变量的空行 */
@@ -677,3 +679,15 @@ export const newVariable = (uid: string): VariableDraft => ({
 
 /** 变量名自动转大写,只保留 A-Z0-9_ */
 export const normalizeVarName = (s: string) => s.replace(/[^A-Za-z0-9_]/g, "").toUpperCase();
+
+/** 新文件路径的错误;合法返回 null */
+export function newFilePathError(path: string, files: Record<string, string>): string | null {
+  const p = path.trim();
+  if (!p) return "路径不能为空";
+  if (p === "SKILL.md") return "不能和 SKILL.md 重名";
+  if (p in files) return "已有同名文件";
+  if (p.split("/").includes("..")) return "不能包含 ..";
+  if (p.startsWith("/")) return "不能用绝对路径";
+  if (!isSafeSkillPath(p)) return "只允许字母、数字、._- 和 /";
+  return findPathConflict([...Object.keys(files), p]);
+}

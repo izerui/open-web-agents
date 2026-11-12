@@ -1138,6 +1138,7 @@ export function ChatThread({
   selectedToolLocator,
   readOnly,
   awaitingTools,
+  renderTurnExtra,
 }: {
   turns: Turn[];
   onRerunAction?: (runId: string, prompt: string) => void;
@@ -1156,6 +1157,8 @@ export function ChatThread({
   readOnly?: boolean;
   /** 正在等你确认的工具名(对应的调用标「等你确认」) */
   awaitingTools?: readonly string[];
+  /** 每一轮下方追加的内容(构建页试聊:耗时与「存为评测用例」) */
+  renderTurnExtra?: (turn: Turn, index: number) => React.ReactNode;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollMode, setScrollMode] = useState<ScrollMode>("following");
@@ -1336,6 +1339,7 @@ export function ChatThread({
                     readOnly={readOnly}
                     awaitingTools={awaitingTools}
                   />
+                  {renderTurnExtra?.(turn, virtualRow.index)}
                 </div>
               </div>
             );
