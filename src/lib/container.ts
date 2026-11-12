@@ -99,6 +99,8 @@ import {
   formatContext,
   retrieve,
 } from "@/lib/modules/knowledge/domain/retrieval";
+import { MysqlMarketStats } from "@/lib/modules/market/adapters/mysql-market-stats";
+import type { MarketStatsSource } from "@/lib/modules/market/domain/stats";
 import { AnthropicHttpProbe } from "@/lib/modules/model-gateway/adapters/anthropic-probe";
 import { EnvModelGateway } from "@/lib/modules/model-gateway/adapters/env-gateway";
 import {
@@ -166,6 +168,8 @@ export interface Container {
   runQuery: MysqlRunQuery;
   /** 工作室列表:近 N 天运行数与更新时间(一条聚合查询) */
   agentActivity: AgentActivityQuery;
+  /** 市场卡片的作者、使用次数与每次约花费(批量聚合,进程内短缓存)。 */
+  marketStats: MarketStatsSource;
   usage: MysqlUsageRepo;
   knowledge: MysqlKnowledgeRepo;
   /**
@@ -699,6 +703,7 @@ function build(): Container {
     runs,
     runQuery: new MysqlRunQuery(db),
     agentActivity: new MysqlAgentActivity(db),
+    marketStats: new MysqlMarketStats(db),
     usage,
     knowledge,
     searchKnowledge,

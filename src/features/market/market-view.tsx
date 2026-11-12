@@ -161,7 +161,7 @@ export function MarketView({ manageOnly = false }: { manageOnly?: boolean }) {
               {managing ? (
                 <ListingControls item={item} onSaved={reload} />
               ) : (
-                <MarketActions agentId={item.id} />
+                <MarketActions agentId={item.id} name={item.name} version={item.publishedVersion} />
               )}
             </li>
           ))}
