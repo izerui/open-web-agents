@@ -43,6 +43,15 @@ type ManagedAgent = MarketAgent & {
   pendingRequestId?: string;
 };
 
+/** 还没发布的智能体:列出来但不能上架 */
+type UnpublishedAgent = {
+  id: string;
+  name: string;
+  icon?: string;
+  ownerEmail?: string;
+  isPublic: boolean;
+};
+
 type RequestRow = ListingRequest & {
   agentName: string;
   agentIcon?: string;
@@ -51,6 +60,9 @@ type RequestRow = ListingRequest & {
   ownerEmail?: string;
   publishedVersion?: number;
   marketListed: boolean;
+  isPublic?: boolean;
+  /** 智能体当前的市场类别;没有为 null */
+  agentCategory?: string | null;
   deleted: boolean;
   evalState?: string;
   evalPassed?: number;
@@ -115,6 +127,7 @@ function evalBadge(r: RequestRow) {
 export function MarketAdmin() {
   const [tab, setTab] = useTabParam<Tab>(TABS, "agents");
   const [items, setItems] = useState<ManagedAgent[]>([]);
+  const [unpublished, setUnpublished] = useState<UnpublishedAgent[]>([]);
   const [loading, setLoading] = useState(true);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
@@ -123,8 +136,11 @@ export function MarketAdmin() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const d = await fetchJson<{ items: ManagedAgent[] }>("/api/admin/market/agents");
+      const d = await fetchJson<{ items: ManagedAgent[]; unpublished?: UnpublishedAgent[] }>(
+        "/api/admin/market/agents",
+      );
       setItems(d.items);
+      setUnpublished(d.unpublished ?? []);
       setPendingCount(d.items.filter((i) => i.pendingRequestId).length);
       setError("");
       setLoaded(true);
@@ -170,7 +186,14 @@ export function MarketAdmin() {
       }
     >
       {tab === "agents" ? (
-        <AgentsTab items={items} loading={loading} loaded={loaded} error={error} reload={load} />
+        <AgentsTab
+          items={items}
+          unpublished={unpublished}
+          loading={loading}
+          loaded={loaded}
+          error={error}
+          reload={load}
+        />
       ) : (
         <RequestsTab onChanged={load} />
       )}
@@ -180,12 +203,14 @@ export function MarketAdmin() {
 
 function AgentsTab({
   items,
+  unpublished,
   loading,
   loaded,
   error,
   reload,
 }: {
   items: ManagedAgent[];
+  unpublished: UnpublishedAgent[];
   loading: boolean;
   loaded: boolean;
   error: string;
@@ -231,6 +256,14 @@ function AgentsTab({
       (listed === "all" || (listed === "listed") === i.marketListed) &&
       (!category || i.category === category),
   );
+  // 未发布的只在「全部 / 未上架」且不按类别筛时列出(它们还没有类别)
+  const drafts =
+    listed === "listed" || category
+      ? []
+      : unpublished.filter(
+          (i) =>
+            !term || `${i.name}\n${i.id}\n${i.ownerEmail ?? ""}`.toLocaleLowerCase().includes(term),
+        );
 
   return (
     <>
@@ -277,7 +310,9 @@ function AgentsTab({
           <RefreshCw className={cn(loading && "animate-spin")} />
           刷新
         </Button>
-        <span className="ml-auto text-xs text-muted-foreground">显示 {visible.length} 个</span>
+        <span className="ml-auto text-xs text-muted-foreground">
+          显示 {visible.length + drafts.length} 个
+        </span>
       </div>
       <TableCard>
         {error && !loaded ? (
@@ -287,7 +322,7 @@ function AgentsTab({
             <Spinner className="size-4" />
             正在加载…
           </div>
-        ) : items.length === 0 ? (
+        ) : items.length === 0 && drafts.length === 0 ? (
           <EmptyState
             title="还没有已发布的智能体"
             action={
@@ -298,7 +333,7 @@ function AgentsTab({
           >
             智能体发布后才能上架到市场。
           </EmptyState>
-        ) : visible.length === 0 ? (
+        ) : visible.length === 0 && drafts.length === 0 ? (
           <EmptyState
             title="没有符合条件的智能体"
             action={
@@ -424,6 +459,40 @@ function AgentsTab({
                   </td>
                 </tr>
               ))}
+              {drafts.map((item) => (
+                <tr key={item.id} className="text-muted-foreground">
+                  <td className={TD}>
+                    <div className="flex items-center gap-2.5">
+                      <AgentAvatar id={item.id} icon={item.icon} size={30} />
+                      <div className="min-w-0">
+                        <div className="font-semibold break-words text-foreground">{item.name}</div>
+                        <div className="font-mono text-xs break-all">{item.id}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className={cn(TD, "break-all")}>{item.ownerEmail ?? "—"}</td>
+                  <td className={TD}>未发布</td>
+                  <td className={TD}>
+                    {item.isPublic ? (
+                      <Badge variant="outline">已公开</Badge>
+                    ) : (
+                      <span className="text-xs">仅授权可见</span>
+                    )}
+                  </td>
+                  <td className={TD}>—</td>
+                  <td className={TD}>
+                    <Badge variant="warning">未发布</Badge>
+                  </td>
+                  <td className={cn(TD, "text-right")}>
+                    <span className="inline-flex flex-col items-end gap-1">
+                      <Button size="sm" disabled title="先发布才能上架">
+                        上架
+                      </Button>
+                      <span className="text-xs">先发布才能上架</span>
+                    </span>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         )}
@@ -440,6 +509,8 @@ function RequestsTab({ onChanged }: { onChanged: () => Promise<void> }) {
   const [categories, setCategories] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<RequestRow | null>(null);
+  /** 审核时预览上架后的详情页(还没上架,市场详情页打不开) */
+  const [previewing, setPreviewing] = useState<RequestRow | null>(null);
   const confirm = useConfirm();
 
   const load = useCallback(async () => {
@@ -515,7 +586,7 @@ function RequestsTab({ onChanged }: { onChanged: () => Promise<void> }) {
         ) : (
           <ul>
             {rows.map((r) => {
-              const category = categories[r.id] ?? "general";
+              const category = categories[r.id] ?? r.agentCategory ?? "general";
               return (
                 <li
                   key={r.id}
@@ -545,13 +616,17 @@ function RequestsTab({ onChanged }: { onChanged: () => Promise<void> }) {
                       <p className="mt-2.5 text-sm text-muted-foreground">没有填写申请说明。</p>
                     )}
                     <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                      <Badge variant="outline">
+                        类别：{r.agentCategory ? categoryName(r.agentCategory) : "未选"}
+                      </Badge>
+                      <Badge variant="outline">{r.isPublic ? "已公开" : "未公开"}</Badge>
                       {r.publishedVersion !== undefined && r.publishedVersion !== r.version && (
                         <Badge variant="outline">当前发布版已是 v{r.publishedVersion}</Badge>
                       )}
                       {r.marketListed && <Badge variant="success">已在市场上</Badge>}
                       {r.deleted && <Badge variant="destructive">智能体已删除</Badge>}
                       {evalBadge(r)}
-                      {r.marketListed && (
+                      {r.marketListed ? (
                         <Link
                           href={`/market/${encodeURIComponent(r.agentId)}`}
                           target="_blank"
@@ -559,6 +634,16 @@ function RequestsTab({ onChanged }: { onChanged: () => Promise<void> }) {
                         >
                           预览详情页
                         </Link>
+                      ) : (
+                        !r.deleted && (
+                          <button
+                            type="button"
+                            className="ml-1 min-h-8 text-xs underline underline-offset-2"
+                            onClick={() => setPreviewing(r)}
+                          >
+                            预览详情页
+                          </button>
+                        )
                       )}
                     </div>
                   </div>
@@ -640,6 +725,13 @@ function RequestsTab({ onChanged }: { onChanged: () => Promise<void> }) {
           </ul>
         )}
       </div>
+      {previewing && (
+        <PreviewDialog
+          row={previewing}
+          category={categories[previewing.id] ?? previewing.agentCategory ?? "general"}
+          onClose={() => setPreviewing(null)}
+        />
+      )}
       {rejecting && (
         <RejectDialog
           row={rejecting}
@@ -649,6 +741,53 @@ function RequestsTab({ onChanged }: { onChanged: () => Promise<void> }) {
         />
       )}
     </>
+  );
+}
+
+/** 上架申请的详情页预览:按市场详情页的头部信息展示申请的发布版本,审核时就能看到用户会看到什么 */
+function PreviewDialog({
+  row,
+  category,
+  onClose,
+}: {
+  row: RequestRow;
+  category: string;
+  onClose: () => void;
+}) {
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle>预览详情页</DialogTitle>
+          <DialogDescription>
+            通过后，探索页和市场详情页会这样展示「{row.agentName}」（发布版 v{row.version}）。
+          </DialogDescription>
+        </DialogHeader>
+        <div className="rounded-2xl border border-border p-5">
+          <div className="flex items-center gap-3">
+            <AgentAvatar id={row.agentId} icon={row.agentIcon} size={52} />
+            <div className="min-w-0">
+              <div className="font-display text-xl font-semibold break-words">{row.agentName}</div>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                <Badge variant="outline">{categoryName(category)}</Badge>
+                <Badge variant="outline">v{row.version}</Badge>
+                {row.ownerEmail && (
+                  <span className="text-xs text-muted-foreground">{row.ownerEmail}</span>
+                )}
+              </div>
+            </div>
+          </div>
+          <p className="mt-4 text-sm break-words whitespace-pre-wrap">
+            {row.agentDescription || <span className="text-muted-foreground">没有填写简介。</span>}
+          </p>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            关闭
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

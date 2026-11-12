@@ -22,7 +22,6 @@ import {
   STANDARD_METERS,
   deriveSaleRates,
   formatMarkupPercent,
-  markupMarginWarning,
   parseMarkupPercent,
   parseYuan,
 } from "@/lib/modules/capabilities/domain/pricing";
@@ -34,6 +33,7 @@ import {
   type Impact,
   KIND_LABEL,
   creditsText,
+  markupHint,
   perStandard,
   yuanText,
 } from "./model-shared";
@@ -80,6 +80,14 @@ export function ModelDialog({ providerId, kind, model, onClose, onSaved }: Props
   );
   const [impact, setImpact] = useState<Impact | null>(null);
   const [error, setError] = useState("");
+  /** 没过校验的那一栏:红框,红字写在它下面 */
+  const [errField, setErrField] = useState<string | null>(null);
+  const fail = (field: string, text: string) => {
+    setErrField(field);
+    setError(text);
+  };
+  const fieldError = (field: string) =>
+    errField === field && error ? <span className="text-xs text-destructive">{error}</span> : null;
   const [saving, setSaving] = useState(false);
 
   // 停用已启用的模型前先看影响面
@@ -96,6 +104,7 @@ export function ModelDialog({ providerId, kind, model, onClose, onSaved }: Props
   }, [disabling, model]);
 
   const markupBp = parseOr(() => parseMarkupPercent(markup.trim()));
+  const hint = markupHint(markup);
   const preview = meters.map((m) => {
     const cost = parseOr(() => parseYuan((costs[m.meter] ?? "").trim()));
     const sale =
@@ -108,15 +117,17 @@ export function ModelDialog({ providerId, kind, model, onClose, onSaved }: Props
 
   async function save() {
     setError("");
-    if (!name.trim()) return setError("请填写显示名称");
-    if (!modelId.trim()) return setError("请填写模型标识");
-    if (markupBp === null) return setError("加价比例须为非负数,最多 2 位小数,不超过 1000%");
+    setErrField(null);
+    if (!name.trim()) return fail("name", "请填写显示名称");
+    if (!modelId.trim()) return fail("modelId", "请填写模型标识");
+    if (markupBp === null) return fail("markup", "加价比例须为非负数，最多 2 位小数，不超过 1000%");
     const reserveMicro = reserve.trim() ? parseOr(() => parseCredits(reserve.trim())) : null;
     if (kind === "llm" && reserve.trim() && (reserveMicro === null || reserveMicro === "0")) {
-      return setError("单次运行冻结须为大于零的积分数(最多六位小数),留空用平台默认");
+      return fail("reserve", "单次运行冻结须为大于零的积分数（最多六位小数），留空用平台默认");
     }
     const missing = preview.find((p) => p.cost === null);
-    if (missing) return setError(`请填写「${missing.label}」的成本单价(元,最多 8 位小数)`);
+    if (missing)
+      return fail(missing.meter, `请填写「${missing.label}」的成本单价（元，最多 8 位小数）`);
     setSaving(true);
     try {
       await fetchJson("/api/admin/models", {
@@ -171,9 +182,11 @@ export function ModelDialog({ providerId, kind, model, onClose, onSaved }: Props
             <Input
               value={name}
               maxLength={120}
+              aria-invalid={errField === "name" || undefined}
               onChange={(e) => setName(e.target.value)}
               placeholder="如 Claude Sonnet 4.5"
             />
+            {fieldError("name")}
           </label>
           <label className="grid gap-1.5 text-sm">
             模型标识
@@ -181,13 +194,26 @@ export function ModelDialog({ providerId, kind, model, onClose, onSaved }: Props
               value={modelId}
               maxLength={200}
               className="font-mono"
+              aria-invalid={errField === "modelId" || undefined}
               onChange={(e) => setModelId(e.target.value)}
               placeholder="发给提供者的真实模型 id"
             />
+            {fieldError("modelId")}
           </label>
           <label className="grid gap-1.5 text-sm">
-            加价比例(%)
-            <Input value={markup} inputMode="decimal" onChange={(e) => setMarkup(e.target.value)} />
+            加价比例（%，不超过 1000%）
+            <Input
+              value={markup}
+              inputMode="decimal"
+              aria-invalid={hint?.tone === "bad" || undefined}
+              aria-describedby="model-markup-hint"
+              onChange={(e) => setMarkup(e.target.value)}
+            />
+            {hint?.tone === "bad" && (
+              <span id="model-markup-hint" aria-live="polite" className="text-xs text-destructive">
+                {hint.text}
+              </span>
+            )}
           </label>
           {kind === "llm" && (
             <label className="grid gap-1.5 text-sm">
@@ -196,8 +222,10 @@ export function ModelDialog({ providerId, kind, model, onClose, onSaved }: Props
                 value={reserve}
                 inputMode="decimal"
                 placeholder={`留空用平台默认 ${formatCredits(DEFAULT_RESERVE_MICRO.toString())}`}
+                aria-invalid={errField === "reserve" || undefined}
                 onChange={(e) => setReserve(e.target.value)}
               />
+              {fieldError("reserve")}
               <span className="text-xs text-muted-foreground">
                 每次运行发起先冻结这么多,用到八成自动追加;结束按实际用量扣除。
               </span>
@@ -227,10 +255,10 @@ export function ModelDialog({ providerId, kind, model, onClose, onSaved }: Props
           </div>
         </div>
 
-        {markupBp !== null && markupMarginWarning(markupBp) && (
+        {hint?.tone === "warn" && (
           <p className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
-            加价比例不高于充值赠送比例时,可能没有成本余量或低于成本。
+            {hint.text}
           </p>
         )}
 
@@ -263,6 +291,7 @@ export function ModelDialog({ providerId, kind, model, onClose, onSaved }: Props
                       value={costs[p.meter] ?? ""}
                       inputMode="decimal"
                       className="h-8 w-36 font-mono"
+                      aria-invalid={errField === p.meter || undefined}
                       onChange={(e) => setCosts((c) => ({ ...c, [p.meter]: e.target.value }))}
                       placeholder="0"
                     />
@@ -291,7 +320,7 @@ export function ModelDialog({ providerId, kind, model, onClose, onSaved }: Props
           </p>
         )}
 
-        {error && (
+        {error && !["name", "modelId", "markup", "reserve"].includes(errField ?? "") && (
           <p aria-live="assertive" className="text-sm text-destructive">
             {error}
           </p>

@@ -4,6 +4,7 @@ import {
   chargeStatus,
   ledgerKind,
   monthShare,
+  orderStats,
   shareOf,
   sortByCredits,
 } from "../billing-display";
@@ -125,5 +126,43 @@ describe("sortByCredits:积分包按积分数从少到多", () => {
       { id: "d", creditsMicro: "32400000000" },
     ];
     expect(sortByCredits(list).map((p) => p.id)).toEqual(["a", "c", "b", "d"]);
+  });
+});
+
+describe("orderStats:订单页签顶部四张统计卡", () => {
+  const NOW = new Date(2026, 10, 13, 12).getTime();
+  const lastMonth = new Date(2026, 9, 30).getTime();
+  const o = (
+    status: string,
+    creditsMicro: string,
+    priceMinor: string,
+    currency: string,
+    creditedAt?: number,
+  ) => ({
+    status: status as "pending" | "credited" | "cancelled",
+    creditsMicro,
+    priceMinor,
+    currency: currency as "CNY" | "USD",
+    creditedAt,
+  });
+  it("待处理数、本月已发放积分、本月按币种的收款(只算本月确认的)", () => {
+    const s = orderStats(
+      [
+        o("pending", "1000000000", "1000", "CNY"),
+        o("pending", "1000000000", "1000", "CNY"),
+        o("credited", "5000000000", "4800", "CNY", NOW - 1000),
+        o("credited", "20000000000", "18000", "CNY", NOW - 2000),
+        o("credited", "1000000000", "1500", "USD", NOW - 3000),
+        o("credited", "9000000000", "9000", "CNY", lastMonth),
+        o("cancelled", "1000000000", "1000", "CNY"),
+      ],
+      NOW,
+    );
+    expect(s).toEqual({
+      pending: 2,
+      creditedMicro: "26000000000",
+      cnyMinor: "22800",
+      usdMinor: "1500",
+    });
   });
 });

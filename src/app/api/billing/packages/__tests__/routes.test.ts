@@ -8,6 +8,7 @@ const state = vi.hoisted(() => ({
   admin: false,
   apiKey: false,
   authenticated: true,
+  audits: [] as Record<string, unknown>[],
 }));
 let billing = new InMemoryBillingRepo();
 let packages = new InMemoryPackageRepo(billing);
@@ -16,7 +17,9 @@ vi.mock("@/lib/container", () => ({
     billing,
     packages,
     audit: {
-      record: vi.fn(async () => {}),
+      record: async (e: Record<string, unknown>) => {
+        state.audits.push(e);
+      },
     },
     users: {
       get: async (id: string) =>
@@ -78,6 +81,7 @@ describe("package order HTTP contracts", () => {
     state.userId = "alice";
     state.admin = false;
     state.apiKey = false;
+    state.audits = [];
     state.authenticated = true;
     await packages.save(definition, null, "staff");
   });
@@ -150,5 +154,37 @@ describe("package order HTTP contracts", () => {
     expect((await billing.ledger("alice")).items).toHaveLength(1);
     state.admin = false;
     expect((await action(id, { action: "cancel" })).status).toBe(409);
+  });
+  it("管理员可以取消别人待处理的订单:必须写原因,记审计到订单所属账号;已发放的不能取消", async () => {
+    const id = (await (await order()).json()).order.id;
+    state.userId = "root";
+    // 普通用户不能借这个动作取消别人的订单
+    expect((await action(id, { action: "admin_cancel", reason: "重复下单" })).status).toBe(403);
+    state.admin = true;
+    expect((await action(id, { action: "admin_cancel" })).status).toBe(400);
+    expect((await action("missing-order", { action: "admin_cancel", reason: "x" })).status).toBe(
+      404,
+    );
+    state.audits = [];
+    const res = await action(id, { action: "admin_cancel", reason: "重复下单" });
+    expect(res.status).toBe(200);
+    expect((await res.json()).order).toMatchObject({ id, status: "cancelled", accountId: "alice" });
+    expect(state.audits).toEqual([
+      expect.objectContaining({
+        action: "billing.order_cancel",
+        resource: { type: "order", id },
+        ownerId: "alice",
+        details: { by: "admin", reason: "重复下单" },
+      }),
+    ]);
+    // 已发放的订单不能取消
+    state.userId = "alice";
+    state.admin = false;
+    const paid = await order("order-3");
+    const paidId = (await paid.json()).order.id;
+    state.userId = "root";
+    state.admin = true;
+    await action(paidId, { action: "confirm", reason: "已收款" });
+    expect((await action(paidId, { action: "admin_cancel", reason: "x" })).status).toBe(409);
   });
 });

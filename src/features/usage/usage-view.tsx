@@ -382,7 +382,7 @@ function ByDay({ buckets, days }: { buckets: UsageBucket[]; days: number }) {
               >
                 {/* 悬停或聚焦立即出现的提示(原生 title 要停一会儿才出) */}
                 <span
-                  role="tooltip"
+                  aria-hidden
                   className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden -translate-x-1/2 whitespace-nowrap rounded-lg bg-[#1F1E1C] px-2.5 py-1.5 text-xs text-[#F2EFE7] shadow-md group-hover:block group-focus-visible:block"
                 >
                   {d.key.slice(5)}：{d.runs} 次{d.failed > 0 ? `，失败 ${d.failed}` : ""}

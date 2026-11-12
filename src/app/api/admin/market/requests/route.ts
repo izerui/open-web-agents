@@ -39,6 +39,12 @@ async function enrich(ctx: Ctx, list: ListingRequest[]) {
     ),
   );
   const published = await ctx.releases.publishedOf([...agents.values()]);
+  // 公开(所有账号只读可见)与否:审核时要看,不必再跳到智能体列表查
+  const publicIds = new Set(
+    (await ctx.grants.listForType("agent"))
+      .filter((g) => g.principalType === "*")
+      .map((g) => g.resourceId),
+  );
   return Promise.all(
     list.map(async (r) => {
       const agent = agents.get(r.agentId);
@@ -68,6 +74,9 @@ async function enrich(ctx: Ctx, list: ListingRequest[]) {
         ownerEmail: agent ? await emailOf(agent.ownerId) : undefined,
         publishedVersion: agent?.publishedVersion,
         marketListed: agent?.marketListed === true,
+        isPublic: publicIds.has(r.agentId),
+        /** 智能体当前的市场类别(申请本身不带类别);没有为 null */
+        agentCategory: agent?.marketCategory ?? null,
         deleted: !agent,
         evalState,
         evalPassed,

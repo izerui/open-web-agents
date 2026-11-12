@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { llmPriceExample } from "../model-shared";
+import { llmPriceExample, markupHint } from "../model-shared";
 
 const M = 1_000_000;
 
@@ -27,5 +27,25 @@ describe("llmPriceExample:价目表下面的算价举例", () => {
     expect(
       llmPriceExample("m", [{ meter: "input_token", units: "1000000", microCredits: "1" }]),
     ).toBeNull();
+  });
+});
+
+describe("markupHint:加价比例的实时提示", () => {
+  it("超过 1000% 实时报错,不等点保存", () => {
+    expect(markupHint("1500")).toEqual({ tone: "bad", text: "加价比例不能超过 1000%" });
+  });
+  it("格式不对也实时报错", () => {
+    expect(markupHint("abc")?.tone).toBe("bad");
+    expect(markupHint("1.234")?.tone).toBe("bad");
+  });
+  it("不高于充值赠送比例时警告,写明具体比例", () => {
+    expect(markupHint("5")).toEqual({
+      tone: "warn",
+      text: "加价 5% 不高于充值赠送比例（最高 8%）：用户用赠送积分调用这个模型时，平台可能没有成本余量甚至亏本。",
+    });
+  });
+  it("正常范围没有提示", () => {
+    expect(markupHint("10")).toBeNull();
+    expect(markupHint("1000")).toBeNull();
   });
 });

@@ -3,6 +3,13 @@ import { asModelAdmin, jsonBody } from "../_lib/model-admin-route";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/** 每个别名有几个智能体在用(草稿或当前发布版本);保存默认路由前给管理员看影响面。 */
+export async function GET(req: Request) {
+  return asModelAdmin(req, async ({ c }) =>
+    Response.json({ usage: await c.modelAdmin.aliasUsage() }),
+  );
+}
+
 /** 别名 fable/opus/sonnet/haiku → 同一提供者下已启用的文本模型。 */
 export async function PUT(req: Request) {
   return asModelAdmin(req, async ({ c, principal, actorId }) => {

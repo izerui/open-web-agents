@@ -40,6 +40,26 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         });
       return Response.json({ ...result, paymentMode: "manual" });
     }
+    if (body?.action === "admin_cancel") {
+      // 管理员取消别人待处理的订单(重复下单、线下没收到款等):必须写原因,审计记到订单所属账号。
+      // 仍走仓储的 cancelOrder(按订单所属账号),与人工确认在同一把行锁里互斥 —— 已发放的不能取消
+      auth.assertCanAdministerPlatform(principal);
+      if (typeof body.reason !== "string" || !body.reason.trim() || body.reason.length > 200) {
+        return Response.json({ error: "请填写 1~200 字的取消原因" }, { status: 400 });
+      }
+      const existing = await packages.getOrder(id);
+      if (!existing) return Response.json({ error: "订单不存在" }, { status: 404 });
+      const order = await packages.cancelOrder(id, existing.accountId);
+      await audit.record({
+        actor: principal,
+        action: "billing.order_cancel",
+        resource: { type: "order", id },
+        ownerId: existing.accountId,
+        details: { by: "admin", reason: body.reason.trim() },
+        req,
+      });
+      return Response.json({ order });
+    }
     if (body?.action === "cancel") {
       const order = await packages.cancelOrder(id, principal.userId);
       await audit.record({

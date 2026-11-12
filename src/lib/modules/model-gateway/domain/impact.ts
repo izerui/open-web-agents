@@ -37,3 +37,12 @@ export function countImpact(
     aliases: aliases ? MODEL_ALIASES.filter((a) => hits(aliases[a])) : [],
   };
 }
+
+/** 默认路由:每个别名被多少个智能体(草稿或当前发布版本)引用。改别名映射前给管理员看影响面 */
+export function countAliasUsage(rows: AgentModelRefsRow[]): Record<ModelAlias, number> {
+  const out = Object.fromEntries(MODEL_ALIASES.map((a) => [a, 0])) as Record<ModelAlias, number>;
+  for (const row of rows) {
+    for (const alias of new Set(row.refs.filter(isModelAlias))) out[alias] += 1;
+  }
+  return out;
+}

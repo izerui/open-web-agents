@@ -104,3 +104,34 @@ export function sortByCredits<T extends { id: string; creditsMicro: string }>(li
     return d === 0n ? a.id.localeCompare(b.id) : d < 0n ? -1 : 1;
   });
 }
+
+/** 管理端订单页签的统计卡:待处理数,以及本月(本地时区)确认的订单发放的积分和按币种的收款 */
+export function orderStats(
+  orders: {
+    status: "pending" | "credited" | "cancelled";
+    creditsMicro: string;
+    priceMinor: string;
+    currency: "CNY" | "USD";
+    creditedAt?: number;
+  }[],
+  now: number,
+): { pending: number; creditedMicro: string; cnyMinor: string; usdMinor: string } {
+  const d = new Date(now);
+  const monthStart = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+  let credited = 0n;
+  const paid = { CNY: 0n, USD: 0n };
+  let pending = 0;
+  for (const o of orders) {
+    if (o.status === "pending") pending++;
+    if (o.status === "credited" && (o.creditedAt ?? 0) >= monthStart) {
+      credited += BigInt(o.creditsMicro);
+      paid[o.currency] += BigInt(o.priceMinor);
+    }
+  }
+  return {
+    pending,
+    creditedMicro: credited.toString(),
+    cnyMinor: paid.CNY.toString(),
+    usdMinor: paid.USD.toString(),
+  };
+}

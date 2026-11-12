@@ -259,4 +259,39 @@ describe("管理端:申请队列与审核", () => {
       pendingRequestId: r.id,
     });
   });
+
+  it("管理列表另附未发布的智能体(界面列出并禁用上架),不含已发布的", async () => {
+    await container.agents.upsert({
+      ...publishedAgent,
+      id: "draft-only",
+      name: "草稿助手",
+      publishedVersion: undefined,
+    });
+    const res = await manageAgents(request("/api/admin/market/agents", "admin"));
+    const { unpublished } = await res.json();
+    expect(unpublished).toEqual([
+      expect.objectContaining({
+        id: "draft-only",
+        name: "草稿助手",
+        ownerEmail: "owner@example.test",
+        isPublic: false,
+      }),
+    ]);
+  });
+
+  it("申请队列带「是否公开」和智能体当前类别,审核时不必跳页", async () => {
+    await pending();
+    await container.grants.grant({
+      id: "pub",
+      resourceType: "agent",
+      resourceId: publishedAgent.id,
+      principalType: "*",
+      principalId: "*",
+      permission: "read",
+    });
+    const res = await queue(request("/api/admin/market/requests?status=pending", "admin"));
+    const { requests } = await res.json();
+    expect(requests[0]).toMatchObject({ isPublic: true });
+    expect(requests[0]).toHaveProperty("agentCategory");
+  });
 });
