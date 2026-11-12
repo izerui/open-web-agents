@@ -65,7 +65,7 @@ export function BillingView({
   const [adminView, setAdminView] = useState<AdminView>(initialAdminView);
   const [visitedAdmin, setVisitedAdmin] = useState<AdminView[]>([initialAdminView]);
   const [accountView, setAccountView] = useState<AccountView>("overview");
-  const [visitedAccount, setVisitedAccount] = useState<AccountView[]>(admin ? [] : ["overview"]);
+  const [visitedAccount, setVisitedAccount] = useState<AccountView[]>(["overview"]);
   const [batchOpen, setBatchOpen] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([]);
   // 选中的账号记在地址 ?account= 里:刷新、分享都还在这个账号
@@ -177,7 +177,7 @@ export function BillingView({
     try {
       if (BigInt(parseCredits(credits.trim())) <= 0n) throw new Error();
     } catch {
-      return setCreditErr({ field: "credits", text: "积分要填大于零的数（最多六位小数）" });
+      return setCreditErr({ field: "credits", text: "填大于零的积分数" });
     }
     if (!reason.trim()) return setCreditErr({ field: "reason", text: "请填写说明，会记入流水" });
     setConfirm(true);

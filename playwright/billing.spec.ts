@@ -73,6 +73,9 @@ test.describe("积分与计费界面", () => {
     await page.goto(`${BASE}/developer/keys`);
     const row = page.getByRole("row").filter({ hasText: "pw-limit" });
     await expect(row).toContainText("不限额");
+    // 列表显示 Key 尾号,对得上签发时拿到的明文
+    const { plaintext } = (await issued.json()) as { plaintext: string };
+    await expect(row).toContainText(`owa_••••${plaintext.slice(-4)}`);
     await row.getByRole("button", { name: "修改月度积分上限" }).click();
     await page.getByLabel("本月积分上限").fill("100");
     await row.getByRole("button", { name: "保存" }).click();
@@ -224,9 +227,11 @@ test.describe("积分与计费界面", () => {
       await expect(table.locator("tr").filter({ hasText: "not-an-email" })).toContainText(
         "邮箱格式不对",
       );
-      await page.getByRole("button", { name: "向 1 个账号发放" }).click();
-      await expect(page.getByRole("dialog")).toContainText("向 1 个账号各发放 8.8 积分");
-      await page.getByRole("button", { name: "确认发放" }).click();
+      // 预览这一步就是确认:写明人数、每人积分和跳过的人数
+      await expect(page.getByTestId("batch-summary")).toContainText("向 1 个账号各发放 8.8 积分");
+      await expect(page.getByTestId("batch-summary")).toContainText("2 个跳过");
+      await page.getByRole("button", { name: "确认发放 1 人" }).click();
+      await expect(page.getByRole("dialog")).toContainText("发放完成");
       await expect(table.locator("tr").filter({ hasText: email })).toContainText("已发放");
       const [w] = (await sql(
         "SELECT available_micro_credits AS v FROM billing_wallets WHERE account_id = ?",
@@ -284,19 +289,18 @@ test.describe("积分与计费界面", () => {
       await page.getByLabel("每人积分").fill("6");
       await page.getByLabel("发放说明").fill("PW 审计故障");
       await page.getByRole("button", { name: "预览" }).click();
-      await page.getByRole("button", { name: "向 1 个账号发放" }).click();
-      await page.getByRole("button", { name: "确认发放" }).click();
+      await page.getByRole("button", { name: "确认发放 1 人" }).click();
 
       const table = page.getByTestId("batch-lines");
       const row = table.locator("tr").filter({ hasText: email });
-      await expect(row).toContainText("已到账,审计待补");
+      await expect(row).toContainText("已到账，审计待补");
       const retry = page.getByRole("button", { name: /用原批次重试.*1 个审计待补/ });
       await expect(retry).toBeVisible();
 
-      // 管理员随后停用了这个账号,又点了预览:发放按钮不可用,但重试入口还在
+      // 管理员随后停用了这个账号:重试直接重放原请求,不受停用判断限制;关掉弹窗再打开,重试入口还在
       await sql("UPDATE users SET disabled = 1 WHERE id = ?", [target.id]);
-      await page.getByRole("button", { name: "预览" }).click();
-      await expect(row).toContainText("账号已停用");
+      await page.getByRole("button", { name: "稍后处理" }).click();
+      await page.getByRole("button", { name: "批量发放积分", exact: true }).click();
       await expect(retry).toBeVisible();
 
       await drop();

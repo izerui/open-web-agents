@@ -129,10 +129,10 @@ test.describe("模型提供者管理", () => {
         ["缓存写入 / 百万 token", "26.25"],
       ];
       for (const [label, v] of costs) await page.getByLabel(`${label} 成本单价`).fill(v);
-      const warning = page.getByText("加价比例不高于充值赠送比例");
-      await page.getByLabel("加价比例(%)").fill("8");
+      const warning = page.getByText(/不高于充值赠送比例（最高 8%）/);
+      await page.getByLabel(/^加价比例/).fill("8");
       await expect(warning).toBeVisible();
-      await page.getByLabel("加价比例(%)").fill("10");
+      await page.getByLabel(/^加价比例/).fill("10");
       await expect(warning).toHaveCount(0);
       for (const credits of ["2,100", "2,310", "10,500", "11,550", "2,887.5"]) {
         await expect(dialog.getByText(credits, { exact: true })).toBeVisible();

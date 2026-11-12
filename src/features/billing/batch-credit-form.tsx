@@ -260,19 +260,17 @@ export function BatchCreditDialog({
               }}
             >
               <fieldset disabled={busy} className="grid gap-3.5">
-                <label
-                  className="grid gap-1.5 text-[13px] text-muted-foreground"
-                  htmlFor="batch-emails"
-                >
-                  <span>
+                <div className="grid gap-1.5 text-[13px] text-muted-foreground">
+                  <label htmlFor="batch-emails">
                     邮箱（每行一个，或用逗号分隔） <span className="text-destructive">*</span>
-                  </span>
+                  </label>
                   <Textarea
                     id="batch-emails"
                     rows={6}
                     className="font-mono text-xs"
                     placeholder="linzhou@example.com"
                     aria-invalid={errField === "emails" || undefined}
+                    aria-describedby="batch-email-count"
                     value={emails}
                     onChange={(e) => {
                       setEmails(e.target.value);
@@ -284,12 +282,13 @@ export function BatchCreditDialog({
                       "text-xs",
                       emailCount > MAX_BATCH_EMAILS ? "text-destructive" : "text-muted-foreground",
                     )}
+                    id="batch-email-count"
                     data-testid="batch-email-count"
                   >
                     已识别 {emailCount} 个邮箱，上限 {MAX_BATCH_EMAILS}
                   </span>
                   {fieldError("emails")}
-                </label>
+                </div>
                 <div className="grid gap-3 sm:grid-cols-[12rem_minmax(0,1fr)]">
                   <label
                     className="grid content-start gap-1.5 text-[13px] text-muted-foreground"
