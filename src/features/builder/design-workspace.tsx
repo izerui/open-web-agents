@@ -66,7 +66,14 @@ interface View {
 type HistoryItem = { id: string; title?: string };
 type ResourceSource = { id: string; name: string; canWrite?: boolean };
 
-export function DesignWorkspace({ initialSessionId }: { initialSessionId?: string }) {
+export function DesignWorkspace({
+  initialSessionId,
+  initialPrompt,
+}: {
+  initialSessionId?: string;
+  /** 新建弹层里写的描述,预填进输入框(不自动发送,用户确认后再发) */
+  initialPrompt?: string;
+}) {
   const [id, setId] = useState(initialSessionId ?? "");
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [sources, setSources] = useState<ResourceSource[]>([]);
@@ -74,7 +81,7 @@ export function DesignWorkspace({ initialSessionId }: { initialSessionId?: strin
   const [draft, setDraft] = useState<DesignDraft | null>(null);
   const [parameters, setParameters] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(initialPrompt ?? "");
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
   /** AI 编辑提问时在等的回答(同工作台:提问卡片上作答,智能体在同一轮里继续) */
