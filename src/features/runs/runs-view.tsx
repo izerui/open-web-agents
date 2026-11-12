@@ -149,13 +149,20 @@ export type AgentList = {
 
 export function DeveloperRunsView() {
   const list = useAgentList();
+  // 带非空 ?agent= 的地址已重定向到构建页;还留着 ?agent=(空 ID)说明链接坏了,提示缺少 ID,不悄悄显示全部运行
+  const requestedAgent = useSearchParams().get("agent");
   return (
     <SpacePage
       side="developer"
       title="运行记录"
       subtitle="计费在你名下的全部运行，包括你调用别人的智能体、别人用你的 Key 调用。单个智能体的运行分析在它的构建页「运行」阶段。"
     >
-      <RunsPanel requestedAgent={null} platform={false} agentList={list} />
+      <RunsPanel
+        key={JSON.stringify(requestedAgent)}
+        requestedAgent={requestedAgent}
+        platform={false}
+        agentList={list}
+      />
     </SpacePage>
   );
 }
@@ -166,7 +173,6 @@ function RunsInShell({
 }: { requestedAgent: string | null; platform: boolean }) {
   const list = useAgentList();
   const objectMode = requestedAgent !== null;
-  const agent = objectMode ? list.agents.find((a) => a.id === requestedAgent) : undefined;
   return (
     <SpaceShell
       title={platform ? "平台运行" : objectMode ? "运行记录" : "全部运行"}
@@ -179,11 +185,6 @@ function RunsInShell({
           : objectMode
             ? "此智能体下计费在你名下的运行"
             : "计费在你名下的全部运行,包括工作台、接口调用与评测"
-      }
-      object={
-        objectMode && agent
-          ? { ...agent, tab: "runs", canReadConfig: agent.canRead !== false }
-          : undefined
       }
       width={objectMode ? "full" : "wide"}
     >

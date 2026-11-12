@@ -5,7 +5,7 @@
 
 import http from "node:http";
 import type { AddressInfo } from "node:net";
-import { type BrowserContext, expect, test } from "@playwright/test";
+import { type BrowserContext, type Page, expect, test } from "@playwright/test";
 import { passDraftEval } from "./eval-gate";
 
 const BASE = process.env.OWA_E2E_BASE_URL ?? "http://localhost:5678";
@@ -71,6 +71,17 @@ async function asAdmin(ctx: BrowserContext): Promise<() => Promise<void>> {
   };
 }
 
+/** 对话页:会话列表的「新会话」→ 在选择框里点这个智能体(还没发消息,会话尚未创建) */
+async function pickAgent(page: Page, name: string) {
+  await page
+    .getByRole("navigation", { name: "会话列表" })
+    .getByRole("button", { name: "新会话", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "新会话" });
+  await dialog.getByRole("button", { name: new RegExp(name) }).click();
+  await expect(dialog).toHaveCount(0);
+}
+
 test.describe("模型提供者管理", () => {
   test.skip(!DB || !/test/i.test(new URL(DB).pathname), "需要专用测试库来设置管理员");
 
@@ -107,8 +118,10 @@ test.describe("模型提供者管理", () => {
 
       // 添加模型:成本价 → 积分预览;加价 8% 提醒,10% 不提醒
       await page.getByRole("button", { name: "添加模型" }).first().click();
-      await page.getByLabel("显示名称").fill(modelName);
-      await page.getByLabel("模型标识").fill(upstream);
+      const dialog = page.getByRole("dialog");
+      await dialog.getByLabel("显示名称").fill(modelName);
+      // 页面上的「测试用模型」输入框占位也是「模型标识」,这里填的是添加模型对话框里的
+      await dialog.getByLabel("模型标识").fill(upstream);
       const costs: [string, string][] = [
         ["输入 / 百万 token", "21"],
         ["输出 / 百万 token", "105"],
@@ -121,7 +134,6 @@ test.describe("模型提供者管理", () => {
       await expect(warning).toBeVisible();
       await page.getByLabel("加价比例(%)").fill("10");
       await expect(warning).toHaveCount(0);
-      const dialog = page.getByRole("dialog");
       for (const credits of ["2,100", "2,310", "10,500", "11,550", "2,887.5"]) {
         await expect(dialog.getByText(credits, { exact: true })).toBeVisible();
       }
@@ -238,14 +250,12 @@ test.describe("模型提供者管理", () => {
       }
       await userCtx.close();
 
-      // 作者在工作台
+      // 作者在对话页:会话列表「新会话」→ 选智能体,对话头显示它的模型与售价
       await page.setViewportSize({ width: 1400, height: 900 });
-      await page.goto(`${BASE}/`);
-      // 通过切换器选中;?agent= 深链接在能看到内置默认智能体时不生效(工作台原有问题,另行处理)
-      await page.getByTitle("切换智能体").click();
-      await page.getByPlaceholder("搜索智能体…").fill(`PW展示智能体-${tag}`);
-      await page.getByRole("option", { name: new RegExp(`PW展示智能体-${tag}`) }).click();
-      await expect(page.getByTestId("agent-model-price")).toHaveText(expected);
+      await page.goto(`${BASE}/chat`);
+      const header = page.getByRole("region", { name: "当前对话" });
+      await pickAgent(page, `PW展示智能体-${tag}`);
+      await expect(header.getByTestId("agent-model-price")).toHaveText(expected);
       expect(await page.content()).not.toContain(upstream);
 
       // 停用后如实提示
@@ -258,10 +268,8 @@ test.describe("模型提供者管理", () => {
       ).toBe(200);
       // 整页刷新会重新拉取模型目录(页面内缓存随页面重建)
       await page.reload();
-      await page.getByTitle("切换智能体").click();
-      await page.getByPlaceholder("搜索智能体…").fill(`PW展示智能体-${tag}`);
-      await page.getByRole("option", { name: new RegExp(`PW展示智能体-${tag}`) }).click();
-      await expect(page.getByTestId("agent-model-price")).toHaveText("模型暂不可用");
+      await pickAgent(page, `PW展示智能体-${tag}`);
+      await expect(header.getByTestId("agent-model-price")).toHaveText("模型暂不可用");
     } finally {
       await restore();
     }
@@ -354,7 +362,8 @@ test.describe("模型提供者管理", () => {
       await expect(price).toHaveText(textOf(a.name, "1,000"));
 
       // 新会话(还没创建)按草稿:B
-      await page.getByTitle("新建会话").click();
+      await pickAgent(page, agentName);
+      await expect(page).not.toHaveURL(/session=/);
       await expect(price).toHaveText(textOf(b.name, "2,000"));
 
       // 回到 v1 会话后调价:窗口重新获得焦点时刷新,不整页刷新

@@ -4,7 +4,7 @@
 // 只覆盖表单字段,与原 Builder 同一保存语义);被闸门挡住时暂停并说明原因;离开页面时有未落盘的修改照旧提醒。
 // 规则在 autosave.ts / profile-model.ts,这里只负责计时、请求与提醒。
 
-import { BEFORE_CLIENT_NAVIGATION } from "@/components/ide/client-navigation";
+import { BEFORE_CLIENT_NAVIGATION } from "@/lib/client-navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AUTOSAVE_DELAY_MS,

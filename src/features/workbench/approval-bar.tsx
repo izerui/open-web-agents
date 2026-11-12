@@ -170,6 +170,7 @@ export function ApprovalBar({
    * 【为什么光有页面上的审批条不够】agent 是挂起状态,它在等一个人点按钮。
    * 而这个条只在对话区下方 —— 用户滚到上面看历史、或者切去别的标签页,
    * 就完全不知道有东西在等自己,10 分钟后静默变成"自动拒绝"。
+   * 窄屏例外(见下):审批卡固定在输入框上方,通知反而会盖住对话头。
    */
   useEffect(() => {
     const live = new Set(pending.map((p) => p.id));
@@ -194,6 +195,9 @@ export function ApprovalBar({
         });
         continue;
       }
+      // 窄屏的审批卡固定在输入框上方,一直看得到;常驻通知在窄屏贴着顶栏,会挡住对话头
+      // (会话列表、执行详情等开关),不再重复弹
+      if (window.matchMedia("(max-width: 767px)").matches) continue;
       toast.warning(`智能体在等你确认:${p.toolName}`, {
         id: p.id,
         description: p.summary,

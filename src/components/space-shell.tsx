@@ -1,7 +1,5 @@
 "use client";
 
-import type { AgentObject } from "@/components/ide/agent-workspace-header";
-import { IdeFrame } from "@/components/ide/ide-frame";
 import { AppShell } from "@/components/shell/app-shell";
 import type { SideKind } from "@/components/shell/side-nav";
 import { spaceOf } from "@/lib/nav/routes";
@@ -23,11 +21,9 @@ export function SpaceShellEmbed({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * 普通页面的外壳:AppShell + 页头(衬线标题、说明、操作)+ 内容宽度。
- *
- * 左侧栏由当前地址所在的空间决定(开发者 / 账户 / 平台管理),不再靠调用方传 area ——
- * 同一个视图(如运行记录)在个人和平台两处复用时,侧栏自然跟着地址走。
- * 阶段 2–7 逐页按原型重做时,页面会直接用 AppShell,这个包装随之删除。
+ * 共享视图(用量、审计、运行、计费)自带的页面外壳:AppShell + 页头(衬线标题、说明、操作)+ 内容宽度。
+ * 这些视图在个人页与平台管理页里复用;平台管理用 SpaceShellEmbed 嵌进页签时只留说明与操作条。
+ * 左侧栏由当前地址所在的空间决定(开发者 / 账户 / 平台管理)。新页面直接用 AppShell。
  */
 export function SpaceShell({
   title,
@@ -35,8 +31,6 @@ export function SpaceShell({
   actions,
   children,
   width = "wide",
-  sidebarExtra,
-  object,
   footer,
 }: {
   title: string;
@@ -44,9 +38,7 @@ export function SpaceShell({
   actions?: React.ReactNode;
   children: React.ReactNode;
   width?: "narrow" | "wide" | "full" | "flush";
-  sidebarExtra?: React.ReactNode;
   area?: SpaceArea;
-  object?: AgentObject;
   footer?: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -82,16 +74,13 @@ export function SpaceShell({
             width === "wide" && "max-w-[1180px]",
           )}
         >
-          {object && subtitle && <p className="text-sm text-muted-foreground">{subtitle}</p>}
-          {!object && (
-            <div className="flex flex-wrap items-end gap-4">
-              <div className="min-w-0 flex-1">
-                <h1 className="font-display text-[30px] leading-tight font-bold">{title}</h1>
-                {subtitle && <p className="mt-1.5 text-sm text-muted-foreground">{subtitle}</p>}
-              </div>
-              {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+          <div className="flex flex-wrap items-end gap-4">
+            <div className="min-w-0 flex-1">
+              <h1 className="font-display text-[30px] leading-tight font-bold">{title}</h1>
+              {subtitle && <p className="mt-1.5 text-sm text-muted-foreground">{subtitle}</p>}
             </div>
-          )}
+            {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+          </div>
           {children}
         </div>
       </div>
@@ -107,19 +96,6 @@ export function SpaceShell({
       )}
     </div>
   );
-
-  // 智能体对象页、带智能体列表的工作室页:沿用左侧智能体树(宽屏常驻,窄屏从抽屉打开)
-  if (object || sidebarExtra) {
-    return (
-      <IdeFrame
-        object={object}
-        widgets={object ? actions : undefined}
-        toolWindow={sidebarExtra ? { title: "我的智能体", body: sidebarExtra } : undefined}
-      >
-        {main}
-      </IdeFrame>
-    );
-  }
 
   return (
     <AppShell side={side} fullBleed>

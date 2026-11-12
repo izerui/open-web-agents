@@ -157,12 +157,11 @@ test.describe("对话页与对象工作区", () => {
       .getByRole("list", { name: "本轮工具调用" })
       .getByRole("button", { name: /Bash/ })
       .click();
-    await expect(page.getByRole("button", { name: "执行详情", exact: true })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    // 对话头的「执行详情」开关(右栏里还有同名的页签,这里断言对话头开关被打开)
+    const runsToggle = header.getByRole("button", { name: "执行详情", exact: true });
+    await expect(runsToggle).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByRole("region", { name: "调用详情" })).toContainText("尚未配置测试脚本");
-    await page.getByRole("button", { name: "执行详情", exact: true }).click();
+    await runsToggle.click();
     await expect(page.getByRole("region", { name: "调用详情" })).toHaveCount(0);
     // 会话列表按时间列出所有智能体的会话,切过去对话头跟着换
     await page
@@ -280,8 +279,9 @@ test.describe("对话页与对象工作区", () => {
     }
   });
 
-  test("记录 B 方案的真实页面截图", async ({ page }) => {
-    const dir = path.resolve("docs/design-demos/ia-v2/implementation");
+  test("记录 coze-v3 改版后的真实页面截图", async ({ page }) => {
+    // 写到 coze-v3 的实现记录里;ia-v2 是上一轮 B 方案的存档,不能被新界面覆盖
+    const dir = path.resolve("docs/design-demos/coze-v3/implementation/e2e");
     await fs.mkdir(dir, { recursive: true });
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`/chat?session=${sessions[0]}`);

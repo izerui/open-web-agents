@@ -25,7 +25,8 @@ export const AVATAR_COLORS: readonly string[] = [
 /** 白眼只给智能体设计器,其他智能体从这四种里分 */
 const EYES: readonly AvatarEyes[] = ["pill", "round", "side", "dot"];
 const ARCHITECT: AvatarStyle = { color: "#1F1E1C", eyes: "white" };
-const ICON = /^avatar:(#[0-9A-Fa-f]{6}):(pill|round|side|dot|white)$/;
+/** icon 里可选的眼睛不含 white —— 白眼是智能体设计器的专属标记,别的智能体不能借用 */
+const ICON = /^avatar:(#[0-9A-Fa-f]{6}):(pill|round|side|dot)$/;
 
 function hash(s: string): number {
   let h = 2166136261;

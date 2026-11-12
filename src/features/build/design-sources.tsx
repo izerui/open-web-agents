@@ -7,6 +7,7 @@ import { AgentAvatar } from "@/components/agent-avatar";
 import { NativeSelect } from "@/components/ui/native-select";
 import { McpCheck } from "@/features/builder/mcp-check";
 import { cn } from "@/lib/utils";
+import { useState } from "react";
 import { SubHead, TextButton, inputMono } from "./ui";
 import type { Designer } from "./use-designer";
 
@@ -25,6 +26,8 @@ export function DesignSources({
   canStart: boolean;
 }) {
   const v = designer.view;
+  // 勾选要等设计会话接口返回才落到草稿里;请求期间先按用户的操作显示,失败或返回后以草稿为准
+  const [pendingRefs, setPendingRefs] = useState<Record<string, boolean>>({});
   const target = v?.targetId;
   const ids = (v?.resourceAgentIds ?? []).filter((id) => id !== target);
   const resources = v?.resources ?? [];
@@ -116,7 +119,8 @@ export function DesignSources({
                       <p className="m-0 text-[13px] text-muted-foreground">暂无可用资源</p>
                     )}
                     {list.map((r) => {
-                      const on = refs.includes(r.ref);
+                      const saved = refs.includes(r.ref);
+                      const on = pendingRefs[r.ref] ?? saved;
                       const conflict = inline.includes(r.name) && !on;
                       return (
                         <div
@@ -139,9 +143,13 @@ export function DesignSources({
                               className="mt-0.5 size-4 shrink-0 accent-[#1C1C1C]"
                               checked={on}
                               disabled={disabled || conflict}
-                              onChange={(e) =>
-                                void designer.toggleRef(kind, r.ref, e.target.checked)
-                              }
+                              onChange={(e) => {
+                                const next = e.target.checked;
+                                setPendingRefs((p) => ({ ...p, [r.ref]: next }));
+                                void designer
+                                  .toggleRef(kind, r.ref, next)
+                                  .finally(() => setPendingRefs(({ [r.ref]: _, ...rest }) => rest));
+                              }}
                             />
                             <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
                               <span
@@ -156,7 +164,7 @@ export function DesignSources({
                               </span>
                             </span>
                           </label>
-                          {kind === "mcp" && on && v && (
+                          {kind === "mcp" && saved && v && (
                             <div className="mt-1 pl-6">
                               <McpCheck
                                 name={r.name}

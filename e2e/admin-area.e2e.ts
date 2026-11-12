@@ -84,8 +84,8 @@ describe("管理员区边界", () => {
   });
 
   it("个人设置页对普通用户是开放的 —— 别把所有人都挡在外面就算安全", async () => {
-    // 对照组:守卫只该拦 /admin/*,不该顺手把 /settings/* 也拦了
-    const r = await landing(member, "/settings/credentials");
+    // 对照组:守卫只该拦 /admin/*,不该顺手把个人页(/account/*)也拦了
+    const r = await landing(member, "/account/prices");
     expect(r.status).toBe(200);
   });
 
@@ -135,9 +135,13 @@ describe("旧地址不落空", () => {
   // 【为什么 /builder 和 /settings/assistants 不在列】assistant→agent 改名时
   // 这两条转发被一并删掉了(见 0006 迁移那批改动),它们现在就是 404。
   // 留在这里会变成一条断言不存在行为的测试。
+  // coze-v3 信息架构:个人设置拆到 /account/*、/developer/*(映射表见 src/lib/nav/routes.ts)
   const moved: [string, string][] = [
-    ["/settings", "/settings/keys"],
-    ["/usage", "/settings/usage"],
+    ["/settings", "/account/security"],
+    ["/usage", "/account/usage"],
+    ["/settings/keys", "/developer/keys"],
+    ["/settings/credentials", "/account/prices"],
+    ["/market", "/"],
   ];
 
   for (const [from, to] of moved) {

@@ -25,6 +25,8 @@ export default async function Page({
     const h = await headers();
     const req = new Request("http://internal/", { headers: { cookie: h.get("cookie") ?? "" } });
     const principal = await auth.resolveWeb(req);
+    // 与设计器接口(designCaller)同一道闸:不能管理智能体的账号不解析设计会话
+    auth.assertCanManageAgents(principal);
     targetId = (await designer.inspect(await auth.subjectOf(principal), session)).targetId;
   } catch {
     targetId = undefined;

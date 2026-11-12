@@ -5,7 +5,6 @@
 // 发布的前后端约束不变:评测全过、有差异才能发布;回滚与设为发布版只需确认,不受评测限制。
 
 import { useConfirm } from "@/components/confirm-dialog";
-import { notifyAgentCatalogChanged } from "@/components/ide/agent-catalog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -18,6 +17,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
+import { notifyAgentCatalogChanged } from "@/lib/agent-catalog";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { PUBLIC_PRINCIPAL } from "@/lib/modules/access/domain/grants";
 import type { SnapshotChange } from "@/lib/modules/agent/domain/snapshot-diff";

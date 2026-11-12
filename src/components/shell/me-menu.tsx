@@ -1,6 +1,5 @@
 "use client";
 
-import { requestClientNavigation } from "@/components/ide/client-navigation";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { requestClientNavigation } from "@/lib/client-navigation";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { meMenuItems } from "@/lib/nav/routes";
 import { clearMe, initialsOf, isAdminView, useMe } from "@/lib/use-me";

@@ -1,7 +1,6 @@
 "use client";
 
 import { AgentAvatar } from "@/components/agent-avatar";
-import { notifyAgentCatalogChanged } from "@/components/ide/agent-catalog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -13,6 +12,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { type AvatarStyle, formatAvatarIcon } from "@/lib/agent-avatar";
+import { notifyAgentCatalogChanged } from "@/lib/agent-catalog";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import type { AgentTemplate } from "@/lib/modules/agent/templates";
 import { MARKET_CATEGORIES, type MarketAgent } from "@/lib/modules/market/domain/catalog";

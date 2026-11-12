@@ -1,7 +1,6 @@
 "use client";
 
 import { AgentAvatar } from "@/components/agent-avatar";
-import { AGENT_CATALOG_CHANGED, notifyAgentCatalogChanged } from "@/components/ide/agent-catalog";
 import { AppShell } from "@/components/shell/app-shell";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AGENT_CATALOG_CHANGED, notifyAgentCatalogChanged } from "@/lib/agent-catalog";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { agentHref } from "@/lib/nav/routes";
 import { cn } from "@/lib/utils";

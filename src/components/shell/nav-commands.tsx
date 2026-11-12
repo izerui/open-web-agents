@@ -1,7 +1,7 @@
 "use client";
 
-import { requestClientNavigation } from "@/components/ide/client-navigation";
 import { CommandGroup, CommandItem, CommandSeparator } from "@/components/ui/command";
+import { requestClientNavigation } from "@/lib/client-navigation";
 import { type PaletteEntry, paletteEntries } from "@/lib/nav/routes";
 import { useMe } from "@/lib/use-me";
 import { CornerDownLeft } from "lucide-react";

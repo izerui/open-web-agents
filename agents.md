@@ -210,16 +210,20 @@ Open Web Agents 是一个基于 `@anthropic-ai/claude-agent-sdk` 的多智能体
 
 ### 6.1 前端特性层
 
-当前 UI 侧主要在 `src/features/`:
+界面按 coze-v3「对话搭建」信息架构组织(设计依据见 `docs/design-demos/coze-v3/`)。
+全站外壳在 `src/components/shell/`(顶栏空间导航、⌘K、头像菜单、开发者/账户/管理侧栏),
+导航与路由(含旧地址重定向)的唯一来源是 `src/lib/nav/routes.ts`。
 
-- `workbench`: 主工作台,包含对话区、审批条、文件面板
-- `builder`: 智能体构建器、知识库、分享面板
-- `chat`: SSE 拆帧与聊天视图
-- `embed`: 嵌入式聊天
-- `settings`: 凭证与 API Key 管理
-- `groups`: 用户组管理
-- `usage`: 用量页
-- `auth`: 登录表单
+| 一级空间 | 地址 | 特性目录 |
+| --- | --- | --- |
+| 探索 | `/`、`/market/[id]` | `explore`(首页、一句话推荐、正在工作)、`market`(详情、立即使用/克隆/接入) |
+| 对话 | `/chat` | `workbench`(会话列表含归档、对话流、提问卡片、审批条、工作区文件、执行详情)、`chat`(SSE 拆帧) |
+| 工作室 | `/agents`、`/agents/new` | `studio`(我的智能体、新建弹层:设计器/空白/克隆/模板) |
+| 构建页 | `/agents/[id]?stage=` | `build`(智能体设计器、档案九节与自动保存、试聊、评测、上线清单与发布分享、接入与在线试调、运行);`builder` 下是它复用的知识库、MCP 测试、模型选择与评测表单 |
+| 开发者 | `/developer/keys`、`/developer/runs` | `integration`(API Key、签名密钥、调用代码、Webhook 投递)、`runs` |
+| 账户 | `/account/*` | `billing`、`usage`、`audit`、`settings` |
+| 平台管理 | `/admin/*`(仅管理员) | `admin`(账号与用户组、模型与提供者、市场上架与上架申请、套餐、计费、平台运行与用量)、`models` |
+| 登录 | `/login` | `auth` |
 
 ---
 

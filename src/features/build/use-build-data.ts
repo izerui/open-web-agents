@@ -2,8 +2,8 @@
 
 // 构建页的数据:智能体列表(左栏与本智能体的完整配置)、页头徽标与上线清单要的元数据。
 
-import { AGENT_CATALOG_CHANGED } from "@/components/ide/agent-catalog";
 import type { StudioAgent } from "@/features/studio/studio-model";
+import { AGENT_CATALOG_CHANGED } from "@/lib/agent-catalog";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import type { SnapshotChange } from "@/lib/modules/agent/domain/snapshot-diff";
 import { useCallback, useEffect, useRef, useState } from "react";

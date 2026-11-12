@@ -10,6 +10,18 @@ const BASE = process.env.OWA_E2E_BASE_URL ?? "http://localhost:5678";
 
 const fixtures = { mp4: "", pdf: "", wav: "" };
 
+/**
+ * PDF 首行文字所在的 60px 高条带。coze-v3 的右侧面板更宽,Chromium 的 PDF 查看器会在顶部显示
+ * 56px 的工具栏(下载、打印),条带从工具栏下沿开始,才截得到页面文字而不是工具栏。
+ */
+const PDF_VIEWER_TOOLBAR = 56;
+const pdfTextClip = (box: { x: number; y: number; width: number }) => ({
+  x: box.x,
+  y: box.y + PDF_VIEWER_TOOLBAR,
+  width: box.width,
+  height: 60,
+});
+
 test.beforeAll(() => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owa-media-fixtures-"));
 
@@ -172,7 +184,7 @@ test.describe("视频/PDF/音频预览", () => {
     expect(box).toBeTruthy();
     if (!box) return;
     await expect(page).toHaveScreenshot("pdf-text-region.png", {
-      clip: { x: box.x, y: box.y, width: box.width, height: 60 },
+      clip: pdfTextClip(box),
       maxDiffPixels: 100,
     });
   });
@@ -220,7 +232,7 @@ test.describe("视频/PDF/音频预览", () => {
     // 空白 PDF 应该无法通过有文字的基准
     await expect(
       expect(page).toHaveScreenshot("pdf-text-region.png", {
-        clip: { x: box.x, y: box.y, width: box.width, height: 60 },
+        clip: pdfTextClip(box),
         maxDiffPixels: 100,
         timeout: 3_000,
       }),

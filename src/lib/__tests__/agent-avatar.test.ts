@@ -28,6 +28,10 @@ describe("avatarStyle", () => {
     expect(avatarStyle("agent-architect")).toEqual({ color: "#1F1E1C", eyes: "white" });
   });
 
+  it("icon 里写白眼也不行:白眼只属于智能体设计器", () => {
+    expect(avatarStyle("x", "avatar:#C8C2E8:white")).toEqual(avatarStyle("x"));
+  });
+
   it("其他智能体不会被分到设计器专用的白眼", () => {
     const ids = Array.from({ length: 50 }, (_, i) => `a${i}`);
     expect(ids.every((id) => avatarStyle(id).eyes !== "white")).toBe(true);

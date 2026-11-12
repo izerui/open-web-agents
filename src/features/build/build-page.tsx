@@ -6,7 +6,6 @@
 
 import { AgentAvatar } from "@/components/agent-avatar";
 import { useConfirm } from "@/components/confirm-dialog";
-import { notifyAgentCatalogChanged } from "@/components/ide/agent-catalog";
 import { AppShell } from "@/components/shell/app-shell";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +18,7 @@ import {
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { useModelCatalog } from "@/features/builder/model-select";
 import { studioAgents } from "@/features/studio/studio-model";
+import { notifyAgentCatalogChanged } from "@/lib/agent-catalog";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { agentHref } from "@/lib/nav/routes";
 import { cn } from "@/lib/utils";

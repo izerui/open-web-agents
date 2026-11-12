@@ -226,14 +226,19 @@ test.describe("消耗汇总", () => {
     const invoke = await seedRun(user.id, agentId, "invoke", keyId, 5);
 
     await page.goto(`${BASE}/account/billing`);
+    // 概览页的"本月已用"是汇总的对照口径
+    await expect(
+      page.locator("dt", { hasText: "本月已用 / 月度上限" }).locator("+ dd"),
+    ).toContainText("15.00");
+    // 消耗汇总在积分页的「运行消耗」页签
+    await page.getByRole("tab", { name: "运行消耗", exact: true }).click();
     const summary = page.getByRole("region", { name: "消耗汇总", exact: true });
     const rows = summary.getByTestId("charge-summary-row");
     await expect(rows).toHaveCount(2);
     await expect(rows.filter({ hasText: "网页对话" })).toContainText("10.00");
     await expect(rows.filter({ hasText: "API 调用" })).toContainText("5.00");
-    await expect(summary.getByTestId("charge-summary-total")).toContainText("15.00");
     // 本月合计与"本月已用"一致
-    await expect(page.getByText("本月已用 15.00 积分")).toBeVisible();
+    await expect(summary.getByTestId("charge-summary-total")).toContainText("15.00");
 
     await summary.getByRole("button", { name: "按 API Key" }).click();
     await expect(rows.filter({ hasText: "PW 对接 Key" })).toContainText("5.00");
@@ -250,7 +255,7 @@ test.describe("消耗汇总", () => {
       "aria-selected",
       "true",
     );
-    await expect(page.getByTestId("run-charge-drill")).toContainText("本月 · API 调用");
+    await expect(page.getByTestId("run-charge-drill")).toContainText("本月的API 调用");
     const charges = page.getByTestId("run-charge");
     await expect(charges).toHaveCount(1);
     await expect(charges.first()).toContainText(invoke);
@@ -259,8 +264,12 @@ test.describe("消耗汇总", () => {
     await expect(charges.filter({ hasText: web })).toHaveCount(1);
 
     await page.goto(`${BASE}/account/usage`);
-    await expect(page.getByRole("heading", { name: "token 用量" })).toBeVisible();
-    await expect(page.getByTestId("usage-billing-note")).toContainText("实际扣费以");
+    // 原「token 用量」页改名为「用量分析」;仍说明实际扣费以积分页为准,并链到运行消耗
+    await expect(page.getByRole("heading", { level: 1, name: "用量分析" })).toBeVisible();
+    await expect(page.getByTestId("usage-billing-note")).toContainText("实际扣费以积分页为准");
+    await expect(
+      page.getByTestId("usage-billing-note").getByRole("link", { name: "积分与套餐的运行消耗" }),
+    ).toHaveAttribute("href", "/account/billing?tab=runs");
     await expect(page.getByText("积分估算")).toHaveCount(0);
   });
 

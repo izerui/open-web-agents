@@ -65,7 +65,9 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  --radius-2xl: calc(var(--radius) + 8px);
+  /* 卡片 16px、大卡片与弹层 18px(原型 owa.css) */
+  --radius-2xl: 1rem;
+  --radius-3xl: 1.125rem;
 
   /* 正文 14px、辅助 12px */
   --text-sm: 0.875rem;

@@ -1,7 +1,6 @@
 "use client";
 
 import { AgentAvatar } from "@/components/agent-avatar";
-import { requestClientNavigation } from "@/components/ide/client-navigation";
 import {
   CommandDialog,
   CommandEmpty,
@@ -11,6 +10,7 @@ import {
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command";
+import { requestClientNavigation } from "@/lib/client-navigation";
 import { fetchJson } from "@/lib/fetch-json";
 import { agentHref } from "@/lib/nav/routes";
 import { useRouter } from "next/navigation";

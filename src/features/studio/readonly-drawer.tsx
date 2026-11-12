@@ -1,12 +1,12 @@
 "use client";
 
 import { AgentAvatar } from "@/components/agent-avatar";
-import { notifyAgentCatalogChanged } from "@/components/ide/agent-catalog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { KnowledgePanel } from "@/features/builder/knowledge-panel";
+import { notifyAgentCatalogChanged } from "@/lib/agent-catalog";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { agentHref } from "@/lib/nav/routes";
 import { Copy, Eye, Lock, MessageSquare } from "lucide-react";
