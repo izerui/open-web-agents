@@ -21,8 +21,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         .allowed;
     const allowed = canOpenSession || (principal.type === "web" && principal.role === "admin");
     if (!run || !allowed) return apiError(404, "not_found", "run not found");
-    const { ownership: _o, ...visible } = run;
-    return Response.json({ run: { ...visible, canOpenSession } });
+    const { ownership: _o, account, ...visible } = run;
+    // 计费账号只给管理员(平台运行要看得出是谁的运行);普通用户看的是自己的运行,不需要
+    const isAdmin = principal.type === "web" && principal.role === "admin";
+    return Response.json({
+      run: { ...visible, ...(isAdmin && account ? { account } : {}), canOpenSession },
+    });
   } catch (err) {
     const res = authErrorResponse(err);
     if (res) return res;

@@ -72,7 +72,13 @@ export function ChargeSummary({
   onDrill,
   onSelectAccount,
   initialRange = "this_month",
+  activeDrill,
+  defaultBy,
 }: {
+  /** 当前明细正在看的那一项:汇总里对应的行高亮 */
+  activeDrill?: ChargeDrill | null;
+  /** 默认维度(全平台默认按账号) */
+  defaultBy?: SummaryDimension;
   accountId?: string;
   platform?: boolean;
   onDrill?: (drill: ChargeDrill) => void;
@@ -82,9 +88,9 @@ export function ChargeSummary({
   initialRange?: SummaryWindow;
 }) {
   const dimensions: SummaryDimension[] = platform
-    ? ["source", "agent", "account"]
+    ? ["account", "source", "agent"]
     : ["source", "agent", "key"];
-  const [by, setBy] = useState<SummaryDimension>("source");
+  const [by, setBy] = useState<SummaryDimension>(defaultBy ?? "source");
   const [range, setRange] = useState<SummaryWindow>(initialRange);
   const [rows, setRows] = useState<ChargeSummaryRow[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -114,6 +120,17 @@ export function ChargeSummary({
   }, [load]);
 
   const total = rows ? totalOf(rows) : null;
+  /** 这一行是不是明细正在看的那一项(维度取值与时间范围都对得上) */
+  const isActive = (r: ChargeSummaryRow) => {
+    const p = drillParams(by, r);
+    if (!activeDrill || !p) return false;
+    const want: Record<string, string> = { ...p, window: range };
+    const got = activeDrill.params;
+    return (
+      Object.keys(want).length === Object.keys(got).length &&
+      Object.entries(want).every(([k, v]) => got[k] === v)
+    );
+  };
   const clickable = (r: ChargeSummaryRow) =>
     by === "account" ? Boolean(r.key && onSelectAccount) : Boolean(onDrill);
   const open = (r: ChargeSummaryRow) => {
@@ -223,7 +240,13 @@ export function ChargeSummary({
                 <tr
                   key={r.key ?? "none"}
                   data-testid="charge-summary-row"
-                  className={cn(clickable(r) && "hover:[&>td]:bg-[#FAF9F6]")}
+                  aria-selected={isActive(r) || undefined}
+                  className={cn(
+                    clickable(r) && "cursor-pointer hover:[&>td]:bg-[#FAF9F6]",
+                    isActive(r) && tb.selRow,
+                  )}
+                  onClick={clickable(r) ? () => open(r) : undefined}
+                  onKeyDown={clickable(r) ? (e) => e.key === "Enter" && open(r) : undefined}
                 >
                   <td className={cn(tb.td, tb.first, "min-w-32 max-w-xs break-words")}>
                     {clickable(r) ? (

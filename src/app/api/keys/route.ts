@@ -7,6 +7,7 @@ import { monthStartUtc } from "@/lib/modules/billing/application/run-charging";
 import { parseCredits } from "@/lib/modules/capabilities/domain/catalog";
 import { validateKeyRateLimit } from "@/lib/modules/identity/application/invoke-rate-limit";
 import {
+  apiKeyHint,
   generateApiKey,
   hashApiKey,
   parseExpiresInDays,
@@ -139,6 +140,7 @@ export async function POST(req: Request) {
     rateLimitPerMinute,
     ...(expiry.days ? { expiresAt: Date.now() + expiry.days * 86_400_000 } : {}),
     hashedKey: hashApiKey(plain),
+    keyHint: apiKeyHint(plain),
   });
 
   await audit.record({

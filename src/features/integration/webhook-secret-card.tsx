@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Banner, CardHead } from "@/features/settings/space-page";
 import { errorText, fetchJson } from "@/lib/fetch-json";
+import { formatTime } from "@/lib/format-time";
 import { refreshMe, useMe } from "@/lib/use-me";
 
 const MIN_SECRET = 24;
@@ -41,6 +42,7 @@ export function WebhookSecretCard() {
       setRevealedSecret(data.secret);
       setPreviousUntil(data.previousValidUntil ?? null);
       setCustomSecret("");
+      setInputError("");
       toast.success(generate ? "已生成新的签名密钥" : "已改用自定义密钥");
       await refreshMe();
     } catch (error) {
@@ -128,7 +130,7 @@ export function WebhookSecretCard() {
         </div>
         {previousUntil && (
           <Banner tone="warn" icon={<Clock />} className="mt-2.5 mb-0">
-            旧密钥在 <b>{new Date(previousUntil).toLocaleString()}</b>{" "}
+            旧密钥在 <b>{formatTime(new Date(previousUntil).getTime())}</b>{" "}
             前仍会额外签名（X-OWA-Signature-Previous），请在这之前把接收方换成新密钥。
           </Banner>
         )}

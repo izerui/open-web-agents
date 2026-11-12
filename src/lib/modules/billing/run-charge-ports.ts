@@ -121,6 +121,11 @@ export interface RunChargeItem {
   /** 运行所属智能体名称(已删除为 null) */
   agentName: string | null;
   apiKeyId: string | null;
+  /** 运行来源(会话的 source;运行已删除为 null) */
+  source: string | null;
+  /** 发起这次运行的 API Key 名称与尾号;网页发起或 Key 已吊销为 null */
+  apiKeyName: string | null;
+  apiKeyHint: string | null;
 }
 
 /**

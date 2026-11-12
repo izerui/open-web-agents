@@ -3,6 +3,7 @@
 import { LoadError } from "@/components/load-error";
 import { Button } from "@/components/ui/button";
 import { errorText, fetchJson } from "@/lib/fetch-json";
+import { formatTime } from "@/lib/format-time";
 import { creditsAmount, creditsExact } from "@/lib/modules/billing/domain/credits-display";
 import type { PendingChargeItem, PendingReason } from "@/lib/modules/billing/run-charge-ports";
 import { RefreshCw } from "lucide-react";
@@ -126,9 +127,7 @@ export function PendingCharges({ onSelectAccount }: { onSelectAccount?: (id: str
             <tbody>
               {items.map((c) => (
                 <tr key={c.runId} className="border-b align-top" data-testid="pending-charge">
-                  <td className="whitespace-nowrap px-2 py-2">
-                    {new Date(c.createdAt).toLocaleString()}
-                  </td>
+                  <td className="whitespace-nowrap px-2 py-2">{formatTime(c.createdAt)}</td>
                   <td className="max-w-48 break-all px-2 py-2">
                     {onSelectAccount ? (
                       <button

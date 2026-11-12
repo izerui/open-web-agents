@@ -6,6 +6,11 @@ import { Button } from "@/components/ui/button";
 import { CardHead, EmptyState, tb } from "@/features/settings/space-page";
 import { shortTime } from "@/features/settings/time-format";
 import { errorText, fetchJson } from "@/lib/fetch-json";
+import { formatTime } from "@/lib/format-time";
+import {
+  CHARGE_SOURCE_LABEL,
+  SESSION_SOURCE_TO_CHARGE,
+} from "@/lib/modules/billing/domain/charge-summary";
 import { creditsAmount, creditsExact } from "@/lib/modules/billing/domain/credits-display";
 import type { RunChargeItem } from "@/lib/modules/billing/run-charge-ports";
 import { cn } from "@/lib/utils";
@@ -99,16 +104,23 @@ export function RunChargeList({
           )
         }
         actions={
-          <Button
-            variant="ghost"
-            size="sm"
-            title="刷新运行消耗"
-            disabled={loading}
-            onClick={() => void load()}
-          >
-            <RefreshCw className={cn("size-[15px]", loading && "animate-spin")} />
-            刷新
-          </Button>
+          <>
+            {items.length > 0 && (
+              <span className="text-xs text-muted-foreground">
+                {items.length} 条{next ? "，还有更早的" : ""}
+              </span>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              title="刷新运行消耗"
+              disabled={loading}
+              onClick={() => void load()}
+            >
+              <RefreshCw className={cn("size-[15px]", loading && "animate-spin")} />
+              刷新
+            </Button>
+          </>
         }
       />
       {error && (
@@ -124,7 +136,7 @@ export function RunChargeList({
         )
       ) : (
         <div className={tb.wrap}>
-          <table className={cn(tb.table, "min-w-[760px]")}>
+          <table className={cn(tb.table, "min-w-[960px]")}>
             <caption className="sr-only">运行计费明细</caption>
             <thead>
               <tr>
@@ -133,6 +145,12 @@ export function RunChargeList({
                 </th>
                 <th scope="col" className={tb.th}>
                   智能体
+                </th>
+                <th scope="col" className={tb.th}>
+                  来源
+                </th>
+                <th scope="col" className={tb.th}>
+                  API Key
                 </th>
                 <th scope="col" className={cn(tb.th, tb.right)}>
                   应扣
@@ -154,15 +172,32 @@ export function RunChargeList({
                 return (
                   <tr key={c.runId} data-testid="run-charge">
                     <td className={cn(tb.td, tb.first, tb.num)}>
-                      <span title={new Date(c.createdAt).toLocaleString()}>
-                        {shortTime(c.createdAt)}
-                      </span>
+                      <span title={formatTime(c.createdAt)}>{shortTime(c.createdAt)}</span>
                     </td>
                     <td className={cn(tb.td, "min-w-40 max-w-xs break-words")}>
                       {c.agentName ?? "已删除的智能体"}
                       <div className="break-all font-mono text-xs text-muted-foreground">
                         {c.runId}
                       </div>
+                    </td>
+                    <td className={cn(tb.td, "whitespace-nowrap")}>
+                      {c.source ? (
+                        CHARGE_SOURCE_LABEL[SESSION_SOURCE_TO_CHARGE[c.source] ?? "other"]
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    <td className={cn(tb.td, "min-w-32 max-w-56 break-words")}>
+                      {c.apiKeyId ? (
+                        <>
+                          {c.apiKeyName ?? "已吊销的 Key"}
+                          <div className="font-mono text-xs text-muted-foreground">
+                            {c.apiKeyHint ?? `ID ${c.apiKeyId.slice(0, 12)}`}
+                          </div>
+                        </>
+                      ) : (
+                        <span className="text-muted-foreground">不经 Key</span>
+                      )}
                     </td>
                     <td className={cn(tb.td, tb.num, tb.right, "font-mono")}>
                       {amount(c.estimatedMicro)}

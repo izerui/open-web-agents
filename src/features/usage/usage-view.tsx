@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Banner, CardHead, SpacePage, StatCard, tb } from "@/features/settings/space-page";
 import { shortTime } from "@/features/settings/time-format";
+import { formatTime } from "@/lib/format-time";
 import { creditsAmount } from "@/lib/modules/billing/domain/credits-display";
 import {
   type UsageBucket,
@@ -438,7 +439,7 @@ function RunDetailSection({ runs, scope }: { runs: RunDetail[]; scope: "self" | 
                         )}
                       </td>
                       <td className={cn(tb.td, tb.num)}>
-                        <span title={new Date(r.at).toLocaleString()}>{shortTime(r.at)}</span>
+                        <span title={formatTime(r.at)}>{shortTime(r.at)}</span>
                       </td>
                       <td className={tb.td}>
                         <span className="flex items-center gap-2">

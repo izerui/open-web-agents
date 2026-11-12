@@ -14,6 +14,14 @@ export function generateApiKey(): string {
   return KEY_PREFIX + randomBytes(32).toString("base64url");
 }
 
+/**
+ * 认 Key 用的尾号(如 `owa_••••7Q2c`):签发时与哈希一起存下,列表和确认框靠它对上明文。
+ * 只留末 4 位 —— 4 个 base64url 字符对 32 字节熵的 Key 没有可利用的信息量。
+ */
+export function apiKeyHint(plain: string): string {
+  return `${KEY_PREFIX}••••${plain.slice(-4)}`;
+}
+
 /** 明文 → 存库用的哈希(hex,64 字符)。 */
 export function hashApiKey(plain: string): string {
   return createHash("sha256").update(plain, "utf8").digest("hex");

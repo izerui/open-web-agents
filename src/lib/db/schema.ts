@@ -324,6 +324,8 @@ export const apiKeys = mysqlTable(
     ownerId: varchar("owner_id", { length: 36 }).notNull(),
     /** 只存哈希,明文只在创建时返回一次 */
     hashedKey: varchar("hashed_key", { length: 128 }).notNull().unique(),
+    /** 认 Key 用的尾号(`owa_••••7Q2c`);加列之前签发的 Key 为空,界面退回显示 ID */
+    keyHint: varchar("key_hint", { length: 32 }),
     name: varchar("name", { length: 255 }),
     /** 这把 Key 每分钟的新调用上限;NULL = 用平台默认(OWA_INVOKE_RATE_LIMIT_PER_KEY) */
     rateLimitPerMinute: int("rate_limit_per_minute"),

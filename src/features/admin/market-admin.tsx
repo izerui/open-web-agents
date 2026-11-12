@@ -18,6 +18,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { errorText, fetchJson } from "@/lib/fetch-json";
+import { formatTime } from "@/lib/format-time";
 import { MARKET_CATEGORIES, type MarketAgent } from "@/lib/modules/market/domain/catalog";
 import type { ListingRequest } from "@/lib/modules/market/listing-request-ports";
 import { cn } from "@/lib/utils";
@@ -77,10 +78,7 @@ type RequestFilter = (typeof REQUEST_FILTERS)[number]["value"];
 const categoryName = (id?: string) =>
   MARKET_CATEGORIES.find((c) => c.id === id)?.name ?? "通用助手";
 
-function when(ms: number): string {
-  const d = new Date(ms);
-  return `${d.getMonth() + 1}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
+const when = (ms: number) => formatTime(ms);
 
 /** 评测结论的一句话（只对待审申请计算；没有就不显示） */
 function evalBadge(r: RequestRow) {

@@ -16,15 +16,28 @@ export function AccountSecurityView() {
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  /** 提交时没过校验的那一栏,红字写在它下面 */
+  const [fieldErr, setFieldErr] = useState<{
+    field: "current" | "next" | "confirm";
+    text: string;
+  } | null>(null);
   const mismatch = confirm.length > 0 && confirm !== next;
   const tooShort = next.length > 0 && next.length < 8;
+  const currentErr = fieldErr?.field === "current" ? fieldErr.text : "";
+  const nextErr = tooShort ? "至少 8 位" : fieldErr?.field === "next" ? fieldErr.text : "";
+  const confirmErr = mismatch
+    ? "两次输入的密码不一致"
+    : fieldErr?.field === "confirm"
+      ? fieldErr.text
+      : "";
 
   async function submit() {
     if (busy) return;
-    if (!current) return setError("请输入当前密码");
-    if (next.length < 8) return setError("新密码至少 8 位");
-    if (next !== confirm) return setError("两次输入的密码不一致");
     setError("");
+    if (!current) return setFieldErr({ field: "current", text: "请输入当前密码" });
+    if (next.length < 8) return setFieldErr({ field: "next", text: "新密码至少 8 位" });
+    if (next !== confirm) return setFieldErr({ field: "confirm", text: "两次输入的密码不一致" });
+    setFieldErr(null);
     setBusy(true);
     try {
       await fetchJson("/api/me/password", {
@@ -60,6 +73,7 @@ export function AccountSecurityView() {
           至少 8 位。管理员给你的初始密码请尽快在这里改掉。
         </p>
         <form
+          noValidate
           className="space-y-3.5"
           onSubmit={(e) => {
             e.preventDefault();
@@ -71,10 +85,14 @@ export function AccountSecurityView() {
             <Input
               type="password"
               autoComplete="current-password"
-              required
+              aria-invalid={Boolean(currentErr) || undefined}
               value={current}
-              onChange={(e) => setCurrent(e.target.value)}
+              onChange={(e) => {
+                setCurrent(e.target.value);
+                setFieldErr(null);
+              }}
             />
+            {currentErr && <span className="text-xs text-destructive">{currentErr}</span>}
           </label>
           <label className="flex flex-col gap-1.5">
             <span className="text-[13px] text-muted-foreground">新密码</span>
@@ -82,24 +100,28 @@ export function AccountSecurityView() {
               type="password"
               autoComplete="new-password"
               placeholder="至少 8 位"
-              required
-              aria-invalid={tooShort}
+              aria-invalid={Boolean(nextErr) || undefined}
               value={next}
-              onChange={(e) => setNext(e.target.value)}
+              onChange={(e) => {
+                setNext(e.target.value);
+                setFieldErr(null);
+              }}
             />
-            {tooShort && <span className="text-xs text-destructive">至少 8 位</span>}
+            {nextErr && <span className="text-xs text-destructive">{nextErr}</span>}
           </label>
           <label className="flex flex-col gap-1.5">
             <span className="text-[13px] text-muted-foreground">再次输入新密码</span>
             <Input
               type="password"
               autoComplete="new-password"
-              required
-              aria-invalid={mismatch}
+              aria-invalid={Boolean(confirmErr) || undefined}
               value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
+              onChange={(e) => {
+                setConfirm(e.target.value);
+                setFieldErr(null);
+              }}
             />
-            {mismatch && <span className="text-xs text-destructive">两次输入的密码不一致</span>}
+            {confirmErr && <span className="text-xs text-destructive">{confirmErr}</span>}
           </label>
           <p aria-live="polite" className="min-h-[18px] text-xs text-destructive">
             {error}

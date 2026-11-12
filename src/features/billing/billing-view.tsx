@@ -262,6 +262,7 @@ export function BillingView({
         <div id="billing-overview" hidden={adminView !== "overview"}>
           <ChargeSummary
             platform
+            defaultBy="account"
             onSelectAccount={(id, range) =>
               // 明细也只看这段时间,和刚才那笔汇总对得上
               selectAccount(id, range, {
@@ -431,6 +432,7 @@ export function BillingView({
                 key={admin ? `${accountId}:${accountRange}` : "self"}
                 accountId={admin ? accountId : undefined}
                 initialRange={accountRange}
+                activeDrill={drill}
                 onDrill={(next) => {
                   setDrill(next);
                   openAccountView("runs");

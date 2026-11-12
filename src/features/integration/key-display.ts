@@ -49,6 +49,44 @@ export function parseRpmDraft(
   return { ok: true, value };
 }
 
+/** 签发表单里写明的每分钟上限范围(普通账号不能高于平台默认,与服务端 validateKeyRateLimit 一致) */
+export function rpmRangeText(platformMax: number): string {
+  return platformMax > 0 ? `1 到 ${platformMax} 次，不能高于平台默认` : "正整数";
+}
+
+/** 认 Key 用的标识:有尾号显示尾号;加列之前签发的旧 Key 退回显示 ID */
+export function keyLabel(k: { id: string; keyHint?: string }): string {
+  return k.keyHint || `ID ${k.id.slice(0, 12)}`;
+}
+
+/** 轮换的重叠期最长 168 小时(parseGraceHours),再留一分钟余量 */
+const MAX_GRACE_MS = 168 * 3_600_000 + 60_000;
+
+/**
+ * 轮换后留下的旧 Key:库里没有记录轮换关系,按轮换的特征认 ——
+ * 之后有一把同名、同绑定的 Key,而自己的到期时刻落在那把 Key 签发后的重叠期以内。
+ */
+export function rotatedOldKeys(
+  keys: { id: string; name?: string; agentId?: string; createdAt: number; expiresAt?: number }[],
+): Set<string> {
+  const old = new Set<string>();
+  for (const k of keys) {
+    if (k.expiresAt === undefined) continue;
+    const exp = k.expiresAt;
+    const succeeded = keys.some(
+      (n) =>
+        n.id !== k.id &&
+        (n.name ?? "") === (k.name ?? "") &&
+        (n.agentId ?? "") === (k.agentId ?? "") &&
+        n.createdAt > k.createdAt &&
+        exp >= n.createdAt - 60_000 &&
+        exp - n.createdAt <= MAX_GRACE_MS,
+    );
+    if (succeeded) old.add(k.id);
+  }
+  return old;
+}
+
 /** 智能体对调用方的状态:调用默认用发布版,从未发布则用草稿 */
 export function accessStatusText(agent: {
   published?: { version: number } | null;

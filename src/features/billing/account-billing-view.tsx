@@ -207,6 +207,7 @@ export function AccountBillingView() {
           {visited.includes("runs") && (
             <>
               <ChargeSummary
+                activeDrill={drill}
                 onDrill={(d) => {
                   setDrill(d);
                   requestAnimationFrame(() =>

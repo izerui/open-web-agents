@@ -19,6 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { formatPrice, parsePrice } from "@/features/billing/money";
 import { creditsText } from "@/features/models/model-shared";
 import { errorText, fetchJson } from "@/lib/fetch-json";
+import { formatTime } from "@/lib/format-time";
 import type { CreditOrder, CreditPackage } from "@/lib/modules/billing/package-ports";
 import { formatCredits, parseCredits } from "@/lib/modules/capabilities/domain/catalog";
 import { cn } from "@/lib/utils";
@@ -76,10 +77,7 @@ const ORDER_FILTERS = [
 ] as const;
 type OrderFilter = (typeof ORDER_FILTERS)[number]["value"];
 
-function when(ms: number): string {
-  const d = new Date(ms);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
+const when = (ms: number) => formatTime(ms);
 
 /** 价格只做展示：「¥ 100」后面跟币种小字 */
 function Price({ minor, currency }: { minor: string; currency: "CNY" | "USD" }) {

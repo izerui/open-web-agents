@@ -20,6 +20,7 @@ import { creditsText } from "@/features/models/model-shared";
 import { Banner, CardHead, EmptyState, tb } from "@/features/settings/space-page";
 import { shortTime } from "@/features/settings/time-format";
 import { errorText, fetchJson } from "@/lib/fetch-json";
+import { formatTime } from "@/lib/format-time";
 import type { CreditOrder, CreditPackage } from "@/lib/modules/billing/package-ports";
 import { formatCredits, parseCredits } from "@/lib/modules/capabilities/domain/catalog";
 import { cn } from "@/lib/utils";
@@ -643,7 +644,7 @@ export function PackageView({
                           </p>
                           <p className="mt-1 break-all text-muted-foreground">{order.id}</p>
                           <p className="mt-1 whitespace-nowrap text-muted-foreground">
-                            {new Date(order.createdAt).toLocaleString()}
+                            {formatTime(order.createdAt)}
                           </p>
                         </td>
                         {admin && (
@@ -876,9 +877,7 @@ function UserPackages({
                       {formatPrice(order.priceMinor, order.currency)}
                     </td>
                     <td className={cn(tb.td, tb.num)}>
-                      <span title={new Date(order.createdAt).toLocaleString()}>
-                        {shortTime(order.createdAt)}
-                      </span>
+                      <span title={formatTime(order.createdAt)}>{shortTime(order.createdAt)}</span>
                     </td>
                     <td className={tb.td}>
                       <Badge variant={ORDER_TONE[order.status]}>{STATUS[order.status]}</Badge>

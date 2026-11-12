@@ -78,7 +78,21 @@ function decodeCursor(raw: string): { createdAt: number; runId: string } {
 
 type Row = typeof runCharges.$inferSelect;
 
-function itemOf(c: Row, agentName: string | null): RunChargeItem {
+/** 明细每条要带的关联信息:智能体名、来源、API Key 名称与尾号 */
+const LINKED = {
+  agentName: agents.name,
+  source: sessions.source,
+  apiKeyName: apiKeys.name,
+  apiKeyHint: apiKeys.keyHint,
+};
+type Linked = {
+  agentName: string | null;
+  source: string | null;
+  apiKeyName: string | null;
+  apiKeyHint: string | null;
+};
+
+function itemOf(c: Row, l: Linked): RunChargeItem {
   return {
     runId: c.runId,
     state: c.state as RunChargeItem["state"],
@@ -90,8 +104,11 @@ function itemOf(c: Row, agentName: string | null): RunChargeItem {
     incomplete: c.incomplete === 1,
     createdAt: c.createdAt.getTime(),
     settledAt: c.settledAt?.getTime() ?? null,
-    agentName: agentName ?? null,
+    agentName: l.agentName ?? null,
     apiKeyId: c.apiKeyId,
+    source: l.source ?? null,
+    apiKeyName: c.apiKeyId ? (l.apiKeyName ?? null) : null,
+    apiKeyHint: c.apiKeyId ? (l.apiKeyHint ?? null) : null,
   };
 }
 
@@ -114,11 +131,12 @@ export class MysqlRunChargeQuery implements RunChargeQuery {
     const cursor = opts.cursor ? decodeCursor(opts.cursor) : null;
     const at = cursor ? new Date(cursor.createdAt) : null;
     const rows = await this.db
-      .select({ c: runCharges, agentName: agents.name })
+      .select({ c: runCharges, ...LINKED })
       .from(runCharges)
       .leftJoin(runs, eq(runs.id, runCharges.runId))
       .leftJoin(sessions, eq(sessions.id, runs.sessionId))
       .leftJoin(agents, eq(agents.id, sessions.agentId))
+      .leftJoin(apiKeys, eq(apiKeys.id, runCharges.apiKeyId))
       .where(
         and(
           eq(runCharges.accountId, accountId),
@@ -133,7 +151,7 @@ export class MysqlRunChargeQuery implements RunChargeQuery {
       )
       .orderBy(desc(runCharges.createdAt), desc(runCharges.runId))
       .limit(opts.limit + 1);
-    const page = rows.slice(0, opts.limit).map(({ c, agentName }) => itemOf(c, agentName));
+    const page = rows.slice(0, opts.limit).map(({ c, ...l }) => itemOf(c, l));
     const last = page.at(-1);
     return {
       items: page,
@@ -151,7 +169,7 @@ export class MysqlRunChargeQuery implements RunChargeQuery {
     const rows = await this.db
       .select({
         c: runCharges,
-        agentName: agents.name,
+        ...LINKED,
         email: users.email,
         reason: PENDING_REASON_SQL,
       })
@@ -160,6 +178,7 @@ export class MysqlRunChargeQuery implements RunChargeQuery {
       .leftJoin(runs, eq(runs.id, runCharges.runId))
       .leftJoin(sessions, eq(sessions.id, runs.sessionId))
       .leftJoin(agents, eq(agents.id, sessions.agentId))
+      .leftJoin(apiKeys, eq(apiKeys.id, runCharges.apiKeyId))
       .where(
         and(
           eq(runCharges.state, "provisional"),
@@ -175,8 +194,8 @@ export class MysqlRunChargeQuery implements RunChargeQuery {
       .orderBy(desc(runCharges.createdAt), desc(runCharges.runId))
       .limit(opts.limit + 1);
     const page = rows.slice(0, opts.limit).map(
-      ({ c, agentName, email, reason }): PendingChargeItem => ({
-        ...itemOf(c, agentName),
+      ({ c, email, reason, ...l }): PendingChargeItem => ({
+        ...itemOf(c, l),
         reason: reason as PendingReason,
         accountId: c.accountId,
         accountEmail: email ?? null,

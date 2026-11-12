@@ -16,6 +16,7 @@ import {
 import { EmptyState, SpacePage, tb } from "@/features/settings/space-page";
 import { shortTime } from "@/features/settings/time-format";
 import { errorText, fetchJson } from "@/lib/fetch-json";
+import { formatTime } from "@/lib/format-time";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -205,7 +206,7 @@ function AuditContent({ platform }: { platform: boolean }) {
                   return (
                     <tr key={e.id}>
                       <td className={cn(tb.td, tb.first, tb.num)}>
-                        <span title={new Date(e.at).toLocaleString()}>{shortTime(e.at)}</span>
+                        <span title={formatTime(e.at)}>{shortTime(e.at)}</span>
                       </td>
                       <td className={tb.td}>
                         <span className="flex max-w-56 items-center gap-2" title={e.actor.id}>

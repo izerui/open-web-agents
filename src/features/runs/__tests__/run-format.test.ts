@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   canCancelRun,
   formatDuration,
+  hasChatTranscript,
   looksLikeJson,
   prettyInput,
+  runCreditsText,
   tokensText,
   versionLabel,
 } from "../run-format";
@@ -58,5 +60,26 @@ describe("输入的展示", () => {
     expect(prettyInput('{"a":1}')).toBe('{\n  "a": 1\n}');
     expect(prettyInput("{坏的")).toBe("{坏的");
     expect(prettyInput("普通文本")).toBe("普通文本");
+  });
+});
+
+describe("runCreditsText:运行花费一律显示积分", () => {
+  it("已结算显示实际扣除", () => {
+    expect(runCreditsText({ micro: "1500000", state: "settled" })).toBe("1.50 积分");
+  });
+  it("冻结中写明是冻结", () => {
+    expect(runCreditsText({ micro: "9000000", state: "open" })).toBe("冻结 9.00 积分");
+  });
+  it("没有扣费记录返回 null(不退回显示美元)", () => {
+    expect(runCreditsText(undefined)).toBeNull();
+  });
+});
+
+describe("hasChatTranscript:哪些运行能在对话里查看", () => {
+  it.each(["web", "api", "try", "trial", "design"])("%s 有对话", (s) => {
+    expect(hasChatTranscript(s)).toBe(true);
+  });
+  it.each(["invoke", "eval"])("%s 没有可查看的对话", (s) => {
+    expect(hasChatTranscript(s)).toBe(false);
   });
 });
