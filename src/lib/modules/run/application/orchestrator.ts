@@ -214,9 +214,10 @@ export class RunOrchestrator {
         session.source === "invoke" || session.source === "eval"
           ? (config.unattendedApproval ?? "allow")
           : ("ask" as const),
-      // 提问等人回答只在界面上有人看着提问卡片的入口:网页对话与 AI 编辑。
+      // 提问等人回答只在界面上有人看着提问卡片的入口:网页对话、构建页试聊与 AI 编辑。
       // API Key 建的多轮会话(source=api)审批仍可由调用方用 Key 裁决,但没人对着卡片作答,不等
-      canAskUser: session.source === "web" || session.source === "design",
+      canAskUser:
+        session.source === "web" || session.source === "trial" || session.source === "design",
       credentials,
       modelSlots: binding.slots,
       // 每份快照都记在内存里(无论写库成没成):引擎之后出错时随错误带给 worker,
@@ -328,10 +329,12 @@ export class RunOrchestrator {
       return { status: "failed", error: { kind: "aborted", message: "运行在启动前已被中止" } };
     }
 
-    // 运行中途追加消息:只给有人在对话的入口(工作台、API 会话)。接口调用是一次性输入。
+    // 运行中途追加消息:只给有人在对话的入口(工作台、构建页试聊、API 会话)。接口调用是一次性输入。
     // 开不了(通道不可用)就不接受追加,运行照常
     const steer =
-      cmd.runId && this.deps.steerChannel && (session.source === "web" || session.source === "api")
+      cmd.runId &&
+      this.deps.steerChannel &&
+      (session.source === "web" || session.source === "trial" || session.source === "api")
         ? await ChannelSteerInbox.open(this.deps.steerChannel, cmd.runId)
         : null;
 

@@ -14,9 +14,19 @@ export interface UsageQuery {
    * 产生的花费(这两类会话没有 owner)不算在任何人头上,额度也就拦不住它们。
    */
   ownerId?: string;
+  /** 只统计该智能体的会话(sessions.agent_id);不传则不限。 */
+  agentId?: string;
   /** 起始时间(ms)。 */
   since: number;
   limit?: number;
+}
+
+/** list 与 isTruncated 共用的筛选条件:两者口径必须一致,截断判断才可信。 */
+function usageConds(q: UsageQuery) {
+  const conds = [gte(runs.createdAt, new Date(q.since))];
+  if (q.ownerId) conds.push(eq(sessions.billingUserId, q.ownerId));
+  if (q.agentId) conds.push(eq(sessions.agentId, q.agentId));
+  return conds;
 }
 
 /** 单次查询的记录数上限。超过即截断,调用方需通过 isTruncated 感知。 */
@@ -34,8 +44,7 @@ export class MysqlUsageRepo {
    * 响应里没有任何截断标志。数字偏小,所以超预算时反而没人会察觉。
    */
   async isTruncated(q: UsageQuery): Promise<boolean> {
-    const conds = [gte(runs.createdAt, new Date(q.since))];
-    if (q.ownerId) conds.push(eq(sessions.billingUserId, q.ownerId));
+    const conds = usageConds(q);
     const rows = await this.db
       .select({ n: sql<number>`COUNT(*)` })
       .from(runs)
@@ -52,8 +61,7 @@ export class MysqlUsageRepo {
    * 但上限意味着结果可能不完整,故配套提供 isTruncated。
    */
   async list(q: UsageQuery): Promise<RunUsageRecord[]> {
-    const conds = [gte(runs.createdAt, new Date(q.since))];
-    if (q.ownerId) conds.push(eq(sessions.billingUserId, q.ownerId));
+    const conds = usageConds(q);
 
     const rows = await this.db
       .select({

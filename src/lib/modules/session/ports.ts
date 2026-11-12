@@ -3,7 +3,11 @@ import type { ModelAlias } from "@/lib/shared";
 
 /** 会话从哪个入口来。决定审批怎么走、结果是否推 webhook、在哪个列表里展示。 */
 /** eval = 评测里每个用例的运行:无人值守,不推回调,不进工作台的会话列表 */
-export type SessionSource = "web" | "api" | "invoke" | "eval" | "design";
+/**
+ * 会话来源。trial = 构建页「试聊」:作者在构建页用草稿对话,交互语义同 web(能提问、审批、追加消息),
+ * 但不出现在 /chat 的普通会话列表里。
+ */
+export type SessionSource = "web" | "api" | "invoke" | "eval" | "design" | "trial";
 
 /** active 正常 / archived 归档(列表默认不显示) / deleted 已删除(视同不存在)。 */
 export type SessionStatus = "active" | "archived" | "deleted";

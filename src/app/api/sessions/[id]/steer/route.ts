@@ -38,7 +38,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (!session) return apiError(404, "not_found", "session not found");
     // 追加消息同样在用这个智能体 —— 分享撤销后不能继续往运行里塞内容
     await auth.assertCanInvoke(principal, session.agentId);
-    if (session.source !== "web" && session.source !== "api") {
+    // 试聊(trial)与网页对话同一交互语义,同样可追加
+    if (session.source !== "web" && session.source !== "trial" && session.source !== "api") {
       return apiError(409, "not_accepting", "这个会话的运行不接受追加消息");
     }
   } catch (err) {

@@ -38,6 +38,7 @@ beforeEach(async () => {
     designState: { draft: { name: "x" } } as never,
   });
   await sessions.create({ ...base, id: "other-user", ownerId: "someone-else" });
+  await sessions.create({ ...base, id: "trial-chat", ownerId: "owner", source: "trial" });
 });
 
 describe("GET /api/sessions(对话页)", () => {
@@ -58,6 +59,16 @@ describe("GET /api/sessions(对话页)", () => {
     expect(design?.source).toBe("design");
     expect(design?.designTargetAgentId).toBe("market-agent");
     expect(JSON.stringify(body)).not.toContain("designState");
+  });
+
+  it("构建页试聊(trial)不出现在默认、归档与 include=design 视图里", async () => {
+    for (const path of [
+      "/api/sessions",
+      "/api/sessions?include=design",
+      "/api/sessions?archived=1",
+    ]) {
+      expect(await ids(path)).not.toContain("trial-chat");
+    }
   });
 
   it("别人的会话在任何视图里都看不到", async () => {

@@ -37,7 +37,7 @@ interface RunItem {
   agentName?: string;
   /** 执行的智能体版本;undefined = 草稿 */
   agentVersion?: number;
-  source: "web" | "api" | "invoke" | "eval" | "design";
+  source: "web" | "api" | "invoke" | "eval" | "design" | "trial";
   status: RunStatus;
   promptPreview: string;
   createdAt: number;
@@ -60,6 +60,7 @@ const SOURCE_LABEL: Record<RunItem["source"], string> = {
   invoke: "接口调用",
   eval: "评测",
   design: "智能体设计器",
+  trial: "构建页试聊",
 };
 
 const STATUS_META: Record<

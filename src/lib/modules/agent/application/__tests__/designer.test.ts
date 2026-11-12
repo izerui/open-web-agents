@@ -327,6 +327,81 @@ describe("AgentDesigner", () => {
     expect(saved.saved.config.mcpServers).toEqual(source.config.mcpServers);
   });
 
+  it("预览带上基线草稿 base:等于目标智能体当前内容的 draftOf,MCP 同样脱敏;新建时为空白基线", async () => {
+    const targetWithMcp: Agent = {
+      ...target,
+      config: { ...target.config, mcpServers: source.config.mcpServers },
+    };
+    const h = await setup({ target: targetWithMcp });
+    await h.edit({ ...draftOf(targetWithMcp), systemPrompt: "Edited prompt" });
+    const view = await h.inspect();
+    expect(view.base).toEqual(draftOf(targetWithMcp));
+    expect(view.base.systemPrompt).toBe("Original prompt");
+    expect(view.draft.systemPrompt).toBe("Edited prompt");
+    for (const secret of ["secret-token", "secret-env"]) {
+      expect(JSON.stringify(view.base)).not.toContain(secret);
+    }
+    const fresh = await setup();
+    expect((await fresh.inspect()).base).toEqual(draftOf(undefined));
+  });
+
+  it("bindTarget:无目标的设计会话认领已建的智能体,草稿不变,之后差异相对该智能体、apply 改它", async () => {
+    const h = await setup();
+    await h.agents.upsert(target);
+    const before = await h.inspect();
+    const view = await h.designer.update(owner, "design", {
+      revision: before.revision,
+      bindTarget: target.id,
+    });
+    if (view.legacy) throw new Error("expected initialized design");
+    expect(view.targetId).toBe(target.id);
+    expect(view.conflict).toBe(false);
+    expect(view.draft).toEqual(before.draft);
+    expect(view.base).toEqual(draftOf(target));
+    expect(view.resourceAgentIds).toContain(target.id);
+    expect(view.changes).toContainEqual(
+      expect.objectContaining({ kind: "changed", before: "Original prompt", after: "New prompt" }),
+    );
+    const session = await h.sessions.get("design");
+    expect(session?.designTargetAgentId).toBe(target.id);
+    expect(session?.title).toBe("设计:Original");
+    expect((await h.inspect()).targetId).toBe(target.id);
+    const saved = await h.designer.apply(owner, "design", (await h.inspect()).previewToken);
+    expect(saved).toMatchObject({ created: false, agent: { id: target.id } });
+    expect(saved.saved.config.systemPrompt).toBe("New prompt");
+  });
+
+  it("bindTarget:已有目标 409 design_bound;无写权限 403;revision 不对 409", async () => {
+    const bound = await setup({ target });
+    await expect(
+      bound.designer.update(owner, "design", {
+        revision: (await bound.inspect()).revision,
+        bindTarget: source.id,
+      }),
+    ).rejects.toMatchObject({ status: 409, code: "design_bound" });
+
+    const h = await setup();
+    await h.agents.upsert({ ...target, ownerId: "someone-else" });
+    const view = await h.inspect();
+    await expect(
+      h.designer.update(owner, "design", { revision: view.revision, bindTarget: target.id }),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      h.designer.update(owner, "design", { revision: view.revision, bindTarget: "missing" }),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      h.designer.update(owner, "design", { revision: "stale", bindTarget: source.id }),
+    ).rejects.toMatchObject({ status: 409, code: "design_changed" });
+    expect((await h.sessions.get("design"))?.designTargetAgentId).toBeUndefined();
+  });
+
+  it("bindTarget:旧设计(无设计状态)409 design_legacy", async () => {
+    const h = await setup({ legacy: true });
+    await expect(
+      h.designer.update(owner, "design", { bindTarget: source.id }),
+    ).rejects.toMatchObject({ status: 409, code: "design_legacy" });
+  });
+
   it("modifying skill content saves the change while MCP secrets are restored from original", async () => {
     const targetWithResources: Agent = {
       ...target,
