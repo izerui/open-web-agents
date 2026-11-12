@@ -125,8 +125,64 @@ function toItem(r: Row): RunListItem {
   };
 }
 
+/** 每个会话最近一次运行的摘要(探索首页「你的 AI 同事正在工作」用)。 */
+export interface LatestRun {
+  sessionId: string;
+  status: RunState;
+  /** 本轮输入的前 300 字 */
+  promptPreview: string;
+  /** 本轮最终回答的前 400 字;还没回答为 undefined */
+  replyPreview?: string;
+  createdAt: number;
+  startedAt?: number;
+}
+
 export class MysqlRunQuery {
   constructor(private readonly db: Db) {}
+
+  /**
+   * 一批会话各自最近一次运行。窗口函数一条查询取齐,不按会话逐个查。
+   * 未出现在结果里的会话 = 还没跑过。
+   */
+  async latestBySessions(sessionIds: string[]): Promise<Map<string, LatestRun>> {
+    const out = new Map<string, LatestRun>();
+    const ids = [...new Set(sessionIds)];
+    if (ids.length === 0) return out;
+    const res = await this.db.execute(sql`
+      SELECT session_id, status, prompt_preview, reply_preview, created_ms, started_ms FROM (
+        SELECT r.session_id, r.status,
+               LEFT(r.prompt, 300) AS prompt_preview,
+               LEFT(r.final_text, 400) AS reply_preview,
+               UNIX_TIMESTAMP(r.created_at) * 1000 AS created_ms,
+               UNIX_TIMESTAMP(r.started_at) * 1000 AS started_ms,
+               ROW_NUMBER() OVER (PARTITION BY r.session_id ORDER BY r.created_at DESC, r.id DESC) AS rn
+        FROM runs r
+        WHERE r.session_id IN (${sql.join(
+          ids.map((id) => sql`${id}`),
+          sql`, `,
+        )})
+      ) t WHERE rn = 1`);
+    const rows = ((res as unknown as [unknown[]])[0] ?? []) as {
+      session_id: string;
+      status: string;
+      prompt_preview: string | null;
+      reply_preview: string | null;
+      created_ms: string | number;
+      started_ms: string | number | null;
+    }[];
+    for (const r of rows) {
+      const started = r.started_ms === null ? undefined : Number(r.started_ms);
+      out.set(r.session_id, {
+        sessionId: r.session_id,
+        status: r.status as RunState,
+        promptPreview: r.prompt_preview ?? "",
+        replyPreview: r.reply_preview ?? undefined,
+        createdAt: Number(r.created_ms),
+        startedAt: Number.isFinite(started) ? started : undefined,
+      });
+    }
+    return out;
+  }
 
   async list(f: RunQueryFilter): Promise<{ items: RunListItem[]; nextCursor?: string }> {
     const conds = [

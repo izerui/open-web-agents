@@ -9,7 +9,7 @@ export async function marketContext(req: Request) {
     ...container,
     principal,
     subject: await container.auth.subjectOf(principal),
-    market: new AgentMarket(container.agents, container.releases),
+    market: new AgentMarket(container.agents, container.releases, container.marketStats),
   };
 }
 

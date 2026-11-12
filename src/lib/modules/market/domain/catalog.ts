@@ -1,4 +1,5 @@
 import type { Agent, AgentSnapshot } from "@/lib/modules/agent/ports";
+import { EMPTY_MARKET_STATS, type MarketStats } from "./stats";
 
 export const MARKET_CATEGORIES = [
   { id: "general", name: "通用助手" },
@@ -13,7 +14,11 @@ export function validCategory(value: unknown): value is string {
 }
 
 /** 显式白名单:市场使用权不暴露定义、技能正文、工具连接或回调地址。 */
-export function marketSummary(agent: Agent, published: AgentSnapshot) {
+export function marketSummary(
+  agent: Agent,
+  published: AgentSnapshot & { createdAt?: number; note?: string },
+  stats: MarketStats = EMPTY_MARKET_STATS,
+) {
   return {
     id: agent.id,
     name: published.name,
@@ -22,6 +27,13 @@ export function marketSummary(agent: Agent, published: AgentSnapshot) {
     marketListed: agent.marketListed === true,
     category: agent.marketCategory ?? "general",
     publishedVersion: agent.publishedVersion,
+    /** 当前发布版本的发布时间(ms)与版本说明;「最新」排序与详情的版本说明用 */
+    publishedAt: published.createdAt ?? null,
+    versionNote: published.note ?? null,
+    /** A10 / A11:作者显示名、近 90 天使用次数、近 50 次成功运行的平均实扣积分 */
+    author: stats.author,
+    useCount: stats.useCount,
+    avgCredits: stats.avgCredits,
     config: {
       model: published.config.model,
       starters: published.config.starters,

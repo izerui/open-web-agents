@@ -7,9 +7,10 @@ import {
 } from "@/lib/modules/access/domain/principal";
 import type { AgentReleases } from "@/lib/modules/agent/application/releases";
 import { isSystemAgent } from "@/lib/modules/agent/domain/system-agent";
-import type { AgentRepo } from "@/lib/modules/agent/ports";
+import type { Agent, AgentRepo } from "@/lib/modules/agent/ports";
 import { BrandedError } from "@/lib/shared";
 import { marketSummary, validCategory } from "../domain/catalog";
+import { EMPTY_MARKET_STATS, type MarketStats, type MarketStatsSource } from "../domain/stats";
 
 export class MarketError extends BrandedError {
   static readonly brand = Symbol.for("owa.error.MarketError");
@@ -27,7 +28,19 @@ export class AgentMarket {
   constructor(
     private readonly agents: AgentRepo,
     private readonly releases: Pick<AgentReleases, "publishedOf">,
+    private readonly stats?: MarketStatsSource,
   ) {}
+
+  /**
+   * 卡片上的作者、使用次数与每次约花费。整页一次批量取。
+   * 【为什么取不到不报错】这几项只是附加信息,统计查询出问题不该让整个市场打不开。
+   */
+  private async statsFor(agents: readonly Agent[]): Promise<Map<string, MarketStats>> {
+    if (!this.stats || agents.length === 0) return new Map();
+    return this.stats
+      .forAgents(agents.map((a) => ({ id: a.id, ownerId: a.ownerId })))
+      .catch(() => new Map<string, MarketStats>());
+  }
 
   async list(
     principal: Principal,
@@ -54,13 +67,16 @@ export class AgentMarket {
         (query.manage || isMarketUsable(a)) &&
         canInvokeAgent(principal, a, subject, grants).allowed,
     );
-    const versions = await this.releases.publishedOf(agents);
+    const [versions, stats] = await Promise.all([
+      this.releases.publishedOf(agents),
+      this.statsFor(agents),
+    ]);
     const search = query.search?.trim().toLocaleLowerCase() ?? "";
     return agents
       .flatMap((agent) => {
         const version = versions.get(agent.id);
         if (!version) return [];
-        const item = marketSummary(agent, version);
+        const item = marketSummary(agent, version, stats.get(agent.id) ?? EMPTY_MARKET_STATS);
         if (query.category && item.category !== query.category) return [];
         if (
           search &&
@@ -83,7 +99,8 @@ export class AgentMarket {
     }
     const published = (await this.releases.publishedOf([agent])).get(id);
     if (!published) throw new MarketError(404, "not_found", "已发布版本不存在");
-    return marketSummary(agent, published);
+    const stats = (await this.statsFor([agent])).get(id) ?? EMPTY_MARKET_STATS;
+    return marketSummary(agent, published, stats);
   }
 
   async setListing(principal: Principal, id: string, raw: unknown) {
