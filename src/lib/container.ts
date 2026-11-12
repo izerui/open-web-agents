@@ -21,6 +21,10 @@ import { probeMcp } from "@/lib/modules/agent-engine/adapters/mcp-probe";
 import type { ModelMetering } from "@/lib/modules/agent-engine/domain/model-usage";
 import type { EnginePort, TranscriptPort } from "@/lib/modules/agent-engine/ports";
 import { readBundle, writeBundle } from "@/lib/modules/agent/adapters/fs-bundle-store";
+import {
+  type AgentActivityQuery,
+  MysqlAgentActivity,
+} from "@/lib/modules/agent/adapters/mysql-agent-activity";
 import { MysqlAgentModelRefs } from "@/lib/modules/agent/adapters/mysql-agent-model-refs";
 import { MysqlAgentRepo } from "@/lib/modules/agent/adapters/mysql-agent-repo";
 import { MysqlAgentVersionRepo } from "@/lib/modules/agent/adapters/mysql-agent-version-repo";
@@ -160,6 +164,8 @@ export interface Container {
   runs: MysqlRunRepo;
   /** 运行记录查询(读模型)。 */
   runQuery: MysqlRunQuery;
+  /** 工作室列表:近 N 天运行数与更新时间(一条聚合查询) */
+  agentActivity: AgentActivityQuery;
   usage: MysqlUsageRepo;
   knowledge: MysqlKnowledgeRepo;
   /**
@@ -692,6 +698,7 @@ function build(): Container {
     auth,
     runs,
     runQuery: new MysqlRunQuery(db),
+    agentActivity: new MysqlAgentActivity(db),
     usage,
     knowledge,
     searchKnowledge,

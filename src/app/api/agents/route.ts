@@ -38,9 +38,12 @@ function canManageWebhook(subject: Subject, agent: { ownerId: string }): boolean
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/** 工作室「近 7 天运行」的窗口 */
+const ACTIVITY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
 /** 列出调用方可见的智能体:自己的 + 被分享的 + 公开的(admin 看全部)。 */
 export async function GET(req: Request) {
-  const { agents, grants, auth, env, releases } = getContainer();
+  const { agents, grants, auth, env, releases, agentActivity } = getContainer();
   try {
     // 保留 principal:API Key 只能看到它绑定的智能体,且永远按只读者对待(见 agentAccessLevel)
     const principal = await auth.resolveWeb(req);
@@ -71,6 +74,11 @@ export async function GET(req: Request) {
     const visible = all.filter((a) => canInvokeAgent(principal, a, subject, allGrants).allowed);
     // 同理一次取齐各自当前发布的版本
     const published = await releases.publishedOf(visible);
+    // 工作室卡片上的「近 7 天运行」与更新时间:能读定义的条目才有,一条聚合查询取齐
+    const readable = visible.filter((a) => levels.get(a.id) !== "none").map((a) => a.id);
+    const activity = readable.length
+      ? await agentActivity.of(readable, Date.now() - ACTIVITY_WINDOW_MS)
+      : new Map<string, { runs: number; updatedAt: number }>();
 
     return Response.json({
       agents: visible
@@ -109,6 +117,10 @@ export async function GET(req: Request) {
             // 回调地址可能带着接收方的令牌,非所有者不该看到
             webhookUrl: manage ? a.webhookUrl : undefined,
             isPublic: isPublic(a.id, allGrants),
+            // 工作室按它分「我建的 / 分享给我的」;前端拿不到可靠的本人 id(本地模式是匿名管理员)
+            isOwner: a.ownerId === subject.userId,
+            runs7d: activity.get(a.id)?.runs ?? 0,
+            updatedAt: activity.get(a.id)?.updatedAt ?? null,
             canWrite,
             canManageWebhook: manage,
           };
@@ -130,6 +142,11 @@ interface CreateBody {
   /** 配了就在运行终态推一次结果回调。 */
   webhookUrl?: string;
   config?: Partial<AgentConfig>;
+  /**
+   * 只新建、不覆盖:ID 已被占用(含已删除、含别人名下)时 409。
+   * 新建弹层与模板都带上它 —— 否则在新建框里填了一个自己有写权限的已有 ID,会悄悄改掉那个智能体。
+   */
+  createOnly?: boolean;
 }
 
 /**
@@ -181,6 +198,13 @@ export async function POST(req: Request) {
   let webhookUrl = requestedWebhook;
   // 审计要对比保存前后,所以在外层留住它
   let before: Agent | null = null;
+
+  if (targetId && body.createOnly === true && (await agents.idTaken(targetId))) {
+    return Response.json(
+      { error: `ID「${targetId}」已被占用,请换一个`, code: "id_taken" },
+      { status: 409 },
+    );
+  }
 
   if (targetId) {
     const existing = await agents.get(targetId);
