@@ -30,8 +30,10 @@ describe("designerHref", () => {
 });
 
 describe("chatHref", () => {
-  it("对话页暂不接 q 参数:只带会话", () => {
-    expect(chatHref("s 1", "整理今天的周会录音")).toBe("/chat?session=s%201");
+  it("示例问题带进对话页的输入框(q 参数,对话页只预填不发送)", () => {
+    expect(chatHref("s 1", "整理今天的周会录音")).toBe(
+      "/chat?session=s%201&q=%E6%95%B4%E7%90%86%E4%BB%8A%E5%A4%A9%E7%9A%84%E5%91%A8%E4%BC%9A%E5%BD%95%E9%9F%B3",
+    );
     expect(chatHref("s1")).toBe("/chat?session=s1");
   });
 });

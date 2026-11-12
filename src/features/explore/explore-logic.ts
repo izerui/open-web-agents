@@ -8,15 +8,10 @@ export function designerHref(desc: string): string {
   return text ? `/agents/new?desc=${encodeURIComponent(text)}` : "/agents/new";
 }
 
-/**
- * 对话页还不认 q 参数(阶段 3 再接):现在只打开新建的会话,不把问题带过去。
- * 对话页支持后把它改成 true,示例问题就会直接带进输入框。
- */
-export const CHAT_ACCEPTS_Q = false;
-
+/** 打开新建的会话;带上示例问题时用 q 参数预填进对话页输入框(只预填,不自动发送) */
 export function chatHref(sessionId: string, question?: string): string {
   const base = `/chat?session=${encodeURIComponent(sessionId)}`;
-  return CHAT_ACCEPTS_Q && question ? `${base}&q=${encodeURIComponent(question)}` : base;
+  return question ? `${base}&q=${encodeURIComponent(question)}` : base;
 }
 
 export interface MarketListItem {
