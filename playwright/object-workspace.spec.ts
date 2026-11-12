@@ -12,7 +12,7 @@ const sessions: string[] = [];
 const agentIds: string[] = [];
 let api: APIRequestContext;
 
-test.describe("B 对象工作区", () => {
+test.describe("对话页与对象工作区", () => {
   test.beforeAll(async ({ playwright }) => {
     api = await playwright.request.newContext({ baseURL: BASE });
     expect(
@@ -117,55 +117,55 @@ test.describe("B 对象工作区", () => {
     await page.route("**/api/sessions/*/run", (route) => route.abort());
   });
 
-  test("对象树、四个页签与会话详情保持同一智能体", async ({ page }) => {
+  test("对话页:会话列表、对话头与执行详情保持同一智能体", async ({ page }) => {
     await page.goto(`/chat?session=${sessions[0]}`);
-    await expect(page.getByRole("heading", { level: 1, name: "接口开发助手" })).toBeVisible();
-    const tabs = page.getByRole("navigation", { name: "当前智能体工作区" });
-    await expect(tabs.getByRole("link")).toHaveCount(4);
-    await expect(tabs.getByRole("link", { name: "配置", exact: true })).toHaveAttribute(
+    const header = page.getByRole("region", { name: "当前对话" });
+    await expect(header.getByRole("heading", { level: 1 })).toHaveText("创建一个简单的 REST API");
+    // 自己的智能体:名字链到构建页;对话页不再有对象页头的四个页签
+    await expect(header.getByRole("link", { name: "接口开发助手", exact: true })).toHaveAttribute(
       "href",
       `/agents/${first}`,
     );
-    await expect(tabs.getByRole("link", { name: "运行", exact: true })).toHaveAttribute(
-      "href",
-      `/agents/${first}?stage=runs`,
-    );
-    await expect(tabs.getByRole("link", { name: "接入", exact: true })).toHaveAttribute(
-      "href",
-      `/agents/${first}?stage=access`,
-    );
+    await expect(page.getByRole("navigation", { name: "当前智能体工作区" })).toHaveCount(0);
     await expect(page.getByText("接口结构已整理。", { exact: false })).toBeVisible();
     // coze-v3:顶栏有一组空间导航,对话页处于「对话」
     await expect(
-      page.getByRole("navigation", { name: "主导航", exact: true }).getByRole("link", { name: "对话" }),
+      page
+        .getByRole("navigation", { name: "主导航", exact: true })
+        .getByRole("link", { name: "对话" }),
     ).toHaveAttribute("aria-current", "page");
-    await expect(page.getByRole("navigation", { name: "打开的会话" })).toHaveCount(0);
     const size = await page
       .locator("#main-content aside")
       .first()
       .evaluate((node) => node.getBoundingClientRect().width);
     expect(size).toBe(268);
-    await page.getByRole("button", { name: "查看执行详情", exact: true }).click();
+    // 对话流里点一次工具调用 → 右侧执行详情定位到同一项
+    await page.getByRole("button", { name: /调用了 3 个工具/ }).click();
     await page
-      .getByRole("list", { name: "工具调用" })
+      .getByRole("list", { name: "本轮工具调用" })
       .getByRole("button", { name: /Bash/ })
       .click();
-    await expect(page.getByRole("region", { name: "调用详情" })).toContainText("尚未配置测试脚本");
-    await page.getByRole("button", { name: "查看执行详情", exact: true }).click();
-    await page.locator(`aside a[href="/chat?agent=${second}"]`).click();
-    await expect(page.getByRole("heading", { level: 1, name: "文档整理助手" })).toBeVisible();
-    await expect(tabs.getByRole("link", { name: "运行", exact: true })).toHaveAttribute(
-      "href",
-      `/agents/${second}?stage=runs`,
+    await expect(page.getByRole("button", { name: "执行详情", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
     );
-    await expect(page.locator(`aside a[href="/chat?session=${sessions[1]}"]`)).toBeVisible();
+    await expect(page.getByRole("region", { name: "调用详情" })).toContainText("尚未配置测试脚本");
+    await page.getByRole("button", { name: "执行详情", exact: true }).click();
+    await expect(page.getByRole("region", { name: "调用详情" })).toHaveCount(0);
+    // 会话列表按时间列出所有智能体的会话,切过去对话头跟着换
+    await page
+      .getByRole("navigation", { name: "会话列表" })
+      .getByRole("link", { name: /^整理接口文档/ })
+      .click();
+    await expect(header.getByRole("link", { name: "文档整理助手", exact: true })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`session=${sessions[1]}`));
   });
 
-  test("配置、运行、接入之间保持对象深链", async ({ page }) => {
+  test("构建页与对话页之间保持对象深链", async ({ page }) => {
     await page.goto(`/chat?session=${sessions[0]}`);
     await page
-      .getByRole("navigation", { name: "当前智能体工作区" })
-      .getByRole("link", { name: "配置", exact: true })
+      .getByRole("region", { name: "当前对话" })
+      .getByRole("link", { name: "接口开发助手", exact: true })
       .click();
     await expect(page.getByRole("heading", { level: 1, name: "接口开发助手" })).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`/agents/${first}$`));
@@ -189,21 +189,24 @@ test.describe("B 对象工作区", () => {
       .getByRole("navigation", { name: "当前智能体工作区" })
       .getByRole("link", { name: "对话", exact: true })
       .click();
-    await expect(page.getByRole("heading", { level: 1, name: "接口开发助手" })).toBeVisible();
-    await expect(page).toHaveURL(new RegExp(`session=${sessions[0]}`));
-    await expect(page.getByText("接口结构已整理。", { exact: false })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/chat\\?agent=${first}`));
+    await expect(
+      page
+        .getByRole("region", { name: "当前对话" })
+        .getByRole("link", { name: "接口开发助手", exact: true }),
+    ).toBeVisible();
   });
 
-  test("375px 下对象树和执行详情可操作且无横向溢出", async ({ page }) => {
+  test("375px 下会话列表和执行详情改抽屉，可操作且无横向溢出", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(`/chat?session=${sessions[0]}`);
-    await expect(page.getByRole("heading", { level: 1, name: "接口开发助手" })).toBeVisible();
-    await page.getByRole("button", { name: "打开智能体树" }).click();
-    const drawer = page.getByRole("dialog", { name: "智能体与会话" });
+    await expect(page.getByText("接口结构已整理。", { exact: false })).toBeVisible();
+    await page.getByRole("button", { name: "会话列表", exact: true }).click();
+    const drawer = page.getByRole("dialog", { name: "会话列表" });
     await expect(drawer).toBeVisible();
-    await drawer.locator(`a[href="/chat?session=${sessions[0]}"]`).click();
+    await drawer.getByRole("link", { name: /^创建一个简单的 REST API/ }).click();
     await expect(drawer).not.toBeVisible();
-    await page.getByRole("button", { name: "查看执行详情", exact: true }).click();
+    await page.getByRole("button", { name: "执行详情", exact: true }).click();
     await expect(page.getByRole("dialog", { name: "执行详情" })).toBeVisible();
     await page.keyboard.press("Escape");
     expect(
@@ -276,8 +279,8 @@ test.describe("B 对象工作区", () => {
       style: "nextjs-portal { display:none !important }",
     });
     await page
-      .getByRole("navigation", { name: "当前智能体工作区" })
-      .getByRole("link", { name: "配置", exact: true })
+      .getByRole("region", { name: "当前对话" })
+      .getByRole("link", { name: "接口开发助手", exact: true })
       .click();
     await expect(page.getByRole("heading", { level: 1, name: "接口开发助手" })).toBeVisible();
     await expect(

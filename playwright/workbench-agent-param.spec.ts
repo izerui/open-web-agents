@@ -27,7 +27,9 @@ async function createAgent(ctx: BrowserContext, name: string) {
   return id;
 }
 
-const picker = (page: Page) => page.getByRole("heading", { level: 1 });
+// 对话头里的智能体名(coze-v3:h1 是会话名,智能体名是旁边的链接)
+const picker = (page: Page) =>
+  page.getByRole("region", { name: "当前对话" }).getByRole("link").first();
 
 test.describe("工作台 ?agent= 参数", () => {
   test("默认智能体可见时,带 ?agent= 打开选中指定的智能体;不带参数仍是默认智能体", async ({
@@ -38,11 +40,11 @@ test.describe("工作台 ?agent= 参数", () => {
     const name = `PW 指定智能体 ${Date.now()}`;
     const agentId = await createAgent(context, name);
 
-    await page.goto(`${BASE}/?agent=${agentId}`);
+    await page.goto(`${BASE}/chat?agent=${agentId}`);
     await expect(picker(page)).toHaveText(name, { timeout: 15_000 });
 
     // 对照:不带参数打开,仍选中默认智能体
-    await page.goto(`${BASE}/`);
+    await page.goto(`${BASE}/chat`);
     await expect(picker(page)).toHaveText("通用智能体", { timeout: 15_000 });
   });
 
@@ -55,7 +57,7 @@ test.describe("工作台 ?agent= 参数", () => {
     expect(s.ok()).toBeTruthy();
     const sessionId = ((await s.json()) as { session?: { id: string } }).session?.id;
 
-    await page.goto(`${BASE}/?session=${sessionId}&agent=${agentId}`);
+    await page.goto(`${BASE}/chat?session=${sessionId}&agent=${agentId}`);
     await expect(picker(page)).toHaveText("通用智能体", { timeout: 15_000 });
   });
 });

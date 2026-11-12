@@ -32,7 +32,8 @@ export function ChatHeader({
 }: {
   title: string;
   agent?: AgentSummary;
-  badge: { label: string; tone: BadgeTone; title: string };
+  /** 没有可用智能体(链接失效)时不显示 */
+  badge?: { label: string; tone: BadgeTone; title: string };
   model?: string;
   rightTab: RightTab | null;
   onToggleAction: (tab: RightTab) => void;
@@ -84,16 +85,18 @@ export function ChatHeader({
               {agent.name}
             </Link>
           )}
-          <span
-            title={badge.title}
-            className={cn(
-              "inline-flex h-5 shrink-0 items-center gap-1 rounded-full px-2 text-xs whitespace-nowrap",
-              TONE[badge.tone],
-            )}
-          >
-            {badge.label === "运行中" && <Spin className="size-[11px] border-[1.5px]" />}
-            {badge.label}
-          </span>
+          {badge && (
+            <span
+              title={badge.title}
+              className={cn(
+                "inline-flex h-5 shrink-0 items-center gap-1 rounded-full px-2 text-xs whitespace-nowrap",
+                TONE[badge.tone],
+              )}
+            >
+              {badge.label === "运行中" && <Spin className="size-[11px] border-[1.5px]" />}
+              {badge.label}
+            </span>
+          )}
           <ModelPrice model={model} className="whitespace-nowrap max-md:hidden" />
         </div>
       </div>

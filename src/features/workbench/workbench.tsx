@@ -1276,7 +1276,7 @@ export function Workbench() {
       <ChatHeader
         title={activeSession ? sessionLabel(activeSession) : "新会话"}
         agent={agentContextError ? undefined : current}
-        badge={badge}
+        badge={agentContextError || !current ? undefined : badge}
         model={agentContextError ? undefined : shownModel}
         rightTab={rightTab}
         onToggleAction={toggleRight}
