@@ -678,6 +678,7 @@ export class MysqlRunRepo implements RunRepo {
         // 聚合 timestamp 经 Drizzle/mysql2 解码时会受进程时区影响;直接取 Unix 毫秒
         // 可避免 Asia/Shanghai 等环境下把 lastRunAt 重复偏移一次。
         lastRunAt: sql<number>`MAX(UNIX_TIMESTAMP(${runs.createdAt}) * 1000)`,
+        active: sql<number>`SUM(CASE WHEN ${runs.status} IN ('pending', 'running') THEN 1 ELSE 0 END)`,
       })
       .from(runs)
       .where(inArray(runs.sessionId, [...new Set(sessionIds)]))
@@ -685,7 +686,11 @@ export class MysqlRunRepo implements RunRepo {
 
     for (const r of rows) {
       const at = Number(r.lastRunAt ?? 0);
-      out.set(r.sessionId, { runs: Number(r.total), lastRunAt: Number.isFinite(at) ? at : 0 });
+      out.set(r.sessionId, {
+        runs: Number(r.total),
+        lastRunAt: Number.isFinite(at) ? at : 0,
+        active: Number(r.active ?? 0),
+      });
     }
     return out;
   }

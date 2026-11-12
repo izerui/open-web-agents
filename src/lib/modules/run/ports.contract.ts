@@ -293,6 +293,22 @@ export function runRepoContract(name: string, harness: ContractHarness): void {
         expect((await repo.statsBySessions(["s1"])).get("s1")?.runs).toBe(2);
       });
 
+      it("active 只数还没结束的运行(排队中与运行中)", async () => {
+        const repo = await harness.makeRepo();
+        await repo.create({ id: "a1", sessionId: "s1" });
+        const c = await repo.claimNext(30_000, 1000);
+        await repo.complete("a1", "success", c?.fence);
+        await repo.create({ id: "a2", sessionId: "s1" });
+        await repo.create({ id: "a3", sessionId: "s1" });
+        await repo.cancel("a3");
+        await repo.create({ id: "b1", sessionId: "s2" });
+        await repo.cancel("b1");
+
+        const stats = await repo.statsBySessions(["s1", "s2"]);
+        expect(stats.get("s1")?.active).toBe(1);
+        expect(stats.get("s2")?.active).toBe(0);
+      });
+
       it("lastRunAt 落在合理的时间区间内", async () => {
         const repo = await harness.makeRepo();
         const before = Date.now();

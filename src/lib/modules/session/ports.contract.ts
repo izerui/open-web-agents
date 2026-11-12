@@ -92,6 +92,22 @@ export function sessionRepoContract(name: string, harness: SessionRepoHarness): 
       expect(list.map((s) => s.id)).toEqual(["k1"]);
     });
 
+    it("归档:默认不列;includeArchived 一起列;archivedOnly 只列归档的;已删除的永远不列", async () => {
+      await mk("live", { ownerId: "u1" });
+      await mk("shelved", { ownerId: "u1" });
+      await mk("gone", { ownerId: "u1" });
+      await repo.update("shelved", { status: "archived" });
+      await repo.update("gone", { status: "deleted" });
+
+      expect((await repo.list({ ownerId: "u1" })).map((s) => s.id)).toEqual(["live"]);
+      expect(
+        (await repo.list({ ownerId: "u1", includeArchived: true })).map((s) => s.id).sort(),
+      ).toEqual(["live", "shelved"]);
+      expect((await repo.list({ ownerId: "u1", archivedOnly: true })).map((s) => s.id)).toEqual([
+        "shelved",
+      ]);
+    });
+
     it("不传过滤条件时回全部(admin 需要看到无归属的历史数据)", async () => {
       await mk("s1", { ownerId: "u1" });
       await mk("s2");

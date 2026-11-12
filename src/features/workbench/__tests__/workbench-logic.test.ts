@@ -1,6 +1,7 @@
 import type { SessionSummary, Turn } from "@/features/workbench/types";
 import {
   filterSessionsForAgent,
+  promptFromSearch,
   sessionIdFromSearch,
   updateTurnByLocalId,
   withSessionInUrl,
@@ -13,6 +14,18 @@ const session = (id: string, agentId: string, title?: string): SessionSummary =>
   title,
   workspaceDir: `/workspaces/${id}`,
   createdAt: 1,
+});
+
+describe("promptFromSearch", () => {
+  it("?q= 预填输入框;没有或只有空白时为 null", () => {
+    expect(promptFromSearch("?session=s1&q=%E5%B8%AE%E6%88%91%E7%BF%BB%E8%AF%91")).toBe("帮我翻译");
+    expect(promptFromSearch("?q=%20%20")).toBeNull();
+    expect(promptFromSearch("?session=s1")).toBeNull();
+  });
+
+  it("保留原文里的换行与首尾以外的空白", () => {
+    expect(promptFromSearch(`?q=${encodeURIComponent(" 第一行\n第二行 ")}`)).toBe("第一行\n第二行");
+  });
 });
 
 describe("session URL", () => {

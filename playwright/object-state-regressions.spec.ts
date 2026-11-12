@@ -9,6 +9,12 @@ let authCookies: Parameters<BrowserContext["addCookies"]>[0] = [];
 const prompt = (page: Page) => page.getByRole("textbox", { name: "系统提示词 *", exact: true });
 const save = (page: Page) => page.getByRole("button", { name: "保存智能体", exact: true });
 const tabs = (page: Page) => page.getByRole("navigation", { name: "当前智能体工作区" });
+/** 对话页(coze-v3):对话头里的智能体名链接、左栏会话列表里的会话行 */
+const chatAgent = (page: Page, name: string) =>
+  page.getByRole("region", { name: "当前对话" }).getByRole("link", { name, exact: true });
+const sessionRow = (scope: Page | ReturnType<Page["getByRole"]>, title: string) =>
+  scope.getByRole("link", { name: new RegExp(`^${title}`) });
+const composer = (page: Page) => page.getByRole("textbox", { name: "消息", exact: true });
 
 async function fixture(page: Page) {
   let agents = [
@@ -46,6 +52,11 @@ async function fixture(page: Page) {
     else await complete(route);
   });
   await page.route("**/api/sessions", (route) => route.fulfill({ json: { sessions } }));
+  await page.route("**/api/sessions?*", (route) =>
+    route.fulfill({
+      json: { sessions: route.request().url().includes("archived=1") ? [] : sessions },
+    }),
+  );
   await page.route("**/api/sessions/*/history", (route) => route.fulfill({ json: { turns: [] } }));
   await page.route("**/api/runs?*", (route) => route.fulfill({ json: { items: [] } }));
   return {
@@ -177,29 +188,24 @@ test("AI 编辑草稿也能取消搜索跳转", async ({ page }) => {
   await expect(page).toHaveURL(/\/settings\/runs$/);
 });
 
-test("跨对象配置返回对话，不清除默认对象的会话记忆；新会话仍可清除当前记忆", async ({ page }) => {
+test("会话列表跨智能体切换会话；新会话先选智能体，再清掉地址里的旧会话", async ({ page }) => {
   await fixture(page);
   await page.goto("/chat?session=review-default-session");
-  const remembered = (id: string) =>
-    page.evaluate((agentId) => {
-      const key = Object.keys(sessionStorage).find(
-        (key) => key.startsWith("owa.object-session:") && key.endsWith(`:${agentId}`),
-      );
-      return key ? sessionStorage.getItem(key) : null;
-    }, id);
-  await expect.poll(() => remembered("default")).toBe("review-default-session");
-  await page.getByRole("button", { name: "展开 审查智能体 A 的会话" }).click();
-  await page.getByRole("link", { name: "A 历史会话", exact: true }).click();
-  await expect.poll(() => remembered("review-a")).toBe("review-a-session");
-  await tabs(page).getByRole("link", { name: "配置" }).click();
+  await expect(chatAgent(page, "通用智能体")).toBeVisible();
+  await sessionRow(page.getByRole("navigation", { name: "会话列表" }), "A 历史会话").click();
+  await expect(chatAgent(page, "审查智能体 A")).toHaveAttribute("href", "/agents/review-a");
+  await expect(page).toHaveURL(/session=review-a-session/);
+  await chatAgent(page, "审查智能体 A").click();
   await expect(prompt(page)).toHaveValue("审查智能体 A 已保存提示词");
-  await tabs(page).getByRole("link", { name: "对话" }).click();
-  await expect(page.locator("[data-conversation-shell] textarea")).toBeEnabled();
-  await expect.poll(() => remembered("review-a")).toBe("review-a-session");
-  expect(await remembered("default")).toBe("review-default-session");
-  await page.getByRole("link", { name: "新建会话", exact: true }).click();
-  await expect.poll(() => remembered("review-a")).toBeNull();
-  expect(await remembered("default")).toBe("review-default-session");
+  await page.goBack();
+  await expect(composer(page)).toBeEnabled();
+  await page.getByRole("button", { name: "新会话", exact: true }).click();
+  const picker = page.getByRole("dialog", { name: "新会话" });
+  await picker.getByRole("button", { name: /审查智能体 B/ }).click();
+  await expect(picker).toBeHidden();
+  await expect(chatAgent(page, "审查智能体 B")).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "新会话" })).toBeVisible();
+  await expect(page).toHaveURL(/\/chat\?agent=review-b$/);
 });
 
 test("无效或空对象链接禁止发送，用户显式选择后恢复；有效会话优先", async ({ page }) => {
@@ -207,18 +213,25 @@ test("无效或空对象链接禁止发送，用户显式选择后恢复；有�
   for (const id of ["missing-review-agent", ""]) {
     await page.goto(`/chat?agent=${id}`);
     await expect(
-      page.locator("output").filter({ hasText: id ? "找不到指定的智能体" : "链接缺少智能体 ID" }),
-    ).toContainText(id ? "找不到指定的智能体" : "链接缺少智能体 ID");
-    await expect(page.locator("[data-conversation-shell] textarea")).toBeDisabled();
+      page.getByRole("heading", {
+        level: 2,
+        name: id ? "找不到指定的智能体，或你没有访问权限。" : "链接缺少智能体 ID。",
+      }),
+    ).toBeVisible();
+    await expect(composer(page)).toBeDisabled();
     await expect(tabs(page)).toHaveCount(0);
-    await expect(page).toHaveURL(new RegExp(`/\\?agent=${id}$`));
-    await page.getByRole("link", { name: "审查智能体 A", exact: true }).click();
-    await expect(page.locator("[data-conversation-shell] textarea")).toBeEnabled();
-    await expect(page.getByRole("heading", { level: 1, name: "审查智能体 A" })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/chat\\?agent=${id}$`));
+    await page.getByRole("button", { name: "新会话", exact: true }).click();
+    await page
+      .getByRole("dialog", { name: "新会话" })
+      .getByRole("button", { name: /审查智能体 A/ })
+      .click();
+    await expect(composer(page)).toBeEnabled();
+    await expect(chatAgent(page, "审查智能体 A")).toBeVisible();
   }
   await page.goto("/chat?agent=missing-review-agent&session=review-a-session");
-  await expect(page.getByRole("heading", { level: 1, name: "审查智能体 A" })).toBeVisible();
-  await expect(page.locator("[data-conversation-shell] textarea")).toBeEnabled();
+  await expect(chatAgent(page, "审查智能体 A")).toBeVisible();
+  await expect(composer(page)).toBeEnabled();
 });
 
 test("切换会话后迟到的审批不出现在新会话", async ({ page }) => {
@@ -233,8 +246,7 @@ test("切换会话后迟到的审批不出现在新会话", async ({ page }) => 
   });
   await page.goto("/chat?session=review-default-session");
   await expect.poll(() => Boolean(pending)).toBe(true);
-  await page.getByRole("button", { name: "展开 审查智能体 A 的会话" }).click();
-  await page.getByRole("link", { name: "A 历史会话", exact: true }).click();
+  await sessionRow(page.getByRole("navigation", { name: "会话列表" }), "A 历史会话").click();
   await expect.poll(() => Boolean(nextPoll)).toBe(true);
   await pending?.fulfill({
     json: {
@@ -253,7 +265,7 @@ test("切换会话后迟到的审批不出现在新会话", async ({ page }) => 
   // Allow the released response and its effects to commit before asserting absence.
   await page.waitForTimeout(150);
   await expect(page.getByText("只属于默认会话的审批", { exact: false })).toHaveCount(0);
-  await expect(page.getByRole("heading", { level: 1, name: "审查智能体 A" })).toBeVisible();
+  await expect(chatAgent(page, "审查智能体 A")).toBeVisible();
   await nextPoll?.fulfill({ json: { pending: [], grants: [] } });
 });
 
@@ -268,21 +280,22 @@ test("创建会话期间离开工作台，迟到响应不改写配置 URL 或发
     }
     return route.fulfill({ json: { sessions: [] } });
   });
+  await page.route("**/api/sessions?*", (route) => route.fulfill({ json: { sessions: [] } }));
   await page.route("**/api/sessions/*/run", (route) => {
     runPosts.push(route.request().url());
     return route.fulfill({ status: 400, json: { error: "测试禁止模型调用" } });
   });
   await page.goto("/chat?agent=review-a");
-  const input = page.locator("[data-conversation-shell] textarea");
+  const input = composer(page);
   await expect(input).toBeEnabled();
   await input.fill("仅测试迟到响应");
   await input.press("Enter");
   await expect.poll(() => Boolean(pending)).toBe(true);
-  await tabs(page).getByRole("link", { name: "配置" }).click();
+  await chatAgent(page, "审查智能体 A").click();
   await expect(prompt(page)).toHaveValue("审查智能体 A 已保存提示词");
   await pending?.fulfill({ json: { session: { id: "late-session", agentId: "review-a" } } });
   await page.waitForTimeout(150);
-  await expect(page).toHaveURL(/\/agents\?id=review-a$/);
+  await expect(page).toHaveURL(/\/agents\/review-a$/);
   expect(runPosts).toEqual([]);
 });
 
@@ -421,14 +434,13 @@ test("旧会话追加消息的迟到重发结果不能发送到新会话", async
     return route.fulfill({ status: 400, json: { error: "禁止真实运行" } });
   });
   await page.goto("/chat?session=review-default-session");
-  const input = page.locator("[data-conversation-shell] textarea");
+  const input = composer(page);
   await expect(input).toHaveAttribute("placeholder", /运行中/);
   await input.fill("只给旧会话的追加消息");
   await input.press("Enter");
   await expect.poll(() => Boolean(pending)).toBe(true);
-  await page.getByRole("button", { name: "展开 审查智能体 A 的会话" }).click();
-  await page.getByRole("link", { name: "A 历史会话", exact: true }).click();
-  await expect(input).toHaveAttribute("placeholder", "说点什么,或输入 /");
+  await sessionRow(page.getByRole("navigation", { name: "会话列表" }), "A 历史会话").click();
+  await expect(input).toHaveAttribute("placeholder", "说点什么，或输入 /");
   await pending?.fulfill({ status: 409, json: { code: "not_accepting" } });
   await page.waitForTimeout(150);
   expect(runPosts).toEqual([]);
@@ -460,15 +472,14 @@ test("移动端审批与输入区均可见，切会话时立即清除旧审批",
     nextPoll = route;
   });
   await page.goto("/chat?session=review-default-session");
-  const approve = page
-    .locator("[data-slot=card]")
-    .getByRole("button", { name: "批准", exact: true });
+  const approval = page.getByRole("region", { name: "待你确认" });
+  const approve = approval.getByRole("button", { name: "批准", exact: true });
   await expect(approve).toBeInViewport();
-  const input = page.locator("[data-conversation-shell] textarea");
+  const input = composer(page);
   await expect(input).toBeInViewport();
   await expect(page.getByRole("textbox", { name: "消息", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "添加附件", exact: true })).toBeVisible();
-  const cardBox = await page.locator("[data-slot=card]").boundingBox();
+  await expect(page.getByRole("button", { name: "添加图片或文件", exact: true })).toBeVisible();
+  const cardBox = await approval.boundingBox();
   const inputBox = await input.boundingBox();
   expect(cardBox && inputBox && cardBox.y + cardBox.height <= inputBox.y).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -476,10 +487,10 @@ test("移动端审批与输入区均可见，切会话时立即清除旧审批",
     path: testInfo.outputPath("approval-mobile.png"),
     animations: "disabled",
   });
-  await page.getByRole("button", { name: "打开智能体树" }).click();
-  const drawer = page.getByRole("dialog", { name: "智能体与会话" });
-  await drawer.getByRole("button", { name: "展开 审查智能体 A 的会话" }).click();
-  await drawer.getByRole("link", { name: "A 历史会话", exact: true }).click();
+  await page.getByRole("button", { name: "会话列表", exact: true }).click();
+  const drawer = page.getByRole("dialog", { name: "会话列表" });
+  await sessionRow(drawer, "A 历史会话").click();
+  await expect(drawer).toBeHidden();
   await expect.poll(() => Boolean(nextPoll)).toBe(true);
   await expect(page.getByText("写入本会话的工作目录", { exact: false })).toHaveCount(0);
   await nextPoll?.fulfill({ json: { pending: [], grants: [] } });
@@ -535,9 +546,8 @@ for (const next of ["另一会话", "同会话下一轮", "原运行"] as const)
     await page.getByRole("button", { name: "停止运行", exact: true }).click();
     await expect.poll(() => Boolean(cancellation)).toBe(true);
     if (next === "另一会话") {
-      await page.getByRole("button", { name: "展开 审查智能体 A 的会话" }).click();
-      await page.getByRole("link", { name: "A 历史会话", exact: true }).click();
-      await expect(page.getByRole("heading", { level: 1, name: "审查智能体 A" })).toBeVisible();
+      await sessionRow(page.getByRole("navigation", { name: "会话列表" }), "A 历史会话").click();
+      await expect(chatAgent(page, "审查智能体 A")).toBeVisible();
     } else if (next === "同会话下一轮") {
       await stream?.fulfill({
         contentType: "text/event-stream",
@@ -643,7 +653,7 @@ for (const [status, outcome] of [
         .map((event) => `data: ${JSON.stringify(event)}\n\n`)
         .join(""),
     });
-    await expect(input).toHaveAttribute("placeholder", "说点什么,或输入 /");
+    await expect(input).toHaveAttribute("placeholder", "说点什么，或输入 /");
     await steer?.fulfill({
       status,
       json: status === 202 ? { outcome: "pending" } : { code: "dropped" },

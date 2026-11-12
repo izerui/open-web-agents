@@ -100,6 +100,7 @@ export class InMemorySessionRepo implements SessionRepo {
         }
         if (filter?.sources && !filter.sources.includes(s.source)) return false;
         if (s.status === "deleted") return false;
+        if (filter?.archivedOnly) return s.status === "archived";
         if (s.status === "archived" && !filter?.includeArchived) return false;
         return true;
       })

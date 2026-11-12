@@ -11,21 +11,23 @@ import {
   FileTreeIcon,
   FileTreeName,
 } from "@/components/ai-elements/file-tree";
-import { Badge } from "@/components/ui/badge";
+import { MessageResponse } from "@/components/ai-elements/message";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
+import { cn } from "@/lib/utils";
 import {
+  AlertTriangle,
+  Archive,
   Copy,
   Download,
-  Eye,
-  FileCode,
+  FileImage,
   FileText,
   FileWarning,
-  Folder,
   FolderOpen,
   RefreshCw,
+  Sparkles,
+  SquareTerminal,
   X,
 } from "lucide-react";
 import type { BundledLanguage } from "shiki";
@@ -89,6 +91,54 @@ function formatSize(n?: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function fileIconOf(name: string) {
+  if (/\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(name))
+    return <FileImage className="size-4 text-muted-foreground" />;
+  if (/\.(py|js|ts|tsx|jsx|sh|log|json|sql|go|rs|java|rb|php)$/i.test(name))
+    return <SquareTerminal className="size-4 text-muted-foreground" />;
+  return <FileText className="size-4 text-muted-foreground" />;
+}
+
+/** 工作目录路径条:路径、运行中实时刷新、手动刷新。 */
+function PathBar({
+  label,
+  live = false,
+  loading = false,
+  onRefresh,
+}: {
+  label: string;
+  live?: boolean;
+  loading?: boolean;
+  onRefresh?: () => void;
+}) {
+  return (
+    <div className="flex min-h-[45px] shrink-0 items-center gap-2 border-b border-line-soft px-4 py-2 text-[12.5px] whitespace-nowrap text-muted-foreground">
+      工作目录
+      <code className="min-w-0 truncate rounded-md bg-[#F4F2EC] px-1.5 py-0.5 font-mono text-[#3C3A35]">
+        {label}
+      </code>
+      {live && (
+        <span className="rounded-full bg-warning-soft px-2 text-xs leading-5 text-warning-text">
+          运行中，实时刷新
+        </span>
+      )}
+      {loading && <Spinner className="size-3.5" />}
+      {onRefresh && (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="ml-auto"
+          onClick={onRefresh}
+          title="刷新"
+          aria-label="刷新工作空间"
+        >
+          <RefreshCw />
+        </Button>
+      )}
+    </div>
+  );
+}
+
 /** 根目录在 API 里是空字符串,但 Set/Map 的 key 用空串容易看走眼,这里统一。 */
 const ROOT = "";
 
@@ -103,11 +153,14 @@ export function FilePanel({
   sessionId,
   refreshKey,
   live = false,
+  onSuggestAction,
 }: {
   sessionId: string | null;
   refreshKey: number;
   /** 当前会话正在运行:此时才需要轮询,产物在持续变化。 */
   live?: boolean;
+  /** 空目录时的「让智能体生成点东西」:由页面决定怎么做(比如预填输入框) */
+  onSuggestAction?: () => void;
 }) {
   /** 目录路径 → 该目录下的一层子节点。没有条目 = 还没拉过。 */
   const [dirs, setDirs] = useState<Map<string, FileNode[]>>(new Map());
@@ -277,9 +330,15 @@ export function FilePanel({
 
   if (!sessionId) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
-        <FolderOpen className="size-8 text-muted-foreground/40" />
-        <p className="text-xs text-muted-foreground">发送消息后创建会话工作空间</p>
+      <div className="flex h-full flex-col text-sm">
+        <PathBar label="尚未创建" />
+        <div className="px-6 py-10 text-center text-muted-foreground">
+          <FolderOpen className="mx-auto size-7" />
+          <p className="mt-2.5 mb-1 font-display text-[17px] text-foreground">还没有工作目录</p>
+          <p>
+            发出第一条消息后，会为这个会话创建独立的工作目录，上传的附件和智能体生成的文件都在这里。
+          </p>
+        </div>
       </div>
     );
   }
@@ -290,15 +349,15 @@ export function FilePanel({
 
     if (nodes === undefined) {
       return loading.has(dir) ? (
-        <div className="flex items-center gap-2 px-2 py-1 text-xs text-muted-foreground">
-          <Spinner className="size-3" />
+        <div className="flex items-center gap-2 px-2 py-1.5 text-[13px] text-muted-foreground">
+          <Spinner className="size-3.5" />
           载入中…
         </div>
       ) : null;
     }
 
     if (nodes.length === 0) {
-      return <p className="px-2 py-1 text-xs text-muted-foreground/60">(空)</p>;
+      return <p className="px-2 py-1.5 text-[13px] text-muted-foreground">（空）</p>;
     }
 
     return nodes.map((n) =>
@@ -307,16 +366,19 @@ export function FilePanel({
           {renderLevel(n.path)}
         </FileTreeFolder>
       ) : (
-        <FileTreeFile key={n.path} name={n.name} path={n.path}>
+        <FileTreeFile
+          key={n.path}
+          name={n.name}
+          path={n.path}
+          className="min-h-8 rounded-lg hover:bg-[#F4F2EC]"
+        >
           <span className="size-4 shrink-0" />
-          <FileTreeIcon>
-            <FileText className="size-4 text-muted-foreground" />
-          </FileTreeIcon>
-          <FileTreeName className="flex-1 text-xs">{n.name}</FileTreeName>
+          <FileTreeIcon>{fileIconOf(n.name)}</FileTreeIcon>
+          <FileTreeName className="flex-1 text-sm">{n.name}</FileTreeName>
           {n.size !== undefined && (
-            <Badge variant="ghost" className="shrink-0 text-[10px] text-muted-foreground">
+            <span className="shrink-0 pl-2 text-xs text-muted-foreground">
               {formatSize(n.size)}
-            </Badge>
+            </span>
           )}
         </FileTreeFile>
       ),
@@ -324,62 +386,68 @@ export function FilePanel({
   }
 
   const rootNodes = dirs.get(ROOT);
-  // 只有 HTML 才提供"渲染 / 源码"切换 —— 其余文件没有可渲染的形态
+  // HTML 与 Markdown 提供「预览 / 源码」切换,其余文件没有可渲染的形态
   const isHtml = preview?.mime === "text/html";
+  const isMarkdown =
+    preview !== null &&
+    preview.text !== null &&
+    (preview.mime === "text/markdown" || /\.(md|markdown)$/i.test(preview.path));
+  const name = preview?.path.split("/").pop() ?? "";
+  const fileUrl = (inline: boolean) =>
+    `/api/sessions/${sessionId}/files?download=${encodeURIComponent(preview?.path ?? "")}${inline ? "&inline=1" : ""}`;
+  const notFound = error !== null && /^not found$/i.test(error);
 
   return (
     <div className="flex h-full flex-col text-sm">
-      {/* 顶部工具栏 */}
-      {/* 窗口名已经在工具窗口的标签上,这里只给路径和操作 */}
-      <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border pr-1.5 pl-3">
-        <Folder className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
-          {sessionId ? `workspaces/${sessionId.slice(0, 8)}` : "尚未创建"}
-        </span>
-        {loading.size > 0 && <Spinner className="size-3 text-muted-foreground" />}
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="ml-auto"
-          onClick={refreshAll}
-          title="刷新"
-          aria-label="刷新工作空间"
-        >
-          <RefreshCw />
-        </Button>
-      </div>
+      <PathBar
+        label={`workspaces/${sessionId.slice(0, 8)}`}
+        live={live}
+        loading={loading.size > 0}
+        onRefresh={refreshAll}
+      />
 
-      {/* 文件树 */}
-      <ScrollArea className="min-h-0 flex-1">
+      {/* 文件树:有预览时收成上半截,把空间让给预览 */}
+      <ScrollArea
+        className={cn(
+          "min-h-0",
+          preview ? "max-h-[38%] shrink-0 border-b border-line-soft" : "flex-1",
+        )}
+      >
         {/*
           【为什么不直接把 error 甩出来】接口回的是 "not found" 这种给程序看的字符串,
           用户看到只会一头雾水。把最常见的一种翻译成人话,其余仍原样附在下面备查。
         */}
-        {error && (
-          <div className="flex flex-col items-center gap-2 px-3 py-8 text-center">
-            <FileWarning className="size-5 text-destructive" />
-            <p className="text-xs text-destructive">
-              {/^not found$/i.test(error) ? "工作空间不存在" : "工作空间读取失败"}
+        {error ? (
+          <div className="px-6 py-10 text-center text-muted-foreground">
+            {notFound ? (
+              <Archive className="mx-auto size-7" />
+            ) : (
+              <FileWarning className="mx-auto size-7 text-destructive" />
+            )}
+            <p className="mt-2.5 mb-1 font-display text-[17px] text-foreground">
+              {notFound ? "工作空间不存在" : "工作空间读取失败"}
             </p>
-            <p className="text-[11px] text-muted-foreground">
-              {/^not found$/i.test(error) ? "这个会话的工作目录已被清理,或还没产生任何文件" : error}
-            </p>
-            <Button variant="outline" size="sm" onClick={refreshAll}>
-              <RefreshCw className="size-3.5" />
+            <p>{notFound ? "这个会话的工作目录已被清理，或还没产生任何文件" : error}</p>
+            <Button variant="outline" size="sm" className="mt-3" onClick={refreshAll}>
+              <RefreshCw />
               重试
             </Button>
           </div>
-        )}
-
-        {rootNodes?.length === 0 && !error ? (
-          <div className="flex flex-col items-center gap-1 p-6 text-center">
-            <FolderOpen className="size-5 text-muted-foreground/40" />
-            <p className="text-xs text-muted-foreground">空目录</p>
-            <p className="text-[11px] text-muted-foreground/60">让 agent 生成点东西</p>
+        ) : rootNodes?.length === 0 ? (
+          <div className="px-6 py-10 text-center text-muted-foreground">
+            <FolderOpen className="mx-auto size-7" />
+            <p className="mt-2.5 mb-1 font-display text-[17px] text-foreground">空目录</p>
+            <p>这个会话还没有生成文件。</p>
+            {onSuggestAction && (
+              <Button variant="outline" size="sm" className="mt-3" onClick={onSuggestAction}>
+                <Sparkles />
+                让智能体生成点东西
+              </Button>
+            )}
           </div>
         ) : (
           <FileTree
-            className="rounded-none border-0 bg-transparent"
+            className="rounded-none border-0 bg-transparent font-sans [&>div]:px-2 [&>div]:py-1.5"
             expanded={expanded}
             onExpandedChange={handleExpandedChange}
             onSelect={(path) => {
@@ -397,8 +465,8 @@ export function FilePanel({
 
       {/* 文件预览错误不能替换整棵文件树。用户仍可选择其它文件。 */}
       {previewError && (
-        <div className="flex items-center justify-between gap-2 border-t border-border px-3 py-2 text-xs text-destructive">
-          <span className="min-w-0 flex-1 truncate">预览失败:{previewError}</span>
+        <div className="flex items-center justify-between gap-2 border-t border-line-soft px-4 py-2.5 text-[13px] text-destructive">
+          <span className="min-w-0 flex-1 truncate">预览失败：{previewError}</span>
           <Button
             type="button"
             variant="ghost"
@@ -411,92 +479,101 @@ export function FilePanel({
         </div>
       )}
 
-      {/* 文件预览面板 */}
+      {/* 文件预览 */}
       {preview && (
-        <div className="flex max-h-[45%] min-h-0 flex-col border-t border-border">
-          <div className="flex items-center gap-2 px-3 py-2">
-            <FileText className="size-4 shrink-0 text-muted-foreground" />
-            <span className="truncate font-mono text-xs">{preview.path}</span>
-            <div className="ml-auto flex items-center gap-1">
-              {isHtml && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 gap-1.5 text-xs"
-                  title={showRendered ? "查看源码" : "在沙箱中渲染"}
-                  onClick={() => setShowRendered((v) => !v)}
-                >
-                  {showRendered ? <FileCode className="size-3.5" /> : <Eye className="size-3.5" />}
-                  {showRendered ? "源码" : "预览"}
-                </Button>
-              )}
-              {/* 复制按钮放头部而不是浮在代码上 —— 侧栏太窄,浮动按钮会直接压住第一行 */}
-              {preview.text !== null && (
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  title="复制内容"
-                  aria-label="复制文件内容"
-                  onClick={() => {
-                    void navigator.clipboard.writeText(preview.text ?? "").then(
-                      () => toast.success("文件内容已复制"),
-                      () => toast.error("复制失败，请手动选择内容"),
-                    );
-                  }}
-                >
-                  <Copy />
-                </Button>
-              )}
-              <Button variant="ghost" size="icon-sm" asChild title="下载">
-                <a
-                  aria-label="下载文件"
-                  href={`/api/sessions/${sessionId}/files?download=${encodeURIComponent(preview.path)}`}
-                >
-                  <Download />
-                </a>
-              </Button>
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex items-center gap-1 border-b border-line-soft py-2 pr-2.5 pl-4">
+            <b className="min-w-0 flex-1 truncate text-[13px] font-semibold" title={preview.path}>
+              {name}
+            </b>
+            {(isHtml || isMarkdown) && (
+              <fieldset className="mr-1 inline-flex rounded-full bg-[#ECEAE3] p-[3px]">
+                <legend className="sr-only">预览方式</legend>
+                {(
+                  [
+                    [true, "预览"],
+                    [false, "源码"],
+                  ] as const
+                ).map(([rendered, label]) => (
+                  <button
+                    key={label}
+                    type="button"
+                    aria-pressed={showRendered === rendered}
+                    onClick={() => setShowRendered(rendered)}
+                    className={cn(
+                      "h-7 rounded-full px-3 text-[13px] text-muted-foreground",
+                      showRendered === rendered &&
+                        "bg-card font-semibold text-foreground shadow-[0_1px_2px_rgb(0_0_0/6%)]",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </fieldset>
+            )}
+            {/* 复制按钮放头部而不是浮在代码上 —— 侧栏太窄,浮动按钮会直接压住第一行 */}
+            {preview.text !== null && (
               <Button
                 variant="ghost"
                 size="icon-sm"
-                onClick={() => setPreview(null)}
-                title="关闭"
-                aria-label="关闭文件预览"
+                title="复制内容"
+                aria-label="复制文件内容"
+                onClick={() => {
+                  void navigator.clipboard.writeText(preview.text ?? "").then(
+                    () => toast.success("文件内容已复制"),
+                    () => toast.error("复制失败，请手动选择内容"),
+                  );
+                }}
               >
-                <X />
+                <Copy />
               </Button>
-            </div>
+            )}
+            <Button variant="ghost" size="icon-sm" asChild title="下载">
+              <a aria-label="下载文件" href={fileUrl(false)}>
+                <Download />
+              </a>
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => {
+                setPreview(null);
+                setSelected(undefined);
+              }}
+              title="关闭预览"
+              aria-label="关闭文件预览"
+            >
+              <X />
+            </Button>
           </div>
-          <Separator />
-          <div className="min-h-0 flex-1 overflow-auto px-3 pb-3 pt-2">
+          <div
+            className={cn(
+              "min-h-0 flex-1 overflow-auto",
+              isHtml && showRendered ? "p-0" : "px-3.5 py-3",
+            )}
+          >
             {preview.mime.startsWith("image/") ? (
-              <img
-                src={`/api/sessions/${sessionId}/files?download=${encodeURIComponent(preview.path)}&inline=1`}
-                alt={preview.path}
-                className="mx-auto max-w-full rounded-md border border-border"
-              />
+              <div className="flex justify-center rounded-[10px] bg-[#EDEBE5] p-4">
+                <img src={fileUrl(true)} alt={preview.path} className="max-w-full rounded-md" />
+              </div>
             ) : preview.mime.startsWith("video/") ? (
               <video
                 controls
                 preload="metadata"
-                src={`/api/sessions/${sessionId}/files?download=${encodeURIComponent(preview.path)}&inline=1`}
+                src={fileUrl(true)}
                 className="mx-auto max-w-full rounded-md"
               >
                 <track kind="captions" />
               </video>
             ) : preview.mime.startsWith("audio/") ? (
-              <audio
-                controls
-                preload="metadata"
-                src={`/api/sessions/${sessionId}/files?download=${encodeURIComponent(preview.path)}&inline=1`}
-                className="w-full"
-              >
+              <audio controls preload="metadata" src={fileUrl(true)} className="w-full">
                 <track kind="captions" />
               </audio>
             ) : preview.mime === "application/pdf" ? (
               <iframe
                 title={`预览 ${preview.path}`}
-                src={`/api/sessions/${sessionId}/files?download=${encodeURIComponent(preview.path)}&inline=1`}
-                className="h-[70vh] w-full rounded-md border border-border"
+                src={fileUrl(true)}
+                className="h-[70vh] w-full rounded-[10px] border border-border"
               />
             ) : isHtml && showRendered && preview.text !== null ? (
               /**
@@ -514,18 +591,33 @@ export function FilePanel({
                 title={`预览 ${preview.path}`}
                 srcDoc={preview.text}
                 sandbox="allow-scripts"
-                className="h-[60vh] w-full rounded-md border border-border bg-white"
+                className="h-full min-h-[360px] w-full border-0 bg-white"
               />
+            ) : isMarkdown && showRendered && preview.text !== null ? (
+              // Markdown 用对话正文同一套渲染
+              <div className="chat-md text-sm leading-[1.7]">
+                <MessageResponse>{preview.text}</MessageResponse>
+              </div>
             ) : preview.text === null ? (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <FileWarning className="size-4 shrink-0" />
-                <span>
-                  {preview.mime} · {formatSize(preview.size)} —— 二进制文件,请下载查看
-                </span>
+              <div className="px-4 py-8 text-center text-muted-foreground">
+                <FileText className="mx-auto size-7" />
+                <p className="mt-2.5 mb-1 font-display text-[17px] text-foreground">
+                  无法预览这个文件
+                </p>
+                <p>
+                  {name} 是二进制文件（{preview.mime}，{formatSize(preview.size)}
+                  ），下载后用本地程序打开。
+                </p>
+                <Button size="sm" className="mt-3" asChild>
+                  <a href={fileUrl(false)}>
+                    <Download />
+                    下载
+                  </a>
+                </Button>
               </div>
             ) : (
               /**
-               * 侧栏只有两百多像素宽,不换行的话每一行都被切掉大半,
+               * 侧栏只有三四百像素宽,不换行的话每一行都被切掉大半,
                * 要横向拖着看 —— 预览的意义就没了。
                *
                * 行号是 ::before 伪元素(w-8 + mr-4 = 3rem),一旦换行,
@@ -533,7 +625,7 @@ export function FilePanel({
                */
               <CodeBlock
                 className={
-                  "text-xs [&_pre]:whitespace-pre-wrap [&_pre]:break-words " +
+                  "text-[13px] [&_pre]:whitespace-pre-wrap [&_pre]:break-words " +
                   "[&_code>span]:pl-12 [&_code>span]:-indent-12"
                 }
                 code={preview.text}
@@ -542,7 +634,13 @@ export function FilePanel({
               />
             )}
             {preview.truncated && (
-              <p className="pt-2 text-xs text-muted-foreground">…内容过长已截断</p>
+              <p className="m-3 flex flex-wrap items-center gap-1.5 rounded-lg bg-warning-soft px-2.5 py-2 text-[13px] text-warning-text">
+                <AlertTriangle className="size-3.5 shrink-0" />
+                内容过长，只显示了开头一部分。
+                <a className="underline underline-offset-[3px]" href={fileUrl(false)}>
+                  下载完整文件
+                </a>
+              </p>
             )}
           </div>
         </div>

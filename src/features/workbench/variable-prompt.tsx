@@ -22,6 +22,14 @@ interface VariableState {
   filled: boolean;
 }
 
+/** 「变量已填写:A（已隐藏）、B = 值」——密钥只说填了,不露值 */
+function filledSummary(state: VariableState): string {
+  const parts = state.variables
+    .filter((v) => state.values[v.name]?.trim())
+    .map((v) => (v.secret ? `${v.name}（已隐藏）` : `${v.name} = ${state.values[v.name]}`));
+  return parts.length ? `变量已填写：${parts.join("、")}` : "";
+}
+
 export function VariablePrompt({
   agentId,
   sessionId,
@@ -82,24 +90,31 @@ export function VariablePrompt({
 
   return (
     <>
-      {missing.length > 0 && (
-        <div className="mx-auto mb-3 flex max-w-2xl items-center gap-3 rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm">
-          <KeyRound className="size-4 shrink-0 text-warning" />
-          <span>需要填写 {missing.length} 个必填变量才能运行此智能体</span>
-          <Button
-            size="sm"
-            variant="outline"
-            className="ml-auto shrink-0"
+      {missing.length > 0 ? (
+        <div className="mx-5 mt-2.5 flex items-center gap-2 rounded-[10px] bg-warning-soft px-3 py-2 text-sm text-warning-text max-md:mx-3">
+          <KeyRound className="size-[15px] shrink-0" />
+          <span className="min-w-0 flex-1">
+            需要填写 {missing.length} 个必填变量才能运行此智能体
+          </span>
+          <button
+            type="button"
+            className="shrink-0 underline decoration-[#C9C4B8] underline-offset-[3px] max-md:min-h-11"
             onClick={() => setOpen(true)}
           >
             填写变量
-          </Button>
+          </button>
         </div>
-      )}
-      {missing.length === 0 && (
-        <div className="mx-auto mb-3 flex max-w-2xl items-center gap-2 text-xs text-muted-foreground">
-          <KeyRound className="size-3" />
-          <button type="button" className="underline" onClick={() => setOpen(true)}>
+      ) : (
+        <div className="mx-5 mt-2.5 flex items-center gap-2 rounded-[10px] bg-[#F4F2EC] px-3 py-2 text-sm text-[#3C3A35] max-md:mx-3">
+          <KeyRound className="size-[15px] shrink-0" />
+          <span className="min-w-0 flex-1 truncate">
+            {filledSummary(state) || "这个智能体定义了变量，都是选填的"}
+          </span>
+          <button
+            type="button"
+            className="shrink-0 underline decoration-[#C9C4B8] underline-offset-[3px] max-md:min-h-11"
+            onClick={() => setOpen(true)}
+          >
             管理变量
           </button>
         </div>
@@ -114,7 +129,8 @@ export function VariablePrompt({
           <DialogHeader>
             <DialogTitle>填写变量</DialogTitle>
             <DialogDescription>
-              这些参数由智能体定义，运行时会自动注入。密钥类型加密存储。
+              这些参数由智能体定义，运行时自动注入。值按「你 +
+              这个智能体」保存，其他人看不到；密钥类型加密存储。
             </DialogDescription>
           </DialogHeader>
           <div className="min-h-0 space-y-4 overflow-y-auto">
@@ -137,7 +153,7 @@ export function VariablePrompt({
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
           <DialogFooter className="shrink-0">
-            <Button variant="ghost" disabled={busy} onClick={() => setOpen(false)}>
+            <Button variant="outline" disabled={busy} onClick={() => setOpen(false)}>
               取消
             </Button>
             <Button disabled={busy} onClick={() => void save()}>

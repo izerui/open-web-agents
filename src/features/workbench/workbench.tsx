@@ -1,28 +1,35 @@
 "use client";
 
-import { AgentTree } from "@/components/ide/agent-tree";
-import { IdeFrame } from "@/components/ide/ide-frame";
+import { AgentAvatar } from "@/components/agent-avatar";
+import { AppShell } from "@/components/shell/app-shell";
 import { followRun } from "@/features/chat/follow-run";
 import { fetchJson } from "@/lib/fetch-json";
+import { useMe } from "@/lib/use-me";
 import { cn } from "@/lib/utils";
 import type { FileUIPart } from "ai";
 import {
-  AlertTriangle,
+  Archive,
   Bot,
   Command,
-  FolderOpen,
-  ListTree,
+  Info,
   MessageSquare,
   Plus,
   RefreshCw,
+  Square,
+  TriangleAlert,
+  Upload,
   X,
 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ApprovalBar, type PendingQuestion } from "./approval-bar";
+import { Spin } from "./chat-bits";
+import { ChatHeader, type RightTab } from "./chat-header";
+import { joinPromptAttachments, versionBadge } from "./chat-view.logic";
 import { CommandPalette } from "./command-palette";
-import { ContextWindowMeter } from "./context-window-meter";
+import { Composer, type QueuedMessage, type SlashCommand } from "./composer";
 import {
   ChatThread,
   type SubmitAnswer,
@@ -32,21 +39,22 @@ import {
 } from "./conversation";
 import { createEventBatcher } from "./event-batcher";
 import { FilePanel } from "./file-panel";
+import { NewSessionDialog } from "./new-session-dialog";
 import { RunTree } from "./run-tree";
-import { SessionActions } from "./session-actions";
 import { sessionLabel } from "./session-groups";
+import { type ListView, SessionList, type SessionWait } from "./session-list";
 import { sendSteer } from "./steer-client";
 import type { AgentSummary, SessionSummary, Turn } from "./types";
 import { VariablePrompt } from "./variable-prompt";
 import {
   agentIdFromSearch,
+  promptFromSearch,
   sessionIdFromSearch,
   updateTurnByLocalId,
   withSessionInUrl,
 } from "./workbench.logic";
 import { makeWorkspaceFileDropHandlers } from "./workspace-file-drop";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   ResizableHandle,
@@ -57,91 +65,10 @@ import {
 } from "@/components/ui/resizable";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 
-import {
-  Attachment,
-  AttachmentPreview,
-  AttachmentRemove,
-  Attachments,
-} from "@/components/ai-elements/attachments";
-import {
-  PromptInput,
-  PromptInputActionAddAttachments,
-  PromptInputActionMenu,
-  PromptInputActionMenuContent,
-  PromptInputActionMenuTrigger,
-  PromptInputBody,
-  PromptInputFooter,
-  PromptInputHeader,
-  type PromptInputMessage,
-  PromptInputSubmit,
-  PromptInputTextarea,
-  PromptInputTools,
-  usePromptInputAttachments,
-} from "@/components/ai-elements/prompt-input";
-import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion";
+import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { refreshModelCatalog } from "@/features/builder/model-select";
-import { ModelPrice } from "@/features/models/model-price";
 
-const RIGHT_KEY = "owa.object-workspace.right";
-
-interface SlashCommand {
-  name: string;
-  label: string;
-  icon: React.ElementType;
-  disabled?: boolean;
-
-  run(): void;
-}
-
-function SlashCommandMenu({
-  commands,
-  activeIndex,
-  onSelect,
-}: {
-  commands: SlashCommand[];
-  activeIndex: number;
-  onSelect(command: SlashCommand): void;
-}) {
-  if (commands.length === 0) return null;
-  return (
-    <div className="mb-2 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg">
-      {commands.map((command, index) => (
-        <button
-          key={command.name}
-          type="button"
-          disabled={command.disabled}
-          className={cn(
-            "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm disabled:opacity-40",
-            index === activeIndex ? "bg-accent text-accent-foreground" : "hover:bg-accent/60",
-          )}
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => onSelect(command)}
-        >
-          <command.icon className="size-4 text-muted-foreground" />
-          <span className="font-mono text-xs">/{command.name}</span>
-          <span className="text-xs text-muted-foreground">{command.label}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function AttachmentsDisplay() {
-  const { files, remove } = usePromptInputAttachments();
-
-  if (files.length === 0) return null;
-
-  return (
-    <Attachments>
-      {files.map((file) => (
-        <Attachment key={file.id} data={file} onRemove={() => remove(file.id)}>
-          <AttachmentPreview />
-          <AttachmentRemove />
-        </Attachment>
-      ))}
-    </Attachments>
-  );
-}
+const RIGHT_KEY = "owa.chat.right";
 
 /* ================================================================== */
 /*  运行事件流                                                       */
@@ -203,8 +130,41 @@ const DEFAULT_AGENT_STARTERS = [
   "创建一个简单的 REST API",
 ];
 
+/** 空状态、错误状态共用的居中块 */
+function EmptyBlock({
+  icon,
+  title,
+  children,
+  actions,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  children?: React.ReactNode;
+  actions?: React.ReactNode;
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-10 py-6 text-center max-md:px-5">
+      {icon}
+      <h2 className="mt-[18px] mb-1.5 font-display text-[28px] leading-[1.3] max-md:text-[22px]">
+        {title}
+      </h2>
+      {children && <div className="max-w-[460px] text-muted-foreground">{children}</div>}
+      {actions && <div className="mt-[22px] flex flex-wrap justify-center gap-2.5">{actions}</div>}
+    </div>
+  );
+}
+
+function BadIcon() {
+  return (
+    <span className="flex size-14 items-center justify-center rounded-full bg-destructive-soft text-destructive">
+      <TriangleAlert className="size-6" />
+    </span>
+  );
+}
+
 export function Workbench() {
   const router = useRouter();
+  const { me } = useMe();
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   /**
    * 智能体列表的加载状态。曾经失败只弹一个 toast:之后 agents 为空、输入框永久禁用,
@@ -217,6 +177,8 @@ export function Workbench() {
   /** ?agent= 只在第一次拿到智能体列表时生效一次,之后的刷新不覆盖用户自己的选择 */
   const urlAgentPendingRef = useRef(true);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  /** 已归档的会话(左栏「已归档」视图,可恢复) */
+  const [archived, setArchived] = useState<SessionSummary[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
@@ -227,7 +189,7 @@ export function Workbench() {
    * 曾经运行中按回车:send() 直接 return,输入框却以为提交成功,把文字和附件一起清空 ——
    * 用户写的东西静默丢失,也不知道为什么没发出去。
    */
-  const [queued, setQueued] = useState<{ id: string; text: string; files: FileUIPart[] }[]>([]);
+  const [queued, setQueued] = useState<(QueuedMessage & { files: FileUIPart[] })[]>([]);
   /** 追加消息接口答"待定"(202)的那些:之后若在事件流里收到未送达,自动改为排队重发 */
   const pendingSteerRef = useRef(new Set<string>());
   const [filesKey, setFilesKey] = useState(0);
@@ -243,13 +205,20 @@ export function Workbench() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [slashIndex, setSlashIndex] = useState(0);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [listView, setListView] = useState<ListView>("active");
+  const [listQuery, setListQuery] = useState("");
+  const [listOpen, setListOpen] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [layoutReady, setLayoutReady] = useState(false);
   const [mobileLayout, setMobileLayout] = useState(false);
-  /** 右侧工具窗口当前是哪个标签;null = 收起。 */
-  const [rightTab, setRightTab] = useState<"files" | "runs" | null>(null);
+  /** 右侧面板当前是哪个页签;null = 关闭。 */
+  const [rightTab, setRightTab] = useState<RightTab | null>(null);
   const [rightReady, setRightReady] = useState(false);
+  /** 执行详情里选中的那次调用(对话流里点工具摘要也会定位到这里) */
+  const [selectedTool, setSelectedTool] = useState<string | null>(null);
+  /** 待你确认的工具名(审批条轮询带回) */
+  const [awaitingTools, setAwaitingTools] = useState<string[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const activeRunRef = useRef<{ abort: AbortController; runId?: string } | null>(null);
   /** 打开会话的序号:用来丢弃"切走之后才回来"的过期响应。 */
@@ -272,7 +241,17 @@ export function Workbench() {
     window.history.replaceState(window.history.state, "", nextUrl);
   }, []);
 
-  // 右侧工具窗口的状态从上次离开时恢复
+  // ?q= 预填输入框(探索页、市场详情带着一句话过来);只预填不发送,读完从地址里去掉
+  useEffect(() => {
+    const q = promptFromSearch(window.location.search);
+    if (!q) return;
+    setInput(q);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("q");
+    window.history.replaceState(window.history.state, "", url);
+  }, []);
+
+  // 右侧面板的状态从上次离开时恢复
   useEffect(() => {
     const right = localStorage.getItem(RIGHT_KEY);
     if (right === "files") setRightTab("files");
@@ -280,17 +259,21 @@ export function Workbench() {
     setRightReady(true);
   }, []);
   useEffect(() => {
-    if (!rightReady) return;
+    if (!rightReady || mobileLayout) return;
     localStorage.setItem(RIGHT_KEY, rightTab ?? "none");
-  }, [rightTab, rightReady]);
+  }, [rightTab, rightReady, mobileLayout]);
 
-  const toggleRight = useCallback((tab: "files" | "runs") => {
+  const toggleRight = useCallback((tab: RightTab) => {
     setRightTab((cur) => (cur === tab ? null : tab));
   }, []);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 767px)");
-    const update = () => setMobileLayout(media.matches);
+    const update = () => {
+      setMobileLayout(media.matches);
+      // 窄屏下右侧面板是抽屉,进页面时不该自己弹出来
+      if (media.matches) setRightTab(null);
+    };
     update();
     setLayoutReady(true);
     media.addEventListener("change", update);
@@ -298,17 +281,16 @@ export function Workbench() {
   }, []);
 
   /**
-   * 拉智能体与会话列表。
+   * 拉会话列表(含智能体设计器的会话)与已归档列表。
    *
    * 【为什么不能直接 r.json()】接口 500 时响应体是空的,json() 会抛 SyntaxError,
    * 而这两条链原本既不看 res.ok 也没有 catch —— 于是变成 unhandledRejection,
-   * 智能体和会话【双双设不进去】,界面静默变成"一条历史都没有"的空白。
-   * 用户看到的是"数据没了",实际只是一个接口挂了,而且屏幕上没有任何线索。
+   * 界面静默变成"一条历史都没有"的空白。
    */
   const loadSessions = useCallback(async () => {
     setSessionsError(null);
     try {
-      const res = await fetch("/api/sessions");
+      const res = await fetch("/api/sessions?include=design");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = (await res.json()) as { sessions?: SessionSummary[] };
       setSessions(d.sessions ?? []);
@@ -316,6 +298,16 @@ export function Workbench() {
       setSessionsError(e instanceof Error ? e.message : String(e));
     } finally {
       setSessionsLoaded(true);
+    }
+    // 归档列表只是附加视图:读不到不影响主列表,计数显示 0
+    try {
+      const res = await fetch("/api/sessions?archived=1&include=design");
+      if (res.ok) {
+        const d = (await res.json()) as { sessions?: SessionSummary[] };
+        setArchived(d.sessions ?? []);
+      }
+    } catch {
+      // 留着上次的归档列表
     }
   }, []);
 
@@ -350,7 +342,7 @@ export function Workbench() {
         setAgentsState("ok");
         const nextAgents = d.agents ?? [];
         setAgents(nextAgents);
-        // 从构建器"试运行"跳过来时 URL 带着 ?agent=,第一次加载时优先选中它。
+        // 从构建页"试运行"跳过来时 URL 带着 ?agent=,第一次加载时优先选中它。
         // 曾经只在"还没选中"时才采用 —— 而初始值是 "default",默认智能体可见时参数永远被忽略。
         // 同时带 ?session= 时以会话所属的智能体为准
         const search = window.location.search;
@@ -367,8 +359,7 @@ export function Workbench() {
         });
       })
       .catch((e: unknown) => {
-        // 智能体拉不到不该连累会话列表 —— 原来两条链共用一个 effect 且都没 catch,
-        // 任一失败都变成 unhandledRejection,两边一起空掉
+        // 智能体拉不到不该连累会话列表
         toast.error(`智能体列表加载失败:${e instanceof Error ? e.message : String(e)}`);
         setAgentsState("error");
       });
@@ -379,23 +370,39 @@ export function Workbench() {
     void loadSessions();
   }, [loadAgents, loadSessions]);
 
-  const newSession = useCallback(() => {
-    if (running) return;
+  /**
+   * 离开当前会话前断开本地事件流。运行不绑定在这个 HTTP 请求上,服务端照常跑完;
+   * 切回来时从 /history 还原、从 /events 接回实时流。
+   */
+  const detach = useCallback(() => {
     openSeqRef.current += 1;
     pendingSteerRef.current.clear();
     setQueued([]);
     abortRef.current?.abort();
     abortRef.current = null;
     activeRunRef.current = null;
-    setSessionId(null);
-    syncSessionUrl(null);
-    const url = new URL(window.location.href);
-    url.searchParams.set("agent", agentId);
-    window.history.replaceState(window.history.state, "", url);
-    setTurns([]);
-    setHistoryLoading(false);
-    setHistoryError(null);
-  }, [agentId, running, syncSessionUrl]);
+    setRunning(false);
+    setSelectedTool(null);
+  }, []);
+
+  /** 开一个新会话(还没发消息时只在本地,发第一条时才真正创建) */
+  const startNewSession = useCallback(
+    (nextAgentId: string) => {
+      detach();
+      setSessionId(null);
+      setAgentId(nextAgentId);
+      setAgentContextError(null);
+      const url = new URL(window.location.href);
+      url.searchParams.set("agent", nextAgentId);
+      url.searchParams.delete("session");
+      window.history.replaceState(window.history.state, "", url);
+      setTurns([]);
+      setHistoryLoading(false);
+      setHistoryError(null);
+      setListView("active");
+    },
+    [detach],
+  );
 
   /**
    * 中断 = 先告诉服务端取消,再断开本地流。
@@ -463,9 +470,8 @@ export function Workbench() {
   /**
    * 打开一个历史会话:先把跑过的轮次还原出来,若其中一轮还在跑就接回实时流。
    *
-   * 【为什么要还原】这里曾经只做 setTurns([]) —— 打开历史会话是一片空白。
-   * 过程事件只活在 Redis 与进程内的 replay 缓冲里,运行一结束就没了,
-   * 用户刷新一下,刚才看到的思考、工具调用、产出全部消失。
+   * 【为什么要还原】过程事件只活在 Redis 与进程内的 replay 缓冲里,运行一结束就没了,
+   * 不还原的话用户刷新一下,刚才看到的思考、工具调用、产出全部消失。
    *
    * 【为什么历史与实时流不会重复】/history 只回【已终态】轮次的过程,仍在跑的那一轮
    * 由 /events 推 —— 两个来源各管一段。AgentEvent 里没有唯一 id,真要重了也去不掉,
@@ -477,11 +483,14 @@ export function Workbench() {
     abortRef.current = null;
     activeRunRef.current = null;
     setRunning(false);
+    setListOpen(false);
+    setSelectedTool(null);
 
     const seq = ++openSeqRef.current;
     pendingSteerRef.current.clear();
     setQueued([]);
-    const targetSession = sessions.find((session) => session.id === id);
+    const targetSession =
+      sessions.find((session) => session.id === id) ?? archived.find((s) => s.id === id);
     if (targetSession) {
       setAgentId(targetSession.agentId);
       setAgentContextError(null);
@@ -542,6 +551,7 @@ export function Workbench() {
         abortRef.current = null;
         if (activeRunRef.current?.abort === abort) activeRunRef.current = null;
         setFilesKey((k) => k + 1);
+        void loadSessions();
       }
     }
   }
@@ -558,7 +568,8 @@ export function Workbench() {
       return;
     initialSessionAppliedRef.current = true;
     const requestedSessionId = sessionIdFromSearch(window.location.search);
-    if (requestedSessionId && sessions.some((session) => session.id === requestedSessionId)) {
+    const known = [...sessions, ...archived].find((s) => s.id === requestedSessionId);
+    if (requestedSessionId && known && known.source !== "design") {
       void openSession(requestedSessionId);
     } else {
       if (requestedSessionId) syncSessionUrl(null);
@@ -578,12 +589,16 @@ export function Workbench() {
     setContextReady(true);
   }, [agents, agentsState, sessions, sessionsError, sessionsLoaded, syncSessionUrl]);
 
+  const activeSession = sessionId
+    ? (sessions.find((s) => s.id === sessionId) ?? archived.find((s) => s.id === sessionId))
+    : undefined;
+  const isArchived = activeSession?.status === "archived";
+
   /**
    * 拿到可用的会话 id,没有就现建一个。
    *
-   * 【为什么要校验返回体】这里原本直接解构 `{ session }` 就用 `session.id`:
-   * 建会话失败(未登录、库挂了)时 session 是 undefined,下一行立刻 TypeError,
-   * 而这个异常发生在发送流程内部 —— 用户点了发送,界面毫无反应,也没有任何提示。
+   * 【为什么要校验返回体】建会话失败(未登录、库挂了)时 session 是 undefined,
+   * 不校验的话下一行立刻 TypeError,用户点了发送,界面毫无反应,也没有任何提示。
    */
   async function ensureSession(firstPrompt: string, signal: AbortSignal): Promise<string> {
     if (!contextReady || agentContextError) throw new Error("请选择可用的智能体");
@@ -606,20 +621,19 @@ export function Workbench() {
     signal.throwIfAborted();
     setSessionId(session.id);
     syncSessionUrl(session.id);
-    setSessions((s) => [session, ...s]);
+    setSessions((s) => [{ ...session, source: "web", lastActiveAt: Date.now() }, ...s]);
     return session.id;
   }
 
   /**
    * 发起一轮。
    *
-   * `text` 用于【非输入框来源】的发送 —— 目前是用户点了 agent 提问里的选项。
-   * 不走输入框是有意的:那些选项是 agent 给的,不该先塞进输入框再让用户按回车,
-   * 也不该把用户正在打的字冲掉。
+   * `text` 用于【非输入框来源】的发送 —— 开场建议、提问卡片「作为新消息发送」。
+   * 不走输入框是有意的:那些不该先塞进输入框再让用户按回车,也不该把用户正在打的字冲掉。
    */
   async function send(text?: string, files: FileUIPart[] = [], clearComposer = false) {
     const prompt = (text ?? input).trim();
-    if (!contextReady || agentContextError || !agentId) return;
+    if (!contextReady || agentContextError || !agentId || isArchived) return;
     if (!prompt || running || historyLoading || historyError !== null) return;
     setRunning(true);
     // 这一轮按服务端当前的模型与价格运行:顺便刷新标题栏显示
@@ -650,9 +664,10 @@ export function Workbench() {
       if (seq !== openSeqRef.current) throw new Error("会话已经切换");
       const uploadedFiles = await uploadPromptFiles(id, files, abort.signal);
       abort.signal.throwIfAborted();
-      const runPrompt = uploadedFiles.length
-        ? `${prompt}\n\n已上传到当前工作区的附件:\n${uploadedFiles.map((name) => `- ${name}`).join("\n")}`
-        : prompt;
+      const runPrompt = joinPromptAttachments(prompt, uploadedFiles);
+      if (uploadedFiles.length) {
+        patch((turn) => ({ ...turn, prompt: runPrompt }));
+      }
       const res = await fetch(`/api/sessions/${id}/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -718,7 +733,7 @@ export function Workbench() {
    * 较早的记录定位不了那一轮之前的状态时,改为干净上下文重跑,并如实提示。
    */
   async function rerun(fromRunId: string, prompt: string) {
-    if (!sessionId || running) return;
+    if (!sessionId || running || isArchived) return;
     setRunning(true);
 
     const localId = crypto.randomUUID();
@@ -805,11 +820,11 @@ export function Workbench() {
   const current = agents.find((a) => a.id === agentId);
   // 已有会话按它实际运行的版本显示模型(锁定的发布版可能与草稿不同);
   // 还没有会话时,列表给的配置正是新会话会用的那一版(能编辑的人是草稿,其他人是发布版)
-  const activeSession = sessionId ? sessions.find((s) => s.id === sessionId) : undefined;
   const shownModel = activeSession ? activeSession.model : current?.config.model;
   // 开场建议按智能体配置;曾经写死成编程示例,对"发票抽取"之类的智能体毫无意义
-  const starters =
-    current?.config.starters ?? (current?.id === "default" ? DEFAULT_AGENT_STARTERS : []);
+  const starters = (
+    current?.config.starters ?? (current?.id === "default" ? DEFAULT_AGENT_STARTERS : [])
+  ).slice(0, 4);
   // 一个智能体都没有时,agentId 还是兜底的 "default",不能拿它当名字显示
   const hasAgents = agents.length > 0;
   const composerBlocked =
@@ -817,7 +832,8 @@ export function Workbench() {
     agentContextError !== null ||
     historyLoading ||
     historyError !== null ||
-    !hasAgents;
+    !hasAgents ||
+    isArchived;
   const contextUsed = useMemo(() => contextTokens(turns), [turns]);
   const totalProcessed = useMemo(() => {
     const all = turns.flatMap((t) => t.events);
@@ -838,8 +854,8 @@ export function Workbench() {
 
   // 记住用户拖出来的分栏宽度,下次进来还是这个宽度
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
-    id: "workbench-panels",
-    panelIds: ["chat", "files"],
+    id: "chat-panels",
+    panelIds: ["chat", "side"],
     storage: layoutStorage,
     onlySaveAfterUserInteractions: true,
   });
@@ -854,10 +870,12 @@ export function Workbench() {
         const runId = activeRunRef.current?.runId;
         // 纯文本:直接追加进正在跑的这一轮;带附件的(追加只能带文本)或还拿不到 runId 时照旧排队
         if (message.files.length === 0 && runId && sessionId) {
+          setInput("");
           void steerOrQueue(sessionId, runId, text);
           return;
         }
         setQueued((q) => [...q, { id: crypto.randomUUID(), text, files: message.files }]);
+        setInput("");
         toast.message("已排队,本轮结束后发送");
         return;
       }
@@ -874,24 +892,7 @@ export function Workbench() {
       sessionId,
       historyLoading,
       historyError,
-    ],
-  );
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally use the current send closure
-  const handleSuggestionClick = useCallback(
-    (suggestion: string) => {
-      void send(suggestion).catch(() => {});
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [
-      running,
-      input,
-      contextReady,
-      agentContextError,
-      agentId,
-      sessionId,
-      historyLoading,
-      historyError,
+      isArchived,
     ],
   );
 
@@ -987,525 +988,503 @@ export function Workbench() {
     (runId: string, prompt: string) => void rerunRef.current(runId, prompt),
     [],
   );
+  const locateTool = useCallback((locator: string) => {
+    setSelectedTool(locator);
+    setRightTab("runs");
+  }, []);
+
+  const openPicker = useCallback(() => {
+    setListOpen(false);
+    setPickerOpen(true);
+  }, []);
+
   const slashCommands = useMemo<SlashCommand[]>(
     () => [
-      { name: "new", label: "新建会话", icon: Plus, disabled: running, run: newSession },
-      { name: "search", label: "搜索会话和页面", icon: Command, run: () => setPaletteOpen(true) },
+      { name: "new", label: "新建会话", icon: Plus, run: openPicker },
+      {
+        name: "search",
+        label: "搜索会话与页面（⌘K）",
+        icon: Command,
+        run: () => setPaletteOpen(true),
+      },
       { name: "agents", label: "管理智能体", icon: Bot, run: () => router.push("/agents") },
       {
         name: "stop",
         label: "停止当前运行",
-        icon: X,
+        icon: Square,
         disabled: !running,
         run: () => void cancelRun(),
       },
     ],
-    [cancelRun, newSession, router, running],
+    [cancelRun, openPicker, router, running],
   );
-  const slashMenuOpen = /^\/[^\s]*$/.test(input);
-  const slashQuery = slashMenuOpen ? input.slice(1).toLocaleLowerCase() : "";
-  const matchingSlashCommands = slashMenuOpen
-    ? slashCommands.filter((command) => command.name.startsWith(slashQuery))
-    : [];
-  const selectSlashCommand = useCallback((command: SlashCommand) => {
-    if (command.disabled) return;
-    setInput("");
-    setSlashIndex(0);
-    command.run();
-  }, []);
 
   const pickAgent = (id: string) => {
-    if (id === agentId || running) return;
-    newSession();
-    setAgentId(id);
-    setAgentContextError(null);
-    const url = new URL(window.location.href);
-    url.searchParams.set("agent", id);
-    url.searchParams.delete("session");
-    window.history.replaceState(window.history.state, "", url);
+    setPickerOpen(false);
+    startNewSession(id);
   };
+
+  const restoreSession = async (id: string) => {
+    try {
+      await fetchJson(`/api/sessions/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archived: false }),
+      });
+      const label = sessionLabel(archived.find((s) => s.id === id) ?? { id });
+      toast.success(`已恢复「${label}」`);
+      if (id === sessionId) {
+        setSessions((all) => [
+          ...all,
+          ...archived.filter((s) => s.id === id).map((s) => ({ ...s, status: "active" })),
+        ]);
+      }
+      setArchived((all) => all.filter((s) => s.id !== id));
+      void loadSessions();
+    } catch (e) {
+      toast.error(`恢复失败:${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  const onRemoved = (id: string) => {
+    setSessions((all) => all.filter((item) => item.id !== id));
+    void loadSessions();
+    if (id === sessionId) {
+      detach();
+      setSessionId(null);
+      syncSessionUrl(null);
+      setTurns([]);
+    }
+  };
+
+  const wait: SessionWait =
+    awaitingTools.length > 0 ? "approval" : pendingQuestions.length > 0 ? "ask" : null;
+  const runningSession = running && activeSession ? sessionLabel(activeSession) : null;
+  const badge = versionBadge({ running, session: activeSession, agent: current });
+
   const sessionList = (
+    <SessionList
+      view={listView}
+      onViewChangeAction={(v) => {
+        setListView(v);
+        setListQuery("");
+      }}
+      query={listQuery}
+      onQueryChangeAction={setListQuery}
+      sessions={sessions}
+      archived={archived}
+      agents={agents}
+      loaded={sessionsLoaded}
+      error={sessionsError}
+      onRetryAction={() => void loadSessions()}
+      activeSessionId={sessionId}
+      running={running}
+      wait={wait}
+      onOpenAction={(id) => void openSession(id)}
+      onNewAction={openPicker}
+      onChangedAction={() => void loadSessions()}
+      onRemovedAction={onRemoved}
+      onRestoreAction={(id) => void restoreSession(id)}
+    />
+  );
+
+  const purgedAt = activeSession?.workspacePurgedAt;
+  const bars = (
     <>
-      {sessionsError && (
-        <div className="px-4 py-3 text-sm">
-          <p className="text-destructive">会话列表加载失败：{sessionsError}</p>
-          <Button variant="ghost" onClick={() => void loadSessions()}>
-            重试
-          </Button>
+      {contextReady && !agentContextError && hasAgents && (
+        <VariablePrompt
+          key={`${agentId}-${sessionId ?? ""}`}
+          agentId={agentId}
+          sessionId={sessionId}
+        />
+      )}
+      {purgedAt && (
+        <output className="mx-5 mt-2.5 flex items-start gap-2 rounded-[10px] bg-[#EEF1F4] px-3 py-2 text-sm text-[#34465A] max-md:mx-3">
+          <Info className="mt-0.5 size-[15px] shrink-0" />
+          <span>
+            这个会话长期未活动，工作目录已于 {new Date(purgedAt).toLocaleString()}{" "}
+            自动清理，之前生成的文件已不在。对话记录还在；继续对话会在新的空目录里进行。
+          </span>
+        </output>
+      )}
+      {isArchived && sessionId && (
+        <div className="mx-5 mt-2.5 flex items-center gap-2 rounded-[10px] bg-[#F4F2EC] px-3 py-2 text-sm text-[#3C3A35] max-md:mx-3">
+          <Archive className="size-[15px] shrink-0" />
+          <span className="min-w-0 flex-1">这个会话已归档，恢复后才能继续对话</span>
+          <button
+            type="button"
+            className="shrink-0 underline decoration-[#C9C4B8] underline-offset-[3px]"
+            onClick={() => void restoreSession(sessionId)}
+          >
+            恢复会话
+          </button>
         </div>
       )}
-      {!sessionsLoaded && <p className="px-4 py-3 text-sm text-muted-foreground">正在读取会话…</p>}
-      <AgentTree
-        agents={agents}
-        sessions={sessions}
-        activeAgentId={agentId}
-        activeSessionId={sessionId}
-        running={running}
-        onPickAgentAction={pickAgent}
-        onOpenSessionAction={(id) => void openSession(id)}
-        onNewSessionAction={newSession}
-        sessionActions={(session) => (
-          <SessionActions
-            session={session}
-            onChanged={() => void loadSessions()}
-            onRemoved={(id) => {
-              setSessions((all) => all.filter((item) => item.id !== id));
-              if (id === sessionId) {
-                setRunning(false);
-                openSeqRef.current += 1;
-                pendingSteerRef.current.clear();
-                abortRef.current?.abort();
-                setSessionId(null);
-                syncSessionUrl(null);
-                setTurns([]);
-                setQueued([]);
-              }
-            }}
-          />
-        )}
-      />
     </>
   );
+
+  let stream: React.ReactNode;
+  if (agentsState === "ok" && !hasAgents) {
+    // 没有任何可用智能体时,"发一句话试试"配一个禁用的输入框是自相矛盾的
+    stream = (
+      <EmptyBlock
+        icon={<AgentAvatar id="default" size={64} />}
+        title="还没有可用的智能体"
+        actions={
+          <>
+            <Button asChild>
+              <Link href="/agents">
+                <Plus />
+                新建智能体
+              </Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <Link href="/">去探索看看</Link>
+            </Button>
+          </>
+        }
+      >
+        先创建一个智能体，或请管理员分享给你。也可以去探索里找一个现成的。
+      </EmptyBlock>
+    );
+  } else if (agentContextError) {
+    const recent = sessions.find((s) => s.source !== "design");
+    stream = (
+      <EmptyBlock
+        icon={<BadIcon />}
+        title={agentContextError}
+        actions={
+          <>
+            <Button
+              onClick={() =>
+                recent ? void openSession(recent.id) : startNewSession(agents[0]?.id ?? "default")
+              }
+            >
+              {recent ? "回到最近会话" : "开始新会话"}
+            </Button>
+            <Button variant="outline" asChild>
+              <Link href="/">去探索找智能体</Link>
+            </Button>
+          </>
+        }
+      >
+        可能链接拼错了、智能体已被删除，或作者没有分享给你。
+      </EmptyBlock>
+    );
+  } else if (historyLoading) {
+    stream = (
+      <div className="flex min-h-0 flex-1 items-center justify-center gap-2.5 text-muted-foreground">
+        <Spin />
+        正在读取会话历史…
+      </div>
+    );
+  } else if (historyError) {
+    stream = (
+      <EmptyBlock
+        icon={<BadIcon />}
+        title="读取会话历史失败"
+        actions={
+          sessionId && (
+            <Button onClick={() => void openSession(sessionId)}>
+              <RefreshCw />
+              重试
+            </Button>
+          )
+        }
+      >
+        {historyError}。会话本身没有丢失。
+      </EmptyBlock>
+    );
+  } else if (turns.length === 0) {
+    stream =
+      agentsState === "error" ? (
+        <EmptyBlock
+          icon={<BadIcon />}
+          title="智能体列表没读到"
+          actions={
+            <Button onClick={loadAgents}>
+              <RefreshCw />
+              重试
+            </Button>
+          }
+        />
+      ) : agentsState === "loading" || !contextReady ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center gap-2.5 text-muted-foreground">
+          <Spin />
+          正在读取…
+        </div>
+      ) : (
+        <EmptyBlock
+          icon={<AgentAvatar id={agentId} icon={current?.icon} size={64} />}
+          title={current ? `和「${current.name}」开始对话` : "开始对话"}
+        >
+          <p>{current?.description || "描述你要它完成的事，它会在独立的工作目录里动手。"}</p>
+          {starters.length > 0 && !isArchived && (
+            <div className="mx-auto mt-6 grid w-[min(560px,100%)] grid-cols-2 gap-2.5 max-md:grid-cols-1">
+              {starters.map((text) => (
+                <button
+                  key={text}
+                  type="button"
+                  onClick={() => void send(text).catch(() => {})}
+                  className="flex min-h-11 items-center gap-2 rounded-[14px] border border-border bg-[#FBFAF7] px-3.5 py-3 text-left text-sm text-foreground hover:border-[#BDB8AC] hover:bg-card"
+                >
+                  <MessageSquare className="size-[15px] shrink-0 text-muted-foreground" />
+                  {text}
+                </button>
+              ))}
+            </div>
+          )}
+        </EmptyBlock>
+      );
+  } else {
+    stream = (
+      <ChatThread
+        key={sessionId ?? "new-session"}
+        agentName={current?.name ?? activeSession?.agentId}
+        agentId={agentId}
+        agentIcon={current?.icon}
+        turns={turns}
+        onRerunAction={stableRerunAction}
+        onAnswerAction={stableAnswerAction}
+        pendingQuestions={pendingQuestions}
+        submitAnswerAction={submitAnswerAction}
+        onLocateToolAction={locateTool}
+        selectedToolLocator={rightTab === "runs" ? selectedTool : null}
+        readOnly={isArchived}
+        awaitingTools={awaitingTools}
+      />
+    );
+  }
+
+  const placeholder = isArchived
+    ? "这个会话已归档，恢复后才能继续对话"
+    : historyError
+      ? "会话历史没读到，暂时不能发消息"
+      : running
+        ? "运行中也可以继续补充"
+        : "说点什么，或输入 /";
+
+  const chatCard = (
+    <div
+      data-conversation-shell=""
+      className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-[18px] border border-border bg-card max-md:rounded-none max-md:border-0"
+      onDragEnter={dropHandlers.onDragEnter as React.DragEventHandler}
+      onDragOver={dropHandlers.onDragOver as React.DragEventHandler}
+      onDragLeave={dropHandlers.onDragLeave as React.DragEventHandler}
+      onDrop={dropHandlers.onDrop as React.DragEventHandler}
+    >
+      <ChatHeader
+        title={activeSession ? sessionLabel(activeSession) : "新会话"}
+        agent={agentContextError ? undefined : current}
+        badge={agentContextError || !current ? undefined : badge}
+        model={agentContextError ? undefined : shownModel}
+        rightTab={rightTab}
+        onToggleAction={toggleRight}
+        onOpenListAction={() => setListOpen(true)}
+      />
+      {bars}
+      <div className="relative flex min-h-0 flex-1 flex-col">{stream}</div>
+      <div className="shrink-0 pt-1">
+        <ApprovalBar
+          key={sessionId ?? "new"}
+          sessionId={sessionId}
+          running={running}
+          onQuestionsChange={setPendingQuestions}
+          onApprovalsChange={setAwaitingTools}
+          refreshKey={approvalRefresh}
+        />
+        <Composer
+          input={input}
+          onInputChangeAction={setInput}
+          running={running}
+          blocked={composerBlocked}
+          placeholder={placeholder}
+          onSubmitAction={handlePromptSubmit}
+          onStopAction={() => void cancelRun()}
+          commands={slashCommands}
+          queued={queued}
+          onUnqueueAction={(id) => setQueued((all) => all.filter((x) => x.id !== id))}
+          contextUsed={contextUsed}
+          totalProcessed={totalProcessed}
+        />
+      </div>
+    </div>
+  );
+
+  const panelTabs = (
+    <div className="flex shrink-0 items-center gap-2 border-b border-line-soft py-2.5 pr-3 pl-3.5">
+      <div className="inline-flex rounded-full bg-[#ECEAE3] p-[3px]">
+        {(
+          [
+            ["files", "工作区文件"],
+            ["runs", "执行详情"],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            aria-pressed={rightTab === key}
+            onClick={() => setRightTab(key)}
+            className={cn(
+              "h-[30px] rounded-full px-3.5 text-[13px] text-muted-foreground max-md:h-10",
+              rightTab === key &&
+                "bg-card font-semibold text-foreground shadow-[0_1px_2px_rgb(0_0_0/6%)]",
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <button
+        type="button"
+        aria-label="关闭面板"
+        title="关闭面板"
+        onClick={() => setRightTab(null)}
+        className="ml-auto flex size-8 items-center justify-center rounded-full hover:bg-[#F0EEE8] max-md:size-11"
+      >
+        <X className="size-4" />
+      </button>
+    </div>
+  );
+  const panelBody =
+    rightTab === "runs" ? (
+      <RunTree
+        turns={turns}
+        agentName={current?.name}
+        selected={selectedTool}
+        onSelectAction={setSelectedTool}
+        running={running}
+      />
+    ) : (
+      <FilePanel
+        sessionId={sessionId}
+        refreshKey={filesKey}
+        live={running}
+        onSuggestAction={
+          isArchived
+            ? undefined
+            : () => {
+                setInput("把这次的结果整理成一个文件放到工作区");
+                if (mobileLayout) setRightTab(null);
+              }
+        }
+      />
+    );
 
   return (
     <>
       <CommandPalette
         open={paletteOpen}
         onOpenChangeAction={setPaletteOpen}
-        // 全部会话:命令面板是全局搜索,不该被当前智能体和侧栏搜索词收窄
-        sessions={sessions}
+        // 全部会话:命令面板是全局搜索,不该被侧栏搜索词收窄
+        sessions={sessions.filter((s) => s.source !== "design")}
         agents={agents}
         currentAgentId={agentId}
         running={running}
         onOpenSessionAction={(id) => void openSession(id)}
-        onNewSessionAction={newSession}
+        onNewSessionAction={openPicker}
         onPickAgentAction={pickAgent}
       />
+      <NewSessionDialog
+        open={pickerOpen}
+        onOpenChangeAction={setPickerOpen}
+        agents={agents}
+        agentsState={agentsState}
+        onRetryAction={loadAgents}
+        meId={me?.user?.id ?? null}
+        runningTitle={runningSession}
+        onPickAction={pickAgent}
+      />
 
-      <IdeFrame
-        onSearchAction={() => setPaletteOpen(true)}
-        object={
-          contextReady && !agentContextError && current
-            ? {
-                id: agentId,
-                name: current.name,
-                tab: "chat",
-                sessionId,
-                canReadConfig: current.canRead !== false,
-              }
-            : undefined
-        }
-        widgets={
-          <Badge variant={running ? "success" : "outline"}>
-            {running
-              ? "运行中"
-              : activeSession?.agentVersion
-                ? `v${activeSession.agentVersion}`
-                : !activeSession && current?.canWrite !== true && current?.publishedVersion
-                  ? `已发布 v${current.publishedVersion}`
-                  : "草稿"}
-          </Badge>
-        }
-        toolWindow={{
-          title: "智能体",
-          body: sessionList,
-        }}
-      >
-        {layoutReady ? (
-          <ResizablePanelGroup
-            className="min-h-0 flex-1"
-            defaultLayout={defaultLayout}
-            onLayoutChanged={onLayoutChanged}
-          >
-            {/* 尺寸必须带单位:v4 把裸数字当像素 */}
-            <ResizablePanel
-              id="chat"
-              defaultSize="74%"
-              minSize="40%"
-              className="workbench-chat-panel flex min-w-0 flex-col"
-            >
-              <div className="flex min-h-[70px] shrink-0 items-center gap-3 border-b border-border px-7 max-md:px-3">
-                <div className="min-w-0 flex-1">
-                  <h2 className="truncate text-sm font-semibold">
-                    {activeSession ? sessionLabel(activeSession) : "新会话"}
-                  </h2>
-                  <ModelPrice
-                    model={shownModel}
-                    className="truncate text-xs text-muted-foreground"
-                  />
-                </div>
-                <button
-                  type="button"
-                  aria-label="查看执行详情"
-                  title="查看执行详情"
-                  aria-pressed={rightTab === "runs"}
-                  onClick={() => toggleRight("runs")}
-                  className={cn(
-                    "flex size-11 shrink-0 items-center justify-center rounded-md hover:bg-accent",
-                    rightTab === "runs" && "bg-accent",
-                  )}
-                >
-                  <ListTree className="size-[18px]" />
-                </button>
-                <button
-                  type="button"
-                  aria-label="打开工作空间"
-                  title="打开工作空间"
-                  aria-pressed={rightTab === "files"}
-                  onClick={() => toggleRight("files")}
-                  className={cn(
-                    "flex size-11 shrink-0 items-center justify-center rounded-md hover:bg-accent",
-                    rightTab === "files" && "bg-accent",
-                  )}
-                >
-                  <FolderOpen className="size-[18px]" />
-                </button>
-                <Sheet
-                  open={mobileLayout && rightTab !== null}
-                  onOpenChange={(open) => {
-                    if (!open) setRightTab(null);
-                  }}
-                >
-                  <SheetContent className="w-[92vw] gap-0 p-0" side="right">
-                    <SheetTitle className="sr-only">
-                      {rightTab === "runs" ? "执行详情" : "工作空间"}
-                    </SheetTitle>
-                    <SheetDescription className="sr-only">
-                      查看当前会话的文件或工具执行过程
-                    </SheetDescription>
-                    <div className="min-h-0 flex-1 pt-12">
-                      {rightTab === "runs" ? (
-                        <RunTree turns={turns} />
-                      ) : (
-                        <FilePanel sessionId={sessionId} refreshKey={filesKey} live={running} />
-                      )}
-                    </div>
-                  </SheetContent>
-                </Sheet>
-              </div>
-
-              <div
-                data-conversation-shell=""
-                className="relative flex min-h-0 flex-1 flex-col overflow-x-hidden"
-                onDragEnter={dropHandlers.onDragEnter as React.DragEventHandler}
-                onDragOver={dropHandlers.onDragOver as React.DragEventHandler}
-                onDragLeave={dropHandlers.onDragLeave as React.DragEventHandler}
-                onDrop={dropHandlers.onDrop as React.DragEventHandler}
+      <AppShell fullBleed onSearchAction={() => setPaletteOpen(true)}>
+        <div className="flex min-h-0 flex-1">
+          <aside className="w-[268px] shrink-0 border-r border-border max-md:hidden">
+            {sessionList}
+          </aside>
+          <div className="flex min-h-0 min-w-0 flex-1">
+            {!layoutReady ? (
+              <div className="h-full w-full" aria-hidden="true" />
+            ) : mobileLayout ? (
+              chatCard
+            ) : (
+              <ResizablePanelGroup
+                className="min-h-0 flex-1"
+                defaultLayout={defaultLayout}
+                onLayoutChanged={onLayoutChanged}
               >
-                {/* 拖拽覆盖层 */}
-                {dragActive && (
-                  <div className="pointer-events-none absolute inset-2 z-40 flex items-center justify-center rounded-lg border-2 border-dashed border-primary/60 bg-primary/[0.035]">
-                    <div className="flex items-center gap-2 rounded-md border border-primary/25 bg-popover px-4 py-2 text-sm font-medium text-foreground shadow-lg">
-                      松手添加文件
-                    </div>
-                  </div>
-                )}
-
-                {(() => {
-                  const purgedAt = sessions.find((s) => s.id === sessionId)?.workspacePurgedAt;
-                  return purgedAt ? (
-                    <output className="mx-4 mt-3 block rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs">
-                      这个会话长期未活动,工作目录已于 {new Date(purgedAt).toLocaleString()}{" "}
-                      自动清理,之前生成的文件已不在。对话记录还在;继续对话会在新的空目录里进行。
-                    </output>
-                  ) : null;
-                })()}
-
-                {/*
-                  失败与"结局未知"由该轮自己的结果卡片展示。曾经顶部还有一条横幅显示同一段话,
-                  同一个失败出现两遍。
-                */}
-                {/* 对话区域 */}
-                {contextReady && !agentContextError && (
-                  <VariablePrompt
-                    key={`${agentId}-${sessionId ?? ""}`}
-                    agentId={agentId}
-                    sessionId={sessionId}
-                  />
-                )}
-                <div className="relative flex min-h-0 flex-1 flex-col">
-                  {agentContextError ? (
-                    <output className="flex min-h-0 flex-1 items-center justify-center px-6 text-sm text-destructive">
-                      {agentContextError}
-                    </output>
-                  ) : historyLoading ? (
-                    <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
-                      正在读取会话历史…
-                    </div>
-                  ) : historyError ? (
-                    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-                      <AlertTriangle className="size-6 text-destructive" />
-                      <p className="text-sm text-destructive">{historyError}</p>
-                      {sessionId && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => void openSession(sessionId)}
-                        >
-                          <RefreshCw className="size-3.5" />
-                          重试
-                        </Button>
-                      )}
-                    </div>
-                  ) : turns.length === 0 ? (
-                    <div className="flex min-h-0 flex-1 items-center justify-center">
-                      {agentsState === "error" ? (
-                        <div className="flex flex-col items-center gap-3 px-6 text-center">
-                          <AlertTriangle className="size-6 text-destructive" />
-                          <p className="text-sm text-destructive">智能体列表没读到</p>
-                          <Button variant="outline" size="sm" onClick={loadAgents}>
-                            <RefreshCw className="size-3.5" />
-                            重试
-                          </Button>
-                        </div>
-                      ) : agentsState === "ok" && !hasAgents ? (
-                        // 没有任何可用智能体时,"发一句话试试"配一个禁用的输入框是自相矛盾的
-                        <div className="flex flex-col items-center gap-3 px-6 text-center">
-                          <MessageSquare className="size-12 text-muted-foreground/20" />
-                          <h2 className="text-xl font-medium text-foreground">
-                            还没有可用的智能体
-                          </h2>
-                          <p className="text-sm text-muted-foreground">
-                            先创建一个智能体,或请管理员分享给你。
-                          </p>
-                          <Button size="sm" onClick={() => router.push("/agents")}>
-                            新建智能体
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="flex max-w-md flex-col items-center gap-3 px-6 text-center">
-                          <MessageSquare className="size-12 text-muted-foreground/20" />
-                          <h2 className="text-xl font-medium text-foreground">
-                            {current ? `和「${current.name}」开始对话` : "开始对话"}
-                          </h2>
-                          <p className="text-sm text-muted-foreground">
-                            {current?.description ||
-                              "描述你要它完成的事,它会在独立的工作目录里动手。"}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <ChatThread
-                      key={sessionId ?? "new-session"}
-                      agentName={current?.name}
-                      turns={turns}
-                      onRerunAction={stableRerunAction}
-                      onAnswerAction={stableAnswerAction}
-                      pendingQuestions={pendingQuestions}
-                      submitAnswerAction={submitAnswerAction}
-                    />
-                  )}
-                </div>
-
-                <ApprovalBar
-                  key={sessionId ?? "new"}
-                  sessionId={sessionId}
-                  running={running}
-                  onQuestionsChange={setPendingQuestions}
-                  refreshKey={approvalRefresh}
-                />
-
-                {/* 输入区占据独立高度,消息与提问在上方滚动,不会被输入框盖住。 */}
-                <div className="z-20 shrink-0 py-3">
-                  <div className="w-full px-3 sm:px-5">
-                    <div className="pointer-events-auto mx-auto max-w-[850px]">
-                      {contextReady &&
-                        !agentContextError &&
-                        turns.length === 0 &&
-                        starters.length > 0 && (
-                          <Suggestions className="pb-3">
-                            {starters.map((text) => (
-                              <Suggestion
-                                key={text}
-                                suggestion={text}
-                                onClick={handleSuggestionClick}
-                              />
-                            ))}
-                          </Suggestions>
-                        )}
-                      <div className="pb-4">
-                        {slashMenuOpen && (
-                          <SlashCommandMenu
-                            commands={matchingSlashCommands}
-                            activeIndex={Math.min(
-                              slashIndex,
-                              Math.max(0, matchingSlashCommands.length - 1),
-                            )}
-                            onSelect={selectSlashCommand}
-                          />
-                        )}
-                        {queued.length > 0 && (
-                          <ul className="mb-2 space-y-1" aria-label="排队中的消息">
-                            {queued.map((q, i) => (
-                              <li
-                                key={q.id}
-                                className="flex items-center gap-2 rounded-md border border-border bg-muted/40 px-2.5 py-1.5 text-xs"
-                              >
-                                <span className="shrink-0 text-muted-foreground">排队 {i + 1}</span>
-                                <span className="min-w-0 flex-1 truncate">{q.text}</span>
-                                {q.files.length > 0 && (
-                                  <span className="shrink-0 text-muted-foreground">
-                                    {q.files.length} 个附件
-                                  </span>
-                                )}
-                                <button
-                                  type="button"
-                                  className="shrink-0 rounded px-1 text-muted-foreground hover:text-foreground"
-                                  aria-label="取消这条排队消息"
-                                  onClick={() =>
-                                    setQueued((all) => all.filter((x) => x.id !== q.id))
-                                  }
-                                >
-                                  ×
-                                </button>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                        <PromptInput globalDrop multiple onSubmit={handlePromptSubmit}>
-                          {/* 没有附件时这一段是空的,但仍带着上内边距,会把占位文字往下顶 */}
-                          <PromptInputHeader className="empty:hidden">
-                            <AttachmentsDisplay />
-                          </PromptInputHeader>
-                          <PromptInputBody>
-                            <PromptInputTextarea
-                              aria-label="消息"
-                              className="min-h-10"
-                              value={input}
-                              onChange={(event) => {
-                                setInput(event.target.value);
-                                setSlashIndex(0);
-                              }}
-                              onKeyDown={(event) => {
-                                if (!slashMenuOpen || matchingSlashCommands.length === 0) return;
-                                if (event.key === "ArrowDown") {
-                                  event.preventDefault();
-                                  setSlashIndex(
-                                    (index) => (index + 1) % matchingSlashCommands.length,
-                                  );
-                                } else if (event.key === "ArrowUp") {
-                                  event.preventDefault();
-                                  setSlashIndex(
-                                    (index) =>
-                                      (index - 1 + matchingSlashCommands.length) %
-                                      matchingSlashCommands.length,
-                                  );
-                                } else if (event.key === "Enter" && !event.shiftKey) {
-                                  event.preventDefault();
-                                  const command = matchingSlashCommands[slashIndex];
-                                  if (command) selectSlashCommand(command);
-                                } else if (event.key === "Escape") {
-                                  event.preventDefault();
-                                  setInput("");
-                                }
-                              }}
-                              disabled={composerBlocked}
-                              placeholder={
-                                running
-                                  ? "运行中也可以继续补充,会交给正在干活的智能体"
-                                  : "说点什么,或输入 /"
-                              }
-                            />
-                          </PromptInputBody>
-                          {/*
-                            左边是"往里加东西"(附件)和上下文用量,右边是"发出去"。
-                            曾经三样东西用 justify-between 平分,附件按钮孤零零地落在正中间。
-                          */}
-                          <PromptInputFooter>
-                            <PromptInputTools>
-                              <PromptInputActionMenu>
-                                <PromptInputActionMenuTrigger
-                                  aria-label="添加附件"
-                                  tooltip="添加附件"
-                                />
-                                <PromptInputActionMenuContent>
-                                  <PromptInputActionAddAttachments label="添加图片或文件" />
-                                </PromptInputActionMenuContent>
-                              </PromptInputActionMenu>
-                              {contextUsed > 0 && (
-                                <ContextWindowMeter
-                                  usedTokens={contextUsed}
-                                  maxTokens={200_000}
-                                  totalProcessed={totalProcessed}
-                                />
-                              )}
-                            </PromptInputTools>
-                            <div className="flex items-center gap-3">
-                              <PromptInputSubmit
-                                aria-label={running ? "停止运行" : "发送消息"}
-                                title={running ? "停止运行" : "发送消息"}
-                                className="size-11"
-                                status={running ? "streaming" : "ready"}
-                                onStop={cancelRun}
-                                disabled={!running && composerBlocked}
-                              />
-                            </div>
-                          </PromptInputFooter>
-                        </PromptInput>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </ResizablePanel>
-
-            {rightTab && !mobileLayout && (
-              <>
-                <ResizableHandle className="workbench-panel-handle" />
+                {/* 尺寸必须带单位:v4 把裸数字当像素 */}
                 <ResizablePanel
-                  id="files"
-                  defaultSize="24%"
-                  minSize="16%"
-                  maxSize="45%"
-                  className="workbench-files-panel flex min-w-0 flex-col bg-sidebar"
+                  id="chat"
+                  defaultSize="66%"
+                  minSize="40%"
+                  className={cn("flex min-w-0 flex-col py-4 pl-4", !rightTab && "pr-4")}
                 >
-                  {/* 右侧工具窗口:工作空间与运行两个标签,和右侧工具窗口条上的两个图标对应 */}
-                  <div className="flex h-9 shrink-0 items-stretch gap-3 border-b border-border px-3 text-sm">
-                    {(
-                      [
-                        ["files", "工作空间"],
-                        ["runs", "运行"],
-                      ] as const
-                    ).map(([key, label]) => (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => setRightTab(key)}
-                        className={cn(
-                          rightTab === key
-                            ? "text-foreground shadow-[inset_0_-2px_0_var(--primary)]"
-                            : "text-muted-foreground hover:text-foreground",
-                        )}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                    <span className="flex-1" />
-                    <button
-                      type="button"
-                      aria-label="收起工具窗口"
-                      onClick={() => toggleRight(rightTab)}
-                      className="my-auto flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-                    >
-                      <X className="size-3.5" />
-                    </button>
-                  </div>
-                  <div className="min-h-0 flex-1">
-                    {rightTab === "files" ? (
-                      <FilePanel sessionId={sessionId} refreshKey={filesKey} live={running} />
-                    ) : (
-                      <RunTree turns={turns} />
-                    )}
-                  </div>
+                  {chatCard}
                 </ResizablePanel>
-              </>
+                {rightTab && (
+                  <>
+                    <ResizableHandle className="w-4 bg-transparent before:absolute before:top-[40%] before:left-[7px] before:h-[20%] before:w-[3px] before:rounded-sm before:bg-[#D9D5CB] before:transition-colors hover:before:bg-[#8E897D] focus-visible:before:bg-[#8E897D] data-[separator=active]:before:bg-[#8E897D]" />
+                    <ResizablePanel
+                      id="side"
+                      defaultSize="34%"
+                      minSize="16%"
+                      maxSize="45%"
+                      className="flex min-w-0 flex-col py-4 pr-4"
+                    >
+                      <section
+                        aria-label={rightTab === "runs" ? "执行详情" : "工作区文件"}
+                        className="flex h-full min-h-0 flex-col overflow-hidden rounded-[18px] border border-border bg-card"
+                      >
+                        {panelTabs}
+                        <div className="min-h-0 flex-1">{panelBody}</div>
+                      </section>
+                    </ResizablePanel>
+                  </>
+                )}
+              </ResizablePanelGroup>
             )}
-          </ResizablePanelGroup>
-        ) : (
-          <div className="h-full w-full bg-background" aria-hidden="true" />
+          </div>
+        </div>
+
+        {/* 窄屏:会话列表与右侧面板改抽屉 */}
+        <Sheet open={mobileLayout && listOpen} onOpenChange={setListOpen}>
+          <SheetContent side="left" className="w-[88vw] max-w-80 gap-0 p-0 pt-10">
+            <SheetTitle className="sr-only">会话列表</SheetTitle>
+            <SheetDescription className="sr-only">切换、搜索、管理会话</SheetDescription>
+            {sessionList}
+          </SheetContent>
+        </Sheet>
+        <Sheet
+          open={mobileLayout && rightTab !== null}
+          onOpenChange={(open) => {
+            if (!open) setRightTab(null);
+          }}
+        >
+          <SheetContent side="right" showCloseButton={false} className="w-[92vw] gap-0 p-0">
+            <SheetTitle className="sr-only">
+              {rightTab === "runs" ? "执行详情" : "工作区文件"}
+            </SheetTitle>
+            <SheetDescription className="sr-only">
+              查看当前会话的文件或工具执行过程
+            </SheetDescription>
+            {panelTabs}
+            <div className="min-h-0 flex-1">{panelBody}</div>
+          </SheetContent>
+        </Sheet>
+
+        {/* 拖拽覆盖层 */}
+        {dragActive && (
+          <div className="pointer-events-none fixed inset-0 z-[85] flex items-center justify-center bg-[rgb(247_246_242/86%)]">
+            <div className="rounded-3xl border-2 border-dashed border-[#9C978B] bg-card px-20 py-12 text-center max-md:px-8">
+              <Upload className="mx-auto size-9" />
+              <p className="mt-3 mb-1 font-display text-[26px]">松手添加文件</p>
+              <p className="text-muted-foreground">
+                单个文件不超过 10MB，会先上传到这个会话的工作目录
+              </p>
+            </div>
+          </div>
         )}
-      </IdeFrame>
+      </AppShell>
     </>
   );
 }

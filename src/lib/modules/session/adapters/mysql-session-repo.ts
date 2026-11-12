@@ -133,7 +133,11 @@ export class MysqlSessionRepo implements SessionRepo {
         ? eq(sessions.billingUserId, filter.billingUserId)
         : undefined,
       filter?.sources ? inArray(sessions.source, filter.sources) : undefined,
-      filter?.includeArchived ? ne(sessions.status, "deleted") : eq(sessions.status, "active"),
+      filter?.archivedOnly
+        ? eq(sessions.status, "archived")
+        : filter?.includeArchived
+          ? ne(sessions.status, "deleted")
+          : eq(sessions.status, "active"),
     ].filter((c) => c !== undefined);
 
     const q = this.db.select(COLUMNS).from(sessions);

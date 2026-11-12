@@ -143,12 +143,14 @@ export class InMemoryRunRepo implements RunRepo {
     for (const run of this.runs.values()) {
       if (!want.has(run.sessionId)) continue;
       const at = this.createdAt.get(run.id) ?? 0;
+      const live = run.state === "pending" || run.state === "running" ? 1 : 0;
       const cur = out.get(run.sessionId);
       if (cur) {
         cur.runs += 1;
+        cur.active += live;
         if (at > cur.lastRunAt) cur.lastRunAt = at;
       } else {
-        out.set(run.sessionId, { runs: 1, lastRunAt: at });
+        out.set(run.sessionId, { runs: 1, lastRunAt: at, active: live });
       }
     }
     return out;

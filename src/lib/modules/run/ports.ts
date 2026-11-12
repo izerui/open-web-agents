@@ -127,6 +127,8 @@ export interface RunStats {
   runs: number;
   /** 最后一次发起运行的时间戳(ms)。比会话创建时间更能反映"最近在用哪个"。 */
   lastRunAt: number;
+  /** 还没结束的运行数(排队中与运行中)。会话列表据此显示「运行中」。 */
+  active: number;
 }
 
 /**

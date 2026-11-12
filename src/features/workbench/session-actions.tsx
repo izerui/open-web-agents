@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { errorText, fetchJson } from "@/lib/fetch-json";
+import { cn } from "@/lib/utils";
 import { Archive, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -31,10 +32,15 @@ import type { SessionSummary } from "./types";
  */
 export function SessionActions({
   session,
+  running = false,
   onChanged,
   onRemoved,
+  className,
 }: {
   session: SessionSummary;
+  /** 这个会话正在运行(删除确认里要明确说会停止) */
+  running?: boolean;
+  className?: string;
   /** 标题等字段改了:刷新列表。 */
   onChanged: () => void;
   /** 会话从列表里消失(归档或删除):若正打开着,调用方要切走。 */
@@ -72,7 +78,9 @@ export function SessionActions({
   }
 
   async function archive() {
-    if (await patch({ archived: true }, "已归档")) onRemoved(session.id);
+    if (await patch({ archived: true }, `已归档「${label}」,可在左下角「已归档」里恢复`)) {
+      onRemoved(session.id);
+    }
   }
 
   async function remove() {
@@ -96,12 +104,15 @@ export function SessionActions({
           <button
             type="button"
             aria-label={`会话操作:${label}`}
-            className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-background/40 hover:text-foreground data-[state=open]:bg-background/40 [&_svg]:size-4"
+            className={cn(
+              "flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-[#E6E3DB] hover:text-foreground data-[state=open]:bg-[#E6E3DB] max-md:size-11 [&_svg]:size-4",
+              className,
+            )}
           >
             <MoreHorizontal />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent side="right" align="start">
+        <DropdownMenuContent side="bottom" align="start" className="min-w-[180px]">
           <DropdownMenuItem
             onSelect={() => {
               setTitle(session.title ?? "");
@@ -127,6 +138,7 @@ export function SessionActions({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>重命名会话</DialogTitle>
+            <DialogDescription className="sr-only">给这个会话起一个好找的名字</DialogDescription>
           </DialogHeader>
           <form
             onSubmit={(e) => {
@@ -134,7 +146,14 @@ export function SessionActions({
               void rename();
             }}
           >
+            <label
+              htmlFor={`rename-${session.id}`}
+              className="mb-1.5 block text-[13px] text-muted-foreground"
+            >
+              会话名
+            </label>
             <Input
+              id={`rename-${session.id}`}
               autoFocus
               value={title}
               maxLength={120}
@@ -156,14 +175,21 @@ export function SessionActions({
       <Dialog open={dialog === "delete"} onOpenChange={(o) => !o && setDialog(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>删除会话「{label}」?</DialogTitle>
-            <DialogDescription>
-              正在运行的任务会被停止,工作目录里的文件会一起删除,且无法恢复。
-              用量与计费记录会保留。只想从列表里收起来的话,用「归档」。
-            </DialogDescription>
+            <DialogTitle>删除这个会话?</DialogTitle>
+            <DialogDescription>「{label}」将被永久删除，不能恢复：</DialogDescription>
           </DialogHeader>
+          <ul className="list-disc space-y-1 pl-5 text-sm leading-[1.8] text-muted-foreground">
+            {running ? (
+              <li className="font-semibold text-destructive">正在运行的任务会被停止</li>
+            ) : (
+              <li>如果有运行中的任务，会先停止</li>
+            )}
+            <li>会话的工作目录和里面的文件会被删除</li>
+            <li>用量与计费记录保留，仍可在「积分与套餐」里查到</li>
+            <li>只想从列表里收起来的话，用「归档」</li>
+          </ul>
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => setDialog(null)}>
+            <Button type="button" variant="outline" onClick={() => setDialog(null)}>
               取消
             </Button>
             <Button

@@ -7,11 +7,34 @@ import {
   sumUsage,
   transitionScrollMode,
 } from "@/features/workbench/conversation";
+import { toolLocator, turnKeyOf } from "@/features/workbench/conversation.logic";
 import type { Turn } from "@/features/workbench/types";
 import type { AgentEvent } from "@/lib/shared";
 import { describe, expect, it } from "vitest";
 
+describe("turnKeyOf / toolLocator", () => {
+  it("优先本地 id,其次 runId,最后按位置", () => {
+    expect(turnKeyOf({ localId: "l", runId: "r", prompt: "", events: [], running: false }, 3)).toBe(
+      "l",
+    );
+    expect(turnKeyOf({ runId: "r", prompt: "", events: [], running: false }, 3)).toBe("r");
+    expect(turnKeyOf({ prompt: "", events: [], running: false }, 3)).toBe("turn-3");
+    expect(toolLocator("r", "t1")).toBe("r|t1");
+  });
+});
+
 describe("foldEvents", () => {
+  it("每个工具调用带稳定的 key:有 toolUseId 用它,否则按出现顺序编号(对话流与执行详情据此互相定位)", () => {
+    const out = foldEvents([
+      { kind: "tool_use", tool: "A", input: {}, toolUseId: "t1" },
+      { kind: "text", text: "中间的话" },
+      { kind: "tool_use", tool: "B", input: {} },
+      { kind: "tool_use", tool: "C", input: {}, toolUseId: "t3" },
+    ]);
+    const keys = out.flatMap((r) => (r.kind === "tool" ? [r.key] : []));
+    expect(keys).toEqual(["t1", "#1", "t3"]);
+  });
+
   it("把 tool_result 合并进对应的 tool_use", () => {
     const out = foldEvents([
       { kind: "tool_use", tool: "Bash", input: { command: "ls" }, toolUseId: "t1" },
@@ -99,6 +122,23 @@ describe("foldEvents", () => {
         { kind: "tool", call: { tool: "Read" } },
       ],
     });
+  });
+
+  it("提问按出现的位置成块:先问后答,回答正文排在提问卡片之后", () => {
+    const question: AgentEvent = {
+      kind: "question",
+      toolUseId: "q1",
+      questions: [{ question: "选哪个?", options: [{ label: "A" }] }],
+    };
+    const blocks = processBlocks(
+      foldEvents([
+        { kind: "thinking", text: "要问一下" },
+        question,
+        { kind: "text", text: "按 A 做" },
+      ]),
+    );
+    expect(blocks.map((block) => block.kind)).toEqual(["activity", "question", "text"]);
+    expect(blocks[1]).toMatchObject({ kind: "question", event: { toolUseId: "q1" } });
   });
 
   it("过滤瞬时状态,保留诊断状态和孤立工具结果", () => {

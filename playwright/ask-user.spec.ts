@@ -120,8 +120,8 @@ test.describe("智能体提问", () => {
     const tag = Date.now() % 1_000_000;
     try {
       const agent = await agentOn(api, gw.baseUrl, tag);
-      await page.goto(`${BASE}/?agent=${agent}`);
-      const box = page.getByPlaceholder("说点什么,或输入 /");
+      await page.goto(`${BASE}/chat?agent=${agent}`);
+      const box = page.getByRole("textbox", { name: "消息", exact: true });
       await box.fill("帮我写份报告");
       await box.press("Enter");
 
@@ -132,6 +132,8 @@ test.describe("智能体提问", () => {
       expect(gw.turns()).toBe(1);
 
       await card.getByRole("button", { name: "Word" }).click();
+      // 「其他（自己填写）」是一个选项,点开才出现输入框
+      await card.getByRole("button", { name: "其他（自己填写）" }).click();
       await card.getByLabel("其他回答:报告用哪种格式?").fill("另外要带目录");
       await card.getByRole("button", { name: "提交回答" }).click();
 
@@ -181,14 +183,15 @@ test.describe("智能体提问", () => {
     const answers = { "背景?": long("甲"), "目标?": long("乙"), "约束?": long("丙") };
     try {
       const agent = await agentOn(context.request, gw.baseUrl, tag);
-      await page.goto(`${BASE}/?agent=${agent}`);
-      const box = page.getByPlaceholder("说点什么,或输入 /");
+      await page.goto(`${BASE}/chat?agent=${agent}`);
+      const box = page.getByRole("textbox", { name: "消息", exact: true });
       await box.fill("帮我写计划");
       await box.press("Enter");
       const card = page.getByTestId("question-card");
       await expect(card.getByTestId("question-state")).toHaveText("待回答", { timeout: 30_000 });
-      for (const [q, a] of Object.entries(answers)) {
+      for (const [i, [q, a]] of Object.entries(answers).entries()) {
         expect(a.length).toBe(1500);
+        await card.getByRole("button", { name: "其他（自己填写）" }).nth(i).click();
         await card.getByLabel(`其他回答:${q}`).fill(a);
       }
       await card.getByRole("button", { name: "提交回答" }).click();
@@ -198,7 +201,7 @@ test.describe("智能体提问", () => {
         const c = page.getByTestId("question-card");
         await expect(c.getByTestId("question-state")).toHaveText("已回答", { timeout: 15_000 });
         const shown = await c.getByTestId("question-answer").allTextContents();
-        expect(shown).toEqual(Object.values(answers).map((a) => `你的回答:${a}`));
+        expect(shown).toEqual(Object.values(answers).map((a) => `你的回答：${a}`));
       };
       await check();
       await page.reload();

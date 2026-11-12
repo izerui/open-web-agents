@@ -105,7 +105,9 @@ test.describe("视频/PDF/音频预览", () => {
     const sessionId = await createSession(context);
     await uploadBuffer(context, sessionId, fs.readFileSync(fixtures.mp4), "seek-test.mp4");
 
-    await page.goto(`${BASE}/?session=${sessionId}`);
+    await page.goto(`${BASE}/chat?session=${sessionId}`);
+    // coze-v3:工作区文件在右侧面板里,默认关着
+    await page.getByRole("button", { name: "工作区文件", exact: true }).click();
     await expect(page.getByText("seek-test.mp4")).toBeVisible({ timeout: 15_000 });
     await page.getByText("seek-test.mp4").click();
 
@@ -125,10 +127,9 @@ test.describe("视频/PDF/音频预览", () => {
 
     // 播放并等 currentTime 增长
     await video.evaluate((v: HTMLVideoElement) => v.play());
-    await page.waitForFunction(
-      () => document.querySelector("video")!.currentTime > 0.3,
-      { timeout: 10_000 },
-    );
+    await page.waitForFunction(() => (document.querySelector("video")?.currentTime ?? 0) > 0.3, {
+      timeout: 10_000,
+    });
     await video.evaluate((v: HTMLVideoElement) => v.pause());
 
     // 跳转到 2 秒并等 seeked 事件
@@ -144,10 +145,9 @@ test.describe("视频/PDF/音频预览", () => {
 
     // 从跳转位置继续播放
     await video.evaluate((v: HTMLVideoElement) => v.play());
-    await page.waitForFunction(
-      () => document.querySelector("video")!.currentTime > 2.2,
-      { timeout: 10_000 },
-    );
+    await page.waitForFunction(() => (document.querySelector("video")?.currentTime ?? 0) > 2.2, {
+      timeout: 10_000,
+    });
     const timeAfterResume = await video.evaluate((v: HTMLVideoElement) => v.currentTime);
     expect(timeAfterResume).toBeGreaterThan(2.1);
   });
@@ -157,7 +157,9 @@ test.describe("视频/PDF/音频预览", () => {
     const sessionId = await createSession(context);
     await uploadBuffer(context, sessionId, fs.readFileSync(fixtures.pdf), "render-test.pdf");
 
-    await page.goto(`${BASE}/?session=${sessionId}`);
+    await page.goto(`${BASE}/chat?session=${sessionId}`);
+    // coze-v3:工作区文件在右侧面板里,默认关着
+    await page.getByRole("button", { name: "工作区文件", exact: true }).click();
     await expect(page.getByText("render-test.pdf")).toBeVisible({ timeout: 15_000 });
     await page.getByText("render-test.pdf").click();
 
@@ -168,8 +170,9 @@ test.describe("视频/PDF/音频预览", () => {
     // 只截取包含文字的顶部区域（约 60px 高），文字消失就会超出容差
     const box = await pdfFrame.boundingBox();
     expect(box).toBeTruthy();
+    if (!box) return;
     await expect(page).toHaveScreenshot("pdf-text-region.png", {
-      clip: { x: box!.x, y: box!.y, width: box!.width, height: 60 },
+      clip: { x: box.x, y: box.y, width: box.width, height: 60 },
       maxDiffPixels: 100,
     });
   });
@@ -201,7 +204,9 @@ test.describe("视频/PDF/音频预览", () => {
     const blankPdf = Buffer.from(blankBody + blankXref);
 
     await uploadBuffer(context, sessionId, blankPdf, "blank-test.pdf");
-    await page.goto(`${BASE}/?session=${sessionId}`);
+    await page.goto(`${BASE}/chat?session=${sessionId}`);
+    // coze-v3:工作区文件在右侧面板里,默认关着
+    await page.getByRole("button", { name: "工作区文件", exact: true }).click();
     await expect(page.getByText("blank-test.pdf")).toBeVisible({ timeout: 15_000 });
     await page.getByText("blank-test.pdf").click();
 
@@ -211,10 +216,11 @@ test.describe("视频/PDF/音频预览", () => {
 
     const box = await pdfFrame.boundingBox();
     expect(box).toBeTruthy();
+    if (!box) return;
     // 空白 PDF 应该无法通过有文字的基准
     await expect(
       expect(page).toHaveScreenshot("pdf-text-region.png", {
-        clip: { x: box!.x, y: box!.y, width: box!.width, height: 60 },
+        clip: { x: box.x, y: box.y, width: box.width, height: 60 },
         maxDiffPixels: 100,
         timeout: 3_000,
       }),
@@ -226,7 +232,9 @@ test.describe("视频/PDF/音频预览", () => {
     const sessionId = await createSession(context);
     await uploadBuffer(context, sessionId, fs.readFileSync(fixtures.wav), "dur-test.wav");
 
-    await page.goto(`${BASE}/?session=${sessionId}`);
+    await page.goto(`${BASE}/chat?session=${sessionId}`);
+    // coze-v3:工作区文件在右侧面板里,默认关着
+    await page.getByRole("button", { name: "工作区文件", exact: true }).click();
     await expect(page.getByText("dur-test.wav")).toBeVisible({ timeout: 15_000 });
     await page.getByText("dur-test.wav").click();
 
@@ -250,7 +258,9 @@ test.describe("视频/PDF/音频预览", () => {
     const originalPdf = fs.readFileSync(fixtures.pdf);
     await uploadBuffer(context, sessionId, originalPdf, "dl-btn-test.pdf");
 
-    await page.goto(`${BASE}/?session=${sessionId}`);
+    await page.goto(`${BASE}/chat?session=${sessionId}`);
+    // coze-v3:工作区文件在右侧面板里,默认关着
+    await page.getByRole("button", { name: "工作区文件", exact: true }).click();
     await expect(page.getByText("dl-btn-test.pdf")).toBeVisible({ timeout: 15_000 });
     await page.getByText("dl-btn-test.pdf").click();
 
@@ -265,7 +275,8 @@ test.describe("视频/PDF/音频预览", () => {
     ]);
     const dlPath = await download.path();
     expect(dlPath).toBeTruthy();
-    const downloaded = fs.readFileSync(dlPath!);
+    if (!dlPath) return;
+    const downloaded = fs.readFileSync(dlPath);
     expect(Buffer.compare(downloaded, originalPdf)).toBe(0);
   });
 
