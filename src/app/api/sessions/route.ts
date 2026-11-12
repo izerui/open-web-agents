@@ -24,7 +24,14 @@ export async function GET(req: Request) {
     //                 侧栏里混着所有人的会话和一堆标题为 invoke 的接口调用
     //   integrations  用自己的 key 发起的接口调用 / API 会话
     //   all           全部(仅管理员,含无归属的历史数据)
-    const view = new URL(req.url).searchParams.get("view");
+    //
+    // 对话页的两个附加参数(只作用于默认视图):
+    //   archived=1      只列归档的(「已归档」视图,可恢复)
+    //   include=design  一并列出智能体设计器的会话(列表里标「设计器」,点开去构建页)
+    const params = new URL(req.url).searchParams;
+    const view = params.get("view");
+    const archivedOnly = params.get("archived") === "1";
+    const withDesign = params.get("include") === "design";
     const filter: SessionListFilter | undefined =
       principal.type === "apiKey"
         ? { callerApiKeyId: principal.keyId }
@@ -32,7 +39,11 @@ export async function GET(req: Request) {
           ? { billingUserId: principal.userId, sources: ["invoke", "api"] }
           : view === "all" && principal.role === "admin"
             ? undefined
-            : { ownerId: principal.userId, sources: ["web"] };
+            : {
+                ownerId: principal.userId,
+                sources: withDesign ? ["web", "design"] : ["web"],
+                archivedOnly,
+              };
 
     // 查询已经收窄,这里的 canAccessSession 是第二道闸:授权规则只有一处权威,
     // 万一查询条件写错也由它兜住,而不是让越权数据直接流出去。
@@ -58,17 +69,20 @@ export async function GET(req: Request) {
      */
     const stats = await runs
       .statsBySessions(visible.map((s) => s.id))
-      .catch(() => new Map<string, { runs: number; lastRunAt: number }>());
+      .catch(() => new Map<string, { runs: number; lastRunAt: number; active: number }>());
     // 会话实际运行的模型(锁定版本或草稿):工作台据此显示名称与售价,不按智能体当前草稿猜
     const models = await releases.modelsOf(visible).catch(() => new Map<string, string>());
 
     return NextResponse.json({
-      sessions: visible.map((s) => {
+      // 设计状态是设计器的内部数据(整份草稿),列表用不到,也不该随列表外流
+      sessions: visible.map(({ designState: _designState, ...s }) => {
         const st = stats.get(s.id);
         return {
           ...s,
           model: models.get(s.id),
           runCount: st?.runs ?? 0,
+          // 还没结束的运行:列表里画「运行中」
+          activeRuns: st?.active ?? 0,
           // 没跑过就退回创建时间 —— 列表要按"最近动过"排序,不能有空洞
           lastActiveAt: st?.lastRunAt ?? s.createdAt,
         };

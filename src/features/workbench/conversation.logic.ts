@@ -3,6 +3,11 @@ import type { Turn } from "./types";
 
 export interface ToolCall {
   kind: "tool";
+  /**
+   * 这一轮里稳定的标识:有 toolUseId 用它,否则按出现顺序编号(#0、#1…)。
+   * 对话流里的工具摘要与右侧执行详情靠「轮次 + key」互相定位。
+   */
+  key: string;
   tool: string;
   input: unknown;
   result?: { text: string; isError: boolean };
@@ -51,15 +56,18 @@ export function transitionScrollMode(current: ScrollMode, event: ScrollModeEvent
 export function foldEvents(events: AgentEvent[]): Rendered[] {
   const out: Rendered[] = [];
   const byToolId = new Map<string, ToolCall>();
+  let ordinal = 0;
 
   for (const event of events) {
     if (event.kind === "tool_use") {
       const call: ToolCall = {
         kind: "tool",
+        key: event.toolUseId ?? `#${ordinal}`,
         tool: event.tool,
         input: event.input,
         subagent: event.subagent,
       };
+      ordinal += 1;
       if (event.toolUseId) byToolId.set(event.toolUseId, call);
       out.push(call);
     } else if (event.kind === "tool_result") {

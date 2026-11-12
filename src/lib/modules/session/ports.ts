@@ -68,6 +68,8 @@ export interface SessionListFilter {
   sources?: SessionSource[];
   /** 是否包含归档的会话。已删除的永远不列。 */
   includeArchived?: boolean;
+  /** 只列归档的会话(对话页「已归档」视图)。优先于 includeArchived。 */
+  archivedOnly?: boolean;
 }
 
 /** reclaimWorkspace 的结果,见其注释。 */

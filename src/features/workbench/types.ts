@@ -19,6 +19,14 @@ export interface SessionSummary {
   agentVersion?: number;
   /** 这个会话实际运行的模型(按锁定版本或草稿解析,服务端给出) */
   model?: string;
+  /** 入口:web 对话 / design 智能体设计器(对话页列表里标「设计器」) */
+  source?: string;
+  /** 设计器会话的目标智能体 */
+  designTargetAgentId?: string;
+  /** active / archived */
+  status?: string;
+  /** 还没结束的运行数(列表据此画「运行中」) */
+  activeRuns?: number;
 }
 
 export interface AgentSummary {
@@ -26,6 +34,8 @@ export interface AgentSummary {
   name: string;
   icon?: string;
   description?: string;
+  /** 所有者;"system" = 平台内置。市场智能体不返回 */
+  ownerId?: string;
   config: {
     /** 别名或模型目录 id;显示时换成模型名与售价 */
     model?: string;

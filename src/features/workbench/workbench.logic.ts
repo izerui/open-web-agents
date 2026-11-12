@@ -11,6 +11,15 @@ export function agentIdFromSearch(search: string): string | null {
   return value || null;
 }
 
+/**
+ * ?q=:打开对话页时预填输入框(探索页、市场详情带着一句话过来)。只预填,不自动发送 ——
+ * 用户要先看一眼、确认跑的是哪个智能体再发。
+ */
+export function promptFromSearch(search: string): string | null {
+  const value = new URLSearchParams(search).get("q")?.trim();
+  return value || null;
+}
+
 export function withSessionInUrl(href: string, sessionId: string | null): string {
   try {
     const url = new URL(href);

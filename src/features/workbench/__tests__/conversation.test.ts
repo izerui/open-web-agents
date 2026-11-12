@@ -12,6 +12,17 @@ import type { AgentEvent } from "@/lib/shared";
 import { describe, expect, it } from "vitest";
 
 describe("foldEvents", () => {
+  it("每个工具调用带稳定的 key:有 toolUseId 用它,否则按出现顺序编号(对话流与执行详情据此互相定位)", () => {
+    const out = foldEvents([
+      { kind: "tool_use", tool: "A", input: {}, toolUseId: "t1" },
+      { kind: "text", text: "中间的话" },
+      { kind: "tool_use", tool: "B", input: {} },
+      { kind: "tool_use", tool: "C", input: {}, toolUseId: "t3" },
+    ]);
+    const keys = out.flatMap((r) => (r.kind === "tool" ? [r.key] : []));
+    expect(keys).toEqual(["t1", "#1", "t3"]);
+  });
+
   it("把 tool_result 合并进对应的 tool_use", () => {
     const out = foldEvents([
       { kind: "tool_use", tool: "Bash", input: { command: "ls" }, toolUseId: "t1" },
