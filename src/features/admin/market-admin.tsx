@@ -534,7 +534,7 @@ function RequestsTab({ onChanged }: { onChanged: () => Promise<void> }) {
                         <div className="text-xs text-muted-foreground">
                           {r.requesterEmail ?? r.requesterId} 申请于 {when(r.createdAt)}
                           {r.ownerEmail && r.ownerEmail !== r.requesterEmail
-                            ? `,所有者 ${r.ownerEmail}`
+                            ? `，所有者 ${r.ownerEmail}`
                             : ""}
                         </div>
                       </div>
@@ -553,7 +553,7 @@ function RequestsTab({ onChanged }: { onChanged: () => Promise<void> }) {
                       {r.marketListed && <Badge variant="success">已在市场上</Badge>}
                       {r.deleted && <Badge variant="destructive">智能体已删除</Badge>}
                       {evalBadge(r)}
-                      {!r.deleted && (
+                      {r.marketListed && (
                         <Link
                           href={`/market/${encodeURIComponent(r.agentId)}`}
                           target="_blank"
@@ -673,7 +673,7 @@ function RejectDialog({
         <DialogHeader>
           <DialogTitle>驳回「{row.agentName}」的上架申请</DialogTitle>
           <DialogDescription>
-            原因会显示给 {row.requesterEmail ?? "申请人"},对方可以修改后重新申请。
+            {`原因会显示给${row.requesterEmail ? ` ${row.requesterEmail} ` : "申请人"}，对方可以修改后重新申请。`}
           </DialogDescription>
         </DialogHeader>
         <form
