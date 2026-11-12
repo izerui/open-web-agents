@@ -86,6 +86,13 @@ export function BuildPage({
 }) {
   const router = useRouter();
   const confirm = useConfirm();
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
   const list = useAgentList();
   const catalog = useModelCatalog();
   const [createdId, setCreatedId] = useState<string | null>(null);
@@ -340,7 +347,8 @@ export function BuildPage({
           });
           notifyAgentCatalogChanged();
           toast.success(`已删除「${name}」`);
-          router.push("/agents");
+          // 请求期间已经切到别的智能体:不再把页面带回工作室
+          if (aliveRef.current) router.push("/agents");
         } catch (e) {
           toast.error(`删除失败：${errorText(e)}`);
         }

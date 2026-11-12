@@ -36,7 +36,7 @@ import {
   Users,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   type EvalSummary,
@@ -128,6 +128,13 @@ export function PublishStage({
 }) {
   const router = useRouter();
   const confirm = useConfirm();
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [justPublished, setJustPublished] = useState<number | null>(null);
@@ -488,7 +495,8 @@ export function PublishStage({
                   await fetchJson(base, { method: "DELETE" });
                   notifyAgentCatalogChanged();
                   toast.success(`已删除「${agentName}」`);
-                  router.push("/agents");
+                  // 请求期间已经切到别的智能体:不再把页面带回工作室
+                  if (aliveRef.current) router.push("/agents");
                 } catch (e) {
                   toast.error(`删除失败：${errorText(e)}`);
                 }

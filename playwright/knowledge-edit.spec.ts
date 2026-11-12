@@ -2,7 +2,7 @@
 //   添加 → 展开 → 编辑 → 保存 → 重新打开确认新内容
 //   + 延迟 PUT 场景: A 保存慢 → 切文档 B → A 返回不影响 B
 
-import { type BrowserContext, type Locator, expect, test } from "@playwright/test";
+import { type BrowserContext, type Locator, type Page, expect, test } from "@playwright/test";
 
 const BASE = process.env.OWA_E2E_BASE_URL ?? "http://localhost:5678";
 
@@ -35,8 +35,12 @@ async function addDoc(ctx: BrowserContext, agentId: string, title: string, conte
   return body.doc.id;
 }
 
-function knowledgePanel(page: import("@playwright/test").Page): Locator {
-  return page.locator("text=知识库").locator("..").locator("..").locator("..");
+/** 构建页编排 › 档案的「知识」节:点节标题展开,返回节的正文(知识库面板),不含节标题里的文档摘要 */
+async function openKnowledge(page: Page): Promise<Locator> {
+  const section = page.locator('[data-sec="knowledge"]');
+  const head = section.locator(":scope > button");
+  if ((await head.getAttribute("aria-expanded")) !== "true") await head.click();
+  return section.locator(":scope > div");
 }
 
 function docPre(panel: Locator): Locator {
@@ -55,8 +59,7 @@ test.describe("知识库编辑浏览器验收", () => {
     );
 
     await page.goto(`${BASE}/agents/${agentId}`);
-    await page.getByRole("tab", { name: "知识", exact: true }).click();
-    const panel = knowledgePanel(page);
+    const panel = await openKnowledge(page);
     await expect(panel.getByText("二叉树基础")).toBeVisible({ timeout: 15_000 });
 
     // 展开文档
@@ -100,8 +103,7 @@ test.describe("知识库编辑浏览器验收", () => {
     await addDoc(context, agentId, "测试文档", "原始正文内容不为空");
 
     await page.goto(`${BASE}/agents/${agentId}`);
-    await page.getByRole("tab", { name: "知识", exact: true }).click();
-    const panel = knowledgePanel(page);
+    const panel = await openKnowledge(page);
     await expect(panel.getByText("测试文档")).toBeVisible({ timeout: 15_000 });
 
     // 展开 → 编辑 → 清空正文 → 保存
@@ -128,8 +130,7 @@ test.describe("知识库编辑浏览器验收", () => {
     const docBId = await addDoc(context, agentId, "文档B", "文档B的原始正文内容");
 
     await page.goto(`${BASE}/agents/${agentId}`);
-    await page.getByRole("tab", { name: "知识", exact: true }).click();
-    const panel = knowledgePanel(page);
+    const panel = await openKnowledge(page);
     await expect(panel.getByText("文档A")).toBeVisible({ timeout: 15_000 });
 
     // 展开 A 并进入编辑

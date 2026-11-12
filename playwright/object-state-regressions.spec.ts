@@ -6,9 +6,34 @@ const account = {
   password: "e2e-password-123456",
 };
 let authCookies: Parameters<BrowserContext["addCookies"]>[0] = [];
-const prompt = (page: Page) => page.getByRole("textbox", { name: "系统提示词 *", exact: true });
-const save = (page: Page) => page.getByRole("button", { name: "保存智能体", exact: true });
-const tabs = (page: Page) => page.getByRole("navigation", { name: "当前智能体工作区" });
+/** 构建页(编排 › 档案):提示词一节默认展开;没有保存按钮,停顿约 800ms 自动保存 */
+const prompt = (page: Page) => page.getByRole("textbox", { name: "系统提示词", exact: true });
+/** 「名称」在「名称与头像」一节里,已有智能体默认收起,先展开 */
+async function nameField(page: Page) {
+  const head = page.locator('[data-sec="identity"] > button');
+  if ((await head.getAttribute("aria-expanded")) !== "true") await head.click();
+  return page.getByRole("textbox", { name: "名称", exact: true });
+}
+/** 页头的保存状态文字 */
+const saveStatus = (page: Page, text: string | RegExp) => page.getByText(text);
+const stages = (page: Page) => page.getByRole("navigation", { name: "构建阶段" });
+const stageButton = (page: Page, label: string) =>
+  stages(page).getByRole("button", { name: new RegExp(`^${label}`) });
+/** 构建页左栏「我的智能体」里的一行(可访问名 = 名字 + 状态行) */
+const railAgent = (page: Page, name: string) =>
+  page.locator("aside").getByRole("button", { name: new RegExp(`^${name}`) });
+/** 构建页页头里的智能体名称 */
+const buildTitle = (page: Page, name: string) =>
+  page
+    .locator("header")
+    .filter({ has: page.getByRole("link", { name: "返回工作室" }) })
+    .getByText(name, { exact: true });
+/** 顶栏搜索(⌘K)里选一个页面 */
+async function openSearch(page: Page, query: string) {
+  await page.getByRole("button", { name: "搜索页面、智能体与会话" }).click();
+  await page.getByPlaceholder("搜索页面、智能体、会话…").fill(query);
+}
+const designer = (page: Page) => page.getByRole("region", { name: "智能体设计器", exact: true });
 /** 对话页(coze-v3):对话头里的智能体名链接、左栏会话列表里的会话行 */
 const chatAgent = (page: Page, name: string) =>
   page.getByRole("region", { name: "当前对话" }).getByRole("link", { name, exact: true });
@@ -83,22 +108,30 @@ test.beforeEach(async ({ context }) => {
   await context.addCookies(authCookies);
 });
 
+// 构建页左栏「我的智能体」在 1280px 以下隐藏;用宽屏保证左栏可点(移动端用例自己改视口)
+test.use({ viewport: { width: 1440, height: 900 } });
+
 test("保存 A 的迟到响应不能改写 B 的对象身份或表单", async ({ page }) => {
   const state = await fixture(page);
   await page.goto("/agents/review-a");
   await expect(prompt(page)).toHaveValue("审查智能体 A 已保存提示词");
-  await prompt(page).fill("A 保存快照");
   state.hold();
-  await save(page).click();
+  await prompt(page).fill("A 保存快照");
+  // 停顿后自动保存发出,被挡住
+  await expect.poll(() => state.submitted.length).toBe(1);
+  // 左栏切换会先等自动保存落盘;用搜索直接跳到 B,让 A 的保存响应在 B 打开之后才回来
   page.on("dialog", (dialog) => dialog.accept());
-  await page.getByRole("link", { name: "审查智能体 B", exact: true }).click();
+  await openSearch(page, "审查智能体 B");
+  await page.getByRole("option", { name: /审查智能体 B/ }).click();
   await expect(prompt(page)).toHaveValue("审查智能体 B 已保存提示词");
   await state.release();
-  await expect(save(page)).toBeDisabled();
-  await expect(page).toHaveURL(/\/agents\?id=review-b$/);
-  await expect(page.getByRole("heading", { level: 1, name: "审查智能体 B" })).toBeVisible();
+  await page.waitForTimeout(150);
+  // A 的迟到响应不算 B 的保存:B 仍是「没改过」的状态
+  await expect(saveStatus(page, "改动会自动保存")).toBeVisible();
+  await expect(page).toHaveURL(/\/agents\/review-b$/);
+  await expect(buildTitle(page, "审查智能体 B")).toBeVisible();
+  await expect(prompt(page)).toHaveValue("审查智能体 B 已保存提示词");
   await prompt(page).fill("B 修改");
-  await save(page).click();
   await expect.poll(() => state.submitted.length).toBe(2);
   expect(state.submitted[1]).toMatchObject({
     id: "review-b",
@@ -106,53 +139,56 @@ test("保存 A 的迟到响应不能改写 B 的对象身份或表单", async ({
   });
 });
 
-test("保存期间继续编辑同一对象，新内容仍待保存；对象树同步改名", async ({ page }) => {
+test("保存期间继续编辑同一对象，新内容仍会保存；左栏同步改名", async ({ page }) => {
   const state = await fixture(page);
   await page.goto("/agents/review-a");
   await expect(prompt(page)).toHaveValue("审查智能体 A 已保存提示词");
-  await page.getByRole("textbox", { name: "名称 *", exact: true }).fill("A 新名称");
   state.hold();
-  await save(page).click();
+  await (await nameField(page)).fill("A 新名称");
+  await expect.poll(() => state.submitted.length).toBe(1);
   await prompt(page).fill("保存发出后的新编辑");
   await state.release();
-  await expect(save(page)).toBeEnabled();
   await expect(prompt(page)).toHaveValue("保存发出后的新编辑");
-  await expect(page.getByRole("link", { name: "A 新名称", exact: true })).toBeVisible();
-  await save(page).click();
-  await expect(save(page)).toBeDisabled();
+  await expect(railAgent(page, "A 新名称")).toBeVisible();
+  // 保存进行中又改了:这次存完自动再存一次,带上新内容
+  await expect.poll(() => state.submitted.length).toBe(2);
   expect(state.submitted[1]).toMatchObject({
     id: "review-a",
+    name: "A 新名称",
     config: { systemPrompt: "保存发出后的新编辑" },
   });
+  await expect(saveStatus(page, /草稿自动保存于/)).toBeVisible();
 });
 
 test("搜索跳转可以取消，离开后迟到的保存不改变页面", async ({ page }) => {
   const state = await fixture(page);
   await page.goto("/agents/review-a");
   await expect(prompt(page)).toHaveValue("审查智能体 A 已保存提示词");
+  // 挡住自动保存,让草稿保持「没落盘」
+  state.hold();
   await prompt(page).fill("仍未保存");
-  await page.getByRole("button", { name: "搜索页面与会话" }).click();
-  await page.getByPlaceholder("搜索页面…").fill("全部运行");
+  await expect.poll(() => state.submitted.length).toBe(1);
+  await openSearch(page, "运行记录");
   page.once("dialog", (dialog) => dialog.dismiss());
-  await page.getByRole("option", { name: "全部运行" }).click();
+  await page.getByRole("option", { name: "运行记录", exact: true }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
-  await expect(page).toHaveURL(/\/agents\?id=review-a$/);
+  await expect(page).toHaveURL(/\/agents\/review-a$/);
   await page.keyboard.press("Escape");
   await expect(prompt(page)).toHaveValue("仍未保存");
-  await page.getByRole("textbox", { name: "名称 *", exact: true }).fill("离开后保存的 A");
-  state.hold();
-  await save(page).click();
-  await page.getByRole("button", { name: "搜索页面与会话" }).click();
-  await page.getByPlaceholder("搜索页面…").fill("全部运行");
+  await (await nameField(page)).fill("离开后保存的 A");
+  await openSearch(page, "运行记录");
   page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("option", { name: "全部运行" }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "全部运行" })).toBeVisible();
+  await page.getByRole("option", { name: "运行记录", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "运行记录" })).toBeVisible();
   await state.release();
-  await expect(page.getByRole("link", { name: "离开后保存的 A", exact: true })).toBeVisible();
-  await expect(page).toHaveURL(/\/settings\/runs$/);
+  await page.waitForTimeout(150);
+  // 原先断言的全站对象树改名已不存在(构建页左栏只在构建页里),这里只验证迟到的保存不把页面带回去
+  await expect(page.getByRole("heading", { level: 1, name: "运行记录" })).toBeVisible();
+  await expect(page).toHaveURL(/\/developer\/runs$/);
 });
 
-test("AI 编辑草稿也能取消搜索跳转", async ({ page }) => {
+test("新建态（智能体设计器）里没存下的档案也能取消搜索跳转", async ({ page }) => {
+  // 原「AI 编辑」独立页面已并入构建页;它的新建态 /agents/new?designer= 里档案没填全时暂停保存,离开同样要确认
   await fixture(page);
   await page.route("**/api/agents/design", (route) =>
     route.fulfill({ json: { sessions: [{ id: "review-design", title: "审查设计" }] } }),
@@ -175,17 +211,17 @@ test("AI 编辑草稿也能取消搜索跳转", async ({ page }) => {
       },
     }),
   );
-  await page.goto("/agents/design?session=review-design");
-  await page.getByLabel("名称", { exact: true }).fill("未保存的设计");
-  await page.getByRole("button", { name: "搜索页面与会话" }).click();
-  await page.getByPlaceholder("搜索页面…").fill("全部运行");
+  await page.goto("/agents/new?designer=review-design");
+  await page.getByRole("textbox", { name: "名称", exact: true }).fill("未保存的设计");
+  await expect(saveStatus(page, /暂停保存：提示词为空/)).toBeVisible();
+  await openSearch(page, "运行记录");
   page.once("dialog", (dialog) => dialog.dismiss());
-  await page.getByRole("option", { name: "全部运行" }).click();
+  await page.getByRole("option", { name: "运行记录", exact: true }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
-  await expect(page).toHaveURL(/\/agents\/design\?session=review-design$/);
+  await expect(page).toHaveURL(/\/agents\/new\?designer=review-design$/);
   page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("option", { name: "全部运行" }).click();
-  await expect(page).toHaveURL(/\/settings\/runs$/);
+  await page.getByRole("option", { name: "运行记录", exact: true }).click();
+  await expect(page).toHaveURL(/\/developer\/runs$/);
 });
 
 test("会话列表跨智能体切换会话；新会话先选智能体，再清掉地址里的旧会话", async ({ page }) => {
@@ -219,7 +255,7 @@ test("无效或空对象链接禁止发送，用户显式选择后恢复；有�
       }),
     ).toBeVisible();
     await expect(composer(page)).toBeDisabled();
-    await expect(tabs(page)).toHaveCount(0);
+    await expect(stages(page)).toHaveCount(0);
     await expect(page).toHaveURL(new RegExp(`/chat\\?agent=${id}$`));
     await page.getByRole("button", { name: "新会话", exact: true }).click();
     await page
@@ -305,21 +341,27 @@ test("删除 A 期间切到 B，删除完成不清空 B 编辑器", async ({ pag
   await page.route("**/api/agents/review-a", (route) => {
     pending = route;
   });
-  await page.goto("/agents/review-a");
+  // 先在 B,再从左栏进 A:删除确认弹层在请求完成前一直挡着页面,换对象用浏览器后退回到 B
+  await page.goto("/agents/review-b");
+  await expect(prompt(page)).toHaveValue("审查智能体 B 已保存提示词");
+  await railAgent(page, "审查智能体 A").click();
+  await expect(page).toHaveURL(/\/agents\/review-a$/);
   await expect(prompt(page)).toHaveValue("审查智能体 A 已保存提示词");
-  page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("button", { name: "删除", exact: true }).click();
+  await page.getByRole("button", { name: "更多操作", exact: true }).click();
+  await page.getByRole("menuitem", { name: "删除智能体", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "删除智能体", exact: true }).click();
   await expect.poll(() => Boolean(pending)).toBe(true);
-  await page.getByRole("link", { name: "审查智能体 B", exact: true }).click();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/agents\/review-b$/);
   await expect(prompt(page)).toHaveValue("审查智能体 B 已保存提示词");
   await pending?.fulfill({ json: { ok: true } });
   await page.waitForTimeout(150);
-  await expect(page).toHaveURL(/\/agents\?id=review-b$/);
+  await expect(page).toHaveURL(/\/agents\/review-b$/);
   await expect(prompt(page)).toHaveValue("审查智能体 B 已保存提示词");
 });
 
 test("登出失败保留当前页面与账号，不显示成功", async ({ page }) => {
-  await fixture(page);
+  const state = await fixture(page);
   await page.route("**/api/auth", async (route) => {
     if (route.request().method() === "POST") {
       await route.fulfill({ status: 503, json: { error: "登出服务不可用" } });
@@ -327,36 +369,45 @@ test("登出失败保留当前页面与账号，不显示成功", async ({ page 
   });
   await page.goto("/agents/review-a");
   await expect(prompt(page)).toHaveValue("审查智能体 A 已保存提示词");
+  // 挡住自动保存,让草稿保持「没落盘」,登出与跳转前都要确认
+  state.hold();
   await prompt(page).fill("登出失败也要保留的草稿");
-  await page.getByRole("button", { name: `${account.email} 的账号菜单` }).click();
+  await expect.poll(() => state.submitted.length).toBe(1);
+  await page.getByRole("button", { name: "账号菜单", exact: true }).click();
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("menuitem", { name: "登出", exact: true }).click();
   await expect(page.getByText("登出失败:登出服务不可用")).toBeVisible();
-  await expect(page).toHaveURL(/\/agents\?id=review-a$/);
+  await expect(page).toHaveURL(/\/agents\/review-a$/);
   await expect(page.getByText("已登出", { exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: "搜索页面与会话" }).click();
-  await page.getByPlaceholder("搜索页面…").fill("全部运行");
+  await expect(prompt(page)).toHaveValue("登出失败也要保留的草稿");
+  await openSearch(page, "运行记录");
   page.once("dialog", (dialog) => dialog.dismiss());
-  await page.getByRole("option", { name: "全部运行" }).click();
+  await page.getByRole("option", { name: "运行记录", exact: true }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
-  await expect(page).toHaveURL(/\/agents\?id=review-a$/);
+  await expect(page).toHaveURL(/\/agents\/review-a$/);
 });
 
-test("AI 编辑请求完成前换对象，不跳到旧对象的设计会话", async ({ page }) => {
+test("新建设计请求完成前换对象，不把旧对象的设计会话写进地址", async ({ page }) => {
+  // 原「AI 编辑」按钮换成构建页里智能体设计器的「新建设计」;会话建好后只改地址里的 ?designer=,不再跳页
   await fixture(page);
   let pending: Route | undefined;
   await page.route("**/api/agents/design", (route) => {
-    pending = route;
+    if (route.request().method() === "POST") {
+      pending = route;
+      return;
+    }
+    return route.fulfill({ json: { sessions: [] } });
   });
   await page.goto("/agents/review-a");
   await expect(prompt(page)).toHaveValue("审查智能体 A 已保存提示词");
-  await page.getByRole("button", { name: "AI 编辑", exact: true }).click();
+  await designer(page).getByRole("button", { name: "新建设计", exact: true }).click();
   await expect.poll(() => Boolean(pending)).toBe(true);
-  await page.getByRole("link", { name: "审查智能体 B", exact: true }).click();
+  await railAgent(page, "审查智能体 B").click();
   await expect(prompt(page)).toHaveValue("审查智能体 B 已保存提示词");
   await pending?.fulfill({ json: { sessionId: "late-design-session" } });
-  await expect(page.getByRole("button", { name: "AI 编辑", exact: true })).toBeEnabled();
-  await expect(page).toHaveURL(/\/agents\?id=review-b$/);
+  await page.waitForTimeout(150);
+  await expect(designer(page).getByRole("button", { name: "新建设计", exact: true })).toBeEnabled();
+  await expect(page).toHaveURL(/\/agents\/review-b$/);
 });
 
 test("恢复版本期间换对象，迟到回调不重新打开旧对象", async ({ page }) => {
@@ -368,42 +419,25 @@ test("恢复版本期间换对象，迟到回调不重新打开旧对象", async
   await page.route("**/api/agents/review-a/versions/1/restore", (route) => {
     pending = route;
   });
-  await page.goto("/agents/review-a");
+  // 先在 B,再从左栏进 A:载入草稿的确认弹层在请求完成前一直挡着页面,换对象用浏览器后退回到 B
+  await page.goto("/agents/review-b");
+  await expect(prompt(page)).toHaveValue("审查智能体 B 已保存提示词");
+  await railAgent(page, "审查智能体 A").click();
   await expect(prompt(page)).toHaveValue("审查智能体 A 已保存提示词");
-  await page.getByRole("tab", { name: "发布与分享", exact: true }).click();
-  page.once("dialog", (dialog) => dialog.accept());
+  await stageButton(page, "发布").click();
   await page.getByRole("button", { name: "载入草稿", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "载入草稿", exact: true }).click();
   await expect.poll(() => Boolean(pending)).toBe(true);
-  await page.getByRole("link", { name: "审查智能体 B", exact: true }).click();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/agents\/review-b$/);
   await expect(prompt(page)).toHaveValue("审查智能体 B 已保存提示词");
   await pending?.fulfill({ json: { ok: true } });
   await page.waitForTimeout(150);
-  await expect(page).toHaveURL(/\/agents\?id=review-b$/);
+  await expect(page).toHaveURL(/\/agents\/review-b$/);
   await expect(prompt(page)).toHaveValue("审查智能体 B 已保存提示词");
 });
 
-test("恢复版本等待期间输入的新修改不会被覆盖", async ({ page }) => {
-  await fixture(page);
-  let pending: Route | undefined;
-  await page.route("**/api/agents/review-a/versions", (route) =>
-    route.fulfill({ json: { versions: [{ version: 1, name: "A", createdAt: 1 }] } }),
-  );
-  await page.route("**/api/agents/review-a/versions/1/restore", (route) => {
-    pending = route;
-  });
-  await page.goto("/agents/review-a");
-  await expect(prompt(page)).toHaveValue("审查智能体 A 已保存提示词");
-  await page.getByRole("tab", { name: "发布与分享", exact: true }).click();
-  page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("button", { name: "载入草稿", exact: true }).click();
-  await expect.poll(() => Boolean(pending)).toBe(true);
-  await page.getByRole("tab", { name: "配置", exact: true }).click();
-  await prompt(page).fill("恢复请求之后输入的修改");
-  await pending?.fulfill({ json: { ok: true } });
-  await expect(page.getByText("服务端草稿已恢复，当前表单的新修改仍保留。")).toBeVisible();
-  await expect(prompt(page)).toHaveValue("恢复请求之后输入的修改");
-  await expect(save(page)).toBeEnabled();
-});
+// 「恢复版本等待期间输入的新修改不会被覆盖」已删除:载入草稿改为应用内确认弹层,请求完成前弹层不可关闭并挡住档案,等待期间无法再改草稿
 
 test("旧会话追加消息的迟到重发结果不能发送到新会话", async ({ page }) => {
   await fixture(page);
@@ -570,15 +604,20 @@ for (const next of ["另一会话", "同会话下一轮", "原运行"] as const)
   });
 }
 
-test("准备 AI 编辑时继续输入，跳转前需确认且可以保留新修改", async ({ page }) => {
-  await fixture(page);
+test("新建设计期间继续输入，新修改保留并自动保存", async ({ page }) => {
+  // 原「AI 编辑」要跳到设计页,所以跳转前确认;设计器并入构建页后不再跳页,也就没有确认框,只验证新修改不丢
+  const state = await fixture(page);
   let pending: Route | undefined;
   await page.route("**/api/agents/design", (route) => {
-    pending = route;
+    if (route.request().method() === "POST") {
+      pending = route;
+      return;
+    }
+    return route.fulfill({ json: { sessions: [] } });
   });
   await page.goto("/agents/review-a");
   await expect(prompt(page)).toHaveValue("审查智能体 A 已保存提示词");
-  await page.getByRole("button", { name: "AI 编辑", exact: true }).click();
+  await designer(page).getByRole("button", { name: "新建设计", exact: true }).click();
   await expect.poll(() => Boolean(pending)).toBe(true);
   await prompt(page).fill("请求发出后输入的新修改");
   let confirmations = 0;
@@ -587,10 +626,15 @@ test("准备 AI 编辑时继续输入，跳转前需确认且可以保留新修�
     await dialog.dismiss();
   });
   await pending?.fulfill({ json: { sessionId: "prepared-design" } });
-  await expect.poll(() => confirmations).toBe(1);
-  await expect(page).toHaveURL(/\/agents\?id=review-a$/);
+  await expect(page).toHaveURL(/\/agents\/review-a\?designer=prepared-design$/);
   await expect(prompt(page)).toHaveValue("请求发出后输入的新修改");
-  await expect(save(page)).toBeEnabled();
+  await expect
+    .poll(() => state.submitted.at(-1))
+    .toMatchObject({
+      id: "review-a",
+      config: { systemPrompt: "请求发出后输入的新修改" },
+    });
+  expect(confirmations).toBe(0);
 });
 
 for (const [status, outcome] of [

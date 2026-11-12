@@ -281,7 +281,17 @@ export function useDesigner(opts: {
     }
   }, []);
 
+  /** 页面已经换走(切到别的智能体)后,晚到的响应不能再改地址 */
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
   const select = useCallback((id: string) => {
+    if (!mounted.current) return;
     autoPicked.current = true;
     setSessionId(id);
     cb.current.onSessionChange(id || null);
