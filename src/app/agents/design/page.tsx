@@ -1,4 +1,4 @@
-import { DesignWorkspace } from "@/features/builder/design-workspace";
+import { BuildPage } from "@/features/build/build-page";
 import { getContainer } from "@/lib/container";
 import { agentHref } from "@/lib/nav/routes";
 import { requireLogin } from "@/lib/server-guard";
@@ -17,8 +17,8 @@ export default async function Page({
 }: { searchParams: Promise<{ session?: string }> }) {
   await requireLogin();
   const { session } = await searchParams;
-  // 不带会话:和以前一样直接打开智能体设计器,从零开始一个新设计
-  if (!session) return <DesignWorkspace />;
+  // 不带会话:打开构建页的新建态,由智能体设计器从零开始一个新设计
+  if (!session) return <BuildPage initialStage="orch" />;
   let targetId: string | undefined;
   try {
     const { auth, designer } = getContainer();

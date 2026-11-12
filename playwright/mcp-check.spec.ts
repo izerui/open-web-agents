@@ -1,5 +1,5 @@
-// MCP 测试连接的界面验收:构建器里每个 MCP 都有"测试连接",成功显示服务名与工具列表(未调用);
-// 失败显示原因;改了配置清掉旧结果。AI 编辑里对已保存草稿中的 MCP 同样可以测试。
+// MCP 测试连接的界面验收:构建页档案「能力」节里每个 MCP 都有"测试连接",成功显示服务名与工具列表(未调用);
+// 失败显示原因;改了配置清掉旧结果。智能体设计器的设计草稿里引用的 MCP(Skills / MCP 来源)同样可以测试。
 // 模拟 MCP 服务放在本机内网地址上,服务须以 OWA_WEBHOOK_ALLOW_PRIVATE=1 启动(OWA_E2E_ALLOW_PRIVATE=1 告知)。
 
 import http from "node:http";
@@ -58,7 +58,7 @@ test.describe("MCP 测试连接", () => {
   });
   test.afterAll(() => server?.close());
 
-  test("构建器:测试连接显示工具列表;改地址后旧结果清掉;连不上显示原因", async ({
+  test("档案能力节:测试连接显示工具列表;改地址后旧结果清掉;连不上显示原因", async ({
     page,
     context,
   }) => {
@@ -77,8 +77,9 @@ test.describe("MCP 测试连接", () => {
     const id = ((await created.json()) as { agent: { id: string } }).agent.id;
 
     await page.goto(`${BASE}/agents/${id}`);
-    await page.getByRole("tab", { name: "能力", exact: true }).click();
-    await page.getByRole("button", { name: "测试连接 docs" }).click();
+    const ability = page.locator('[data-sec="ability"]');
+    await ability.locator(":scope > button").click();
+    await ability.getByRole("button", { name: "测试连接 docs" }).click();
     const ok = page.getByTestId("mcp-check-ok");
     await expect(ok).toContainText("连接成功:pw-mcp 2.0.0");
     await expect(ok).toContainText("2 个工具(未调用)");
@@ -86,19 +87,22 @@ test.describe("MCP 测试连接", () => {
     await expect(ok).toContainText("send_mail 工具");
     expect(toolCalls).toBe(0);
 
-    // 改成回环地址:旧结果清掉,再测显示原因
-    const url = page.locator(`input[value="${mcpBase}/mcp"]`);
+    // 展开这一行改成回环地址:旧结果清掉,再测显示原因
+    await ability.getByRole("button", { name: "编辑", exact: true }).click();
+    const url = ability.getByLabel("MCP URL", { exact: true });
+    await expect(url).toHaveValue(`${mcpBase}/mcp`);
     await url.fill("http://127.0.0.1:9/mcp");
     await expect(ok).toHaveCount(0);
-    await page.getByRole("button", { name: "测试连接 docs" }).click();
+    await ability.getByRole("button", { name: "测试连接 docs" }).click();
     await expect(page.getByTestId("mcp-check-failed")).toContainText("不允许连接的地址");
   });
 
-  test("AI 编辑:已保存草稿里的 MCP 可以测试", async ({ page, context }) => {
+  test("智能体设计器:设计草稿里引用的 MCP 可以测试", async ({ page, context }) => {
+    // 原「AI 编辑」独立页面已并入构建页;设计草稿里的 MCP 测试连接走设计会话接口,入口在档案能力节的「Skills / MCP 来源」
     await register(context, "mcp-design");
-    const created = await context.request.post(`${BASE}/api/agents`, {
+    const source = await context.request.post(`${BASE}/api/agents`, {
       data: {
-        name: "PW 设计 MCP",
+        name: "PW MCP 来源",
         config: {
           systemPrompt: "x",
           model: "sonnet",
@@ -106,14 +110,23 @@ test.describe("MCP 测试连接", () => {
         },
       },
     });
+    expect(source.ok()).toBeTruthy();
+    const sourceId = ((await source.json()) as { agent: { id: string } }).agent.id;
+    const created = await context.request.post(`${BASE}/api/agents`, {
+      data: { name: "PW 设计 MCP", config: { systemPrompt: "x", model: "sonnet" } },
+    });
     const id = ((await created.json()) as { agent: { id: string } }).agent.id;
     const design = await context.request.post(`${BASE}/api/agents/design`, {
       data: { agentId: id },
     });
     const sessionId = ((await design.json()) as { sessionId: string }).sessionId;
-    await page.goto(`${BASE}/agents/design?session=${sessionId}`);
-    await page.getByRole("button", { name: "测试连接 docs" }).click();
-    await expect(page.getByTestId("mcp-check-ok")).toContainText("search_docs");
+    await page.goto(`${BASE}/agents/${id}?designer=${sessionId}`);
+    const ability = page.locator('[data-sec="ability"]');
+    await ability.locator(":scope > button").click();
+    await ability.getByLabel("添加资源来源").selectOption(sourceId);
+    await ability.getByRole("checkbox", { name: /^docs/ }).check();
+    await ability.getByRole("button", { name: "测试连接 docs" }).click();
+    await expect(ability.getByTestId("mcp-check-ok")).toContainText("search_docs");
     expect(toolCalls).toBe(0);
   });
 });

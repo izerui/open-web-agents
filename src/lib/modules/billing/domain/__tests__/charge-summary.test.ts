@@ -27,6 +27,9 @@ describe("来源映射与合计", () => {
     expect(SESSION_SOURCE_TO_CHARGE.api).toBe("api");
     expect(SESSION_SOURCE_TO_CHARGE.invoke).toBe("api");
   });
+  it("构建页试聊(trial)按网页对话归类", () => {
+    expect(SESSION_SOURCE_TO_CHARGE.trial).toBe("web");
+  });
   it("各列分别相加,不丢精度", () => {
     const row = (used: string) => ({
       key: null,

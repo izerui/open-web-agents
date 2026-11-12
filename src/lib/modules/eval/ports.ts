@@ -81,3 +81,12 @@ export interface EvalRepo {
   /** 全部判完时收尾:写入通过 / 失败数与结束时刻(只改还在 running 的) */
   finishRun(id: string, counts: { passed: number; failed: number }): Promise<void>;
 }
+
+/** 评测花费预估的样本来源(规则见 domain/cost-estimate.ts) */
+export interface EvalCostSamples {
+  /**
+   * 近 30 天、主模型引用为 model 的已结算运行的实扣(微积分,十进制整数串),最多 20 条;
+   * 本智能体的排在前面,其次按时间倒序。不含设计器会话。
+   */
+  recentChargedMicro(agentId: string, model: string): Promise<string[]>;
+}

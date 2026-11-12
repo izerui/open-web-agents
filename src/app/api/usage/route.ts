@@ -13,6 +13,7 @@ const MAX_DAYS = 90;
 /**
  * 用量与成本看板数据。
  * 普通用户只看自己的;admin 看全平台(`?scope=all`)。
+ * `?agentId=` 只统计该智能体(sessions.agent_id)。
  */
 export async function GET(req: Request) {
   const { usage, auth, capabilities, pricedModels } = getContainer();
@@ -34,10 +35,13 @@ export async function GET(req: Request) {
   const scope = resolveScope(url.searchParams.get("scope"), isAdmin);
   const ownerId = ownerFilter(scope, (principal as { userId: string }).userId);
 
+  // ?agentId=:只统计该智能体的会话(构建页用)。只在 ownerFilter 的范围内收窄,不额外开放权限
+  const agentId = url.searchParams.get("agentId") || undefined;
   const since = Date.now() - days * 24 * 60 * 60 * 1000;
+  const query = { ownerId, since, ...(agentId ? { agentId } : {}) };
   const [records, truncated, catalog] = await Promise.all([
-    usage.list({ ownerId, since }),
-    usage.isTruncated({ ownerId, since }),
+    usage.list(query),
+    usage.isTruncated(query),
     capabilities.list(),
   ]);
 

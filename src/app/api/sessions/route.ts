@@ -116,7 +116,22 @@ export async function POST(req: Request) {
     assistantId?: string;
     title?: string;
     versionMode?: "published" | "draft";
+    /**
+     * 构建页「试聊」:作者用草稿对话。只给网页登录且对该智能体有写权限的人;
+     * 固定跑草稿,来源记 trial(不出现在 /chat 的普通会话列表里)。
+     */
+    trial?: boolean;
   };
+  if (body.trial !== undefined && typeof body.trial !== "boolean") {
+    return Response.json({ error: "trial 须为布尔值", code: "invalid_request" }, { status: 400 });
+  }
+  const trial = body.trial === true;
+  if (trial && body.versionMode === "published") {
+    return Response.json(
+      { error: "试聊固定使用草稿,不能指定 published", code: "invalid_request" },
+      { status: 400 },
+    );
+  }
   if (
     body.versionMode !== undefined &&
     body.versionMode !== "published" &&
@@ -152,6 +167,12 @@ export async function POST(req: Request) {
     const list = await grants.listForResource("agent", agentId);
     canUseDraft = hasResourceAccess(subject, agent, "write", list);
   }
+  if (trial && !canUseDraft) {
+    return Response.json(
+      { error: "仅有编辑权限的登录用户可在构建页试聊", code: "forbidden" },
+      { status: 403 },
+    );
+  }
   if (body.versionMode === "draft" && !canUseDraft) {
     return Response.json(
       { error: "仅有编辑权限的登录用户可试运行草稿", code: "forbidden" },
@@ -161,6 +182,7 @@ export async function POST(req: Request) {
   if (body.versionMode === "published" && agent?.publishedVersion === undefined) {
     return Response.json({ error: "智能体尚未发布", code: "not_published" }, { status: 409 });
   }
+  // 试聊走到这里时 canUseDraft 必为 true,不会锁定版本 —— 固定跑草稿
   if (agent?.publishedVersion !== undefined && (body.versionMode === "published" || !canUseDraft)) {
     agentVersion = (await releases.resolve(agent)).version ?? undefined;
   }
@@ -178,7 +200,7 @@ export async function POST(req: Request) {
     callerApiKeyId: principal.type === "apiKey" ? principal.keyId : undefined,
     // API Key 建的会话没有人用归属,但花费要记在签发人头上
     billingUserId: principal.type === "web" ? principal.userId : principal.ownerId,
-    source: principal.type === "web" ? "web" : "api",
+    source: principal.type === "web" ? (trial ? "trial" : "web") : "api",
     agentVersion,
   });
 

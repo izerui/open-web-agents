@@ -63,5 +63,21 @@ if (!URL_) {
       await spend("other", "r2", 5);
       expect((await usage.costByOwner(0, "u1")).get("u1")).toBe(1_000_000);
     });
+
+    it("agentId:只统计该智能体的会话,截断判断同一口径", async () => {
+      await sessions.create({ id: "s-a", agentId: "a", workspaceDir: "/w", ownerId: "u1" });
+      await sessions.create({ id: "s-b", agentId: "b", workspaceDir: "/w", ownerId: "u1" });
+      await spend("s-a", "r1", 1);
+      await spend("s-b", "r2", 2);
+      await spend("s-b", "r3", 2);
+      const onlyB = await usage.list({ ownerId: "u1", since: 0, agentId: "b" });
+      expect(onlyB.map((r) => r.runId).sort()).toEqual(["r2", "r3"]);
+      expect(await usage.isTruncated({ ownerId: "u1", since: 0, agentId: "a", limit: 1 })).toBe(
+        false,
+      );
+      expect(await usage.isTruncated({ ownerId: "u1", since: 0, agentId: "b", limit: 1 })).toBe(
+        true,
+      );
+    });
   });
 }

@@ -38,7 +38,20 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   try {
     const r = await requireWrite(req, id);
     if (r.error) return r.error;
-    return Response.json({ grants: r.list });
+    // 附上人能看懂的对象名:按账号分享显示邮箱、按组分享显示组名(查不到为 null,前端退回显示 id)
+    const { users, groups } = getContainer();
+    const labeled = await Promise.all(
+      r.list.map(async (g) => {
+        const label =
+          g.principalType === "user"
+            ? ((await users.get(g.principalId).catch(() => null))?.email ?? null)
+            : g.principalType === "group"
+              ? ((await groups.get(g.principalId).catch(() => null))?.name ?? null)
+              : null;
+        return { ...g, label };
+      }),
+    );
+    return Response.json({ grants: labeled });
   } catch (err) {
     const res = authErrorResponse(err);
     if (res) return res;

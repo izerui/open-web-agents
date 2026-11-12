@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { type APIRequestContext, expect, test } from "@playwright/test";
+import { type APIRequestContext, type Page, expect, test } from "@playwright/test";
 
 const BASE = process.env.OWA_E2E_BASE_URL ?? "http://localhost:5678";
 const stamp = randomUUID().slice(0, 8);
@@ -11,6 +11,18 @@ const second = `pw-object-b-${stamp}`;
 const sessions: string[] = [];
 const agentIds: string[] = [];
 let api: APIRequestContext;
+
+/** 构建页页头里的智能体名称(页头不是 h1,按「返回工作室」所在的页头定位) */
+const buildTitle = (page: Page, name: string) =>
+  page
+    .locator("header")
+    .filter({ has: page.getByRole("link", { name: "返回工作室" }) })
+    .getByText(name, { exact: true });
+/** 页头「构建阶段」里的阶段按钮;可访问名是阶段名加状态徽标(如「评测 无用例」) */
+const stageButton = (page: Page, label: string) =>
+  page
+    .getByRole("navigation", { name: "构建阶段" })
+    .getByRole("button", { name: new RegExp(`^${label}`) });
 
 test.describe("对话页与对象工作区", () => {
   test.beforeAll(async ({ playwright }) => {
@@ -121,12 +133,12 @@ test.describe("对话页与对象工作区", () => {
     await page.goto(`/chat?session=${sessions[0]}`);
     const header = page.getByRole("region", { name: "当前对话" });
     await expect(header.getByRole("heading", { level: 1 })).toHaveText("创建一个简单的 REST API");
-    // 自己的智能体:名字链到构建页;对话页不再有对象页头的四个页签
+    // 自己的智能体:名字链到构建页;对话页没有构建页的阶段导航
     await expect(header.getByRole("link", { name: "接口开发助手", exact: true })).toHaveAttribute(
       "href",
       `/agents/${first}`,
     );
-    await expect(page.getByRole("navigation", { name: "当前智能体工作区" })).toHaveCount(0);
+    await expect(page.getByRole("navigation", { name: "构建阶段" })).toHaveCount(0);
     await expect(page.getByText("接口结构已整理。", { exact: false })).toBeVisible();
     // coze-v3:顶栏有一组空间导航,对话页处于「对话」
     await expect(
@@ -167,28 +179,22 @@ test.describe("对话页与对象工作区", () => {
       .getByRole("region", { name: "当前对话" })
       .getByRole("link", { name: "接口开发助手", exact: true })
       .click();
-    await expect(page.getByRole("heading", { level: 1, name: "接口开发助手" })).toBeVisible();
+    await expect(buildTitle(page, "接口开发助手")).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`/agents/${first}$`));
     const request = page.waitForRequest((r) => {
       const url = new URL(r.url());
       return url.pathname === "/api/runs" && url.searchParams.get("agentId") === first;
     });
-    await page
-      .getByRole("navigation", { name: "当前智能体工作区" })
-      .getByRole("link", { name: "运行", exact: true })
-      .click();
+    await stageButton(page, "运行").click();
     await request;
-    await expect(page.getByRole("heading", { level: 1, name: "接口开发助手" })).toBeVisible();
-    await page
-      .getByRole("navigation", { name: "当前智能体工作区" })
-      .getByRole("link", { name: "接入", exact: true })
-      .click();
-    await expect(page.getByRole("heading", { level: 1, name: "接口开发助手" })).toBeVisible();
+    await expect(stageButton(page, "运行")).toHaveAttribute("aria-current", "step");
+    await expect(buildTitle(page, "接口开发助手")).toBeVisible();
+    await stageButton(page, "接入").click();
+    await expect(buildTitle(page, "接口开发助手")).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`/agents/${first}\\?stage=access`));
-    await page
-      .getByRole("navigation", { name: "当前智能体工作区" })
-      .getByRole("link", { name: "对话", exact: true })
-      .click();
+    // 构建页去对话的入口在页头「更多操作」菜单里
+    await page.getByRole("button", { name: "更多操作", exact: true }).click();
+    await page.getByRole("menuitem", { name: "在对话里使用", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/chat\\?agent=${first}`));
     await expect(
       page
@@ -223,26 +229,35 @@ test.describe("对话页与对象工作区", () => {
     expect(bounds.messagesBottom).toBeLessThanOrEqual(bounds.composerTop);
   });
 
-  test("配置分区保留草稿，离开对象前提示未保存修改", async ({ page }) => {
+  test("编排草稿跨阶段保留，自动保存落盘前离开会提示", async ({ page }) => {
+    // 构建页没有「保存智能体」按钮,停顿约 800ms 自动保存;这里把保存请求挡住,保证离开时草稿还没落盘
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/agents", async (route) => {
+      if (route.request().method() === "POST") await gate;
+      await route.continue();
+    });
     await page.goto(`/agents/${first}`);
-    const prompt = page.getByRole("textbox", { name: "系统提示词 *", exact: true });
-    await prompt.fill("验证 B 工作区跨分区保留草稿");
-    await page.getByRole("tab", { name: "能力", exact: true }).click();
-    await page.getByRole("tab", { name: "配置", exact: true }).click();
-    await expect(prompt).toHaveValue("验证 B 工作区跨分区保留草稿");
-    page.once("dialog", (dialog) => void dialog.dismiss());
-    await page
-      .getByRole("navigation", { name: "当前智能体工作区" })
-      .getByRole("link", { name: "运行", exact: true })
-      .click();
-    await expect(page).toHaveURL(new RegExp(`/agents/${first}$`));
-    await expect(prompt).toHaveValue("验证 B 工作区跨分区保留草稿");
+    const prompt = page.getByRole("textbox", { name: "系统提示词", exact: true });
+    await expect(prompt).toBeVisible();
     const saved = page.waitForResponse(
       (response) =>
         response.url().endsWith("/api/agents") && response.request().method() === "POST",
     );
-    await page.getByRole("button", { name: "保存智能体", exact: true }).click();
+    await prompt.fill("验证 B 工作区跨分区保留草稿");
+    await stageButton(page, "评测").click();
+    await expect(page.getByRole("heading", { level: 2, name: "评测", exact: true })).toBeVisible();
+    await stageButton(page, "编排").click();
+    await expect(prompt).toHaveValue("验证 B 工作区跨分区保留草稿");
+    page.once("dialog", (dialog) => void dialog.dismiss());
+    await page.getByRole("link", { name: "返回工作室", exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/agents/${first}$`));
+    await expect(prompt).toHaveValue("验证 B 工作区跨分区保留草稿");
+    release();
     expect((await saved).ok()).toBeTruthy();
+    await expect(page.getByText(/草稿自动保存于/)).toBeVisible();
     await page.reload();
     await expect(prompt).toHaveValue("验证 B 工作区跨分区保留草稿");
   });
@@ -253,7 +268,7 @@ test.describe("对话页与对象工作区", () => {
       if (new URL(request.url()).pathname === "/api/runs") requested.push(request.url());
     });
     await page.goto("/agents/missing-object-workspace?stage=runs");
-    await expect(page.getByText("找不到指定的智能体", { exact: false })).toBeVisible();
+    await expect(page.getByText("找不到这个智能体", { exact: true })).toBeVisible();
     expect(requested).toEqual([]);
   });
 
@@ -282,14 +297,12 @@ test.describe("对话页与对象工作区", () => {
       .getByRole("region", { name: "当前对话" })
       .getByRole("link", { name: "接口开发助手", exact: true })
       .click();
-    await expect(page.getByRole("heading", { level: 1, name: "接口开发助手" })).toBeVisible();
+    await expect(buildTitle(page, "接口开发助手")).toBeVisible();
+    await expect(stageButton(page, "编排")).toHaveAttribute("aria-current", "step");
+    await expect(page.locator('[data-sec="ability"] > button')).toBeVisible();
     await expect(
-      page
-        .getByRole("navigation", { name: "当前智能体工作区" })
-        .getByRole("link", { name: "配置", exact: true }),
+      page.locator("aside").getByRole("button", { name: /^接口开发助手/ }),
     ).toHaveAttribute("aria-current", "page");
-    await expect(page.getByRole("tab", { name: "能力", exact: true })).toBeVisible();
-    await expect(page.locator(`aside a[href="/agents/${first}"]`)).toBeVisible();
     await page.screenshot({
       path: path.join(dir, "agent-config.png"),
       style: "nextjs-portal { display:none !important }",

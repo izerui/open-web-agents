@@ -159,6 +159,9 @@ export class AgentDesigner {
       legacy: false as const,
       busy: await tx.busy(),
       draft: state.draft,
+      // 基线:目标智能体当前内容对应的草稿(MCP 与 draft 同一规则脱敏;新建为空白草稿)。
+      // 前端按节拆分改动时据此知道每个字段「改之前」的值,用于把某节还原或只取部分节组合保存。
+      base: draftOf(target),
       resourceAgentIds: state.resourceAgentIds,
       resources: designResources(resources),
       revision: designHash(state),
@@ -221,14 +224,50 @@ export class AgentDesigner {
       draft?: unknown;
       resourceAgentIds?: unknown;
       reset?: boolean;
+      /**
+       * 认领目标:从零设计时前端可能已先用 POST /api/agents 建出智能体,
+       * 这个还没有目标的设计会话据此绑定它,之后 apply 改它而不是再建一个。
+       * 只在会话尚无目标时允许;草稿保持不变(已有提议在预览里变成相对它的差异)。
+       */
+      bindTarget?: unknown;
     },
   ) {
     return this.deps.inSession(id, async (tx) => {
-      const { session, target } = await this.context(tx, subject, id);
+      const ctx = await this.context(tx, subject, id);
+      const session = ctx.session;
+      let target = ctx.target;
       await this.idle(tx);
-      const state = await this.sync(tx, session);
+      let state = await this.sync(tx, session);
+      if (input.bindTarget !== undefined) {
+        if (typeof input.bindTarget !== "string" || !input.bindTarget)
+          throw new DesignError(400, "invalid_request", "bindTarget 须为智能体 ID");
+        if (!state) throw new DesignError(409, "design_legacy", "旧设计须先载入当前草稿");
+      }
       if (state && input.revision !== designHash(state)) {
         throw new DesignError(409, "design_changed", "设计草稿已变化,请刷新后重试");
+      }
+      if (state && typeof input.bindTarget === "string") {
+        if (session.designTargetAgentId)
+          throw new DesignError(409, "design_bound", "这个设计会话已经有目标智能体");
+        const bound = await this.target(tx, subject, input.bindTarget);
+        // 与新建带目标的会话一致:基线取目标当前内容,目标本身也作为资源来源
+        state = {
+          ...state,
+          baseHash: contentHash(snapshotOf(bound)),
+          mcpBaseline: mcpBaselineOf(bound),
+          resourceAgentIds: state.resourceAgentIds.includes(bound.id)
+            ? state.resourceAgentIds
+            : [...state.resourceAgentIds, bound.id],
+        };
+        await tx.sessions.update(id, {
+          designTargetAgentId: bound.id,
+          title: `设计:${bound.name}`,
+          designState: state,
+        });
+        session.designTargetAgentId = bound.id;
+        session.title = `设计:${bound.name}`;
+        session.designState = state;
+        target = bound;
       }
       let next: DesignState;
       if (input.reset) {

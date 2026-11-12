@@ -65,10 +65,11 @@ import type { RunChargeQuery } from "@/lib/modules/billing/run-charge-ports";
 import { MysqlCapabilityRepo } from "@/lib/modules/capabilities/adapters/mysql-capability-repo";
 import { PricedModels } from "@/lib/modules/capabilities/application/priced-models";
 import type { CapabilityRepo } from "@/lib/modules/capabilities/ports";
+import { MysqlEvalCostSamples } from "@/lib/modules/eval/adapters/mysql-eval-cost-samples";
 import { MysqlEvalRepo } from "@/lib/modules/eval/adapters/mysql-eval-repo";
 import { type EvalDeps, readEvalRun } from "@/lib/modules/eval/application/eval-runner";
 import { ReleaseEvals } from "@/lib/modules/eval/application/release-evals";
-import type { EvalRepo } from "@/lib/modules/eval/ports";
+import type { EvalCostSamples, EvalRepo } from "@/lib/modules/eval/ports";
 import { RedisBus } from "@/lib/modules/events/adapters/redis-bus";
 import type { BusPort } from "@/lib/modules/events/ports";
 import { MysqlApiKeyRepo } from "@/lib/modules/identity/adapters/mysql-api-key-repo";
@@ -195,6 +196,8 @@ export interface Container {
   /** 投递记录、测试投递、手动重发。 */
   webhookConsole: WebhookConsole;
   evals: EvalRepo;
+  /** 评测花费预估的样本:同主模型近期已结算运行的实扣 */
+  evalCostSamples: EvalCostSamples;
   /** 发起 / 读取评测用到的依赖(见 eval/application/eval-runner.ts) */
   evalDeps: EvalDeps;
   /** 取消通知:取消接口落库后发出,执行中的 worker 立即中止。 */
@@ -716,6 +719,7 @@ function build(): Container {
     orchestrator,
     enqueuer,
     evals,
+    evalCostSamples: new MysqlEvalCostSamples(db),
     evalDeps,
     worker,
     webhooks,

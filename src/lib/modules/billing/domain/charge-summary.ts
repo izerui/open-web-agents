@@ -29,6 +29,8 @@ export const CHARGE_SOURCE_LABEL: Record<ChargeSource, string> = {
 /** 会话来源 → 展示来源(SQL 里用同一张表归组,见 mysql-run-charge-query) */
 export const SESSION_SOURCE_TO_CHARGE: Record<string, ChargeSource> = {
   web: "web",
+  // 构建页试聊按工作台(网页对话)归类展示
+  trial: "web",
   api: "api",
   invoke: "api",
   design: "design",

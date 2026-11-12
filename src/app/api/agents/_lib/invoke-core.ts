@@ -1,0 +1,445 @@
+import { createHash, randomUUID } from "node:crypto";
+import fs from "node:fs/promises";
+import { apiError, chargeErrorResponse } from "@/lib/api-error";
+import { getContainer } from "@/lib/container";
+import type { Principal } from "@/lib/modules/access/domain/principal";
+import { VersionNotFound } from "@/lib/modules/agent/application/releases";
+import { parseVersion } from "@/lib/modules/agent/domain/release";
+import { validateAgentConfig } from "@/lib/modules/agent/domain/validate-config";
+import { validateInput } from "@/lib/modules/agent/domain/validate-output";
+import { resolveInWorkspace } from "@/lib/modules/artifacts/domain/safe-path";
+import {
+  checkInvokeRate,
+  rateLimitHeaders,
+} from "@/lib/modules/identity/application/invoke-rate-limit";
+import { validateWebhookUrl } from "@/lib/modules/integration/domain/webhook-policy";
+import { PromptTooLarge, assertPromptSize } from "@/lib/modules/run/application/enqueue";
+import { isValidIdempotencyKey } from "@/lib/modules/run/domain/limits";
+import { DuplicateIdempotencyKey } from "@/lib/modules/run/ports";
+import { workspacePathFor } from "@/lib/modules/session/domain/workspace";
+import type { ModelRef } from "@/lib/shared";
+
+// 接口调用的受理核心:对外 invoke(API Key)与构建页「在线试调」(网页登录)共用。
+// 两个入口只在鉴权上不同;解析请求 → 幂等重放 → 限流 → 版本解析 → override 与 inputSchema 校验
+// → 文件 → 提示词大小 → 建会话 → 入队 → 回包,全部走这一份,契约与错误码保持一致。
+
+interface InvokeBody {
+  /** 符合智能体 inputSchema 的输入;字符串则直接当 prompt。 */
+  input?: unknown;
+  /** 仅支持平台模型别名选择。 */
+  override?: { model?: ModelRef };
+  /** 锁定智能体版本;不传 = 当前发布的版本(从未发布则为草稿)。 */
+  version?: number;
+  /** 本次结果回调到这个地址(代替智能体配置的地址),用调用方自己的签名密钥签名。 */
+  callbackUrl?: string;
+  /** 随这次调用交给智能体的文件:写进这次任务的工作目录,并在提示词里列出 */
+  files?: { name?: unknown; content?: unknown }[];
+}
+
+/** 一次调用最多带的文件数与总大小(解码后) */
+const MAX_INPUT_FILES = 20;
+const MAX_INPUT_BYTES = 10 * 1024 * 1024;
+
+/**
+ * 受理模式:
+ * - invoke:对外接口,行为即原 invoke 路由。
+ * - try:构建页在线试调(网页登录)。会话同样记为接口调用(source=invoke),归属与计费都是本人;
+ *   不支持 Idempotency-Key 与 callbackUrl(传了 400 invalid_request),也不投递智能体的 webhook。
+ */
+export type InvokeMode = "invoke" | "try";
+
+/**
+ * 受理一次调用。调用前须已完成鉴权与 assertCanInvoke —— 这里不再重复。
+ * 返回值就是要回给调用方的 Response(202 受理 / 200 重放 / 4xx 错误)。
+ */
+export async function acceptInvoke(
+  req: Request,
+  agentId: string,
+  principal: Principal,
+  mode: InvokeMode,
+): Promise<Response> {
+  const {
+    agents,
+    sessions,
+    runs,
+    env,
+    enqueuer,
+    releases,
+    rateLimiter,
+    storage,
+    modelCatalogView,
+  } = getContainer();
+
+  // 花费记在签发这把 key 的账号头上,额度自然也按它算
+  const billingUserId = principal.type === "apiKey" ? principal.ownerId : principal.userId;
+
+  const agent = await agents.get(agentId);
+  if (!agent) {
+    return apiError(404, "not_found", "agent not found");
+  }
+
+  const body = (await req.json().catch(() => ({}))) as InvokeBody;
+
+  // ── 第一步:只看请求本身的形状(与版本无关),算出请求摘要 ─────────────────────
+  const prompt =
+    typeof body.input === "string" ? body.input.trim() : JSON.stringify(body.input ?? {});
+  if (!prompt || prompt === "{}") {
+    return apiError(400, "input_invalid", "input is required");
+  }
+
+  // 平台统一供给模型,拒绝用户凭证和网关覆盖。
+  const override = parseOverride(body.override);
+  if (!override.ok) return apiError(400, "invalid_request", override.reason);
+
+  const requested = parseVersion(body.version);
+  if (!requested.ok) return apiError(400, "invalid_request", "version 须为正整数");
+
+  // 在线试调不接受回调地址:结果在页面上轮询看,不投递给任何外部系统(见 InvokeMode)
+  if (mode === "try" && body.callbackUrl !== undefined && body.callbackUrl !== null) {
+    return apiError(400, "invalid_request", "在线试调不支持 callbackUrl");
+  }
+
+  // 回调地址与智能体配置的 webhookUrl 同一套地址策略;建连时还会按实际解析到的地址再查一次
+  const callback = parseCallbackUrl(body.callbackUrl, env.webhookAllowPrivate);
+  if (!callback.ok) return apiError(400, "invalid_request", callback.reason);
+
+  const inputFiles = parseInputFiles(body.files);
+  if (!inputFiles.ok) return apiError(inputFiles.status, "invalid_request", inputFiles.reason);
+
+  // 同键重放时用来判断"是不是同一个请求";请求体里的 version、callbackUrl、文件内容也算请求内容。
+  // 后两者只在给了时才放进去:不带它们的请求摘要与引入它们之前完全一致
+  const requestHash = sha256(
+    JSON.stringify({
+      prompt,
+      override: override.value ?? null,
+      version: requested.value ?? null,
+      ...(callback.value ? { callbackUrl: callback.value } : {}),
+      ...(inputFiles.value.length
+        ? { files: inputFiles.value.map((f) => [f.name, sha256Bytes(f.bytes)]) }
+        : {}),
+    }),
+  );
+
+  // ── 第二步:幂等重放 —— 必须在解析当前版本、校验契约【之前】 ───────────────────
+  /*
+   * 调用方因超时重试同一个请求时带上同一个 Idempotency-Key,拿回的是第一次受理的任务,
+   * 而不是又跑一次、又扣一次费。键按调用方 + 智能体隔离。
+   *
+   * 【为什么要排在版本解析之前】不指定版本的请求按 v1 受理后,作者发布了 schema 不兼容的 v2;
+   * 原请求原键重试若先按"当前发布版本"校验,会被 v2 拒成 400,拿不回已经受理的任务 ——
+   * 恰恰是幂等键要保证的场景。重放只认原任务:原版本、原快照决定的结果形态。
+   */
+  const rawKey = req.headers.get("Idempotency-Key")?.trim();
+  let idempotencyKey: string | undefined;
+  // 在线试调是人在页面上点的一次性调试,没有超时重试的场景,不接受幂等键
+  if (rawKey && mode === "try") {
+    return apiError(400, "invalid_request", "在线试调不支持 Idempotency-Key");
+  }
+  if (rawKey) {
+    if (!isValidIdempotencyKey(rawKey)) {
+      return apiError(
+        400,
+        "idempotency_key_invalid",
+        "Idempotency-Key 须为 1~128 个可见 ASCII 字符",
+      );
+    }
+    // 作用域 = 调用方 + 智能体:同一个键换一个智能体调用,不该拿回另一个智能体的任务。
+    // 存摘要而不是原文:拼起来可能超过列宽
+    const scope = principal.type === "apiKey" ? `k:${principal.keyId}` : `u:${principal.userId}`;
+    idempotencyKey = sha256(`${scope}|${agentId}|${rawKey}`);
+    const existing = await runs.findByIdempotencyKey(idempotencyKey);
+    if (existing) return replayed(existing, requestHash, agent.config.outputSchema !== undefined);
+  }
+
+  // ── 第三步:新请求 —— 限流,再解析这次跑哪一版、按那一版校验契约 ──────────────────
+  // 余额与月度上限在入队时随运行记录同一事务冻结(见 enqueue.ts);放在幂等重放之后:
+  // 首次受理的那次运行可能恰好把额度用完,原键重试仍要拿回原任务。
+  /*
+   * 调用限流:每把 Key、每个智能体各一个每分钟窗口(见 invoke-rate-limit.ts)。
+   * 只查 Redis,被拒的请求不必再碰数据库。
+   */
+  const rate = await checkInvokeRate(rateLimiter, {
+    keyId: principal.type === "apiKey" ? principal.keyId : `user:${principal.userId}`,
+    keyLimit: principal.type === "apiKey" ? principal.rateLimitPerMinute : undefined,
+    agentId,
+    defaultKeyLimit: env.invokeRateLimitPerKey,
+    agentLimit: env.invokeRateLimitPerAgent,
+  });
+  if (!rate.allowed) {
+    const retryAfter = Math.max(1, Math.ceil(rate.retryAfterMs / 1000));
+    return apiError(
+      429,
+      "rate_limited",
+      rate.scope === "key"
+        ? `这把 API Key 每分钟最多发起 ${rate.limit} 次新调用,请 ${retryAfter} 秒后再试`
+        : `该智能体每分钟最多受理 ${rate.limit} 次新调用(所有调用方合计),请 ${retryAfter} 秒后再试`,
+      { scope: rate.scope, limit: rate.limit, retryAfterSeconds: retryAfter },
+      {
+        "Retry-After": String(retryAfter),
+        ...(rate.scope === "key"
+          ? rateLimitHeaders({ limit: rate.limit, remaining: 0, resetMs: rate.retryAfterMs })
+          : {}),
+      },
+    );
+  }
+
+  /*
+   * 入参校验、结构化结果的有无都以【这一版】为准 ——
+   * 草稿里刚改的 inputSchema 不该影响还在用已发布版本的调用方。
+   */
+  let release: Awaited<ReturnType<typeof releases.resolve>>;
+  try {
+    release = await releases.resolve(agent, requested.value);
+  } catch (err) {
+    if (err instanceof VersionNotFound) return apiError(404, "not_found", err.message);
+    throw err;
+  }
+
+  // 覆盖的模型须存在、可用,且与该版本的子代理模型同一来源 —— 与保存配置时同一套规则
+  if (override.value?.model) {
+    const modelIssues = validateAgentConfig(
+      { ...release.config, model: override.value.model },
+      { allowStdioMcp: true, models: await modelCatalogView() },
+    ).filter((i) => i.field === "model" || /^subagents\[\d+\]\.model$/.test(i.field));
+    if (modelIssues.length) {
+      return apiError(400, "invalid_request", `override.model:${modelIssues[0]?.message}`);
+    }
+  }
+  const structured = release.config.outputSchema !== undefined;
+
+  /**
+   * 入站契约校验。智能体声明了 inputSchema,调用方就必须按它传。
+   *
+   * 【为什么必须早失败】不校验的话,一个字段拼错的请求会被原样塞进提示词,
+   * agent 照跑不误,最后产出一个看起来正常、实际答非所问的结果 ——
+   * 调用方拿到 200 和一份结构合规的 JSON,根本意识不到自己传错了,还白花一次模型钱。
+   * 直接说清楚错在哪个字段,比事后对着结果猜便宜得多。
+   */
+  const inputSchema = release.config.inputSchema;
+  if (inputSchema) {
+    // 纯文本对上 object schema 必然不合格,提示要说人话
+    if (typeof body.input === "string") {
+      return apiError(
+        400,
+        "input_invalid",
+        "该智能体声明了 inputSchema,input 必须是符合它的对象,不能是纯文本",
+      );
+    }
+    const verdict = validateInput(inputSchema, body.input);
+    if (!verdict.ok) {
+      return apiError(400, "input_invalid", "input 不符合该智能体的 inputSchema", {
+        details: verdict.errors,
+      });
+    }
+  }
+
+  // 带了文件:与工作台的附件同一个约定 —— 在提示词末尾列出放在工作区里的文件名
+  const runPrompt = inputFiles.value.length
+    ? `${prompt}\n\n已上传到当前工作区的附件:\n${inputFiles.value.map((f) => `- ${f.name}`).join("\n")}`
+    : prompt;
+
+  try {
+    assertPromptSize(runPrompt);
+  } catch (err) {
+    if (err instanceof PromptTooLarge) {
+      return apiError(413, "prompt_too_large", err.message);
+    }
+    throw err;
+  }
+
+  // 每次 invoke 开一个新会话(= 独立工作目录),互不干扰;归属记到发起的 key 上
+  const sessionId = randomUUID().replace(/-/g, "").slice(0, 24);
+  const workspaceDir = workspacePathFor(env.dataDir, sessionId);
+  await fs.mkdir(workspaceDir, { recursive: true });
+  await sessions.create({
+    id: sessionId,
+    agentId,
+    workspaceDir,
+    title: mode === "try" ? "在线试调" : "invoke",
+    unattended: true,
+    source: "invoke",
+    callerApiKeyId: principal.type === "apiKey" ? principal.keyId : undefined,
+    ownerId: principal.type === "web" ? principal.userId : undefined,
+    // 花费记在签发 key 的账号上:额度按它算,模型凭证也用它自带的
+    billingUserId,
+    agentVersion: release.version ?? undefined,
+  });
+
+  const taskId = randomUUID().replace(/-/g, "").slice(0, 24);
+  try {
+    for (const f of inputFiles.value) await storage.write(workspaceDir, f.name, f.bytes);
+    await enqueuer.enqueue({
+      runId: taskId,
+      sessionId,
+      prompt: runPrompt,
+      override: override.value,
+      callbackUrl: callback.value,
+      // 在线试调不触发智能体配置的 webhook:调试不该打到对接方的生产系统
+      ...(mode === "try" ? { noCallback: true } : {}),
+      idempotencyKey,
+      idempotencyHash: idempotencyKey ? requestHash : undefined,
+    });
+  } catch (err) {
+    // 入队失败就回滚刚建的会话与目录,不留空壳
+    await sessions.delete(sessionId).catch(() => {});
+    await fs.rm(workspaceDir, { recursive: true, force: true }).catch(() => {});
+    if (err instanceof DuplicateIdempotencyKey) {
+      // 并发的同键请求:另一个先入队了,返回它(本次的冻结随事务回滚,不重复冻结)
+      const existing = await runs.findByIdempotencyKey(err.idempotencyKey);
+      if (existing) {
+        return replayed(existing, requestHash, agent.config.outputSchema !== undefined);
+      }
+    }
+    const charge = chargeErrorResponse(err);
+    if (charge) return charge;
+    throw err;
+  }
+
+  return Response.json(
+    {
+      taskId,
+      sessionId,
+      /** 有 outputSchema 才会返回结构化结果,否则只有文本 summary */
+      structured,
+      /** 实际执行的版本;null = 草稿(该智能体从未发布) */
+      agentVersion: release.version,
+    },
+    { status: 202, headers: rate.key ? rateLimitHeaders(rate.key) : undefined },
+  );
+}
+
+/**
+ * 同一幂等键的重复请求:返回第一次受理的任务。200 而非 202,让调用方知道这是重放。
+ * 版本与结果形态取自【原任务】;快照缺失的旧任务(版本功能之前受理)才回退到当前草稿判断。
+ */
+function replayed(
+  run: {
+    id: string;
+    sessionId: string;
+    idempotencyHash?: string;
+    agentVersion?: number;
+    hasOutputSchema?: boolean;
+  },
+  requestHash: string,
+  legacyStructured: boolean,
+): Response {
+  // 同一个键配了不同的请求体:多半是调用方复用键的 bug,明确报错而不是返回别的任务
+  if (run.idempotencyHash && run.idempotencyHash !== requestHash) {
+    return apiError(
+      422,
+      "idempotency_conflict",
+      "这个 Idempotency-Key 已用于另一个不同内容的请求",
+      { taskId: run.id },
+    );
+  }
+  return Response.json(
+    {
+      taskId: run.id,
+      sessionId: run.sessionId,
+      structured: run.hasOutputSchema ?? legacyStructured,
+      agentVersion: run.agentVersion ?? null,
+      replayed: true,
+    },
+    { status: 200 },
+  );
+}
+
+type Override = { model?: ModelRef };
+
+/** 别名或模型 id(格式与模型 id 一致);是否可用在解析出版本后再查 */
+const MODEL_REF = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+function parseOverride(
+  raw: unknown,
+): { ok: true; value?: Override } | { ok: false; reason: string } {
+  if (raw === undefined || raw === null) return { ok: true };
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, reason: "override 必须是对象" };
+  }
+  const o = raw as Record<string, unknown>;
+  const out: Override = {};
+  if (Object.keys(o).some((key) => key !== "model")) {
+    return {
+      ok: false,
+      reason: "平台统一提供模型,不接受 override.baseUrl、override.key 或其它凭证覆盖",
+    };
+  }
+  if (o.model !== undefined) {
+    if (typeof o.model !== "string" || !MODEL_REF.test(o.model)) {
+      return { ok: false, reason: "override.model 须为模型别名或平台模型 id" };
+    }
+    out.model = o.model;
+  }
+  return { ok: true, value: Object.keys(out).length ? out : undefined };
+}
+
+function parseCallbackUrl(
+  raw: unknown,
+  allowPrivate: boolean,
+): { ok: true; value?: string } | { ok: false; reason: string } {
+  if (raw === undefined || raw === null || raw === "") return { ok: true };
+  if (typeof raw !== "string" || raw.length > 1024) {
+    return { ok: false, reason: "callbackUrl 须为不超过 1024 字符的字符串" };
+  }
+  const v = validateWebhookUrl(raw, { allowPrivate });
+  if (!v.ok) return { ok: false, reason: v.reason.replace(/^webhookUrl/, "callbackUrl") };
+  return { ok: true, value: raw };
+}
+
+type InputFile = { name: string; bytes: Buffer };
+
+function parseInputFiles(
+  raw: unknown,
+): { ok: true; value: InputFile[] } | { ok: false; status: 400 | 413; reason: string } {
+  if (raw === undefined || raw === null) return { ok: true, value: [] };
+  if (!Array.isArray(raw)) return { ok: false, status: 400, reason: "files 必须是数组" };
+  if (raw.length > MAX_INPUT_FILES) {
+    return { ok: false, status: 413, reason: `一次最多带 ${MAX_INPUT_FILES} 个文件` };
+  }
+  const out: InputFile[] = [];
+  const names = new Set<string>();
+  let total = 0;
+  for (const [i, f] of raw.entries()) {
+    const name: string = typeof f?.name === "string" ? f.name.trim() : "";
+    if (!name || name.length > 255) {
+      return { ok: false, status: 400, reason: `files[${i}].name 须为 1~255 字符` };
+    }
+    // 与工作区上传同一道路径守卫:不能越出工作目录,也不能写进隐藏目录(SDK 的状态在那里)
+    if (
+      name
+        .split("/")
+        .some((seg) => seg === "" || seg === "." || seg === ".." || seg.startsWith("."))
+    ) {
+      return { ok: false, status: 400, reason: `files[${i}].name 不是合法的相对路径:${name}` };
+    }
+    try {
+      resolveInWorkspace("/workspace", name);
+    } catch {
+      return { ok: false, status: 400, reason: `files[${i}].name 不是合法的相对路径:${name}` };
+    }
+    if (names.has(name)) return { ok: false, status: 400, reason: `文件重名:${name}` };
+    names.add(name);
+    if (typeof f?.content !== "string" || !/^[A-Za-z0-9+/]*={0,2}$/.test(f.content)) {
+      return { ok: false, status: 400, reason: `files[${i}].content 须为 base64 字符串` };
+    }
+    const bytes = Buffer.from(f.content, "base64");
+    total += bytes.length;
+    if (total > MAX_INPUT_BYTES) {
+      return {
+        ok: false,
+        status: 413,
+        reason: `文件合计不能超过 ${MAX_INPUT_BYTES / 1024 / 1024}MB`,
+      };
+    }
+    out.push({ name, bytes });
+  }
+  return { ok: true, value: out };
+}
+
+function sha256Bytes(b: Buffer): string {
+  return createHash("sha256").update(b).digest("hex");
+}
+
+function sha256(text: string): string {
+  return createHash("sha256").update(text).digest("hex");
+}

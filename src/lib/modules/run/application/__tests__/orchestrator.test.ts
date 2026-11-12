@@ -165,11 +165,11 @@ describe("RunOrchestrator.execute", () => {
     expect(engine.lastSpec?.model).toEqual({ ref: "haiku", modelId: "model-haiku" });
   });
 
-  it("提问等人回答只在网页对话与 AI 编辑:API Key 会话、接口调用、评测都不等", async () => {
+  it("提问等人回答只在网页对话、构建页试聊与 AI 编辑:API Key 会话、接口调用、评测都不等", async () => {
     const engine = new FakeEngine();
     const { orch, sessions } = await setup(engine);
     const got: Record<string, boolean | undefined> = {};
-    for (const source of ["web", "design", "api", "invoke", "eval"] as const) {
+    for (const source of ["web", "trial", "design", "api", "invoke", "eval"] as const) {
       await sessions.create({
         id: `s-${source}`,
         agentId: "a1",
@@ -182,7 +182,14 @@ describe("RunOrchestrator.execute", () => {
       await orch.execute({ sessionId: `s-${source}`, prompt: "hi" }, signal);
       got[source] = engine.lastCtx?.canAskUser;
     }
-    expect(got).toEqual({ web: true, design: true, api: false, invoke: false, eval: false });
+    expect(got).toEqual({
+      web: true,
+      trial: true,
+      design: true,
+      api: false,
+      invoke: false,
+      eval: false,
+    });
   });
 
   it("AI 编辑强制平台凭证和设计模型,计费归发起账号", async () => {

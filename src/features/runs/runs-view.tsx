@@ -37,7 +37,7 @@ interface RunItem {
   agentName?: string;
   /** 执行的智能体版本;undefined = 草稿 */
   agentVersion?: number;
-  source: "web" | "api" | "invoke" | "eval" | "design";
+  source: "web" | "api" | "invoke" | "eval" | "design" | "trial";
   status: RunStatus;
   promptPreview: string;
   createdAt: number;
@@ -54,7 +54,7 @@ interface RunDetail extends RunItem {
   structured?: unknown;
 }
 
-type AgentLite = { id: string; name: string; icon?: string; canRead?: boolean };
+export type AgentLite = { id: string; name: string; icon?: string; canRead?: boolean };
 
 const SOURCE_LABEL: Record<RunItem["source"], string> = {
   web: "工作台",
@@ -62,6 +62,7 @@ const SOURCE_LABEL: Record<RunItem["source"], string> = {
   invoke: "接口调用",
   eval: "评测",
   design: "智能体设计器",
+  trial: "构建页试聊",
 };
 
 const STATUS_META: Record<
@@ -139,7 +140,7 @@ function useAgentList(): AgentList {
   return { agents, loaded, error, reload };
 }
 
-type AgentList = {
+export type AgentList = {
   agents: AgentLite[];
   loaded: boolean;
   error: string | null;

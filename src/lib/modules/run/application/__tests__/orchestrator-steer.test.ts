@@ -42,9 +42,10 @@ class CtxEngine implements EnginePort {
 }
 
 describe("编排 × 追加消息", () => {
-  it("工作台与 API 会话的运行接受追加;接口调用不接受", async () => {
+  it("工作台、构建页试聊与 API 会话的运行接受追加;接口调用不接受", async () => {
     for (const [source, expected] of [
       ["web", true],
+      ["trial", true],
       ["api", true],
       ["invoke", false],
     ] as const) {

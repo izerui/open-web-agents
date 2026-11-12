@@ -119,6 +119,11 @@ describe("POST /api/sessions/{id}/steer", () => {
     expect(state.offered).toEqual([]);
   });
 
+  it("构建页试聊的会话与网页对话一样接受追加", async () => {
+    state.source = "trial";
+    expect((await post({ runId: "r1", text: "x" })).status).toBe(200);
+  });
+
   it("接口调用的会话:409,且不入队", async () => {
     state.source = "invoke";
     expect((await post({ runId: "r1", text: "x" })).status).toBe(409);
