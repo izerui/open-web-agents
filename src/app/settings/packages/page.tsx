@@ -1,6 +1,6 @@
 import { type PageSearchParams, redirectLegacy } from "@/lib/nav/legacy-page";
 
-/** 旧地址,已迁到 /account/packages(见 src/lib/nav/routes.ts) */
+/** 旧地址,已迁到 /account/billing?tab=packages(见 src/lib/nav/routes.ts) */
 export default async function Page({ searchParams }: { searchParams: PageSearchParams }) {
   return redirectLegacy("/settings/packages", searchParams);
 }

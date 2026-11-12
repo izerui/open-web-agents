@@ -1,26 +1,34 @@
 "use client";
 
+import { AgentAvatar } from "@/components/agent-avatar";
 import { MessageResponse } from "@/components/ai-elements/message";
+import { useConfirm } from "@/components/confirm-dialog";
 import { SpaceShell } from "@/components/space-shell";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState, SpacePage, tb } from "@/features/settings/space-page";
+import { shortTime } from "@/features/settings/time-format";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { formatUsd, toMicroUsd } from "@/lib/modules/usage/domain/aggregate";
 import { cn } from "@/lib/utils";
-import { ExternalLink, RefreshCw } from "lucide-react";
+import { Copy, ExternalLink, Loader2, MessageSquare, RefreshCw, Square, X } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+import {
+  type RunStatus,
+  canCancelRun,
+  formatDuration,
+  looksLikeJson,
+  prettyInput,
+  tokensText,
+  versionLabel,
+} from "./run-format";
 
 interface RunItem {
   id: string;
@@ -30,7 +38,7 @@ interface RunItem {
   /** 执行的智能体版本;undefined = 草稿 */
   agentVersion?: number;
   source: "web" | "api" | "invoke" | "eval" | "design";
-  status: "pending" | "running" | "success" | "failed" | "cancelled";
+  status: RunStatus;
   promptPreview: string;
   createdAt: number;
   durationMs?: number;
@@ -44,41 +52,50 @@ interface RunDetail extends RunItem {
   structured?: unknown;
 }
 
+type AgentLite = { id: string; name: string; icon?: string; canRead?: boolean };
+
 const SOURCE_LABEL: Record<RunItem["source"], string> = {
   web: "工作台",
   api: "API 会话",
   invoke: "接口调用",
   eval: "评测",
-  design: "AI 编辑",
+  design: "智能体设计器",
 };
 
-const STATUS_META: Record<RunItem["status"], { label: string; className: string }> = {
-  pending: { label: "排队中", className: "bg-muted text-muted-foreground" },
-  running: { label: "运行中", className: "bg-brand/15 text-brand" },
-  success: { label: "成功", className: "bg-success/15 text-success" },
-  failed: { label: "失败", className: "bg-destructive/15 text-destructive" },
-  cancelled: { label: "已取消", className: "bg-muted text-muted-foreground" },
+const STATUS_META: Record<
+  RunStatus,
+  { label: string; variant: "default" | "warning" | "success" | "destructive" | "outline" }
+> = {
+  pending: { label: "排队中", variant: "default" },
+  running: { label: "运行中", variant: "warning" },
+  success: { label: "成功", variant: "success" },
+  failed: { label: "失败", variant: "destructive" },
+  cancelled: { label: "已取消", variant: "outline" },
 };
 
-function formatDuration(ms?: number): string {
-  if (ms === undefined) return "—";
-  if (ms < 1000) return `${ms}ms`;
-  const s = Math.round(ms / 1000);
-  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${s % 60}s`;
+function StatusBadge({ status }: { status: RunStatus }) {
+  const m = STATUS_META[status];
+  return (
+    <Badge variant={m.variant}>
+      {status === "running" && <Loader2 className="animate-spin" />}
+      {m.label}
+    </Badge>
+  );
 }
 
-function formatCost(cost?: RunItem["cost"]): string {
-  if (!cost) return "—";
-  if (cost.usd) return formatUsd(toMicroUsd(cost.usd));
-  const tokens = (cost.input ?? 0) + (cost.output ?? 0);
-  return tokens ? `${tokens.toLocaleString()} tokens${cost.partial ? "(部分)" : ""}` : "—";
+function VersionBadge({ version }: { version?: number }) {
+  return (
+    <Badge variant={version ? "outline" : "warning"} className="font-normal">
+      {versionLabel(version)}
+    </Badge>
+  );
 }
 
 /**
- * 个人页查看我名下的运行;平台页由管理路由提供入口,服务端校验 scope=all 权限。
- *
- * 曾经接口调用的过程与结果只能凭 taskId 逐个去查,工作台里也看不到;
- * 这里是两个入口统一的观察窗口。
+ * 运行记录的三个入口:
+ * - 开发者 · 运行记录(本人计费的全部运行)—— DeveloperRunsView,直接用 AppShell
+ * - 构建页「运行」阶段(单个智能体)与平台管理 · 平台运行 —— RunsView,仍在 SpaceShell 里(阶段 5、7 再换)
+ * 三处共用 RunsPanel:筛选、列表、详情抽屉与取消运行。
  */
 export function RunsView({
   platform = false,
@@ -89,7 +106,7 @@ export function RunsView({
   const requestedAgent = agentId ?? searchParams.get("agent");
   // Changing objects resets the result list, pagination and detail together.
   return (
-    <RunsContent
+    <RunsInShell
       key={JSON.stringify([platform, requestedAgent])}
       requestedAgent={requestedAgent}
       platform={platform}
@@ -97,14 +114,93 @@ export function RunsView({
   );
 }
 
-function RunsContent({
+/** 智能体列表(筛选与对象页头共用)。放在外壳一层:对象页头出现时外壳会换结构,面板随之重挂载,状态不能放在面板里 */
+function useAgentList(): AgentList {
+  const [agents, setAgents] = useState<AgentLite[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const reload = useCallback(async () => {
+    setLoaded(false);
+    setError(null);
+    try {
+      const d = await fetchJson<{ agents?: AgentLite[] }>("/api/agents");
+      setAgents(d.agents ?? []);
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setLoaded(true);
+    }
+  }, []);
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+  return { agents, loaded, error, reload };
+}
+
+type AgentList = {
+  agents: AgentLite[];
+  loaded: boolean;
+  error: string | null;
+  reload: () => Promise<void>;
+};
+
+export function DeveloperRunsView() {
+  const list = useAgentList();
+  return (
+    <SpacePage
+      side="developer"
+      title="运行记录"
+      subtitle="计费在你名下的全部运行，包括你调用别人的智能体、别人用你的 Key 调用。单个智能体的运行分析在它的构建页「运行」阶段。"
+    >
+      <RunsPanel requestedAgent={null} platform={false} agentList={list} />
+    </SpacePage>
+  );
+}
+
+function RunsInShell({
   requestedAgent,
   platform,
 }: { requestedAgent: string | null; platform: boolean }) {
+  const list = useAgentList();
   const objectMode = requestedAgent !== null;
-  const [agents, setAgents] = useState<{ id: string; name: string; canRead?: boolean }[]>([]);
-  const [agentsLoaded, setAgentsLoaded] = useState(false);
-  const [agentsError, setAgentsError] = useState<string | null>(null);
+  const agent = objectMode ? list.agents.find((a) => a.id === requestedAgent) : undefined;
+  return (
+    <SpaceShell
+      title={platform ? "平台运行" : objectMode ? "运行记录" : "全部运行"}
+      area={platform ? "admin" : "personal"}
+      subtitle={
+        platform
+          ? objectMode
+            ? "此智能体在全平台的运行"
+            : "全平台运行,包括工作台、接口调用与评测"
+          : objectMode
+            ? "此智能体下计费在你名下的运行"
+            : "计费在你名下的全部运行,包括工作台、接口调用与评测"
+      }
+      object={
+        objectMode && agent
+          ? { ...agent, tab: "runs", canReadConfig: agent.canRead !== false }
+          : undefined
+      }
+      width={objectMode ? "full" : "wide"}
+    >
+      <RunsPanel requestedAgent={requestedAgent} platform={platform} agentList={list} />
+    </SpaceShell>
+  );
+}
+
+export function RunsPanel({
+  requestedAgent,
+  platform,
+  agentList,
+}: {
+  requestedAgent: string | null;
+  platform: boolean;
+  agentList: AgentList;
+}) {
+  const objectMode = requestedAgent !== null;
+  const confirm = useConfirm();
+  const { agents, loaded: agentsLoaded, error: agentsError, reload: loadAgents } = agentList;
   const [agentId, setAgentId] = useState("");
   const [status, setStatus] = useState("");
   const [source, setSource] = useState("");
@@ -113,36 +209,20 @@ function RunsContent({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<RunDetail | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   const seqRef = useRef(0);
   const detailSeqRef = useRef(0);
   const selectedAgent = objectMode ? agents.find((a) => a.id === requestedAgent) : undefined;
   const effectiveAgentId = objectMode ? selectedAgent?.id : agentId;
   const canLoad = !objectMode || Boolean(selectedAgent);
+  const agentById = new Map(agents.map((a) => [a.id, a]));
   const contextError =
     objectMode && agentsLoaded && !agentsError && !selectedAgent
       ? requestedAgent
         ? "找不到指定的智能体,它可能已被删除或你没有访问权限。"
         : "链接缺少智能体 ID,请选择智能体后再查看运行。"
       : null;
-
-  const loadAgents = useCallback(async () => {
-    setAgentsLoaded(false);
-    setAgentsError(null);
-    try {
-      const d = await fetchJson<{ agents?: { id: string; name: string; canRead?: boolean }[] }>(
-        "/api/agents",
-      );
-      setAgents(d.agents ?? []);
-    } catch (e) {
-      setAgentsError(errorText(e));
-    } finally {
-      setAgentsLoaded(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadAgents();
-  }, [loadAgents]);
 
   const load = useCallback(
     async (append?: string) => {
@@ -184,47 +264,48 @@ function RunsContent({
 
   async function openDetail(id: string) {
     const seq = ++detailSeqRef.current;
+    setDetailError(null);
     try {
-      const d = await fetchJson<{ run: RunDetail }>(`/api/runs/${id}`);
+      const d = await fetchJson<{ run: RunDetail }>(`/api/runs/${encodeURIComponent(id)}`);
       if (seq === detailSeqRef.current) setDetail(d.run);
     } catch (e) {
-      if (seq === detailSeqRef.current) setError(errorText(e));
+      if (seq === detailSeqRef.current) setDetailError(errorText(e));
     }
   }
 
+  async function cancelRun(run: RunDetail) {
+    setCancelling(true);
+    try {
+      const r = await fetchJson<{ cancelled: boolean; note?: string }>(
+        `/api/runs/${encodeURIComponent(run.id)}/cancel`,
+        { method: "POST" },
+      );
+      if (r.cancelled) toast.success("运行已取消");
+      else toast.message(r.note ?? "运行已结束,无需取消");
+      await Promise.all([load(), openDetail(run.id)]);
+    } catch (e) {
+      toast.error(`取消失败:${errorText(e)}`);
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  async function copy(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("taskId 已复制");
+    } catch (e) {
+      toast.error(`复制失败:${errorText(e)}`);
+    }
+  }
+
+  const filtered = Boolean(agentId || status || source);
+  const detailAgent = detail ? agentById.get(detail.agentId) : undefined;
+
   return (
-    <SpaceShell
-      title={platform ? "平台运行" : objectMode ? "运行记录" : "全部运行"}
-      area={platform ? "admin" : "personal"}
-      subtitle={
-        platform
-          ? objectMode
-            ? "此智能体在全平台的运行"
-            : "全平台运行,包括工作台、接口调用与评测"
-          : objectMode
-            ? "此智能体下计费在你名下的运行"
-            : "计费在你名下的全部运行,包括工作台、接口调用与评测"
-      }
-      object={
-        objectMode && selectedAgent
-          ? { ...selectedAgent, tab: "runs", canReadConfig: selectedAgent.canRead !== false }
-          : undefined
-      }
-      width={objectMode ? "full" : "wide"}
-      actions={
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => void load()}
-          disabled={!canLoad || loading}
-        >
-          <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
-          刷新
-        </Button>
-      }
-    >
+    <>
       {agentsError && (
-        <Alert variant="destructive" className="flex flex-wrap items-center gap-2">
+        <Alert variant="destructive" className="mb-3 flex flex-wrap items-center gap-2">
           智能体列表加载失败:{agentsError}
           <Button size="sm" variant="outline" onClick={() => void loadAgents()}>
             重试
@@ -232,12 +313,12 @@ function RunsContent({
         </Alert>
       )}
       {contextError && (
-        <Alert variant="destructive">
+        <Alert variant="destructive" className="mb-3">
           <AlertDescription>{contextError}</AlertDescription>
         </Alert>
       )}
       {objectMode && !selectedAgent && (
-        <div className="flex flex-wrap gap-3 text-sm">
+        <div className="mb-3 flex flex-wrap gap-3 text-sm">
           {!agentsLoaded && <p className="text-muted-foreground">正在加载智能体…</p>}
           <Link href="/agents" className="underline">
             选择智能体
@@ -247,12 +328,17 @@ function RunsContent({
           </Link>
         </div>
       )}
+      {detailError && (
+        <p aria-live="polite" className="mb-3 text-sm text-destructive">
+          运行详情没有读到:{detailError}
+        </p>
+      )}
       {canLoad && (
         <>
-          <div className="flex flex-wrap gap-2">
+          <div className="mb-3.5 flex flex-wrap items-center gap-2.5">
             {!objectMode && (
               <NativeSelect
-                className="h-8 w-44 text-xs"
+                className="w-auto max-w-60 min-w-[150px] max-sm:w-full max-sm:max-w-none"
                 aria-label="按智能体筛选"
                 value={effectiveAgentId}
                 disabled={!agentsLoaded || Boolean(agentsError)}
@@ -267,7 +353,7 @@ function RunsContent({
               </NativeSelect>
             )}
             <NativeSelect
-              className="h-8 w-32 text-xs"
+              className="w-auto min-w-[150px] max-sm:flex-1"
               aria-label="按状态筛选"
               value={status}
               onChange={(e) => setStatus(e.target.value)}
@@ -280,7 +366,7 @@ function RunsContent({
               ))}
             </NativeSelect>
             <NativeSelect
-              className="h-8 w-32 text-xs"
+              className="w-auto min-w-[150px] max-sm:flex-1"
               aria-label="按来源筛选"
               value={source}
               onChange={(e) => setSource(e.target.value)}
@@ -292,150 +378,331 @@ function RunsContent({
                 </option>
               ))}
             </NativeSelect>
-          </div>
-
-          {error && <p className="text-xs text-destructive">加载失败:{error}</p>}
-
-          <div className="overflow-x-auto rounded-lg border border-border">
-            <table className="w-full text-xs">
-              <thead className="bg-muted/40 text-left text-muted-foreground">
-                <tr>
-                  <th className="px-3 py-2 font-medium">时间</th>
-                  <th className="px-3 py-2 font-medium">智能体</th>
-                  <th className="px-3 py-2 font-medium">来源</th>
-                  <th className="px-3 py-2 font-medium">状态</th>
-                  <th className="px-3 py-2 font-medium">输入</th>
-                  <th className="px-3 py-2 text-right font-medium">耗时</th>
-                  <th className="px-3 py-2 text-right font-medium">花费</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((r) => (
-                  <tr
-                    key={r.id}
-                    tabIndex={0}
-                    className="cursor-pointer border-t border-border hover:bg-muted/30 focus-visible:bg-muted/30 focus-visible:outline-none"
-                    onClick={() => void openDetail(r.id)}
-                    onKeyDown={(e) => e.key === "Enter" && void openDetail(r.id)}
-                  >
-                    <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
-                      {new Date(r.createdAt).toLocaleString()}
-                    </td>
-                    <td className="max-w-40 truncate px-3 py-2">
-                      {r.agentName ?? r.agentId}
-                      <span className="ml-1 text-muted-foreground">
-                        {r.agentVersion ? `v${r.agentVersion}` : "草稿"}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2">{SOURCE_LABEL[r.source]}</td>
-                    <td className="px-3 py-2">
-                      <Badge className={cn("border-0", STATUS_META[r.status].className)}>
-                        {STATUS_META[r.status].label}
-                      </Badge>
-                    </td>
-                    <td className="max-w-80 truncate px-3 py-2 text-muted-foreground">
-                      {r.promptPreview}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2 text-right">
-                      {formatDuration(r.durationMs)}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2 text-right">{formatCost(r.cost)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {loading && items.length === 0 && (
-              <div className="space-y-2 p-3" aria-busy>
-                {[0, 1, 2].map((i) => (
-                  <Skeleton key={i} className="h-7 w-full" />
-                ))}
-              </div>
+            {!loading && !error && (
+              <span className="text-xs text-muted-foreground">
+                {items.length} 条{cursor ? "，还有更早的" : ""}
+              </span>
             )}
-            {!loading && items.length === 0 && !error && (
-              <p className="p-6 text-center text-xs text-muted-foreground">没有符合条件的运行</p>
-            )}
-          </div>
-
-          {cursor && (
             <Button
               size="sm"
               variant="outline"
+              className="ml-auto"
+              onClick={() => void load()}
               disabled={loading}
-              onClick={() => void load(cursor)}
-              className="self-start"
             >
-              加载更多
+              <RefreshCw className={cn("size-[15px]", loading && "animate-spin")} />
+              刷新
             </Button>
-          )}
+          </div>
+
+          <section
+            aria-label="运行列表"
+            className="overflow-hidden rounded-2xl border border-border bg-card"
+          >
+            {error ? (
+              <EmptyState
+                title="运行记录没有载入"
+                action={
+                  <Button variant="outline" onClick={() => void load()}>
+                    <RefreshCw />
+                    重试
+                  </Button>
+                }
+              >
+                {error}
+              </EmptyState>
+            ) : loading && items.length === 0 ? (
+              <div className="space-y-3 p-5" aria-busy>
+                {[0, 1, 2, 3].map((i) => (
+                  <Skeleton key={i} className="h-8 w-full" />
+                ))}
+                <p className="text-center text-sm text-muted-foreground">正在载入运行记录…</p>
+              </div>
+            ) : items.length === 0 ? (
+              <EmptyState
+                title="没有符合条件的运行"
+                action={
+                  filtered ? (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setAgentId("");
+                        setStatus("");
+                        setSource("");
+                      }}
+                    >
+                      清除筛选
+                    </Button>
+                  ) : undefined
+                }
+              >
+                {filtered ? "换个筛选条件试试。" : "去对话里用一次智能体，运行就会出现在这里。"}
+              </EmptyState>
+            ) : (
+              <div className={tb.wrap}>
+                <table className={cn(tb.table, "min-w-[880px]")}>
+                  <caption className="sr-only">运行列表,按回车查看详情</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col" className={cn(tb.th, tb.first)}>
+                        时间
+                      </th>
+                      <th scope="col" className={tb.th}>
+                        智能体
+                      </th>
+                      <th scope="col" className={tb.th}>
+                        来源
+                      </th>
+                      <th scope="col" className={tb.th}>
+                        状态
+                      </th>
+                      <th scope="col" className={tb.th}>
+                        输入
+                      </th>
+                      <th scope="col" className={tb.th}>
+                        耗时
+                      </th>
+                      <th scope="col" className={cn(tb.th, tb.last, tb.right)}>
+                        花费
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((r) => {
+                      const tokens = tokensText(r.cost);
+                      return (
+                        <tr
+                          key={r.id}
+                          tabIndex={0}
+                          className={cn(tb.clickRow, detail?.id === r.id && tb.selRow)}
+                          onClick={() => void openDetail(r.id)}
+                          onKeyDown={(e) => e.key === "Enter" && void openDetail(r.id)}
+                        >
+                          <td className={cn(tb.td, tb.first, tb.num)}>
+                            <span title={new Date(r.createdAt).toLocaleString()}>
+                              {shortTime(r.createdAt)}
+                            </span>
+                          </td>
+                          <td className={tb.td}>
+                            <span className="flex items-center gap-2 whitespace-nowrap">
+                              <AgentAvatar
+                                id={r.agentId}
+                                icon={agentById.get(r.agentId)?.icon}
+                                size={24}
+                              />
+                              <span className="max-w-40 truncate">{r.agentName ?? r.agentId}</span>
+                              <VersionBadge version={r.agentVersion} />
+                            </span>
+                          </td>
+                          <td className={cn(tb.td, "whitespace-nowrap")}>
+                            {SOURCE_LABEL[r.source]}
+                          </td>
+                          <td className={tb.td}>
+                            <StatusBadge status={r.status} />
+                          </td>
+                          <td className={tb.td}>
+                            <div
+                              className={cn(
+                                "max-w-[300px] truncate",
+                                looksLikeJson(r.promptPreview) && "font-mono text-[13px]",
+                              )}
+                              title={r.promptPreview}
+                            >
+                              {r.promptPreview}
+                            </div>
+                          </td>
+                          <td className={cn(tb.td, tb.num)}>{formatDuration(r.durationMs)}</td>
+                          <td className={cn(tb.td, tb.last, tb.num, tb.right)}>
+                            {tokens ? (
+                              <>
+                                {tokens}
+                                {r.cost?.partial && (
+                                  <Badge
+                                    variant="warning"
+                                    className="ml-1"
+                                    title="有模型调用没回报用量,统计不完整"
+                                  >
+                                    部分
+                                  </Badge>
+                                )}
+                                {r.cost?.usd ? (
+                                  <div className="text-xs text-muted-foreground">
+                                    {formatUsd(toMicroUsd(r.cost.usd))}
+                                  </div>
+                                ) : null}
+                              </>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {!error && items.length > 0 && (
+              <div className="flex items-center justify-center gap-2.5 p-3.5">
+                {cursor ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={loading}
+                    onClick={() => void load(cursor)}
+                  >
+                    {loading ? "载入中…" : "加载更多"}
+                  </Button>
+                ) : (
+                  <span className="text-xs text-muted-foreground">没有更早的运行了</span>
+                )}
+              </div>
+            )}
+          </section>
         </>
       )}
 
       <Sheet open={detail !== null} onOpenChange={(o) => !o && setDetail(null)}>
-        <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
+        <SheetContent showCloseButton={false} className="w-full gap-0 p-0 sm:max-w-[520px]">
           {detail && (
             <>
-              <SheetHeader>
-                <SheetTitle>
-                  {detail.agentName ?? detail.agentId}
-                  <span className="ml-2 font-normal text-muted-foreground text-sm">
-                    {detail.agentVersion ? `v${detail.agentVersion}` : "草稿"}
+              <div className="flex items-center gap-3 border-b border-line-soft px-[22px] py-[18px]">
+                <AgentAvatar id={detail.agentId} icon={detailAgent?.icon} size={36} />
+                <div className="min-w-0 flex-1">
+                  <SheetTitle className="flex flex-wrap items-center gap-2 text-base font-semibold">
+                    <span className="truncate">{detail.agentName ?? detail.agentId}</span>
+                    <VersionBadge version={detail.agentVersion} />
+                  </SheetTitle>
+                  <SheetDescription className="text-xs">
+                    {new Date(detail.createdAt).toLocaleString()}，{SOURCE_LABEL[detail.source]}，
+                    {formatDuration(detail.durationMs)}
+                  </SheetDescription>
+                </div>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  aria-label="关闭"
+                  className="max-md:size-11"
+                  onClick={() => setDetail(null)}
+                >
+                  <X />
+                </Button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto px-[22px] py-[18px] text-sm">
+                <div className="mb-3.5 flex flex-wrap items-center gap-2">
+                  <StatusBadge status={detail.status} />
+                  <span className="text-xs text-muted-foreground">
+                    {tokensText(detail.cost) ?? "没有用量记录"}
+                    {detail.cost?.usd ? `，${formatUsd(toMicroUsd(detail.cost.usd))}` : ""}
+                    {detail.cost?.partial ? "（部分，统计不完整）" : ""}
                   </span>
-                </SheetTitle>
-                <SheetDescription>
-                  {new Date(detail.createdAt).toLocaleString()} · {SOURCE_LABEL[detail.source]} ·{" "}
-                  {STATUS_META[detail.status].label} · {formatDuration(detail.durationMs)} ·{" "}
-                  {formatCost(detail.cost)}
-                </SheetDescription>
-              </SheetHeader>
-              <div className="space-y-4 px-4 pb-6 text-sm">
-                <section className="space-y-1">
-                  <h3 className="text-xs text-muted-foreground">输入</h3>
-                  <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/30 p-2 font-mono text-xs">
-                    {detail.prompt}
+                  {canCancelRun(detail.status) && (
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="ml-auto"
+                      disabled={cancelling}
+                      onClick={() =>
+                        confirm.ask({
+                          title: "取消这次运行？",
+                          description:
+                            detail.status === "pending"
+                              ? `「${detail.agentName ?? detail.agentId}」会立即停止，排队中的运行不会产生费用。`
+                              : `「${detail.agentName ?? detail.agentId}」会立即停止，已经消耗的 tokens 照常计费，冻结的多余积分会退回。`,
+                          confirmLabel: "取消运行",
+                          destructive: true,
+                          onConfirm: () => cancelRun(detail),
+                        })
+                      }
+                    >
+                      <Square className="size-3.5" />
+                      {cancelling ? "取消中…" : "取消运行"}
+                    </Button>
+                  )}
+                </div>
+                <DetailSection title="输入">
+                  <pre className="mt-1.5 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-[10px] bg-[#F6F5F1] px-3 py-2.5 font-mono text-[13px]">
+                    {prettyInput(detail.prompt)}
                   </pre>
-                </section>
+                </DetailSection>
                 {detail.error?.message && (
-                  <section className="space-y-1">
-                    <h3 className="text-xs text-muted-foreground">
-                      错误{detail.error.kind ? `(${detail.error.kind})` : ""}
-                    </h3>
-                    <p className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
+                  <DetailSection title="错误">
+                    <div className="mt-1.5 rounded-xl border border-[#EBC5BB] bg-destructive-soft px-3 py-2.5 text-[#8F3423]">
+                      {detail.error.kind && (
+                        <div className="mb-0.5 font-mono text-xs">kind: {detail.error.kind}</div>
+                      )}
                       {detail.error.message}
-                    </p>
-                  </section>
+                    </div>
+                  </DetailSection>
                 )}
                 {detail.structured !== undefined && (
-                  <section className="space-y-1">
-                    <h3 className="text-xs text-muted-foreground">结构化结果</h3>
-                    <pre className="max-h-64 overflow-auto rounded-md border border-border bg-muted/30 p-2 font-mono text-xs">
+                  <DetailSection title="结构化结果">
+                    <pre className="mt-1.5 max-h-72 overflow-auto rounded-[10px] bg-[#F6F5F1] px-3 py-2.5 font-mono text-[13px]">
                       {JSON.stringify(detail.structured, null, 2)}
                     </pre>
-                  </section>
+                  </DetailSection>
                 )}
-                {detail.finalText && (
-                  <section className="space-y-1">
-                    <h3 className="text-xs text-muted-foreground">最终回答</h3>
-                    <div className="rounded-md border border-border p-2">
+                {detail.finalText ? (
+                  <DetailSection title="最终回答">
+                    <div className="mt-1">
                       <MessageResponse>{detail.finalText}</MessageResponse>
                     </div>
-                  </section>
-                )}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() =>
-                    window.open(`/chat?session=${encodeURIComponent(detail.sessionId)}`, "_blank")
-                  }
-                >
-                  <ExternalLink className="size-3.5" />
-                  在工作台查看完整过程
+                  </DetailSection>
+                ) : canCancelRun(detail.status) ? (
+                  <DetailSection title="最终回答">
+                    <p className="mt-1 text-muted-foreground">运行结束后显示。</p>
+                  </DetailSection>
+                ) : detail.status === "cancelled" ? (
+                  <DetailSection title="最终回答">
+                    <p className="mt-1 text-muted-foreground">
+                      运行在完成前被取消，没有最终回答。已消耗的 tokens 照常计费。
+                    </p>
+                  </DetailSection>
+                ) : null}
+                <DetailSection>
+                  <dl className="grid grid-cols-[84px_1fr] items-center gap-x-3 gap-y-1.5">
+                    <dt className="text-muted-foreground">taskId</dt>
+                    <dd className="flex min-w-0 items-center gap-1 font-mono text-[13px] break-all">
+                      {detail.id}
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        aria-label="复制 taskId"
+                        onClick={() => void copy(detail.id)}
+                      >
+                        <Copy className="size-3.5" />
+                      </Button>
+                    </dd>
+                    <dt className="text-muted-foreground">会话</dt>
+                    <dd className="font-mono text-[13px] break-all">{detail.sessionId}</dd>
+                  </dl>
+                </DetailSection>
+                <Button variant="outline" className="w-full" asChild>
+                  <a
+                    href={`/chat?session=${encodeURIComponent(detail.sessionId)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <MessageSquare />
+                    在对话里查看完整过程
+                    <ExternalLink className="size-3.5" />
+                  </a>
                 </Button>
-                <p className="font-mono text-[11px] text-muted-foreground">taskId: {detail.id}</p>
               </div>
             </>
           )}
         </SheetContent>
       </Sheet>
-    </SpaceShell>
+      {confirm.dialog}
+    </>
+  );
+}
+
+function DetailSection({ title, children }: { title?: string; children: React.ReactNode }) {
+  return (
+    <section className="mb-3 rounded-[14px] border border-border px-4 py-3.5">
+      {title && <h3 className="text-sm font-semibold">{title}</h3>}
+      {children}
+    </section>
   );
 }

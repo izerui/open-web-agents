@@ -55,6 +55,38 @@ export const ACTION_LABEL: Record<AuditAction, string> = {
   "billing.order_confirm": "人工确认套餐入账",
 };
 
+/** 操作类型筛选的分组:按动作前缀归到资源;顺序即下拉里的顺序 */
+const GROUP_OF_PREFIX: readonly [string, readonly string[]][] = [
+  ["智能体", ["agent"]],
+  ["知识", ["knowledge"]],
+  ["评测", ["eval"]],
+  ["API Key", ["api_key"]],
+  ["Webhook", ["webhook"]],
+  ["审批", ["approval"]],
+  ["登录与账号", ["auth", "account", "me"]],
+  ["用户组", ["group"]],
+  ["积分与订单", ["billing"]],
+  ["模型与提供者", ["provider", "model", "capability"]],
+];
+
+export function actionGroups(): { label: string; actions: { value: string; label: string }[] }[] {
+  const entries = Object.entries(ACTION_LABEL);
+  const prefixOf = (action: string) => action.split(".")[0] ?? "";
+  const known = new Set(GROUP_OF_PREFIX.flatMap(([, p]) => p));
+  const groups = GROUP_OF_PREFIX.map(([label, prefixes]) => ({
+    label,
+    actions: entries
+      .filter(([k]) => prefixes.includes(prefixOf(k)))
+      .map(([value, text]) => ({ value, label: text })),
+  }));
+  // 以后新增了没归组的前缀,放进「其他」,不会从筛选里消失
+  const rest = entries.filter(([k]) => !known.has(prefixOf(k)));
+  if (rest.length) {
+    groups.push({ label: "其他", actions: rest.map(([value, text]) => ({ value, label: text })) });
+  }
+  return groups.filter((g) => g.actions.length > 0);
+}
+
 /** 需要特别留意的动作:界面上用醒目颜色标出。 */
 export const SENSITIVE: ReadonlySet<string> = new Set([
   "auth.login_failed",

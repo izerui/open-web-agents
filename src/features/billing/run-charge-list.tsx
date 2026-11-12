@@ -1,44 +1,40 @@
 "use client";
 
 import { LoadError } from "@/components/load-error";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CardHead, EmptyState, tb } from "@/features/settings/space-page";
+import { shortTime } from "@/features/settings/time-format";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { creditsAmount, creditsExact } from "@/lib/modules/billing/domain/credits-display";
 import type { RunChargeItem } from "@/lib/modules/billing/run-charge-ports";
-import { RefreshCw, X } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { RefreshCw } from "lucide-react";
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { chargeStatus } from "./billing-display";
 import type { ChargeDrill } from "./charge-summary";
 
-function stateText(c: RunChargeItem): string {
-  if (c.state === "open") return "冻结中";
-  if (c.state === "provisional") {
-    if (c.owedMicro && c.owedMicro !== "0") {
-      return `余额不足,欠 ${creditsAmount(c.owedMicro)} 积分,充值后自动补扣`;
-    }
-    const refunded =
-      c.refundedMicro && c.refundedMicro !== "0"
-        ? `;多扣的 ${creditsAmount(c.refundedMicro)} 积分已退还`
-        : "";
-    return `用量待补记,待核对${refunded}`;
-  }
-  if (c.owedMicro && c.owedMicro !== "0") return "余额不足补扣,待核对";
-  if (c.incomplete) return "用量不完整,待核对";
-  if (c.refundedMicro && c.refundedMicro !== "0") {
-    return `已结算(多扣的 ${creditsAmount(c.refundedMicro)} 积分已退还)`;
-  }
-  return "已结算";
-}
+const amount = (micro: string | null) =>
+  micro === null ? (
+    <span className="text-muted-foreground">—</span>
+  ) : (
+    <span title={`${creditsExact(micro)} 积分`}>{creditsAmount(micro)}</span>
+  );
 
 /** 运行计费明细:每次运行按用量应扣与实际扣除 */
 export function RunChargeList({
   accountId,
   drill,
   onClearDrill,
+  showRunsLink = false,
 }: {
   accountId?: string;
   /** 从消耗汇总点进来的筛选 */
   drill?: ChargeDrill | null;
   onClearDrill?: () => void;
+  /** 个人页:底部给「去运行记录看输入和回答」 */
+  showRunsLink?: boolean;
 }) {
   const [items, setItems] = useState<RunChargeItem[]>([]);
   const [next, setNext] = useState<string | undefined>();
@@ -76,84 +72,136 @@ export function RunChargeList({
   }, [load]);
 
   return (
-    <section className="mb-6" aria-label="运行计费明细">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-semibold">运行消耗</h2>
-        <Button
-          variant="ghost"
-          size="icon"
-          title="刷新运行消耗"
-          disabled={loading}
-          onClick={() => void load()}
-        >
-          <RefreshCw className="size-4" />
-        </Button>
-      </div>
-      {drill && (
-        <p className="mb-3 flex items-center gap-2 text-xs" data-testid="run-charge-drill">
-          <span className="rounded bg-muted px-2 py-1">只看:{drill.label}</span>
-          <Button variant="ghost" size="sm" className="h-6 px-2" onClick={onClearDrill}>
-            <X className="size-3" />
-            看全部
+    <section
+      className="mb-6 scroll-mt-4 rounded-2xl border border-border bg-card"
+      aria-label="运行计费明细"
+      id="run-charge-list"
+    >
+      <CardHead
+        title="运行明细"
+        meta={
+          drill ? (
+            <span
+              className="inline-flex h-8 items-center gap-2 rounded-full bg-primary pr-1.5 pl-3 text-[13px] text-primary-foreground"
+              data-testid="run-charge-drill"
+            >
+              只看：{drill.label}
+              <button
+                type="button"
+                className="h-6 rounded-full bg-white/15 px-2.5 text-xs"
+                onClick={onClearDrill}
+              >
+                看全部
+              </button>
+            </span>
+          ) : (
+            "点上方汇总的一行，只看那一项"
+          )
+        }
+        actions={
+          <Button
+            variant="ghost"
+            size="sm"
+            title="刷新运行消耗"
+            disabled={loading}
+            onClick={() => void load()}
+          >
+            <RefreshCw className={cn("size-[15px]", loading && "animate-spin")} />
+            刷新
           </Button>
-        </p>
+        }
+      />
+      {error && (
+        <div className="px-[22px] pb-4">
+          <LoadError compact what="运行消耗" message={error} onRetryAction={() => void load()} />
+        </div>
       )}
-      {error && <LoadError compact what="运行消耗" message={error} />}
       {items.length === 0 ? (
-        error ? null : (
-          <p className="py-5 text-sm text-muted-foreground">{loading ? "载入中…" : "暂无运行"}</p>
+        error ? null : loading ? (
+          <p className="px-[22px] pb-5 text-sm text-muted-foreground">载入中…</p>
+        ) : (
+          <EmptyState title="这段时间里没有明细" />
         )
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+        <div className={tb.wrap}>
+          <table className={cn(tb.table, "min-w-[760px]")}>
             <caption className="sr-only">运行计费明细</caption>
             <thead>
-              <tr className="border-b text-muted-foreground">
-                {["时间", "智能体", "应扣", "实际扣除", "状态"].map((t) => (
-                  <th scope="col" key={t} className="px-2 py-3">
-                    {t}
-                  </th>
-                ))}
+              <tr>
+                <th scope="col" className={cn(tb.th, tb.first)}>
+                  时间
+                </th>
+                <th scope="col" className={tb.th}>
+                  智能体
+                </th>
+                <th scope="col" className={cn(tb.th, tb.right)}>
+                  应扣
+                </th>
+                <th scope="col" className={cn(tb.th, tb.right)}>
+                  实际扣除
+                </th>
+                <th scope="col" className={cn(tb.th, tb.right)}>
+                  冻结
+                </th>
+                <th scope="col" className={cn(tb.th, tb.last)}>
+                  状态
+                </th>
               </tr>
             </thead>
             <tbody>
-              {items.map((c) => (
-                <tr key={c.runId} className="border-b align-top" data-testid="run-charge">
-                  <td className="whitespace-nowrap px-2 py-3">
-                    {new Date(c.createdAt).toLocaleString()}
-                  </td>
-                  <td className="min-w-32 max-w-xs break-words px-2 py-3">
-                    {c.agentName ?? "已删除的智能体"}
-                    <p className="mt-1 break-all text-muted-foreground">{c.runId}</p>
-                  </td>
-                  <td
-                    className="whitespace-nowrap px-2 py-3 font-mono"
-                    title={c.estimatedMicro ? `${creditsExact(c.estimatedMicro)} 积分` : undefined}
-                  >
-                    {c.estimatedMicro === null ? "—" : creditsAmount(c.estimatedMicro)}
-                  </td>
-                  <td
-                    className="whitespace-nowrap px-2 py-3 font-mono"
-                    title={c.chargedMicro ? `${creditsExact(c.chargedMicro)} 积分` : undefined}
-                  >
-                    {c.chargedMicro === null ? "—" : creditsAmount(c.chargedMicro)}
-                  </td>
-                  <td className="px-2 py-3">{stateText(c)}</td>
-                </tr>
-              ))}
+              {items.map((c) => {
+                const st = chargeStatus(c);
+                return (
+                  <tr key={c.runId} data-testid="run-charge">
+                    <td className={cn(tb.td, tb.first, tb.num)}>
+                      <span title={new Date(c.createdAt).toLocaleString()}>
+                        {shortTime(c.createdAt)}
+                      </span>
+                    </td>
+                    <td className={cn(tb.td, "min-w-40 max-w-xs break-words")}>
+                      {c.agentName ?? "已删除的智能体"}
+                      <div className="break-all font-mono text-xs text-muted-foreground">
+                        {c.runId}
+                      </div>
+                    </td>
+                    <td className={cn(tb.td, tb.num, tb.right, "font-mono")}>
+                      {amount(c.estimatedMicro)}
+                    </td>
+                    <td className={cn(tb.td, tb.num, tb.right, "font-mono")}>
+                      {amount(c.chargedMicro)}
+                    </td>
+                    <td className={cn(tb.td, tb.num, tb.right, "font-mono")}>
+                      {amount(c.reservedMicro)}
+                    </td>
+                    <td className={cn(tb.td, tb.last, "min-w-44")}>
+                      <Badge variant={st.tone}>{st.label}</Badge>
+                      {st.note && (
+                        <div className="mt-0.5 text-xs text-muted-foreground">{st.note}</div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       )}
-      {next && (
-        <Button
-          variant="outline"
-          className="mt-4"
-          disabled={loading}
-          onClick={() => void load(next)}
-        >
-          加载更早的运行
-        </Button>
+      {(next || showRunsLink) && (
+        <div className="flex flex-wrap items-center justify-center gap-4 p-3.5">
+          {next && (
+            <Button variant="outline" size="sm" disabled={loading} onClick={() => void load(next)}>
+              加载更早的运行
+            </Button>
+          )}
+          {showRunsLink && (
+            <Link
+              className="text-xs underline decoration-[#C9C4B8] underline-offset-[3px]"
+              href="/developer/runs"
+            >
+              去运行记录看每次运行的输入和回答
+            </Link>
+          )}
+        </div>
       )}
     </section>
   );

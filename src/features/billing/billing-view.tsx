@@ -28,6 +28,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { BatchCreditForm } from "./batch-credit-form";
 import { type ChargeDrill, ChargeSummary, WINDOW_LABEL } from "./charge-summary";
+import { LedgerTable } from "./ledger-table";
 import { PendingCharges } from "./pending-charges";
 import { ReconciliationView } from "./reconciliation-view";
 import { RunChargeList } from "./run-charge-list";
@@ -44,7 +45,6 @@ type Statement = {
   };
 };
 type Account = { id: string; email: string; disabled?: boolean };
-const KIND = { credit: "人工入账", reserve: "冻结", settle: "结算", refund: "多扣退还" } as const;
 type AccountView = "overview" | "runs" | "ledger";
 type AdminView = "overview" | "accounts" | "reconciliation";
 
@@ -462,52 +462,7 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
                 {statement.items.length === 0 ? (
                   <p className="py-5 text-sm text-muted-foreground">暂无流水</p>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <caption className="sr-only">积分账户流水</caption>
-                      <thead>
-                        <tr className="border-b text-muted-foreground">
-                          {["时间", "类型", "积分", "可用余额", "说明 / 关联"].map((title) => (
-                            <th scope="col" key={title} className="px-2 py-3">
-                              {title}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {statement.items.map((entry) => (
-                          <tr key={entry.id} className="border-b align-top">
-                            <td className="whitespace-nowrap px-2 py-3">
-                              {new Date(entry.createdAt).toLocaleString()}
-                            </td>
-                            <td className="whitespace-nowrap px-2 py-3">
-                              {entry.kind === "settle" && entry.amountMicroCredits === "0"
-                                ? "释放冻结"
-                                : KIND[entry.kind]}
-                            </td>
-                            <td className="whitespace-nowrap px-2 py-3 font-mono">
-                              {entry.kind === "credit" || entry.kind === "refund"
-                                ? "+"
-                                : entry.kind === "settle" && entry.amountMicroCredits !== "0"
-                                  ? "-"
-                                  : ""}
-                              {creditsExact(entry.amountMicroCredits)}
-                            </td>
-                            <td className="whitespace-nowrap px-2 py-3 font-mono">
-                              {creditsExact(entry.availableAfter)}
-                              <p className="mt-1 text-muted-foreground">
-                                冻结 {creditsExact(entry.reservedAfter)}
-                              </p>
-                            </td>
-                            <td className="min-w-40 max-w-sm break-words px-2 py-3">
-                              {entry.reason || entry.reference}
-                              <p className="mt-1 break-all text-muted-foreground">{entry.id}</p>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <LedgerTable items={statement.items} />
                 )}
                 {statement.nextCursor && (
                   <Button

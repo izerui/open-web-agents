@@ -47,7 +47,7 @@ export default function RouteError({
         <Button asChild variant="outline" size="sm">
           <Link href="/">
             <Home className="size-3.5" />
-            回工作台
+            回到探索
           </Link>
         </Button>
       </div>

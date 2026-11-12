@@ -1,0 +1,110 @@
+import { describe, expect, it } from "vitest";
+import { billingTab, chargeStatus, ledgerKind, monthShare, shareOf } from "../billing-display";
+
+describe("billingTab:地址里的 ?tab= → 页签", () => {
+  it.each([
+    ["packages", "packages"],
+    ["ledger", "ledger"],
+    ["runs", "runs"],
+    // 原型里的锚点叫 cost
+    ["cost", "runs"],
+    ["overview", "overview"],
+    ["", "overview"],
+    [null, "overview"],
+    ["nope", "overview"],
+  ])("%s → %s", (raw, tab) => {
+    expect(billingTab(raw)).toBe(tab);
+  });
+});
+
+const entry = (kind: "credit" | "reserve" | "settle" | "refund", amount: string) => ({
+  kind,
+  amountMicroCredits: amount,
+});
+
+describe("ledgerKind:流水类型、正负与色调", () => {
+  it("入账与多扣退还是加项", () => {
+    expect(ledgerKind(entry("credit", "5"))).toEqual({
+      label: "人工入账",
+      sign: "+",
+      tone: "success",
+    });
+    expect(ledgerKind(entry("refund", "5"))).toEqual({
+      label: "多扣退还",
+      sign: "+",
+      tone: "success",
+    });
+  });
+  it("冻结是减项、提醒色", () => {
+    expect(ledgerKind(entry("reserve", "5"))).toEqual({
+      label: "冻结",
+      sign: "-",
+      tone: "warning",
+    });
+  });
+  it("结算为减项;结算 0 是释放冻结", () => {
+    expect(ledgerKind(entry("settle", "5"))).toEqual({ label: "结算", sign: "-", tone: "default" });
+    expect(ledgerKind(entry("settle", "0"))).toEqual({
+      label: "释放冻结",
+      sign: "",
+      tone: "outline",
+    });
+  });
+});
+
+describe("monthShare:本月已用占月度上限", () => {
+  it("没有上限 = null", () => {
+    expect(monthShare({ usedMicroCredits: "5", limitMicroCredits: null })).toBeNull();
+    expect(monthShare(undefined)).toBeNull();
+  });
+  it("按比例取整、封顶 100", () => {
+    expect(monthShare({ usedMicroCredits: "37", limitMicroCredits: "100" })).toBe(37);
+    expect(monthShare({ usedMicroCredits: "300", limitMicroCredits: "100" })).toBe(100);
+    expect(monthShare({ usedMicroCredits: "0", limitMicroCredits: "0" })).toBe(100);
+  });
+});
+
+const charge = (over: Partial<Parameters<typeof chargeStatus>[0]>) => ({
+  state: "settled" as const,
+  owedMicro: null,
+  refundedMicro: null,
+  incomplete: false,
+  ...over,
+});
+
+describe("chargeStatus:一次运行的扣费状态", () => {
+  it("冻结中", () => {
+    expect(chargeStatus(charge({ state: "open" }))).toMatchObject({
+      label: "冻结中",
+      tone: "warning",
+    });
+  });
+  it("已结算 / 多扣已退还", () => {
+    expect(chargeStatus(charge({}))).toMatchObject({ label: "已结算", tone: "success", note: "" });
+    expect(chargeStatus(charge({ refundedMicro: "2000000" }))).toMatchObject({
+      label: "多扣已退还",
+      tone: "success",
+    });
+  });
+  it("暂记欠额:充值后自动补扣", () => {
+    const s = chargeStatus(charge({ state: "provisional", owedMicro: "3400000" }));
+    expect(s).toMatchObject({ label: "欠额", tone: "destructive" });
+    expect(s.note).toContain("充值后自动补扣");
+  });
+  it("暂记无欠额 = 待核对", () => {
+    expect(chargeStatus(charge({ state: "provisional" }))).toMatchObject({ label: "待核对" });
+  });
+  it("已结算但用量不完整或补扣不足 = 待核对", () => {
+    expect(chargeStatus(charge({ incomplete: true })).label).toBe("待核对");
+    expect(chargeStatus(charge({ owedMicro: "1" })).label).toBe("待核对");
+  });
+});
+
+describe("shareOf:条形宽度", () => {
+  it("占最大值的百分比,有值至少 2%", () => {
+    expect(shareOf("50", "200")).toBe(25);
+    expect(shareOf("1", "1000")).toBe(2);
+    expect(shareOf("0", "1000")).toBe(0);
+    expect(shareOf("5", "0")).toBe(0);
+  });
+});

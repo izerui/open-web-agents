@@ -33,9 +33,9 @@ pnpm dev                          # http://localhost:5678
 
 ### 一分钟体验闭环
 
-1. `/builder` 建一个智能体,填提示词;想让它能被系统调用就再填 `outputSchema`
-2. `/` 工作台里跟它对话,右侧看它在独立工作目录里生成的文件
-3. 「设置 → 接入中心」(`/settings/keys`)签发 API Key,并按智能体复制 curl / Python / Node 代码;或者直接:
+1. 「工作室」(`/agents`)建一个智能体,填提示词;想让它能被系统调用就再填 `outputSchema`
+2. 「对话」(`/chat`)里跟它对话,右侧看它在独立工作目录里生成的文件
+3. 「开发者 → API Key 与签名密钥」(`/developer/keys`)签发 API Key;按智能体复制 curl / Python / Node 代码在它的构建页「接入」(`/agents/<id>?stage=access`);或者直接:
 
 ```bash
 curl -X POST localhost:5678/api/agents/<智能体id>/invoke \
@@ -74,8 +74,8 @@ curl localhost:5678/api/agents/<taskId>/result -H "X-Api-Key: <key>"
 
 ## 平台 AI 编辑
 
-在「我的智能体」里点 **AI 创建**或 **AI 编辑**,进入 `/agents/design`。
-设计记录单独列示,不混进普通工作台。历史 `/?session=...` 设计链接会跳到新的入口。
+在「工作室」里用**智能体设计器**新建或修改智能体,进入 `/agents/<id>?designer=<设计会话>`(新建为 `/agents/new?designer=…`)。
+设计记录单独列示,不混进普通对话。历史 `/agents/design?session=...`、`/?session=...` 设计链接会跳到新的入口。
 
 设计草稿保存在数据库,AI 每轮只读写工作副本 `design-draft.json`,完成后导入。
 手动编辑与 AI 修改使用同一份草稿;保存有修订检查,应用时在事务内锁定目标并复查基线。
@@ -121,12 +121,12 @@ node_modules 加载子进程脚本及其依赖。超过单篇上限的文件按�
 
 ## 智能体市场与模型价目
 
-- `/market`:搜索、分类、已发布详情、立即使用及 API 接入;平台管理员可上下架。
+- `/`(探索)与 `/market/<id>`:搜索、分类、已发布详情、立即使用及 API 接入;平台管理员可上下架。旧的 `/market` 跳到 `/`。
 - 市场仅授予使用权,不额外授予提示词、技能源码、MCP 或版本定义的读取权限。
 - 市场会话显式使用发布版,作者在构建器的草稿试运行保持原行为。
 - 下架不删历史、不撤掉已有的独立 read 分享;纯市场使用权不再允许发起新调用。
 - `/admin/capabilities`:管理 LLM(含图片理解)、生图、视频、语音能力目录和版本化积分价目。
-- `/settings/credentials`:查看平台状态与已发布的能力价目。
+- `/account/prices`(模型价格):查看平台状态与已发布的能力价目。
 - 价目使用整数微积分,按 token、图片数、视频/音频毫秒或字符分别计量。
 - 当前目录与计量基础**尚未启用积分扣款**,未接入的媒体模型标为待接入。
 
@@ -135,7 +135,7 @@ SDK 结果中的 `modelUsage` 随运行结果保存,区分实际模型、普通�
 
 ## 积分账户基础
 
-- `/settings/billing`:当前账号的可用积分、预占积分和分页流水。
+- `/account/billing`(积分与套餐):当前账号的可用积分、冻结积分、流水、充值订单(`?tab=packages`)与运行消耗(`?tab=runs`)。
 - `/admin/billing`:管理员按账号查看账务并人工发放积分;需填写说明并确认。
 - `POST /api/billing/credits`:仅管理员,须带 `Idempotency-Key`;相同请求重放不会重复到账,
   同键不同内容拒绝。此接口是人工入账,不是支付成功回调。

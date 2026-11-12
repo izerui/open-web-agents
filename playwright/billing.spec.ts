@@ -66,20 +66,20 @@ test.describe("积分与计费界面", () => {
     }
   });
 
-  test("接入中心:给 Key 设本月积分上限,可取消", async ({ page, context }) => {
+  test("API Key 页:给 Key 设本月积分上限,可取消", async ({ page, context }) => {
     await register(context, "keylimit");
     const issued = await context.request.post(`${BASE}/api/keys`, { data: { name: "pw-limit" } });
     expect(issued.ok()).toBeTruthy();
     await page.goto(`${BASE}/developer/keys`);
-    const limit = page.getByRole("button", { name: /不单独限额/ });
-    await expect(limit).toBeVisible();
-    await limit.click();
+    const row = page.getByRole("row").filter({ hasText: "pw-limit" });
+    await expect(row).toContainText("不限额");
+    await row.getByRole("button", { name: "修改月度积分上限" }).click();
     await page.getByLabel("本月积分上限").fill("100");
-    await page.getByRole("button", { name: "保存" }).click();
-    await expect(page.getByRole("button", { name: /\/ 100\.00 积分/ })).toBeVisible();
-    await page.getByRole("button", { name: /\/ 100\.00 积分/ }).click();
-    await page.getByRole("button", { name: "不限额" }).click();
-    await expect(page.getByRole("button", { name: /不单独限额/ })).toBeVisible();
+    await row.getByRole("button", { name: "保存" }).click();
+    await expect(row).toContainText("/ 100.00");
+    await row.getByRole("button", { name: "修改月度积分上限" }).click();
+    await row.getByRole("button", { name: "设为不限额" }).click();
+    await expect(row).toContainText("/ 不限额");
   });
 
   test("管理员积分管理:没有计费模式与试算", async ({ page, context }) => {
@@ -130,13 +130,13 @@ test.describe("积分与计费界面", () => {
       await page.getByRole("tab", { name: "运行消耗", exact: true }).click();
       const row = (i: number) =>
         page.getByTestId("run-charge").filter({ hasText: rows[i]?.id ?? "" });
-      await expect(row(0)).toContainText("余额不足,欠 27.75 积分,充值后自动补扣");
+      await expect(row(0)).toContainText("欠额余额不足,欠 27.75 积分,充值后自动补扣");
       await expect(row(0).locator("td").nth(3)).toHaveText("30.00");
-      await expect(row(1)).toContainText("用量待补记,待核对");
+      await expect(row(1)).toContainText("待核对用量待补记");
       await expect(row(1)).not.toContainText("退还");
       await expect(row(1).locator("td").nth(2)).toHaveText("69.30");
       await expect(row(1).locator("td").nth(3)).toHaveText("92.40");
-      await expect(row(2)).toContainText("用量待补记,待核对");
+      await expect(row(2)).toContainText("待核对用量待补记");
     } finally {
       for (const r of rows) await sql("DELETE FROM run_charges WHERE run_id = ?", [r.id]);
     }
@@ -153,7 +153,7 @@ test.describe("积分与计费界面", () => {
       await page.reload();
       await page.getByRole("tab", { name: "运行消耗", exact: true }).click();
       const r = page.getByTestId("run-charge").filter({ hasText: refunded });
-      await expect(r).toContainText("已结算(多扣的 23.10 积分已退还)");
+      await expect(r).toContainText("多扣已退还多扣的 23.10 积分已退还");
       await expect(r.locator("td").nth(3)).toHaveText("69.30");
     } finally {
       await sql("DELETE FROM run_charges WHERE run_id = ?", [refunded]);

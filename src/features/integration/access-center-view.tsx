@@ -3,7 +3,7 @@
 import type { AgentSummary } from "@/features/workbench/types";
 import { Copy, ExternalLink } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -57,7 +57,6 @@ function expiryText(k: KeyRecord, now: number): { text: string; urgent: boolean 
  */
 export function AccessCenterView({ agentId }: { agentId?: string } = {}) {
   const searchParams = useSearchParams();
-  const pathname = usePathname();
   const router = useRouter();
   // 构建页的「接入」阶段直接传入智能体;旧的 ?agent= 仍然认
   const requestedAgent = agentId ?? searchParams.get("agent");
@@ -151,15 +150,8 @@ export function AccessCenterView({ agentId }: { agentId?: string } = {}) {
   }, [reload]);
 
   function selectDocAgent(id: string) {
-    // 构建页「接入」阶段(地址里固定了智能体):换智能体就换到那个智能体的接入页
-    if (agentId) {
-      if (id) router.push(agentHref({ id, stage: "access" }), { scroll: false });
-      return;
-    }
-    const query = new URLSearchParams(searchParams.toString());
-    if (id) query.set("agent", id);
-    else query.delete("agent");
-    router.push(`${pathname}${query.size ? `?${query}` : ""}`, { scroll: false });
+    // 换智能体就换到那个智能体的接入页;不再产生 /developer/keys?agent= 这类地址
+    if (id) router.push(agentHref({ id, stage: "access" }), { scroll: false });
   }
 
   async function issueKey() {

@@ -54,8 +54,8 @@ export const SIDE_NAV: Record<"developer" | "account" | "admin", readonly SideGr
     {
       group: "积分",
       items: [
-        { href: "/account/billing", label: "积分与消耗", icon: Coins },
-        { href: "/account/packages", label: "充值与订单", icon: Package },
+        // 充值与订单是「积分与套餐」的一个页签(/account/billing?tab=packages),不再单列
+        { href: "/account/billing", label: "积分与套餐", icon: Coins },
         { href: "/account/usage", label: "用量分析", icon: BarChart3 },
         { href: "/account/prices", label: "模型价格", icon: ReceiptText },
       ],
@@ -111,15 +111,20 @@ const SETTINGS_TO_ACCOUNT: Record<string, string> = {
   "/settings/account": "/account/security",
   "/settings/credentials": "/account/prices",
   "/settings/billing": "/account/billing",
-  "/settings/packages": "/account/packages",
+  "/settings/packages": "/account/billing?tab=packages",
+  "/account/packages": "/account/billing?tab=packages",
   "/settings/usage": "/account/usage",
   "/usage": "/account/usage",
   "/settings/audit": "/account/audit",
 };
 
 function withQuery(path: string, q: URLSearchParams): string {
-  const s = q.toString();
-  return s ? `${path}?${s}` : path;
+  // 目标自带查询(如 ?tab=packages)时与旧地址的参数合并,目标里的值优先
+  const [base = path, own] = path.split("?");
+  const merged = new URLSearchParams(q);
+  for (const [k, v] of new URLSearchParams(own ?? "")) merged.set(k, v);
+  const s = merged.toString();
+  return s ? `${base}?${s}` : base;
 }
 
 /**
@@ -142,14 +147,21 @@ export function legacyRedirect(pathname: string, search: URLSearchParams): strin
     }
     return null;
   }
-  if (pathname === "/settings/keys" || pathname === "/settings/runs") {
+  if (
+    pathname === "/settings/keys" ||
+    pathname === "/settings/runs" ||
+    pathname === "/developer/keys" ||
+    pathname === "/developer/runs"
+  ) {
+    // 单个智能体的接入与运行在它的构建页;开发者空间只放账号级的 Key 与全部运行
     const agent = q.get("agent");
-    const stage = pathname === "/settings/keys" ? "access" : "runs";
+    const stage = pathname.endsWith("/keys") ? "access" : "runs";
     if (agent) {
       q.delete("agent");
       q.set("stage", stage);
       return withQuery(`/agents/${encodeURIComponent(agent)}`, q);
     }
+    if (pathname.startsWith("/developer")) return null;
     return withQuery(pathname.replace("/settings", "/developer"), q);
   }
   const account = SETTINGS_TO_ACCOUNT[pathname];

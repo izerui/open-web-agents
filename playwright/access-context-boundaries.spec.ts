@@ -73,7 +73,7 @@ test.describe("运行与接入的对象边界", () => {
     await expect(page.getByLabel("按智能体筛选")).toHaveCount(0);
 
     await page.goto("/developer/runs");
-    await expect(page.getByRole("heading", { level: 1, name: "全部运行" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "运行记录" })).toBeVisible();
     await expect(page.getByLabel("按智能体筛选")).toBeEnabled();
     const filtered = page.waitForRequest((request) => {
       const url = new URL(request.url());
@@ -112,8 +112,9 @@ test.describe("运行与接入的对象边界", () => {
       await expect(page.getByRole("button", { name: "签发", exact: true })).toHaveCount(0);
       await expect(page.getByRole("link", { name: "OpenAPI 文档" })).toHaveCount(0);
     }
+    // 换智能体落到它的构建页「接入」,不再产生 /developer/keys?agent= 地址
     await page.getByLabel("选择接入智能体").selectOption(first);
-    await expect(page).toHaveURL(`${BASE}/developer/keys?agent=${first}`);
+    await expect(page).toHaveURL(`${BASE}/agents/${first}?stage=access`);
     await expect(page.getByRole("heading", { level: 1, name: firstName })).toBeVisible();
     await expect(page.getByLabel("选择接入智能体")).toHaveCount(0);
     await expect(page.getByRole("link", { name: "OpenAPI 文档" })).toHaveAttribute(
@@ -122,27 +123,28 @@ test.describe("运行与接入的对象边界", () => {
     );
   });
 
-  test("全局显示账号全部 Key，对象切换与返回保留独立凭证绑定", async ({ page }) => {
+  test("开发者页显示账号全部 Key，按智能体的接入入口落到构建页", async ({ page }) => {
     await page.goto("/developer/keys");
-    await expect(page.getByText("我的 API Key", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "API Key 与签名密钥" })).toBeVisible();
     await expect(page.getByRole("navigation", { name: "当前智能体工作区" })).toHaveCount(0);
     for (const id of [first, second, "all"]) {
       await expect(page.getByText(`scope-${id}-${stamp}`)).toBeVisible();
     }
     await expect(page.getByLabel("限定智能体")).toHaveValue("");
-    await page.getByLabel("限定智能体").selectOption(second);
-    await page.getByLabel("选择接入智能体").selectOption(first);
-    await expect(page).toHaveURL(`${BASE}/developer/keys?agent=${first}`);
+    await page
+      .getByRole("region", { name: "按智能体查看调用文档" })
+      .getByRole("link", { name: new RegExp(firstName) })
+      .click();
+    await expect(page).toHaveURL(`${BASE}/agents/${first}?stage=access`);
     await expect(page.getByRole("heading", { level: 1, name: firstName })).toBeVisible();
-    await expect(page.getByLabel("限定智能体")).toHaveValue(second);
     await expect(page.getByText("可用于此智能体的 API Key", { exact: true })).toBeVisible();
     await expect(page.getByText(`scope-${first}-${stamp}`)).toBeVisible();
     await expect(page.getByText(`scope-all-${stamp}`)).toBeVisible();
     await expect(page.getByText(`scope-${second}-${stamp}`)).toHaveCount(0);
     await page.getByRole("link", { name: "全部 API Key", exact: true }).click();
     await expect(page).toHaveURL(`${BASE}/developer/keys`);
-    await expect(page.getByText("我的 API Key", { exact: true })).toBeVisible();
-    await expect(page.getByLabel("限定智能体")).toHaveValue(second);
-    await expect(page.getByText(`scope-${second}-${stamp}`)).toBeVisible();
+    // 旧的单智能体地址重定向到构建页
+    await page.goto(`/developer/keys?agent=${second}`);
+    await expect(page).toHaveURL(`${BASE}/agents/${second}?stage=access`);
   });
 });
