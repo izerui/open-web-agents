@@ -118,7 +118,7 @@ export function AccountBillingView() {
       }
     >
       <Tabs value={tab} onValueChange={(v) => openTab(v as BillingTab)}>
-        <div className="mb-4 overflow-x-auto border-b border-border">
+        <div className="mb-4 overflow-x-auto overflow-y-hidden border-b border-border">
           <TabsList aria-label="积分与套餐" className="h-auto bg-transparent p-0">
             {BILLING_TABS.map((t) => (
               <TabsTrigger
@@ -249,7 +249,7 @@ function Overview({
           请联系管理员在「平台管理」的「账号」里为你设置积分上限。
         </Banner>
       )}
-      <dl className="mb-4 grid gap-3.5 md:grid-cols-3">
+      <dl className="mb-4 grid grid-cols-1 gap-3.5 md:grid-cols-3">
         <StatCard
           label="可用"
           testId="balance-available"
@@ -297,7 +297,7 @@ function Overview({
           )}
         </StatCard>
       </dl>
-      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
         <section aria-label="最近流水" className="rounded-2xl border border-border bg-card pb-1.5">
           <CardHead
             title="最近流水"

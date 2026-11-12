@@ -152,7 +152,7 @@ function UsageContent({ scope, days }: { scope: "self" | "all"; days: number }) 
         <span data-testid="usage-billing-note">
           这里是按模型价目估算的成本（美元），用来看用量趋势；<b>实际扣费以积分页为准</b>，见
           <Link
-            className="mx-1 underline decoration-[#C9C4B8] underline-offset-[3px]"
+            className="ml-1 underline decoration-[#C9C4B8] underline-offset-[3px]"
             href={scope === "all" ? "/admin/billing" : "/account/billing?tab=runs"}
           >
             {scope === "all" ? "计费" : "积分与套餐的运行消耗"}
@@ -164,7 +164,7 @@ function UsageContent({ scope, days }: { scope: "self" | "all"; days: number }) 
       {error && <LoadError what="用量" message={error} onRetryAction={() => void load()} />}
 
       {loading && !data && (
-        <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
           {[0, 1, 2, 3].map((i) => (
             <Skeleton key={i} className="h-28 rounded-2xl" />
           ))}
@@ -173,7 +173,7 @@ function UsageContent({ scope, days }: { scope: "self" | "all"; days: number }) 
 
       {t && data && (
         <>
-          <dl className="mb-4 grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
+          <dl className="mb-4 grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
             <StatCard
               label="总花费（估算）"
               value={formatUsd(t.costMicroUsd)}
@@ -210,7 +210,7 @@ function UsageContent({ scope, days }: { scope: "self" | "all"; days: number }) 
             />
           </dl>
 
-          <div className="mb-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
+          <div className="mb-4 grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
             <ByAgent buckets={data.byAgent} />
             <ByDay buckets={data.byDay} days={shown} />
           </div>
@@ -263,7 +263,7 @@ function ByAgent({ buckets }: { buckets: UsageBucket[] }) {
             return (
               <li
                 key={b.key}
-                className="mt-3 grid grid-cols-[minmax(0,128px)_minmax(0,1fr)_auto] items-center gap-2.5 text-sm max-sm:grid-cols-[minmax(0,1fr)_auto]"
+                className="mt-3 grid grid-cols-[minmax(0,128px)_minmax(0,1fr)_104px] items-center gap-2.5 text-sm max-sm:grid-cols-[minmax(0,1fr)_auto]"
               >
                 <span className="flex min-w-0 items-center gap-1.5">
                   <AgentAvatar id={b.key} size={20} />
@@ -448,7 +448,7 @@ function RunDetailSection({ runs, scope }: { runs: RunDetail[]; scope: "self" | 
                       </td>
                       <td className={cn(tb.td, "whitespace-nowrap")}>
                         <Badge variant={st.variant}>{st.label}</Badge>
-                        {!est.complete && (
+                        {!est.complete && hasModels && (
                           <Badge variant="warning" className="ml-1" title="有模型没回报用量">
                             部分
                           </Badge>
@@ -515,7 +515,7 @@ function RunDetailSection({ runs, scope }: { runs: RunDetail[]; scope: "self" | 
                                   </td>
                                 </tr>
                               ))}
-                              {!est.complete && (
+                              {!est.complete && hasModels && (
                                 <tr className="border-t border-line-soft">
                                   <td
                                     colSpan={6}

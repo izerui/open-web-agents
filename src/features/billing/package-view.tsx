@@ -750,7 +750,7 @@ function UserPackages({
           </EmptyState>
         </div>
       ) : packages === null ? (
-        <div className="mb-4 grid gap-3.5 sm:grid-cols-2 xl:grid-cols-4" aria-busy>
+        <div className="mb-4 grid grid-cols-1 gap-3.5 sm:grid-cols-2 xl:grid-cols-4" aria-busy>
           {[0, 1, 2, 3].map((i) => (
             <Skeleton key={i} className="h-48 rounded-2xl" />
           ))}
@@ -760,7 +760,7 @@ function UserPackages({
           <EmptyState title="暂无上架的积分包">管理员上架积分包后会显示在这里。</EmptyState>
         </div>
       ) : (
-        <ul className="mb-4 grid gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
+        <ul className="mb-4 grid grid-cols-1 gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
           {packages.map((pack) => (
             <li
               key={pack.id}

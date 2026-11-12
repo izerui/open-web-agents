@@ -40,7 +40,7 @@ export function SpacePage({
               {title}
             </h1>
             {subtitle && (
-              <p className="mt-1.5 text-sm text-muted-foreground max-md:text-[15px]">{subtitle}</p>
+              <p className="mt-1.5 text-sm text-muted-foreground max-md:text-base">{subtitle}</p>
             )}
           </div>
           {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
@@ -66,7 +66,7 @@ export function Banner({
   return (
     <div
       className={cn(
-        "mb-4 flex items-start gap-3 rounded-[14px] px-4 py-3 text-sm leading-relaxed",
+        "mb-4 flex items-start gap-3 rounded-[14px] px-4 py-3 text-sm leading-relaxed max-md:text-base",
         tone === "info" && "bg-[#F2F1EC] text-[#3C3A35]",
         tone === "warn" && "bg-warning-soft text-warning-text",
         tone === "ok" && "bg-success-soft text-success-text",

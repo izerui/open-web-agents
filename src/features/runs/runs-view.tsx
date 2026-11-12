@@ -114,14 +114,45 @@ export function RunsView({
   );
 }
 
+/** 智能体列表(筛选与对象页头共用)。放在外壳一层:对象页头出现时外壳会换结构,面板随之重挂载,状态不能放在面板里 */
+function useAgentList(): AgentList {
+  const [agents, setAgents] = useState<AgentLite[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const reload = useCallback(async () => {
+    setLoaded(false);
+    setError(null);
+    try {
+      const d = await fetchJson<{ agents?: AgentLite[] }>("/api/agents");
+      setAgents(d.agents ?? []);
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setLoaded(true);
+    }
+  }, []);
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+  return { agents, loaded, error, reload };
+}
+
+type AgentList = {
+  agents: AgentLite[];
+  loaded: boolean;
+  error: string | null;
+  reload: () => Promise<void>;
+};
+
 export function DeveloperRunsView() {
+  const list = useAgentList();
   return (
     <SpacePage
       side="developer"
       title="运行记录"
       subtitle="计费在你名下的全部运行，包括你调用别人的智能体、别人用你的 Key 调用。单个智能体的运行分析在它的构建页「运行」阶段。"
     >
-      <RunsPanel requestedAgent={null} platform={false} />
+      <RunsPanel requestedAgent={null} platform={false} agentList={list} />
     </SpacePage>
   );
 }
@@ -130,8 +161,9 @@ function RunsInShell({
   requestedAgent,
   platform,
 }: { requestedAgent: string | null; platform: boolean }) {
-  const [agent, setAgent] = useState<AgentLite | undefined>();
+  const list = useAgentList();
   const objectMode = requestedAgent !== null;
+  const agent = objectMode ? list.agents.find((a) => a.id === requestedAgent) : undefined;
   return (
     <SpaceShell
       title={platform ? "平台运行" : objectMode ? "运行记录" : "全部运行"}
@@ -152,7 +184,7 @@ function RunsInShell({
       }
       width={objectMode ? "full" : "wide"}
     >
-      <RunsPanel requestedAgent={requestedAgent} platform={platform} onAgentResolved={setAgent} />
+      <RunsPanel requestedAgent={requestedAgent} platform={platform} agentList={list} />
     </SpaceShell>
   );
 }
@@ -160,17 +192,15 @@ function RunsInShell({
 export function RunsPanel({
   requestedAgent,
   platform,
-  onAgentResolved,
+  agentList,
 }: {
   requestedAgent: string | null;
   platform: boolean;
-  onAgentResolved?: (agent: AgentLite | undefined) => void;
+  agentList: AgentList;
 }) {
   const objectMode = requestedAgent !== null;
   const confirm = useConfirm();
-  const [agents, setAgents] = useState<AgentLite[]>([]);
-  const [agentsLoaded, setAgentsLoaded] = useState(false);
-  const [agentsError, setAgentsError] = useState<string | null>(null);
+  const { agents, loaded: agentsLoaded, error: agentsError, reload: loadAgents } = agentList;
   const [agentId, setAgentId] = useState("");
   const [status, setStatus] = useState("");
   const [source, setSource] = useState("");
@@ -193,27 +223,6 @@ export function RunsPanel({
         ? "找不到指定的智能体,它可能已被删除或你没有访问权限。"
         : "链接缺少智能体 ID,请选择智能体后再查看运行。"
       : null;
-
-  useEffect(() => {
-    onAgentResolved?.(selectedAgent);
-  }, [onAgentResolved, selectedAgent]);
-
-  const loadAgents = useCallback(async () => {
-    setAgentsLoaded(false);
-    setAgentsError(null);
-    try {
-      const d = await fetchJson<{ agents?: AgentLite[] }>("/api/agents");
-      setAgents(d.agents ?? []);
-    } catch (e) {
-      setAgentsError(errorText(e));
-    } finally {
-      setAgentsLoaded(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadAgents();
-  }, [loadAgents]);
 
   const load = useCallback(
     async (append?: string) => {
@@ -329,7 +338,7 @@ export function RunsPanel({
           <div className="mb-3.5 flex flex-wrap items-center gap-2.5">
             {!objectMode && (
               <NativeSelect
-                className="w-auto min-w-[150px] max-sm:w-full"
+                className="w-auto max-w-60 min-w-[150px] max-sm:w-full max-sm:max-w-none"
                 aria-label="按智能体筛选"
                 value={effectiveAgentId}
                 disabled={!agentsLoaded || Boolean(agentsError)}
@@ -583,7 +592,7 @@ export function RunsPanel({
                 <div className="mb-3.5 flex flex-wrap items-center gap-2">
                   <StatusBadge status={detail.status} />
                   <span className="text-xs text-muted-foreground">
-                    {tokensText(detail.cost) ?? "还没有用量"}
+                    {tokensText(detail.cost) ?? "没有用量记录"}
                     {detail.cost?.usd ? `，${formatUsd(toMicroUsd(detail.cost.usd))}` : ""}
                     {detail.cost?.partial ? "（部分，统计不完整）" : ""}
                   </span>

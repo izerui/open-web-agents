@@ -14,7 +14,7 @@ export function CredentialsView({ configured }: { configured: boolean }) {
       title="模型价格"
       subtitle="运行按模型实际用量扣积分。1 元 = 100 积分，价目由管理员维护，调整后对之后的运行生效。"
     >
-      <div className="mb-[18px] grid gap-3.5 md:grid-cols-2">
+      <div className="mb-[18px] grid grid-cols-1 gap-3.5 md:grid-cols-2">
         <div className="flex items-start gap-3.5 rounded-2xl border border-border bg-card px-[22px] py-[18px]">
           <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#F1EFEA]">
             <Cpu className="size-5" />

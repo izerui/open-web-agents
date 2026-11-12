@@ -529,7 +529,7 @@ export function DeveloperKeysView() {
         )}
       </section>
 
-      <div className="mt-4 grid items-start gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
+      <div className="mt-4 grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
         <WebhookSecretCard />
         <section
           aria-label="按智能体查看调用文档"

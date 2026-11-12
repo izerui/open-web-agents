@@ -68,7 +68,7 @@ export function PriceList({ configured = true }: { configured?: boolean }) {
 
   return (
     <>
-      <div className="mb-3 flex items-center gap-2 overflow-x-auto border-b border-border">
+      <div className="mb-3 flex items-center gap-2 overflow-x-auto overflow-y-hidden border-b border-border">
         <fieldset aria-label="模型类型" className="flex">
           {KIND_ORDER.map((k) => {
             const all = (items ?? []).filter((i) => i.kind === k);
@@ -170,7 +170,14 @@ export function PriceList({ configured = true }: { configured?: boolean }) {
                     ].filter(Boolean);
                     return (
                       <tr key={item.id} className={cn(!item.available && "text-muted-foreground")}>
-                        <td className={cn(tb.td, tb.first, item.available && "font-semibold")}>
+                        <td
+                          className={cn(
+                            tb.td,
+                            tb.first,
+                            "whitespace-nowrap",
+                            item.available && "font-semibold",
+                          )}
+                        >
                           {item.name}
                         </td>
                         {meters.map((m) => {
