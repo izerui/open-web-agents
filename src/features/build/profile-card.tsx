@@ -4,6 +4,7 @@
 // 字段与校验承接原 Builder 的配置、能力、知识、安全与契约四个分区(features.md 2.3.1–2.3.4)。
 
 import { AgentAvatar } from "@/components/agent-avatar";
+import { type ConfirmRequest, useConfirm } from "@/components/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { KnowledgePanel } from "@/features/builder/knowledge-panel";
@@ -29,9 +30,10 @@ import {
   Wrench,
 } from "lucide-react";
 import Link from "next/link";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import type { Stage } from "./build-model";
 import { DesignSources } from "./design-sources";
+import { copiedFrom } from "./designer-model";
 import {
   EFFORTS,
   PERMISSION_META,
@@ -43,6 +45,7 @@ import {
   advancedError,
   envError,
   idError,
+  insertAtCursor,
   mcpOfRow,
   newMcp,
   newSkill,
@@ -130,8 +133,21 @@ export function modelLabel(catalog: ModelCatalog | null, ref: string): string {
   return m.name;
 }
 
+type Ask = (r: ConfirmRequest) => void;
+
+/** 删除档案里的一项前确认:删了会立刻自动保存,没有撤销 */
+const askDelete = (ask: Ask, what: string, run: () => void) =>
+  ask({
+    title: `删除${what}？`,
+    description: "删除后草稿会自动保存，这一项的配置就没了；已发布的版本不受影响。",
+    confirmLabel: "删除",
+    destructive: true,
+    onConfirm: run,
+  });
+
 export function ProfileCard(p: ProfileProps) {
   const { draft: d } = p;
+  const confirm = useConfirm();
   const ctx: SectionContext = {
     exists: p.agentId !== null,
     canManageWebhook: p.canManageWebhook,
@@ -224,17 +240,18 @@ export function ProfileCard(p: ProfileProps) {
                 className="px-3 pt-1 pb-[18px] pl-[54px] max-md:pl-3"
                 onChangeCapture={() => p.onEdited(s.key)}
               >
-                <SectionBody k={s.key} {...p} ctx={ctx} />
+                <SectionBody k={s.key} {...p} ctx={ctx} ask={confirm.ask} />
               </div>
             )}
           </div>
         );
       })}
+      {confirm.dialog}
     </div>
   );
 }
 
-function SectionBody(props: ProfileProps & { k: SectionKey; ctx: SectionContext }) {
+function SectionBody(props: ProfileProps & { k: SectionKey; ctx: SectionContext; ask: Ask }) {
   switch (props.k) {
     case "identity":
       return <IdentityBody {...props} />;
@@ -246,9 +263,12 @@ function SectionBody(props: ProfileProps & { k: SectionKey; ctx: SectionContext 
       return <AbilityBody {...props} />;
     case "knowledge":
       return props.agentId ? (
-        <div onClickCapture={() => setTimeout(props.onKnowledgeChanged, 1500)}>
-          <KnowledgePanel key={props.agentId} agentId={props.agentId} canWrite />
-        </div>
+        <KnowledgePanel
+          key={props.agentId}
+          agentId={props.agentId}
+          canWrite
+          onChanged={props.onKnowledgeChanged}
+        />
       ) : (
         <p className="m-0 text-sm text-muted-foreground">
           填好名称和提示词后会自动建好草稿，就能上传知识文档了。
@@ -269,6 +289,8 @@ function IdentityBody({ draft: d, set, agentId, takenIds, onIdEditing }: Profile
   const style = avatarStyle(d.id || "new-agent", d.icon || null);
   const hint = startersHint(d.startersText);
   const creating = agentId === null;
+  // 新建时一上来不报红:碰过名称框之后才提示必填
+  const [touched, setTouched] = useState(!creating);
   return (
     <>
       <Field label="头像" hint="市场、对话、工作室里用同一个头像">
@@ -317,11 +339,12 @@ function IdentityBody({ draft: d, set, agentId, takenIds, onIdEditing }: Profile
         <Field
           label="名称"
           required
-          error={d.name.trim() ? undefined : "名称是必填项，填好后才会自动保存"}
+          error={d.name.trim() || !touched ? undefined : "名称是必填项，填好后才会自动保存"}
         >
           <Input
             aria-label="名称"
             value={d.name}
+            onBlur={() => setTouched(true)}
             onChange={(e) => set({ name: e.target.value })}
             placeholder="例如 报销审核助手"
           />
@@ -366,11 +389,27 @@ function IdentityBody({ draft: d, set, agentId, takenIds, onIdEditing }: Profile
   );
 }
 
-function PromptBody({ draft: d, set }: ProfileProps) {
+function PromptBody({ draft: d, set, agentId }: ProfileProps) {
   const vars = d.variables.filter((v) => v.name.trim() && !v.secret);
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const insert = (name: string) => {
+    const el = ref.current;
+    const r = insertAtCursor(
+      d.systemPrompt,
+      el ? el.selectionStart : null,
+      el ? el.selectionEnd : null,
+      `{{${name}}}`,
+    );
+    set({ systemPrompt: r.text });
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(r.cursor, r.cursor);
+    });
+  };
   return (
     <Field label="系统提示词" required>
       <Textarea
+        ref={ref}
         aria-label="系统提示词"
         className={cn("min-h-64 resize-y leading-relaxed", inputMono)}
         value={d.systemPrompt}
@@ -385,7 +424,8 @@ function PromptBody({ draft: d, set }: ProfileProps) {
               <button
                 key={v.uid}
                 type="button"
-                onClick={() => set({ systemPrompt: `${d.systemPrompt}{{${v.name}}}` })}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => insert(v.name)}
                 className="inline-flex h-7 items-center rounded-full bg-[#F1EFEA] px-2.5 font-mono text-xs text-[#4D4A43] hover:bg-[#E6E3DB]"
               >
                 {`{{${v.name}}}`}
@@ -401,9 +441,12 @@ function PromptBody({ draft: d, set }: ProfileProps) {
       </div>
       <span className="text-[13px] text-muted-foreground">
         可用 {"{{变量名}}"} 引用变量；密钥类变量不会进提示词。
-        {!d.systemPrompt.trim() && (
-          <span className="text-destructive">提示词是必填项，填好后才会自动保存。</span>
-        )}
+        {!d.systemPrompt.trim() &&
+          (agentId === null ? (
+            <span>提示词是必填项，填好名称和提示词后自动保存。</span>
+          ) : (
+            <span className="text-destructive">提示词是必填项，填好后才会自动保存。</span>
+          ))}
       </span>
     </Field>
   );
@@ -487,8 +530,9 @@ function ModelBody({ draft: d, set, catalog }: ProfileProps) {
   );
 }
 
-function AbilityBody(p: ProfileProps) {
-  const { draft: d, set, update, catalog, stdio, agentId } = p;
+function AbilityBody(p: ProfileProps & { ask: Ask }) {
+  const { draft: d, set, update, catalog, stdio, agentId, ask } = p;
+  const from = copiedFrom(p.designer.view);
   const [openMcp, setOpenMcp] = useState<Set<string>>(() => new Set());
   const [openSub, setOpenSub] = useState<Set<string>>(() => new Set());
   const mainGroup = modelOf(catalog, d.model)?.group;
@@ -531,6 +575,7 @@ function AbilityBody(p: ProfileProps) {
         <SkillItem
           key={k.uid}
           skill={k}
+          from={from.skill[k.name]}
           onPatch={(next) =>
             update((x) => ({
               ...x,
@@ -538,7 +583,12 @@ function AbilityBody(p: ProfileProps) {
             }))
           }
           onDelete={() =>
-            update((x) => ({ ...x, skillPackages: x.skillPackages.filter((s) => s.uid !== k.uid) }))
+            askDelete(ask, `技能包「${k.name || "未命名"}」`, () =>
+              update((x) => ({
+                ...x,
+                skillPackages: x.skillPackages.filter((s) => s.uid !== k.uid),
+              })),
+            )
           }
         />
       ))}
@@ -576,6 +626,11 @@ function AbilityBody(p: ProfileProps) {
               <Layers className="size-4 shrink-0 text-muted-foreground" />
               <b className={cn("font-semibold", inputMono)}>{m.name || "未命名"}</b>
               <Tag>{m.type}</Tag>
+              {from.mcp[m.name] && (
+                <Tag line title="从这个智能体复制进来的，之后它更新不会跟着变">
+                  来自 {from.mcp[m.name]}
+                </Tag>
+              )}
               <span className={cn("min-w-0 flex-1 truncate text-muted-foreground", inputMono)}>
                 {m.type === "http" ? m.url : m.command}
               </span>
@@ -585,7 +640,12 @@ function AbilityBody(p: ProfileProps) {
               <TextButton
                 aria-label={`删除 MCP 服务 ${m.name || i + 1}`}
                 onClick={() =>
-                  update((x) => ({ ...x, mcpServers: x.mcpServers.filter((r) => r.uid !== m.uid) }))
+                  askDelete(ask, `MCP 服务「${m.name || i + 1}」`, () =>
+                    update((x) => ({
+                      ...x,
+                      mcpServers: x.mcpServers.filter((r) => r.uid !== m.uid),
+                    })),
+                  )
                 }
               >
                 <Trash2 />
@@ -736,7 +796,12 @@ function AbilityBody(p: ProfileProps) {
               <TextButton
                 aria-label={`删除子代理 ${s.name || i + 1}`}
                 onClick={() =>
-                  update((x) => ({ ...x, subagents: x.subagents.filter((r) => r.uid !== s.uid) }))
+                  askDelete(ask, `子代理「${s.name || i + 1}」`, () =>
+                    update((x) => ({
+                      ...x,
+                      subagents: x.subagents.filter((r) => r.uid !== s.uid),
+                    })),
+                  )
                 }
               >
                 <Trash2 />
@@ -797,12 +862,13 @@ function AbilityBody(p: ProfileProps) {
         inlineSkills={d.skillPackages.map((s) => s.name)}
         inlineMcps={d.mcpServers.map((m) => m.name)}
         canStart={agentId !== null}
+        ask={ask}
       />
     </>
   );
 }
 
-function VarsBody({ draft: d, update }: ProfileProps) {
+function VarsBody({ draft: d, update, ask }: ProfileProps & { ask: Ask }) {
   const patchRow = (id: string, next: Partial<ProfileDraft["variables"][number]>) =>
     update((x) => ({
       ...x,
@@ -866,9 +932,16 @@ function VarsBody({ draft: d, update }: ProfileProps) {
                 </label>
                 <TextButton
                   aria-label={`删除变量 ${v.name || ""}`}
-                  onClick={() =>
-                    update((x) => ({ ...x, variables: x.variables.filter((r) => r.uid !== v.uid) }))
-                  }
+                  onClick={() => {
+                    const run = () =>
+                      update((x) => ({
+                        ...x,
+                        variables: x.variables.filter((r) => r.uid !== v.uid),
+                      }));
+                    // 还没起名字的空行直接删
+                    if (!v.name.trim() && !v.description.trim()) run();
+                    else askDelete(ask, `变量「${v.name || "未命名"}」`, run);
+                  }}
                 >
                   <Trash2 />
                 </TextButton>

@@ -42,18 +42,15 @@ export function KnowledgeSearch({ agentId }: { agentId: string }) {
       );
       setShowContext(false);
     } catch (err) {
-      setError(`检索失败:${errorText(err)}`);
+      setError(`检索失败：${errorText(err)}`);
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div
-      className="space-y-2 rounded-md border border-dashed border-border p-2"
-      data-testid="knowledge-search"
-    >
-      <p className="text-xs font-medium">检索测试</p>
+    <div className="space-y-2 pt-1" data-testid="knowledge-search">
+      <p className="m-0 text-[13px] font-semibold">检索测试</p>
       <form
         className="flex gap-2"
         onSubmit={(e) => {
@@ -65,7 +62,7 @@ export function KnowledgeSearch({ agentId }: { agentId: string }) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           maxLength={2000}
-          placeholder="输入一个问题,看运行时会带入哪些资料"
+          placeholder="输入一个问题，看运行时会带入哪些资料"
           aria-label="检索测试问题"
         />
         <Button type="submit" size="sm" variant="outline" disabled={!query.trim() || busy}>
@@ -73,22 +70,22 @@ export function KnowledgeSearch({ agentId }: { agentId: string }) {
           {busy ? "检索中…" : "检索"}
         </Button>
       </form>
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p className="text-[13px] text-destructive">{error}</p>}
       {result && result.hits.length === 0 && (
-        <p className="text-xs text-muted-foreground" data-testid="knowledge-search-empty">
-          没有命中:这个问题运行时不会带入任何资料
+        <p className="text-[13px] text-muted-foreground" data-testid="knowledge-search-empty">
+          没有命中：这个问题运行时不会带入任何资料
         </p>
       )}
       {result && result.hits.length > 0 && (
         <div className="space-y-2">
-          <p className="text-xs text-muted-foreground">
-            命中 {result.hits.length} 段,运行时会按下面的顺序带入:
+          <p className="text-[13px] text-muted-foreground">
+            命中 {result.hits.length} 段，运行时会按下面的顺序带入：
           </p>
           <ol className="space-y-2">
             {result.hits.map((h) => (
               <li
                 key={`${h.docId}-${h.index}`}
-                className="rounded-md border p-2 text-xs"
+                className="rounded-xl border border-border p-2.5 text-[13px]"
                 data-testid="knowledge-hit"
               >
                 <p className="mb-1 flex items-center gap-2">

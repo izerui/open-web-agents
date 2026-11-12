@@ -1,7 +1,8 @@
 "use client";
 
-// 智能体设计器栏(编排阶段的主角):深色头、设计记录、对话、待确认的改动(按节应用 A4)、
-// 差异与保存、legacy / conflict / aiIssue、从试运行结果反馈、审批条、输入框。
+// 智能体设计器栏(编排阶段的主角):深色头、设计记录、对话、待确认的改动(按节应用 A4,挂在产生它的
+// 那一轮回复下面,处理后原地留下「已应用到草稿 / 没有应用」)、差异与保存、legacy / conflict / aiIssue、
+// 从试运行结果反馈(浮层)、各阶段之后的「下一步」提示、审批条、输入框。
 
 import { AgentAvatar } from "@/components/agent-avatar";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,8 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { ApprovalBar } from "@/features/workbench/approval-bar";
 import { ChatThread } from "@/features/workbench/conversation";
+import type { Turn } from "@/features/workbench/types";
+import { formatTime } from "@/lib/format-time";
 import { cn } from "@/lib/utils";
 import {
   ArrowUp,
@@ -30,13 +33,22 @@ import {
   Minimize2,
   Plus,
   RefreshCw,
+  RotateCcw,
   Sparkles,
   Square,
   TriangleAlert,
   X,
 } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { trialFeedbackPrompt } from "./design-sections";
+import {
+  type NextStep,
+  type NextTarget,
+  type Outcome,
+  needsRecharge,
+  pendingAnchor,
+} from "./designer-model";
 import { ChangeBlock, DiffList } from "./diff-view";
 import { SECTIONS } from "./profile-model";
 import { Tag } from "./ui";
@@ -67,7 +79,14 @@ export function DesignerPanel({
   onToggleWide,
   onCollapse,
   targetName,
+  next,
+  onNext,
+  onDismissNext,
 }: {
+  /** 各阶段之后的「下一步」提示(前端生成,不调模型) */
+  next?: NextStep | null;
+  onNext?: (to: NextTarget) => void;
+  onDismissNext?: () => void;
   designer: Designer;
   mode: DesignerMode;
   /** 编排阶段才能展开成主画面 */
@@ -84,6 +103,21 @@ export function DesignerPanel({
   const [feedOpen, setFeedOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const wide = mode === "wide";
+  const anchor = pendingAnchor(g.turns);
+  const inlinePending = anchor >= 0;
+
+  /** 每一轮回复下面:这一轮改动的处理结果;最近一轮下面挂待确认的改动 */
+  const renderTurnExtra = (t: Turn, i: number) => {
+    const done = g.outcomes[t.runId ?? `turn-${i}`] ?? [];
+    const showPending = i === anchor && g.pending.length > 0;
+    if (!done.length && !showPending) return null;
+    return (
+      <div className="mt-2 flex flex-col gap-2 sm:pl-[42px]">
+        {done.length > 0 && <OutcomeList items={done} />}
+        {showPending && <PendingChanges designer={g} wide={false} inline />}
+      </div>
+    );
+  };
 
   const openSave = async () => {
     await g.refresh();
@@ -157,14 +191,14 @@ export function DesignerPanel({
         )}
       </div>
 
-      <div className="flex shrink-0 items-center gap-1.5 border-b border-border bg-[#F6F5F1] px-3 py-2">
+      <div className="flex shrink-0 items-center gap-1.5 border-b border-border bg-[#F6F5F1] px-3 py-2 max-md:flex-wrap">
         <label htmlFor="designer-record" className="shrink-0 text-[13px] text-muted-foreground">
           设计记录
         </label>
         <NativeSelect
           id="designer-record"
           aria-label="设计记录"
-          className="h-8 min-w-0 flex-1 text-[13px]"
+          className="h-8 min-w-0 flex-1 text-[13px] max-md:h-11 max-md:basis-[calc(100%-70px)]"
           value={g.sessionId}
           disabled={lock}
           title={
@@ -245,11 +279,28 @@ export function DesignerPanel({
         <StateBox tone="bad">
           <b>设计器这一轮没有完成</b>
           <div>{v.aiIssue}</div>
+          {g.turns.length > 0 && !v.legacy && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="mt-2"
+              disabled={g.blocked}
+              onClick={() => void g.retry()}
+            >
+              <RotateCcw />
+              重试
+            </Button>
+          )}
         </StateBox>
       )}
       {g.error && (
         <StateBox tone="bad" onClose={() => g.setError("")}>
           <div className="[overflow-wrap:anywhere]">{g.error}</div>
+          {needsRecharge(g.error) && (
+            <Link href="/account/billing?tab=packages" className="mt-1 inline-block underline">
+              去充值
+            </Link>
+          )}
         </StateBox>
       )}
 
@@ -293,16 +344,32 @@ export function DesignerPanel({
               onAnswerAction={(text) => void g.send(text)}
               pendingQuestions={g.pendingQuestions}
               submitAnswerAction={g.submitAnswer}
+              renderTurnExtra={renderTurnExtra}
             />
           </div>
         ) : (
           <div className="flex flex-1 items-center justify-center px-8 text-center text-sm text-muted-foreground">
-            你想创建或调整怎样的智能体？说一句，设计器会先问清楚再动手。
+            {g.prompt.trim() && g.blocked
+              ? "正在把你的描述交给设计器…"
+              : "你想创建或调整怎样的智能体？说一句，设计器会先问清楚再动手。"}
+          </div>
+        )}
+        {feedOpen && (
+          <div className="absolute inset-x-3 bottom-2 z-30">
+            <TrialFeedback
+              designer={g}
+              onClose={() => setFeedOpen(false)}
+              onPick={(text) => {
+                g.setPrompt(text);
+                setFeedOpen(false);
+                inputRef.current?.focus();
+              }}
+            />
           </div>
         )}
       </div>
 
-      <div className="flex max-h-[55%] min-h-0 shrink flex-col overflow-y-auto">
+      <div className="flex max-h-[45%] min-h-0 shrink flex-col overflow-y-auto">
         {(v?.issues?.length ?? 0) > 0 && (v?.changes?.length ?? 0) > 0 && (
           <div className="max-h-24 shrink-0 overflow-y-auto border-t border-line-soft bg-[#FDF6F4] px-3 py-1.5 text-xs text-destructive">
             <div className="font-semibold">校验问题，{v?.issues?.length} 处</div>
@@ -314,18 +381,11 @@ export function DesignerPanel({
           </div>
         )}
 
-        {g.pending.length > 0 && <PendingChanges designer={g} wide={wide} />}
+        {/* 没有对话轮次(比如只勾了 Skills / MCP 来源)时改动没处挂,放在输入框上方 */}
+        {g.pending.length > 0 && !inlinePending && <PendingChanges designer={g} wide={wide} />}
 
-        {feedOpen && (
-          <TrialFeedback
-            designer={g}
-            onClose={() => setFeedOpen(false)}
-            onPick={(text) => {
-              g.setPrompt(text);
-              setFeedOpen(false);
-              inputRef.current?.focus();
-            }}
-          />
+        {next && g.pending.length === 0 && !g.running && (
+          <NextStepBar step={next} wide={wide} onNext={onNext} onDismiss={onDismissNext} />
         )}
 
         <div className={cn("shrink-0", wide && "mx-auto w-full max-w-[784px]")}>
@@ -506,14 +566,102 @@ function StateBox({
   );
 }
 
+/** 这一轮改动处理后的结果,留在对话里 */
+function OutcomeList({ items }: { items: Outcome[] }) {
+  return (
+    <div className="flex flex-col gap-1">
+      {items.map((o) => (
+        <div
+          key={o.section}
+          className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-[13px]"
+        >
+          <Tag line>{sectionTitle(o.section)}</Tag>
+          <span className="text-muted-foreground">{o.count} 处改动</span>
+          <span className="ml-auto">
+            {o.applied ? (
+              <Tag tone="ok">
+                <Check />
+                已应用到草稿
+              </Tag>
+            ) : (
+              <Tag>没有应用</Tag>
+            )}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** 「下一步」提示条:按刚发生的事给去处按钮(前端生成,不调模型) */
+function NextStepBar({
+  step,
+  wide,
+  onNext,
+  onDismiss,
+}: {
+  step: NextStep;
+  wide: boolean;
+  onNext?: (to: NextTarget) => void;
+  onDismiss?: () => void;
+}) {
+  return (
+    <div
+      aria-live="polite"
+      className={cn(
+        "rise-in mx-3 mb-1 flex shrink-0 items-start gap-2.5 rounded-[14px] border border-border bg-card px-3 py-2.5 shadow-[0_8px_24px_rgba(40,35,25,.08)]",
+        wide && "mx-auto w-[min(760px,calc(100%-24px))]",
+      )}
+    >
+      <AgentAvatar id="agent-architect" size={24} />
+      <div className="min-w-0 flex-1">
+        <div className="text-[13px] leading-relaxed">{step.text}</div>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {step.actions.map((a, i) => (
+            <Button
+              key={a.to}
+              size="sm"
+              variant={i === 0 ? "default" : "outline"}
+              className="max-md:h-11"
+              onClick={() => onNext?.(a.to)}
+            >
+              {a.label}
+            </Button>
+          ))}
+        </div>
+      </div>
+      {onDismiss && (
+        <button
+          type="button"
+          aria-label="关闭提示"
+          onClick={onDismiss}
+          className="-m-1 grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-accent max-md:size-11"
+        >
+          <X className="size-4" />
+        </button>
+      )}
+    </div>
+  );
+}
+
 /** 待确认的改动:按档案卡的节分组,每组「应用到草稿 / 先不改」(A4) */
-function PendingChanges({ designer: g, wide }: { designer: Designer; wide: boolean }) {
+function PendingChanges({
+  designer: g,
+  wide,
+  inline,
+}: {
+  designer: Designer;
+  wide: boolean;
+  /** 挂在对话里那一轮回复下面 */
+  inline?: boolean;
+}) {
   const [open, setOpen] = useState(true);
   return (
     <div
       className={cn(
-        "mx-3 mb-1 shrink-0 overflow-hidden rounded-[14px] border border-border bg-card shadow-[0_8px_24px_rgba(40,35,25,.08)]",
-        wide && "mx-auto w-[min(760px,calc(100%-24px))]",
+        "shrink-0 overflow-hidden rounded-[14px] border border-border bg-card",
+        !inline && "mx-3 mb-1 shadow-[0_8px_24px_rgba(40,35,25,.08)]",
+        wide && !inline && "mx-auto w-[min(760px,calc(100%-24px))]",
       )}
     >
       <button
@@ -522,7 +670,7 @@ function PendingChanges({ designer: g, wide }: { designer: Designer; wide: boole
         onClick={() => setOpen(!open)}
         className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px]"
       >
-        <AgentAvatar id="agent-architect" size={20} />
+        {!inline && <AgentAvatar id="agent-architect" size={20} />}
         <b className="flex-1">设计器建议这样改，确认后写进草稿</b>
         <span className="text-muted-foreground">{g.pending.length} 节</span>
         <ChevronRight
@@ -601,7 +749,7 @@ function TrialFeedback({
   }, [g.loadTrialRuns]);
   const label = (s: string) => (s === "success" ? "成功" : s === "failed" ? "失败" : "已取消");
   return (
-    <div className="mx-3 mb-1 max-h-64 shrink-0 overflow-auto rounded-[14px] border border-border bg-card px-3 py-2.5 shadow-[0_8px_24px_rgba(40,35,25,.08)]">
+    <div className="max-h-72 overflow-auto rounded-[14px] border border-border bg-card px-3 py-2.5 shadow-[0_12px_32px_rgba(40,35,25,.16)]">
       <div className="mb-1 flex items-center gap-2">
         <b className="text-[13px]">从试运行结果反馈</b>
         <span className="text-xs text-muted-foreground">选一条交给设计器</span>
@@ -609,7 +757,7 @@ function TrialFeedback({
           type="button"
           aria-label="关闭"
           onClick={onClose}
-          className="ml-auto grid size-7 place-items-center rounded-full hover:bg-accent"
+          className="ml-auto grid size-8 place-items-center rounded-full hover:bg-accent max-md:size-11"
         >
           <X className="size-3.5" />
         </button>
@@ -631,7 +779,7 @@ function TrialFeedback({
             </Tag>
             <span className="min-w-0 flex-1 truncate">{r.promptPreview}</span>
             <span className="shrink-0 text-xs text-muted-foreground max-sm:hidden">
-              {new Date(r.at).toLocaleString()}
+              {formatTime(r.at)}
             </span>
             <Button size="xs" variant="outline" onClick={() => onPick(trialFeedbackPrompt(r))}>
               反馈给设计器

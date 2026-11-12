@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { errorText } from "@/lib/fetch-json";
 import { cn } from "@/lib/utils";
-import { CheckCircle2, HelpCircle, Loader2, Upload, XCircle } from "lucide-react";
+import { CheckCircle2, HelpCircle, Loader2, Plus, Upload, XCircle } from "lucide-react";
 import { useRef, useState } from "react";
 
 type FileResult =
@@ -32,9 +32,12 @@ const FORMAT_LABEL: Record<string, string> = {
 export function KnowledgeUpload({
   agentId,
   onUploaded,
+  onManualAdd,
 }: {
   agentId: string;
   onUploaded: () => void | Promise<void>;
+  /** 拖放区里的「手动添加」(粘贴文字,弹窗) */
+  onManualAdd?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState<FileResult[]>([]);
@@ -59,11 +62,11 @@ export function KnowledgeUpload({
         error?: string;
       };
       if (data.results) setResults(data.results);
-      else setError(data.error ?? `上传失败(HTTP ${res.status})`);
+      else setError(data.error ?? `上传失败（HTTP ${res.status}）`);
       // 结果未知的也刷新列表:用户要据此核对是否已入库
       if (data.results?.some((r) => r.ok || r.uncertain)) await onUploaded();
     } catch (err) {
-      setError(`上传失败:${errorText(err)}`);
+      setError(`上传失败：${errorText(err)}`);
     } finally {
       setBusy(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -72,11 +75,11 @@ export function KnowledgeUpload({
 
   return (
     <div className="space-y-2">
-      <label
+      <div
         className={cn(
-          "flex cursor-pointer flex-col items-center gap-1 rounded-md border border-dashed p-3 text-center text-xs text-muted-foreground",
-          dragging && "border-primary bg-primary/5",
-          busy && "pointer-events-none opacity-60",
+          "rounded-[14px] border-[1.5px] border-dashed border-[#C9C4B8] bg-[#FBFAF7] px-4 py-4 text-center transition-colors",
+          dragging && "border-foreground bg-[#F2F0EA]",
+          busy && "opacity-60",
         )}
         onDragOver={(e) => {
           e.preventDefault();
@@ -89,25 +92,50 @@ export function KnowledgeUpload({
           void upload([...e.dataTransfer.files]);
         }}
       >
-        {busy ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
-        <span>{busy ? "正在提取文字…" : "上传文件(可多选,或拖到这里)"}</span>
-        <span className="opacity-70">
-          PDF、Word(.docx)、PPT(.pptx)、Excel(.xlsx)、文本;单个 20MB 以内。只保存提取出的文字
-        </span>
-        <input
-          ref={inputRef}
-          type="file"
-          multiple
-          accept={ACCEPT}
-          className="sr-only"
-          aria-label="上传知识库文件"
-          disabled={busy}
-          onChange={(e) => void upload([...(e.target.files ?? [])])}
-        />
-      </label>
-      {error && <p className="text-xs text-destructive">{error}</p>}
+        <div className="flex flex-wrap items-center justify-center gap-2 text-sm">
+          {busy ? (
+            <Loader2 className="size-[18px] animate-spin" />
+          ) : (
+            <Upload className="size-[18px]" />
+          )}
+          <span>{busy ? "正在提取文字…" : "把文件拖到这里，或"}</span>
+          <label
+            className={cn(
+              "inline-flex h-8 cursor-pointer items-center rounded-full border border-border bg-card px-3 text-[13px] hover:bg-[#F2F0EA] has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring max-md:h-11",
+              busy && "pointer-events-none",
+            )}
+          >
+            选择文件（可多选）
+            <input
+              ref={inputRef}
+              type="file"
+              multiple
+              accept={ACCEPT}
+              className="sr-only"
+              aria-label="上传知识库文件"
+              disabled={busy}
+              onChange={(e) => void upload([...(e.target.files ?? [])])}
+            />
+          </label>
+          {onManualAdd && (
+            <button
+              type="button"
+              onClick={onManualAdd}
+              className="inline-flex h-8 items-center gap-1 rounded-full border border-border bg-card px-3 text-[13px] hover:bg-[#F2F0EA] max-md:h-11"
+            >
+              <Plus className="size-3.5" />
+              手动添加
+            </button>
+          )}
+        </div>
+        <div className="mt-1.5 text-xs text-muted-foreground">
+          支持 PDF、Word（.docx）、PPT（.pptx）、Excel（.xlsx）、文本，单个 20MB
+          以内；只保存提取出的文字，长文档自动切成多篇
+        </div>
+      </div>
+      {error && <p className="m-0 text-[13px] text-destructive">{error}</p>}
       {results.length > 0 && (
-        <ul className="space-y-1 text-xs" data-testid="upload-results">
+        <ul className="m-0 list-none space-y-1 p-0 text-[13px]" data-testid="upload-results">
           {results.map((r, i) => (
             <li key={`${r.file}-${i}`} className="flex items-start gap-1.5">
               {r.ok ? (
@@ -123,9 +151,9 @@ export function KnowledgeUpload({
                   <span className="text-muted-foreground">
                     {" "}
                     — {FORMAT_LABEL[r.format] ?? r.format}
-                    {r.pages ? ` ${r.pages} 页` : ""},
+                    {r.pages ? ` ${r.pages} 页` : ""}，
                     {r.docs.reduce((n, d) => n + d.chars, 0).toLocaleString()} 字
-                    {r.docs.length > 1 ? `,较长,已切成 ${r.docs.length} 篇` : ""}
+                    {r.docs.length > 1 ? `，较长，已切成 ${r.docs.length} 篇` : ""}
                   </span>
                 ) : (
                   <span className={r.uncertain ? "text-warning" : "text-destructive"}>

@@ -6,6 +6,7 @@ import {
   advancedOf,
   draftFromAgent,
   idError,
+  insertAtCursor,
   newFilePathError,
   orchestrationReady,
   overlayConfig,
@@ -174,9 +175,13 @@ describe("parseSchemaText", () => {
   ])("%s", (text, r) => {
     expect(parseSchemaText(text)).toMatchObject(r);
   });
-  it("JSON 写错给出原因", () => {
+  it("JSON 写错给出中文原因", () => {
     const r = parseSchemaText("{");
     expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/^JSON 格式有误/);
+    const r2 = parseSchemaText('{"a": 1,}');
+    expect(r2.ok).toBe(false);
+    if (!r2.ok) expect(r2.error).not.toMatch(/[A-Za-z]{6,}/);
   });
 });
 
@@ -294,5 +299,15 @@ describe("自动保存的乐观锁与新建时的 ID", () => {
     expect(saveBlock(fresh, { isNew: true, takenIds: [], idEditing: false })).toBeNull();
     // 已建好的智能体 ID 不能改,焦点在不在都不影响保存
     expect(saveBlock(d, { isNew: false, takenIds: [], idEditing: true })).toBeNull();
+  });
+});
+
+describe("insertAtCursor:插入变量插在光标处", () => {
+  it("插在选区位置并返回新光标", () => {
+    expect(insertAtCursor("你好世界", 2, 2, "{{X}}")).toEqual({ text: "你好{{X}}世界", cursor: 7 });
+    expect(insertAtCursor("abcdef", 1, 3, "Z")).toEqual({ text: "aZdef", cursor: 2 });
+  });
+  it("没有光标信息时追加到末尾", () => {
+    expect(insertAtCursor("ab", null, null, "Z")).toEqual({ text: "abZ", cursor: 3 });
   });
 });

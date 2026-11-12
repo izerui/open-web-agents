@@ -14,6 +14,7 @@ import { KeyRateLimit } from "@/features/integration/key-rate-limit";
 import { type SnippetLang, buildSnippets, sampleInput } from "@/features/integration/snippets";
 import { WebhookDeliveries } from "@/features/integration/webhook-deliveries";
 import { errorText, fetchJson } from "@/lib/fetch-json";
+import { formatTime } from "@/lib/format-time";
 import { useMe } from "@/lib/use-me";
 import { cn } from "@/lib/utils";
 import {
@@ -36,7 +37,7 @@ import type { Stage } from "./build-model";
 import { Banner, Block, CodeBlock, CopyButton, Field, StageTitle, Tag, TextButton } from "./ui";
 import type { KeyRecord, VersionMeta } from "./use-build-data";
 
-const fmt = (ms?: number) => (ms ? new Date(ms).toLocaleDateString() : "从未使用");
+const fmt = (ms?: number) => (ms ? formatTime(ms) : "从未使用");
 
 interface Endpoint {
   method: string;
@@ -289,7 +290,14 @@ export function AccessStage({
                 done="Key 已复制"
                 className="bg-card text-foreground hover:bg-[#F2F0EA]"
               />
-              <Button size="sm" variant="success" onClick={() => setIssued(null)}>
+              <Button
+                size="sm"
+                variant="success"
+                onClick={() => {
+                  setIssued(null);
+                  toast.success("明文已收起，之后只能轮换，不能再查看");
+                }}
+              >
                 我已保存
               </Button>
             </div>
@@ -347,10 +355,11 @@ export function AccessStage({
         )}
         {keys.length > 0 && (
           <div className="mt-3 overflow-x-auto rounded-xl border border-border">
-            <table className="w-full min-w-[720px] border-collapse text-sm">
+            <table className="w-full min-w-[820px] border-collapse text-sm">
               <thead>
                 <tr className="border-b border-line-soft text-left text-xs text-muted-foreground">
                   <th className="px-3 py-2 font-normal">备注</th>
+                  <th className="px-3 py-2 font-normal">Key</th>
                   <th className="px-3 py-2 font-normal">有效期</th>
                   <th className="px-3 py-2 font-normal">每分钟</th>
                   <th className="px-3 py-2 font-normal">本月积分</th>
@@ -364,6 +373,14 @@ export function AccessStage({
                   return (
                     <tr key={k.id} className="border-b border-line-soft last:border-0">
                       <td className="px-3 py-2">{k.name || "（未命名）"}</td>
+                      <td
+                        className="px-3 py-2 font-mono text-[13px] whitespace-nowrap text-muted-foreground"
+                        title={
+                          k.keyHint ? "明文只在签发时显示一次" : "旧 Key 没有记录尾号，显示 Key ID"
+                        }
+                      >
+                        {k.keyHint || k.id}
+                      </td>
                       <td
                         className={cn(
                           "px-3 py-2 whitespace-nowrap",

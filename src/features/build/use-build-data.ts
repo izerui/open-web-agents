@@ -7,7 +7,7 @@ import { AGENT_CATALOG_CHANGED } from "@/lib/agent-catalog";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import type { SnapshotChange } from "@/lib/modules/agent/domain/snapshot-diff";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { EvalSummary } from "./build-model";
+import { type EvalSummary, runStats } from "./build-model";
 
 export type BuildAgent = StudioAgent & {
   config: Record<string, unknown>;
@@ -54,6 +54,8 @@ export interface VersionMeta {
 }
 
 export interface KeyRecord {
+  /** 掩码后的 Key(如 owa_live_••••7Q2c);旧 Key 或接口还没给时为空,退回显示 ID */
+  keyHint?: string | null;
   id: string;
   name?: string;
   agentId?: string;
@@ -184,4 +186,70 @@ export function useAgentMeta(
   }, [meta.evals, loadVersions]);
 
   return { meta, loadVersions, loadKeys, loadKnowledge, loadChanges };
+}
+
+interface UsageResponse {
+  totals?: { runs?: number; failed?: number };
+  runs?: { runId: string; estimatedCredits?: { totalMicroCredits?: string } | null }[];
+}
+
+/**
+ * 本智能体近 7 天的用量(计费在你名下的运行):页头「运行」徽标、运行阶段统计卡、
+ * 试聊与评测用例的积分都用这一份,口径一致。
+ */
+export function useAgentUsage(agentId: string | null) {
+  const [stats, setStats] = useState<ReturnType<typeof runStats> | null>(null);
+  const [credits, setCredits] = useState<Map<string, string>>(() => new Map());
+  const [error, setError] = useState(false);
+  const seq = useRef(0);
+  const reload = useCallback(async () => {
+    const s = ++seq.current;
+    if (!agentId) {
+      setStats(null);
+      setCredits(new Map());
+      return;
+    }
+    try {
+      const u = await fetchJson<UsageResponse>(
+        `/api/usage?days=7&agentId=${encodeURIComponent(agentId)}`,
+      );
+      if (s !== seq.current) return;
+      setStats(runStats(u));
+      setCredits(
+        new Map(
+          (u.runs ?? []).flatMap((r) => {
+            const t = r.estimatedCredits?.totalMicroCredits;
+            return t && /^\d+$/.test(t) ? [[r.runId, t] as const] : [];
+          }),
+        ),
+      );
+      setError(false);
+    } catch {
+      if (s === seq.current) setError(true);
+    }
+  }, [agentId]);
+  useEffect(() => {
+    setStats(null);
+    void reload();
+  }, [reload]);
+  return { stats, credits, error, reload };
+}
+
+/** 左栏底部「本月已用 N 积分」(与账户页的消耗汇总同一口径) */
+export function useMonthUsed(enabled: boolean) {
+  const [micro, setMicro] = useState<string | null>(null);
+  useEffect(() => {
+    if (!enabled) return;
+    let live = true;
+    void fetchJson<{ total?: { usedMicro?: string } }>(
+      "/api/billing/summary?window=this_month&by=source",
+    ).then(
+      (r) => live && setMicro(r.total?.usedMicro ?? null),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [enabled]);
+  return micro;
 }

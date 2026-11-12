@@ -1,36 +1,25 @@
 "use client";
 
-// 运行阶段:顶部 7 天小统计(A17,用量接口按智能体过滤)+ 本智能体的运行列表、详情抽屉与取消运行(复用 RunsPanel)。
+// 运行阶段:顶部 7 天小统计(A17,用量接口按智能体过滤;与页头「运行」徽标同一份数据)+
+// 本智能体的运行列表、详情抽屉与取消运行(复用 RunsPanel)。
 
 import { creditsText } from "@/features/models/model-shared";
 import { type AgentList, RunsPanel } from "@/features/runs/runs-view";
-import { fetchJson } from "@/lib/fetch-json";
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { runStats } from "./build-model";
+import type { runStats } from "./build-model";
 import { Banner, StageTitle } from "./ui";
 
 export function RunsStage({
   agentId,
   agentList,
-}: { agentId: string | null; agentList: AgentList }) {
-  const [stats, setStats] = useState<ReturnType<typeof runStats> | null>(null);
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    if (!agentId) return;
-    let live = true;
-    void fetchJson<Parameters<typeof runStats>[0]>(
-      `/api/usage?days=7&agentId=${encodeURIComponent(agentId)}`,
-    ).then(
-      (u) => live && setStats(runStats(u)),
-      () => live && setError(true),
-    );
-    return () => {
-      live = false;
-    };
-  }, [agentId]);
-
+  stats,
+  error,
+}: {
+  agentId: string | null;
+  agentList: AgentList;
+  stats: ReturnType<typeof runStats> | null;
+  error: boolean;
+}) {
   if (!agentId) {
     return (
       <div>

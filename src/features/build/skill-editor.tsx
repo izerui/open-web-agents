@@ -8,14 +8,17 @@ import { cn } from "@/lib/utils";
 import { ChevronDown, ChevronRight, FileCode, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { type SkillDraft, newFilePathError } from "./profile-model";
-import { Field, TextButton, inputMono } from "./ui";
+import { Field, Tag, TextButton, inputMono } from "./ui";
 
 export function SkillItem({
   skill,
+  from,
   onPatch,
   onDelete,
 }: {
   skill: SkillDraft;
+  /** 从其他智能体复制进来的:来源智能体的名字 */
+  from?: string;
   onPatch: (next: Partial<SkillDraft>) => void;
   onDelete: () => void;
 }) {
@@ -43,6 +46,11 @@ export function SkillItem({
       <div className="flex min-h-12 items-center gap-2.5 px-3 py-2.5">
         <FileCode className="size-4 shrink-0 text-muted-foreground" />
         <b className={cn("shrink-0 font-semibold", inputMono)}>{skill.name || "未命名"}</b>
+        {from && (
+          <Tag line className="shrink-0" title="从这个智能体复制进来的，之后它更新不会跟着变">
+            来自 {from}
+          </Tag>
+        )}
         <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
           {skill.description}
         </span>

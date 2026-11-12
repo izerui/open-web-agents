@@ -33,7 +33,8 @@ export function CaseForm({
   title: ReactNode;
   note?: ReactNode;
   footnote?: ReactNode;
-  onSaved: () => void;
+  /** 新建时带上新用例的 id */
+  onSaved: (id?: string) => void;
   onCancel: () => void;
   className?: string;
 }) {
@@ -51,12 +52,12 @@ export function CaseForm({
     setSaving(true);
     try {
       const base = `/api/agents/${encodeURIComponent(agentId)}/evals/cases`;
-      await fetchJson(caseId ? `${base}/${caseId}` : base, {
+      const r = await fetchJson<{ case?: { id?: string } }>(caseId ? `${base}/${caseId}` : base, {
         method: caseId ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(built.body),
       });
-      onSaved();
+      onSaved(r?.case?.id);
     } catch (e) {
       setError(`保存用例失败：${errorText(e)}`);
     } finally {

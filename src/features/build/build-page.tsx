@@ -5,7 +5,6 @@
 // 主体:智能体设计器(主角)+ 当前阶段(编排是档案 / 试聊)。窄屏单栏,设计器从卡片打开。
 
 import { AgentAvatar } from "@/components/agent-avatar";
-import { useConfirm } from "@/components/confirm-dialog";
 import { AppShell } from "@/components/shell/app-shell";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,11 +14,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { useModelCatalog } from "@/features/builder/model-select";
 import { studioAgents } from "@/features/studio/studio-model";
 import { notifyAgentCatalogChanged } from "@/lib/agent-catalog";
 import { errorText, fetchJson } from "@/lib/fetch-json";
+import { creditsAmount } from "@/lib/modules/billing/domain/credits-display";
 import { agentHref } from "@/lib/nav/routes";
 import { cn } from "@/lib/utils";
 import {
@@ -28,11 +29,13 @@ import {
   ChevronRight,
   Copy,
   Info,
+  KeyRound,
   Loader2,
   Lock,
   MessageSquare,
   MoreHorizontal,
   Plus,
+  Search,
   Trash2,
   TriangleAlert,
 } from "lucide-react";
@@ -41,10 +44,18 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AccessStage } from "./access-stage";
-import { STAGES, type Stage, railStatus, stageBadges, stageParam } from "./build-model";
-import type { DesignSection } from "./design-sections";
+import {
+  type EvalSummary,
+  STAGES,
+  type Stage,
+  railStatus,
+  stageBadges,
+  stageParam,
+} from "./build-model";
+import { useDeleteAgent } from "./delete-agent";
+import { type NextStep, type NextTarget, nextStepFor } from "./designer-model";
 import { DesignerPanel, DesignerRail } from "./designer-panel";
-import { EvalStage } from "./eval-stage";
+import { type EvalCase, type EvalResult, EvalStage, fixPromptFrom } from "./eval-stage";
 import { ProfileCard, modelLabel } from "./profile-card";
 import {
   SECTIONS,
@@ -56,12 +67,18 @@ import {
   sectionSummary,
 } from "./profile-model";
 import { PublishStage } from "./publish-stage";
-import { ReadonlyView, useClone } from "./readonly-view";
+import { ReadonlyView, shareModeText, useClone } from "./readonly-view";
 import { RunsStage } from "./runs-stage";
 import { TrialPanel } from "./trial-panel";
 import { Seg, TextButton } from "./ui";
 import { useAgentDraft } from "./use-agent-draft";
-import { type BuildAgent, useAgentList, useAgentMeta } from "./use-build-data";
+import {
+  type BuildAgent,
+  useAgentList,
+  useAgentMeta,
+  useAgentUsage,
+  useMonthUsed,
+} from "./use-build-data";
 import { useDesigner } from "./use-designer";
 
 const BUILT_IN = ["default", "agent-architect"];
@@ -85,14 +102,6 @@ export function BuildPage({
   initialStage: Stage;
 }) {
   const router = useRouter();
-  const confirm = useConfirm();
-  const aliveRef = useRef(true);
-  useEffect(() => {
-    aliveRef.current = true;
-    return () => {
-      aliveRef.current = false;
-    };
-  }, []);
   const list = useAgentList();
   const catalog = useModelCatalog();
   const [createdId, setCreatedId] = useState<string | null>(null);
@@ -108,9 +117,14 @@ export function BuildPage({
   const [stage, setStageState] = useState<Stage>(initialStage);
   const [rtab, setRtab] = useState<"card" | "trial">("card");
   const [fresh, setFresh] = useState<Set<SectionKey>>(() => new Set());
+  // 新建时九节都收起,注意力在设计器上;打开已有的智能体默认展开提示词
   const [open, setOpen] = useState<Set<SectionKey>>(
-    () => new Set<SectionKey>(routeId ? ["prompt"] : ["identity", "prompt"]),
+    () => new Set<SectionKey>(routeId ? ["prompt"] : []),
   );
+  /** 设计器底部的「下一步」提示(前端按事件生成) */
+  const [next, setNext] = useState<NextStep | null>(null);
+  const [evalProgress, setEvalProgress] = useState<{ done: number; total: number } | null>(null);
+  const [railQuery, setRailQuery] = useState("");
   const [designerOpen, setDesignerOpen] = useState<boolean | null>(null);
   const [wide, setWide] = useState(false);
   const [mobileDesigner, setMobileDesigner] = useState(false);
@@ -118,6 +132,8 @@ export function BuildPage({
   const stageRef = useRef(stage);
   stageRef.current = stage;
   const sessionRef = useRef<string>(designerSession ?? "");
+  const currentIdRef = useRef(currentId);
+  currentIdRef.current = currentId;
 
   const replaceUrl = useCallback((id: string | null, s: Stage, designer?: string) => {
     const href = agentHref({
@@ -136,6 +152,27 @@ export function BuildPage({
     publishedVersion: agent?.publishedVersion ?? null,
     hasUnpublishedChanges: agent?.hasUnpublishedChanges === true,
   });
+  const usage = useAgentUsage(readOnly || !agent ? null : currentId);
+  const monthUsed = useMonthUsed(list.loaded);
+
+  // 草稿评测跑完(不管人在哪个阶段):设计器底部给下一步
+  const prevEval = useRef<EvalSummary | null>(null);
+  const draftEval = meta.meta.evals?.draft ?? null;
+  useEffect(() => {
+    const was = prevEval.current?.state;
+    prevEval.current = draftEval;
+    if (was !== "running" || !draftEval?.run) return;
+    if (draftEval.state === "passed" || draftEval.state === "failed") {
+      setNext(
+        nextStepFor({
+          kind: "evalDone",
+          passed: draftEval.run.passed,
+          total: draftEval.run.total,
+        }),
+      );
+      void usage.reload();
+    }
+  }, [draftEval, usage.reload]);
 
   const designerRef = useRef<ReturnType<typeof useDesigner> | null>(null);
   /** 自动保存暂停的原因(设计器写入、载入版本期间);由下面的 effect 跟着设计器状态更新 */
@@ -167,6 +204,8 @@ export function BuildPage({
     agentId: currentId,
     initialSession: designerSession,
     initialPrompt: initialDesc,
+    // 自动发过一次之后从地址里去掉 desc:刷新不会再发
+    onAutoSent: () => replaceUrl(currentIdRef.current, stageRef.current, sessionRef.current),
     enabled: !readOnly && !notFound && (!routeId || Boolean(agent)),
     beforeApply: async () => {
       if (!currentId) {
@@ -188,9 +227,9 @@ export function BuildPage({
       pendingReset.current = aid;
       await list.reload();
       void meta.loadVersions();
-      toast.success(
-        `已应用到草稿：${sections.map((k) => SECTIONS.find((s) => s.key === k)?.title ?? k).join("、")}`,
-      );
+      const titles = sections.map((k) => SECTIONS.find((s) => s.key === k)?.title ?? k);
+      toast.success(`已应用到草稿：${titles.join("、")}`);
+      setNext(nextStepFor({ kind: "applied", sections: titles }));
     },
     onSessionChange: (sid) => {
       sessionRef.current = sid ?? "";
@@ -242,6 +281,7 @@ export function BuildPage({
 
   const fixWithDesigner = useCallback(
     (prompt: string) => {
+      setNext(null);
       setDesignerOpen(true);
       if (window.matchMedia("(max-width: 1023px)").matches) setMobileDesigner(true);
       designer.setPrompt(prompt);
@@ -265,15 +305,16 @@ export function BuildPage({
   const ready = orchestrationReady(d);
   const badges = stageBadges({
     readOnly,
-    ready,
     filled,
     caseCount: meta.meta.caseCount,
-    draftEval: meta.meta.evals?.draft ?? null,
+    draftEval,
+    evalProgress,
     publishedVersion: agent?.publishedVersion ?? null,
     hasUnpublishedChanges: agent?.hasUnpublishedChanges === true,
     changeCount: meta.meta.changeCount,
     keyCount: meta.meta.keys.length,
-    runs7d: agent?.runs7d ?? 0,
+    // 与运行阶段统计卡同一口径:近 7 天、计费在你名下的运行
+    runs7d: currentId ? (usage.stats?.runs ?? null) : 0,
   });
   const pendingCount = designer.pending.reduce((n, p) => n + p.changes.length, 0);
   const designerVisible =
@@ -283,7 +324,39 @@ export function BuildPage({
   const avatarId = currentId ?? (d.id || "new-agent");
   const contract = agent?.published ?? agent?.config;
   const deletable = Boolean(agent && canManageWebhook && !BUILT_IN.includes(agent.id));
-  const { clone, busy: cloning } = useClone(currentId ?? "");
+  const clone = useClone(agent);
+  const del = useDeleteAgent(currentId, name);
+
+  /** 「下一步」按钮的去处 */
+  const goNext = async (to: NextTarget) => {
+    if (to === "trial") {
+      setStage("orch");
+      setRtab("trial");
+      setWide(false);
+      setNext(null);
+      return;
+    }
+    if (to !== "fix") {
+      setStage(to);
+      setNext(null);
+      return;
+    }
+    // 让设计器修复:取最近一次对草稿的评测里没过的用例
+    const runId = draftEval?.run?.id;
+    if (!currentId || !runId) return setStage("eval");
+    try {
+      const base = `/api/agents/${encodeURIComponent(currentId)}/evals`;
+      const [r, c] = await Promise.all([
+        fetchJson<{ results: EvalResult[] }>(`${base}/runs/${runId}`),
+        fetchJson<{ cases: EvalCase[] }>(`${base}/cases`),
+      ]);
+      const bad = r.results.filter((x) => x.status === "failed" || x.status === "error");
+      if (bad.length) fixWithDesigner(fixPromptFrom(c.cases, bad));
+      else setStage("eval");
+    } catch (e) {
+      toast.error(`读取评测结果失败：${errorText(e)}`);
+    }
+  };
 
   /** 页头的保存状态 */
   const saveLabel = (() => {
@@ -291,7 +364,7 @@ export function BuildPage({
       return (
         <span className="flex items-center gap-1.5 text-muted-foreground">
           <Lock className="size-3.5" />
-          只读，所有者管理
+          只读，{agent ? shareModeText(agent) : "所有者管理"}
         </span>
       );
     if (designer.working !== null)
@@ -361,28 +434,6 @@ export function BuildPage({
     );
   })();
 
-  const deleteAgent = () =>
-    confirm.ask({
-      title: `删除「${name}」？`,
-      description:
-        "删除后：接口调用、分享立即失效，绑定它的 API Key 也调不通了；历史会话与运行记录保留。此操作不能在界面上撤销。",
-      confirmLabel: "删除智能体",
-      destructive: true,
-      onConfirm: async () => {
-        try {
-          await fetchJson(`/api/agents/${encodeURIComponent(currentId ?? "")}`, {
-            method: "DELETE",
-          });
-          notifyAgentCatalogChanged();
-          toast.success(`已删除「${name}」`);
-          // 请求期间已经切到别的智能体:不再把页面带回工作室
-          if (aliveRef.current) router.push("/agents");
-        } catch (e) {
-          toast.error(`删除失败：${errorText(e)}`);
-        }
-      },
-    });
-
   const openAgent = async (id: string) => {
     if (id === currentId) return;
     if (draft.dirty && !draft.block) await draft.flush();
@@ -391,60 +442,97 @@ export function BuildPage({
 
   // ───────────── 左栏:我的智能体 ─────────────
   const rail = studioAgents(list.agents);
+  const q = railQuery.trim().toLowerCase();
+  const railShown = q
+    ? rail.filter((a) => a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q))
+    : rail;
   const leftList = (
-    <aside className="flex w-[232px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border px-3.5 py-4 max-xl:hidden">
-      <div className="flex items-center justify-between px-2 pt-1 pb-2.5 text-[13px] text-muted-foreground">
-        <span>我的智能体（{rail.length}）</span>
-        <Link
-          href="/agents/new"
-          className="inline-flex h-8 items-center gap-1 rounded-full px-2 text-[13px] text-[#4D4A43] hover:bg-accent"
-        >
-          <Plus className="size-3.5" />
-          新建
-        </Link>
-      </div>
-      {!currentId && (
-        <div className="flex items-center gap-2.5 rounded-[14px] border border-border bg-card px-2.5 py-[9px] shadow-[0_1px_3px_rgba(0,0,0,.04)]">
-          <AgentAvatar id={avatarId} icon={icon} size={34} />
-          <div className="min-w-0">
-            <div className="truncate text-sm font-medium">{d.name.trim() || "新智能体"}</div>
-            <div className="text-xs text-muted-foreground">草稿，未保存</div>
-          </div>
-        </div>
-      )}
-      {!list.loaded && <p className="px-2 text-[13px] text-muted-foreground">正在加载…</p>}
-      {rail.map((a) => {
-        const st = railStatus(a);
-        const on = a.id === currentId;
-        return (
-          <button
-            key={a.id}
-            type="button"
-            aria-current={on ? "page" : undefined}
-            onClick={() => void openAgent(a.id)}
-            className={cn(
-              "flex w-full items-center gap-2.5 rounded-[14px] border border-transparent px-2.5 py-[9px] text-left hover:bg-accent",
-              on && "border-border bg-card shadow-[0_1px_3px_rgba(0,0,0,.04)] hover:bg-card",
-            )}
+    <aside className="flex w-[232px] shrink-0 flex-col border-r border-border max-xl:hidden">
+      <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-3.5 py-4">
+        <div className="flex items-center justify-between px-2 pt-1 pb-2.5 text-[13px] text-muted-foreground">
+          <span>我的智能体（{rail.length}）</span>
+          <Link
+            href="/agents/new"
+            className="inline-flex h-8 items-center gap-1 rounded-full px-2 text-[13px] text-[#4D4A43] hover:bg-accent"
           >
-            <AgentAvatar id={a.id} icon={on && !readOnly ? icon : a.icon} size={34} />
+            <Plus className="size-3.5" />
+            新建
+          </Link>
+        </div>
+        {rail.length > 8 && (
+          <div className="relative mb-1.5 px-0.5">
+            <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              aria-label="搜索我的智能体"
+              className="h-8 pl-8 text-[13px]"
+              value={railQuery}
+              onChange={(e) => setRailQuery(e.target.value)}
+              placeholder="搜索名称或 ID"
+            />
+          </div>
+        )}
+        {!currentId && (
+          <div className="flex items-center gap-2.5 rounded-[14px] border border-border bg-card px-2.5 py-[9px] shadow-[0_1px_3px_rgba(0,0,0,.04)]">
+            <AgentAvatar id={avatarId} icon={icon} size={34} />
             <div className="min-w-0">
-              <div className="truncate text-sm leading-tight font-medium">
-                {on && !readOnly ? name : a.name}
-              </div>
-              <div
-                className={cn(
-                  "truncate text-xs leading-snug text-muted-foreground",
-                  st.tone === "ok" && "text-success-text",
-                  st.tone === "warn" && "text-warning-text",
-                )}
-              >
-                {st.text}
-              </div>
+              <div className="truncate text-sm font-medium">{d.name.trim() || "新智能体"}</div>
+              <div className="text-xs text-muted-foreground">草稿，未保存</div>
             </div>
-          </button>
-        );
-      })}
+          </div>
+        )}
+        {!list.loaded && <p className="px-2 text-[13px] text-muted-foreground">正在加载…</p>}
+        {q && railShown.length === 0 && (
+          <p className="px-2 text-[13px] text-muted-foreground">没有匹配的智能体</p>
+        )}
+        {railShown.map((a) => {
+          const st = railStatus(a);
+          const on = a.id === currentId;
+          return (
+            <button
+              key={a.id}
+              type="button"
+              aria-current={on ? "page" : undefined}
+              onClick={() => void openAgent(a.id)}
+              className={cn(
+                "flex w-full items-center gap-2.5 rounded-[14px] border border-transparent px-2.5 py-[9px] text-left hover:bg-accent",
+                on && "border-border bg-card shadow-[0_1px_3px_rgba(0,0,0,.04)] hover:bg-card",
+              )}
+            >
+              <AgentAvatar id={a.id} icon={on && !readOnly ? icon : a.icon} size={34} />
+              <div className="min-w-0">
+                <div className="truncate text-sm leading-tight font-medium">
+                  {on && !readOnly ? name : a.name}
+                </div>
+                <div
+                  className={cn(
+                    "truncate text-xs leading-snug text-muted-foreground",
+                    st.tone === "ok" && "text-success-text",
+                    st.tone === "warn" && "text-warning-text",
+                  )}
+                >
+                  {st.text}
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+      <div className="shrink-0 border-t border-line-soft px-5 py-3 text-[13px] text-muted-foreground">
+        {monthUsed !== null ? (
+          <>
+            本月已用{" "}
+            <Link
+              href="/account/billing"
+              className="text-foreground underline-offset-2 hover:underline"
+            >
+              {creditsAmount(monthUsed)}
+            </Link>{" "}
+            积分
+          </>
+        ) : (
+          "本月用量读取中…"
+        )}
+      </div>
     </aside>
   );
 
@@ -452,7 +540,7 @@ export function BuildPage({
   const stageNav = (
     <nav
       aria-label="构建阶段"
-      className="flex shrink-0 items-center gap-0.5 rounded-3xl bg-[#ECEAE3] p-1 max-md:w-max"
+      className="flex shrink-0 items-center gap-0.5 rounded-3xl bg-[#ECEAE3] p-1 max-md:w-max max-sm:grid max-sm:w-full max-sm:grid-cols-5 max-sm:rounded-[18px]"
     >
       {(readOnly ? STAGES.slice(0, 1) : STAGES).map((s) => {
         const b = badges[s.key];
@@ -462,16 +550,17 @@ export function BuildPage({
             key={s.key}
             type="button"
             aria-current={on ? "step" : undefined}
+            title={`${s.label}：${b.text}`}
             onClick={() => setStage(s.key)}
             className={cn(
-              "flex h-10 items-center gap-2 rounded-[20px] px-3.5 text-sm whitespace-nowrap text-muted-foreground hover:text-foreground max-2xl:px-2.5",
+              "flex h-10 items-center gap-2 rounded-[20px] px-3.5 text-sm whitespace-nowrap text-muted-foreground hover:text-foreground max-2xl:px-2.5 max-sm:h-auto max-sm:min-h-12 max-sm:min-w-0 max-sm:flex-col max-sm:justify-center max-sm:gap-0.5 max-sm:rounded-[14px] max-sm:px-1 max-sm:py-1",
               on && "bg-card text-foreground shadow-[0_1px_3px_rgba(0,0,0,.07)]",
             )}
           >
             <span className="font-semibold">{s.label}</span>
             <span
               className={cn(
-                "rounded-[10px] bg-[#E2DFD7] px-2 py-px text-xs text-[#4D4A43]",
+                "rounded-[10px] bg-[#E2DFD7] px-2 py-px text-xs text-[#4D4A43] max-sm:max-w-full max-sm:truncate max-sm:px-1.5",
                 b.tone === "ok" && "bg-success-soft text-success-text",
                 b.tone === "warn" && "bg-warning-soft text-warning-text",
                 b.tone === "bad" && "bg-destructive-soft text-destructive",
@@ -500,12 +589,16 @@ export function BuildPage({
         <div className="truncate font-display text-[19px] leading-tight font-bold">{name}</div>
         <div className="text-xs leading-tight">{saveLabel}</div>
       </div>
-      <div className="mx-auto max-w-full overflow-x-auto max-lg:order-last max-lg:mx-0 max-lg:w-full [scrollbar-width:none]">
+      <div className="mx-auto max-w-full overflow-x-auto max-lg:order-last max-lg:mx-0 max-lg:w-full max-sm:overflow-visible [scrollbar-width:none]">
         {stageNav}
       </div>
       <div className="ml-auto flex shrink-0 items-center gap-2 max-lg:ml-0">
         {readOnly ? (
-          <Button disabled={cloning} onClick={() => void clone()}>
+          <Button
+            disabled={clone.busy || !clone.can}
+            title={clone.reason || undefined}
+            onClick={clone.clone}
+          >
             <Copy />
             <span className="max-sm:hidden">克隆一份来改</span>
           </Button>
@@ -534,10 +627,31 @@ export function BuildPage({
                 </Link>
               </DropdownMenuItem>
             )}
+            {currentId && !readOnly && (
+              <DropdownMenuItem
+                onSelect={() => {
+                  setStage("orch");
+                  setRtab("trial");
+                  setWide(false);
+                }}
+              >
+                <MessageSquare />
+                用草稿试聊
+              </DropdownMenuItem>
+            )}
             {currentId && (
-              <DropdownMenuItem disabled={cloning} onSelect={() => void clone()}>
+              <DropdownMenuItem
+                disabled={clone.busy || !clone.can}
+                onSelect={clone.clone}
+                className="flex-wrap"
+              >
                 <Copy />
                 克隆一份
+                {!clone.can && (
+                  <span className="basis-full pl-6 text-xs text-muted-foreground">
+                    {clone.reason}
+                  </span>
+                )}
               </DropdownMenuItem>
             )}
             {currentId && (
@@ -553,6 +667,14 @@ export function BuildPage({
                 复制 ID
               </DropdownMenuItem>
             )}
+            {!readOnly && (
+              <DropdownMenuItem asChild>
+                <Link href="/developer/keys">
+                  <KeyRound />
+                  全部 API Key
+                </Link>
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem asChild>
               <Link href="/agents">
                 <ChevronLeft />
@@ -562,7 +684,7 @@ export function BuildPage({
             {deletable && (
               <>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem variant="destructive" onSelect={deleteAgent}>
+                <DropdownMenuItem variant="destructive" onSelect={del.ask}>
                   <Trash2 />
                   删除智能体
                 </DropdownMenuItem>
@@ -636,9 +758,14 @@ export function BuildPage({
               return r.ok && !r.empty;
             })()}
             beforeRun={draft.flush}
-            onChanged={() => void meta.loadVersions()}
+            onChanged={() => {
+              void meta.loadVersions();
+              void usage.reload();
+            }}
             onFix={fixWithDesigner}
             goStage={goStage}
+            credits={usage.credits}
+            onProgress={setEvalProgress}
           />
         );
       case "publish":
@@ -660,9 +787,10 @@ export function BuildPage({
             canManage={canManageWebhook}
             listed={agent?.marketListed === true}
             beforePublish={draft.flush}
-            onPublished={() => {
+            onPublished={(v) => {
               void list.reload();
               void meta.loadVersions();
+              setNext(nextStepFor({ kind: "published", version: v }));
             }}
             onRestored={() => {
               if (currentId) pendingReset.current = currentId;
@@ -715,6 +843,8 @@ export function BuildPage({
               error: list.error,
               reload: list.reload,
             }}
+            stats={usage.stats}
+            error={usage.error}
           />
         );
       default:
@@ -810,7 +940,12 @@ export function BuildPage({
               return r.ok && !r.empty;
             })()}
             beforeSend={draft.flush}
-            onCaseSaved={() => void meta.loadVersions()}
+            onCaseSaved={() => {
+              void meta.loadVersions();
+              setNext(nextStepFor({ kind: "caseSaved", count: meta.meta.caseCount + 1 }));
+            }}
+            credits={usage.credits}
+            onTurnFinished={() => void usage.reload()}
           />
         )}
       </>
@@ -824,6 +959,12 @@ export function BuildPage({
       onToggleWide={() => setWide((w) => !w)}
       onCollapse={mode === "sheet" ? undefined : () => setDesignerOpen(false)}
       targetName={name}
+      next={next}
+      onNext={(to) => {
+        if (mode === "sheet") setMobileDesigner(false);
+        void goNext(to);
+      }}
+      onDismissNext={() => setNext(null)}
     />
   );
 
@@ -884,7 +1025,9 @@ export function BuildPage({
               <span className="block text-[13px] text-muted-foreground">
                 {pendingCount > 0
                   ? `有 ${designer.pending.length} 节改动等你确认`
-                  : "说说要改什么，它会提问、给差异，确认后写进草稿"}
+                  : next
+                    ? `下一步：${next.actions.map((a) => a.label).join(" / ")}`
+                    : "说说要改什么，它会提问、给差异，确认后写进草稿"}
               </span>
             </span>
             <ChevronRight className="size-4 shrink-0" />
@@ -930,7 +1073,7 @@ export function BuildPage({
           {body}
         </section>
       </div>
-      {confirm.dialog}
+      {del.dialog}
     </AppShell>
   );
 }

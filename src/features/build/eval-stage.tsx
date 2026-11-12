@@ -4,6 +4,7 @@
 // 失败展开输出快照与原因、「让设计器修复」(A7)、用例表单、运行确认含花费预估(A9)、历史评测与详情。
 // 判分、轮询与接口沿用原 EvalPanel。
 
+import { useConfirm } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -17,6 +18,8 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { EMPTY_FORM, type EvalAssertionsBody, formFromCase } from "@/features/builder/eval-form";
 import { creditsText } from "@/features/models/model-shared";
 import { errorText, fetchJson } from "@/lib/fetch-json";
+import { formatTime } from "@/lib/format-time";
+import { creditsAmount } from "@/lib/modules/billing/domain/credits-display";
 import { cn } from "@/lib/utils";
 import {
   Check,
@@ -35,10 +38,11 @@ import { toast } from "sonner";
 import { type EvalSummary, type Stage, assertionText } from "./build-model";
 import { CaseForm } from "./case-form";
 import { type EvalOutputLite, evalFixPrompt } from "./design-sections";
+import { trialCaseIds } from "./trial-model";
 import { Banner, StageTitle, SubHead, Tag, TextButton } from "./ui";
 import type { VersionMeta } from "./use-build-data";
 
-interface EvalCase {
+export interface EvalCase {
   id: string;
   name: string;
   input: unknown;
@@ -59,7 +63,7 @@ interface EvalRun {
   casesChanged?: boolean;
 }
 
-interface EvalResult {
+export interface EvalResult {
   caseId: string;
   caseName: string;
   status: "pending" | "passed" | "failed" | "error";
@@ -70,11 +74,33 @@ interface EvalResult {
   durationMs?: number;
 }
 
-const fmtTime = (ms: number) => {
-  const d = new Date(ms);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-};
+/** 让设计器修复这些未通过的用例:拼给设计器的那句话 */
+export function fixPromptFrom(cases: readonly EvalCase[], results: readonly EvalResult[]): string {
+  return evalFixPrompt(
+    results.map((r) => {
+      const c = cases.find((x) => x.id === r.caseId);
+      return {
+        caseName: r.caseName,
+        input: c?.input ?? "",
+        assertions: c ? assertionText(c.assertions) : "",
+        failures: r.failures,
+        output: r.output,
+      };
+    }),
+  );
+}
+
+/** 用例这次运行的花费、耗时(花费用积分;用量里没有这条运行就不显示) */
+function resultMeta(r: EvalResult, credits: ReadonlyMap<string, string>): string {
+  const micro = r.taskId ? credits.get(r.taskId) : undefined;
+  return [
+    r.status === "error" ? "未能运行" : null,
+    micro !== undefined ? `${creditsAmount(micro)} 积分` : null,
+    r.durationMs !== undefined ? `${(r.durationMs / 1000).toFixed(1)}s` : null,
+  ]
+    .filter(Boolean)
+    .join("，");
+}
 
 export function EvalStage({
   agentId,
@@ -86,6 +112,8 @@ export function EvalStage({
   onChanged,
   onFix,
   goStage,
+  credits,
+  onProgress,
 }: {
   agentId: string | null;
   publishedVersion: number | null;
@@ -97,7 +125,17 @@ export function EvalStage({
   onChanged: () => void;
   onFix: (prompt: string) => void;
   goStage: (s: Stage) => void;
+  /** 运行 id → 微积分(本智能体近 7 天用量) */
+  credits: ReadonlyMap<string, string>;
+  /** 对草稿的评测在跑时报告进度(页头徽标「运行中 x/n」) */
+  onProgress?: (p: { done: number; total: number } | null) => void;
 }) {
+  const confirmDialog = useConfirm();
+  const [history, setHistory] = useState<{ run: EvalRun; results: EvalResult[] } | null>(null);
+  const [fromTrial, setFromTrial] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    if (agentId) setFromTrial(trialCaseIds(agentId));
+  }, [agentId]);
   const base = agentId ? `/api/agents/${encodeURIComponent(agentId)}/evals` : "";
   const [cases, setCases] = useState<EvalCase[] | null>(null);
   const [runs, setRuns] = useState<EvalRun[]>([]);
@@ -178,18 +216,25 @@ export function EvalStage({
   );
   const done = (detail?.results ?? []).filter((r) => r.status !== "pending").length;
 
+  const progress = useRef(onProgress);
+  progress.current = onProgress;
+  const draftRunning = running && shownVersion === undefined;
+  const total = detail?.run.total ?? 0;
+  useEffect(() => {
+    progress.current?.(draftRunning ? { done, total } : null);
+  }, [draftRunning, done, total]);
+  useEffect(() => () => progress.current?.(null), []);
+
   function fix(results: EvalResult[]) {
-    const items = results.map((r) => {
-      const c = cases?.find((x) => x.id === r.caseId);
-      return {
-        caseName: r.caseName,
-        input: c?.input ?? "",
-        assertions: c ? assertionText(c.assertions) : "",
-        failures: r.failures,
-        output: r.output,
-      };
-    });
-    if (items.length) onFix(evalFixPrompt(items));
+    if (results.length) onFix(fixPromptFrom(cases ?? [], results));
+  }
+
+  async function openHistory(id: string) {
+    try {
+      setHistory(await fetchJson<{ run: EvalRun; results: EvalResult[] }>(`${base}/runs/${id}`));
+    } catch (e) {
+      toast.error(`读取评测失败：${errorText(e)}`);
+    }
   }
 
   async function askRun() {
@@ -229,15 +274,22 @@ export function EvalStage({
     }
   }
 
-  async function deleteCase(c: EvalCase) {
-    if (!window.confirm(`删除用例「${c.name}」？历史评测里的记录保留。`)) return;
-    try {
-      await fetchJson(`${base}/cases/${c.id}`, { method: "DELETE" });
-      await load();
-      notify.current();
-    } catch (e) {
-      toast.error(`删除失败：${errorText(e)}`);
-    }
+  function deleteCase(c: EvalCase) {
+    confirmDialog.ask({
+      title: `删除用例「${c.name}」？`,
+      description: "历史评测里的记录保留；草稿的评测结论会作废，需要重跑。",
+      confirmLabel: "删除用例",
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          await fetchJson(`${base}/cases/${c.id}`, { method: "DELETE" });
+          await load();
+          notify.current();
+        } catch (e) {
+          toast.error(`删除失败：${errorText(e)}`);
+        }
+      },
+    });
   }
 
   if (!agentId) {
@@ -465,20 +517,21 @@ export function EvalStage({
                 onClick={() => setOpenCase((m) => ({ ...m, [c.id]: !open }))}
                 className="min-w-0 flex-1 text-left disabled:cursor-default max-md:basis-[calc(100%-34px)]"
               >
-                <div className="flex items-center gap-2 font-semibold">{c.name}</div>
+                <div className="flex flex-wrap items-center gap-2 font-semibold">
+                  {c.name}
+                  {fromTrial.has(c.id) && (
+                    <Tag line className="font-normal">
+                      来自试聊
+                    </Tag>
+                  )}
+                </div>
                 <div className="text-sm text-muted-foreground [overflow-wrap:anywhere]">
                   {assertionText(c.assertions)}
                 </div>
               </button>
               <span className="shrink-0 text-xs whitespace-nowrap text-muted-foreground max-md:ml-[30px] max-md:flex-1">
                 {r && st !== "pending"
-                  ? [
-                      st === "error" ? "未能运行" : null,
-                      r.costMicroUsd !== undefined ? `$${(r.costMicroUsd / 1e6).toFixed(4)}` : null,
-                      r.durationMs !== undefined ? `${(r.durationMs / 1000).toFixed(1)}s` : null,
-                    ]
-                      .filter(Boolean)
-                      .join("，")
+                  ? resultMeta(r, credits)
                   : st === "pending"
                     ? "运行中"
                     : "未运行"}
@@ -495,7 +548,7 @@ export function EvalStage({
               <TextButton
                 aria-label={`删除用例 ${c.name}`}
                 disabled={running}
-                onClick={() => void deleteCase(c)}
+                onClick={() => deleteCase(c)}
               >
                 <Trash2 />
               </TextButton>
@@ -541,7 +594,10 @@ export function EvalStage({
 
       <SubHead>
         <span>
-          历史评测<span className="ml-2 font-normal text-muted-foreground">点一行看详情</span>
+          历史评测
+          <span className="ml-2 font-normal text-muted-foreground">
+            点一行看详情，不改上面的列表
+          </span>
         </span>
       </SubHead>
       <div className="overflow-x-auto rounded-xl border border-border">
@@ -567,8 +623,8 @@ export function EvalStage({
               <tr
                 key={r.id}
                 tabIndex={0}
-                onClick={() => void openRun(r.id)}
-                onKeyDown={(e) => e.key === "Enter" && void openRun(r.id)}
+                onClick={() => void openHistory(r.id)}
+                onKeyDown={(e) => e.key === "Enter" && void openHistory(r.id)}
                 className={cn(
                   "cursor-pointer border-b border-line-soft last:border-0 hover:bg-[#FAF9F6]",
                   detail?.run.id === r.id && "bg-[#F6F5F1]",
@@ -598,13 +654,85 @@ export function EvalStage({
                     : `${r.passed}/${r.total}（${Math.round((r.passed / Math.max(1, r.total)) * 100)}%）`}
                 </td>
                 <td className="px-3 py-2.5 whitespace-nowrap text-muted-foreground">
-                  {fmtTime(r.createdAt)}
+                  {formatTime(r.createdAt)}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      <Dialog open={history !== null} onOpenChange={(o) => !o && setHistory(null)}>
+        <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {history?.run.agentVersion !== undefined ? `v${history?.run.agentVersion}` : "草稿"}
+              的评测，{history ? formatTime(history.run.createdAt) : ""}
+            </DialogTitle>
+            <DialogDescription>
+              {history?.run.status === "running"
+                ? "还在运行"
+                : `${history?.run.passed}/${history?.run.total} 通过`}
+              {history?.run.configHash ? `，配置 ${history.run.configHash.slice(0, 7)}` : ""}
+              {history?.run.casesChanged ? "，之后用例改动过" : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="overflow-hidden rounded-xl border border-border">
+            {(history?.results ?? []).map((r) => {
+              const bad = r.status === "failed" || r.status === "error";
+              return (
+                <div
+                  key={r.caseId}
+                  className="flex items-start gap-2.5 border-b border-line-soft px-3 py-2.5 text-sm last:border-0"
+                >
+                  <span className="mt-0.5">
+                    {r.status === "passed" ? (
+                      <span className="grid size-[18px] place-items-center rounded-full bg-success text-white">
+                        <Check className="size-3" strokeWidth={3} />
+                      </span>
+                    ) : bad ? (
+                      <span className="grid size-[18px] place-items-center rounded-full bg-destructive-soft text-destructive">
+                        <X className="size-3" strokeWidth={3} />
+                      </span>
+                    ) : (
+                      <Loader2 className="size-[18px] animate-spin text-muted-foreground" />
+                    )}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium">{r.caseName}</div>
+                    {bad && (
+                      <div className="text-[13px] text-destructive [overflow-wrap:anywhere]">
+                        {(r.failures?.length ? r.failures : [r.output?.error ?? "未通过"]).join(
+                          "；",
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {r.status === "pending" ? "运行中" : resultMeta(r, credits)}
+                  </span>
+                </div>
+              );
+            })}
+            {history && history.results.length === 0 && (
+              <div className="px-3 py-2.5 text-sm text-muted-foreground">没有用例结果</div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                const id = history?.run.id;
+                setHistory(null);
+                if (id) void openRun(id);
+              }}
+            >
+              在上方列表里展开
+            </Button>
+            <Button onClick={() => setHistory(null)}>关闭</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={confirm !== null} onOpenChange={(o) => !o && !busy && setConfirm(null)}>
         <DialogContent>
@@ -647,6 +775,7 @@ export function EvalStage({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {confirmDialog.dialog}
     </div>
   );
 }

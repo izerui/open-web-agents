@@ -1,6 +1,6 @@
 import type { Turn } from "@/features/workbench/types";
 import { describe, expect, it } from "vitest";
-import { caseFormFromTrial, turnAnswer, turnDurationText } from "../trial-model";
+import { caseFormFromTrial, trialCaseNote, turnAnswer, turnDurationText } from "../trial-model";
 
 describe("caseFormFromTrial:试聊一轮存为评测用例(A6)", () => {
   it("输入取这一轮提问,结构化回答预填「字段等于」", () => {
@@ -24,14 +24,16 @@ describe("caseFormFromTrial:试聊一轮存为评测用例(A6)", () => {
     expect(f.contains).toBe("");
   });
 
-  it("文本回答:正文须包含取回答的第一句", () => {
+  it("文本回答:不拿整句当「须包含」(重跑几乎一定不通过),留给用户填关键词", () => {
     const f = caseFormFromTrial({
       prompt: "美元发票怎么换算",
       answer: "按开票日汇率换算。具体是……",
       hasInputSchema: false,
     });
-    expect(f.contains).toBe("按开票日汇率换算");
+    expect(f.contains).toBe("");
     expect(f.fieldEquals).toBe("");
+    expect(trialCaseNote({ structured: undefined })).toContain("关键词");
+    expect(trialCaseNote({ structured: { a: 1 } })).not.toContain("关键词");
   });
 
   it("有 inputSchema 且提问是 JSON 对象时按 JSON 解析", () => {

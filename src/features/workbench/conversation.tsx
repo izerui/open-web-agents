@@ -754,8 +754,10 @@ const TurnView = memo(function TurnView({
   selectedToolLocator,
   readOnly,
   awaitingTools,
+  renderMeta,
 }: {
   awaitingTools?: readonly string[];
+  renderMeta?: (turn: Turn) => React.ReactNode;
   turn: Turn;
   turnIndex: number;
   turnKey: string;
@@ -1037,6 +1039,7 @@ const TurnView = memo(function TurnView({
                   重跑
                 </button>
               )}
+              {renderMeta?.(turn)}
             </div>
           )}
         </div>
@@ -1139,6 +1142,7 @@ export function ChatThread({
   readOnly,
   awaitingTools,
   renderTurnExtra,
+  renderTurnMeta,
 }: {
   turns: Turn[];
   onRerunAction?: (runId: string, prompt: string) => void;
@@ -1159,6 +1163,8 @@ export function ChatThread({
   awaitingTools?: readonly string[];
   /** 每一轮下方追加的内容(构建页试聊:耗时与「存为评测用例」) */
   renderTurnExtra?: (turn: Turn, index: number) => React.ReactNode;
+  /** 每一轮回复下那一行元信息(token、复制、重跑)末尾追加的内容(构建页试聊:耗时、积分、存为用例) */
+  renderTurnMeta?: (turn: Turn) => React.ReactNode;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollMode, setScrollMode] = useState<ScrollMode>("following");
@@ -1338,6 +1344,7 @@ export function ChatThread({
                     selectedToolLocator={selectedToolLocator}
                     readOnly={readOnly}
                     awaitingTools={awaitingTools}
+                    renderMeta={renderTurnMeta}
                   />
                   {renderTurnExtra?.(turn, virtualRow.index)}
                 </div>

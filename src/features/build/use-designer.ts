@@ -21,6 +21,15 @@ import {
   mergeDesignSections,
   sectionOfChangePath,
 } from "./design-sections";
+import {
+  type Outcome,
+  type Outcomes,
+  addOutcome,
+  outcomesKey,
+  parseOutcomes,
+  pendingAnchor,
+  shouldAutoSend,
+} from "./designer-model";
 
 export interface DesignView {
   sessionId: string;
@@ -74,8 +83,12 @@ export function useDesigner(opts: {
   /** 目标智能体;null = 新建(还没有智能体) */
   agentId: string | null;
   initialSession?: string;
-  /** 新建弹层带来的描述,预填进输入框(不自动发送) */
+  /**
+   * 新建弹层带来的描述:预填进输入框;会话还没有任何轮次时自动发给设计器(取舍 1:
+   * 用户在弹层里已经明确点了「用设计器创建」),发完调 onAutoSent(页面从地址里去掉 desc,刷新不会重发)
+   */
   initialPrompt?: string;
+  onAutoSent?: () => void;
   /** 只读视图不加载设计器 */
   enabled: boolean;
   /** 应用之前先把档案里没落盘的修改存掉;存不了返回 false */
@@ -112,6 +125,35 @@ export function useDesigner(opts: {
   const autoPicked = useRef(Boolean(opts.initialSession));
 
   const blocked = busy || running || loading || view?.busy === true;
+  const turnsRef = useRef<Turn[]>([]);
+  turnsRef.current = turns;
+
+  /** 每一轮里改动的处理结果(已应用 / 没有应用),按设计会话存在本机,留在对话历史里 */
+  const [outcomes, setOutcomes] = useState<Outcomes>({});
+  useEffect(() => {
+    setOutcomes(
+      sessionId && typeof window !== "undefined"
+        ? parseOutcomes(window.localStorage.getItem(outcomesKey(sessionId)))
+        : {},
+    );
+  }, [sessionId]);
+  const recordOutcomes = useCallback((list: Outcome[]) => {
+    const sid = sessionRef.current;
+    const all = turnsRef.current;
+    const i = pendingAnchor(all);
+    if (!sid || i < 0 || list.length === 0) return;
+    const key = all[i]?.runId ?? `turn-${i}`;
+    setOutcomes((m) => {
+      let next = m;
+      for (const o of list) next = addOutcome(next, key, o);
+      try {
+        window.localStorage.setItem(outcomesKey(sid), JSON.stringify(next));
+      } catch {
+        // 存不了只影响刷新后的显示
+      }
+      return next;
+    });
+  }, []);
 
   const loadHistory = useCallback(async () => {
     const h = await fetchJson<{ sessions: DesignRecord[] }>("/api/agents/design");
@@ -445,6 +487,11 @@ export function useDesigner(opts: {
           throw new Error("设计器的改动刚刚变了，请重新查看后再应用");
         }
         const result = await postApply(target.previewToken);
+        recordOutcomes(
+          groupChanges(shown)
+            .filter((g) => applied.has(g.section))
+            .map((g) => ({ section: g.section, count: g.changes.length, applied: true })),
+        );
         const after = await inspect();
         accept(after);
         const rest = pendingSecs.filter((s) => !applied.has(s));
@@ -464,7 +511,7 @@ export function useDesigner(opts: {
       setWorking(null);
       return ok;
     },
-    [act, inspect, accept, rebaseIfNeeded, patch, postApply, loadHistory],
+    [act, inspect, accept, rebaseIfNeeded, patch, postApply, loadHistory, recordOutcomes],
   );
 
   /** 整体「差异与保存」:用弹层里展示的那份预览的 token 保存(服务端核对冲突与 token) */
@@ -477,6 +524,13 @@ export function useDesigner(opts: {
         if (!(await cb.current.beforeApply()))
           throw new Error("档案里还有没保存的修改（或暂停了保存），先处理好再保存");
         const result = await postApply(previewToken);
+        recordOutcomes(
+          groupChanges(cur?.changes ?? []).map((g) => ({
+            section: g.section,
+            count: g.changes.length,
+            applied: true,
+          })),
+        );
         accept(await inspect());
         void loadHistory().catch(() => {});
         await cb.current.onApplied({ agentId: result.agent.id, created: result.created, sections });
@@ -484,7 +538,7 @@ export function useDesigner(opts: {
       setWorking(null);
       return ok;
     },
-    [act, postApply, accept, inspect, loadHistory],
+    [act, postApply, accept, inspect, loadHistory, recordOutcomes],
   );
 
   /** 先不改:这一节退回基线(提议丢掉,对话保留) */
@@ -494,14 +548,17 @@ export function useDesigner(opts: {
       await act(async () => {
         const cur = viewRef.current;
         if (!cur?.draft || !cur.base) return;
+        const count = groupChanges(cur.changes ?? []).find((g) => g.section === section)?.changes
+          .length;
         await patch({
           revision: cur.revision,
           draft: mergeDesignSections(cur.draft, cur.base, [section]),
         });
+        recordOutcomes([{ section, count: count ?? 0, applied: false }]);
       });
       setWorking(null);
     },
-    [act, patch],
+    [act, patch, recordOutcomes],
   );
 
   /** 载入当前草稿(legacy / conflict):替换设计草稿,对话保留 */
@@ -599,6 +656,33 @@ export function useDesigner(opts: {
     return ((await res.json()) as { runs: TrialRun[] }).runs;
   }, []);
 
+  /** 上一轮没有完成(aiIssue):把那一轮的话再发一次 */
+  const retry = useCallback(() => {
+    const last = turnsRef.current.at(-1);
+    return last ? send(last.prompt) : Promise.resolve(false);
+  }, [send]);
+
+  // 带描述进来:会话载入后还没有任何轮次,自动把描述发给设计器(只试一次;失败照常显示错误)
+  const autoTried = useRef(false);
+  const autoPrompt = opts.initialPrompt;
+  useEffect(() => {
+    if (
+      !enabled ||
+      !shouldAutoSend({
+        desc: autoPrompt,
+        sessionId,
+        loading,
+        hasView: view !== null,
+        turnCount: turns.length,
+        attempted: autoTried.current,
+        blocked,
+      })
+    )
+      return;
+    autoTried.current = true;
+    void send(autoPrompt).finally(() => cb.current.onAutoSent?.());
+  }, [enabled, autoPrompt, sessionId, loading, view, turns.length, blocked, send]);
+
   const pending = useMemo(() => groupChanges(view?.changes ?? []), [view?.changes]);
   const records = useMemo(
     () =>
@@ -633,6 +717,8 @@ export function useDesigner(opts: {
     select,
     create,
     send,
+    retry,
+    outcomes,
     stop,
     refresh: () => act(refresh),
     applySection,

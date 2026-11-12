@@ -28,7 +28,7 @@ const isPrimitive = (v: unknown) =>
 
 /**
  * 预填用例表单:输入取这一轮的提问;期望从回答预填 ——
- * 有结构化结果就把顶层的简单字段写成「字段等于」,否则「正文须包含」取回答的第一句。
+ * 有结构化结果就把顶层的简单字段写成「字段等于」;自由文本不预填断言。
  * 只是预填,用户保存前可以改。
  */
 export function caseFormFromTrial(t: {
@@ -54,7 +54,7 @@ export function caseFormFromTrial(t: {
         .replace(/\s+/g, " ")
         .slice(0, 20) || "用例";
   let fieldEquals = "";
-  let contains = "";
+  const contains = "";
   if (t.structured && typeof t.structured === "object" && !Array.isArray(t.structured)) {
     fieldEquals = Object.entries(t.structured as Record<string, unknown>)
       // 长文本(理由、摘要)每次都会变,不适合当断言
@@ -62,13 +62,37 @@ export function caseFormFromTrial(t: {
       .slice(0, 3)
       .map(([k, v]) => `${k} = ${JSON.stringify(v)}`)
       .join("\n");
-  } else if (t.answer.trim()) {
-    contains =
-      t.answer
-        .trim()
-        .split(/[。！？!?\n]/u)[0]
-        ?.trim()
-        .slice(0, 40) ?? "";
   }
+  // 没有结构化结果时不预填「正文须包含」:整句回答下次重跑几乎一定对不上,让用户自己填关键词
   return { ...EMPTY_FORM, name, input: prompt, inputIsJson, fieldEquals, contains };
+}
+
+/** 存为用例表单上的说明 */
+export function trialCaseNote(t: { structured?: unknown }): string {
+  return t.structured && typeof t.structured === "object"
+    ? "已按这次的提问和结构化结果预填，可以再改"
+    : "已按这次的提问预填；回答是自由文本，请在「正文须包含」里填几个必须出现的关键词";
+}
+
+// 「来自试聊」标记:用例接口没有来源字段,在本机记下从试聊存进来的用例 id(换设备看不到标记,不影响评测)
+const trialKey = (agentId: string) => `owa.trial-cases.${agentId}`;
+
+export function trialCaseIds(agentId: string): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const v = JSON.parse(window.localStorage.getItem(trialKey(agentId)) ?? "[]") as unknown;
+    return new Set(Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function markTrialCase(agentId: string, caseId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    const ids = [...trialCaseIds(agentId), caseId].slice(-500);
+    window.localStorage.setItem(trialKey(agentId), JSON.stringify(ids));
+  } catch {
+    // 存不了就不显示标记
+  }
 }
