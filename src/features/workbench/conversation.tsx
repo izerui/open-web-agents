@@ -25,6 +25,7 @@ import {
   questionState,
 } from "./question-state";
 import type { Turn } from "./types";
+import { answeredOptions, branchLabel, formatDuration } from "./workbench.logic";
 
 export {
   contextTokens,
@@ -117,14 +118,19 @@ export function summarizeToolInput(tool: string, input: unknown): string {
   if (!input || typeof input !== "object") return "";
   const values = input as Record<string, unknown>;
   const pick = (key: string) => (typeof values[key] === "string" ? values[key] : "");
-  const value =
-    tool === "Bash"
-      ? pick("command")
-      : ["Write", "Read", "Edit", "NotebookEdit"].includes(tool)
-        ? pick("file_path")
-        : pick("description") || Object.keys(values).join(", ");
-  const oneLine = value.replace(/\s+/g, " ").trim();
-  return oneLine.length > 100 ? `${oneLine.slice(0, 100)}...` : oneLine;
+  const clip = (text: string, max: number) => {
+    const oneLine = text.replace(/\s+/g, " ").trim();
+    return oneLine.length > max ? `${oneLine.slice(0, max)}…` : oneLine;
+  };
+  if (tool === "Bash") return clip(pick("command"), 100);
+  if (["Write", "Read", "Edit", "NotebookEdit"].includes(tool)) return clip(pick("file_path"), 100);
+  const described = pick("description");
+  if (described.trim()) return clip(described, 100);
+  // 没有说明字段:第一个字符串参数的值(query、url、path…)比参数名更能说明这次在做什么
+  const firstText = Object.values(values).find(
+    (v): v is string => typeof v === "string" && v.trim() !== "",
+  );
+  return firstText ? clip(firstText, 60) : Object.keys(values).join(", ");
 }
 
 /** 工具名的区分色(深一档,保证在白底上 ≥4.5:1)。 */
@@ -260,8 +266,11 @@ const ToolsCard = memo(function ToolsCard({
   onLocate,
   selected,
   awaiting,
+  times,
 }: {
   awaiting?: readonly string[];
+  /** 本页实时收到的调用起止(按 toolUseId);有才显示耗时 */
+  times?: Turn["toolTimes"];
   calls: ToolCall[];
   turnKey: string;
   running: boolean;
@@ -344,6 +353,7 @@ const ToolsCard = memo(function ToolsCard({
                       等你确认
                     </span>
                   )}
+                  <ToolDuration time={times?.[call.key]} />
                 </button>
                 {!onLocate && inline === locator && <CallDetail call={call} running={running} />}
               </li>
@@ -354,6 +364,19 @@ const ToolsCard = memo(function ToolsCard({
     </div>
   );
 });
+
+/** 一次调用的耗时(本页实时收到起止时才有) */
+export function ToolDuration({ time }: { time?: { start: number; end?: number } }) {
+  if (!time || time.end === undefined) return null;
+  return (
+    <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+      {formatDuration(time.end - time.start)}
+    </span>
+  );
+}
+
+/** 本页里作答的时刻(按 toolUseId);运行记录里没有回答时间,刷新后就不显示 */
+const answeredAtByTool = new Map<string, number>();
 
 /** 提交回答:回答按题目顺序;decline = 不回答。失败抛错 */
 export type SubmitAnswer = (
@@ -421,6 +444,7 @@ function QuestionBlock({
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const pending = state.kind === "pending" ? state.request : null;
+  const answeredAt = e.toolUseId ? answeredAtByTool.get(e.toolUseId) : undefined;
   useEffect(() => {
     if (!pending) return;
     setNow(Date.now());
@@ -465,8 +489,9 @@ function QuestionBlock({
       setBusy(true);
       try {
         await submitAnswer(pending.id, { answers });
+        if (e.toolUseId) answeredAtByTool.set(e.toolUseId, Date.now());
       } catch (err) {
-        toast.error(`提交回答失败:${err instanceof Error ? err.message : String(err)}`);
+        toast.error(`提交回答失败：${err instanceof Error ? err.message : String(err)}`);
       } finally {
         setBusy(false);
       }
@@ -486,7 +511,7 @@ function QuestionBlock({
     try {
       await submitAnswer(pending.id, { decline: true });
     } catch (err) {
-      toast.error(`提交失败:${err instanceof Error ? err.message : String(err)}`);
+      toast.error(`提交失败：${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setBusy(false);
     }
@@ -512,6 +537,7 @@ function QuestionBlock({
   return (
     <div
       data-testid="question-card"
+      data-question-tool={e.toolUseId}
       className={cn(
         "rounded-[14px] border p-3.5",
         pending
@@ -529,6 +555,9 @@ function QuestionBlock({
           <span data-testid="question-state" className="font-medium">
             {STATE_TEXT[state.kind]}
           </span>
+          {state.kind === "answered" && answeredAt !== undefined && (
+            <span className="tabular-nums">，{clockOf(answeredAt)}</span>
+          )}
           {pending ? (
             <span className="tabular-nums">
               ，剩余 {formatLeft(pending.expiresAt - now)}，超时后由智能体自行判断
@@ -549,10 +578,11 @@ function QuestionBlock({
             )}
           </p>
           {state.kind === "answered" ? (
-            <p className="whitespace-pre-wrap break-words text-sm" data-testid="question-answer">
-              <span className="text-muted-foreground">你的回答：</span>
-              {state.answers[qi] ?? state.raw}
-            </p>
+            <AnsweredOptions
+              options={q.options}
+              answer={state.answers[qi] ?? null}
+              raw={state.raw}
+            />
           ) : (
             <>
               <div className="flex flex-wrap gap-1.5">
@@ -600,7 +630,7 @@ function QuestionBlock({
                   autoFocus
                   className="mt-2 h-[34px] w-full rounded-[10px] border border-border bg-card px-3 text-sm outline-none placeholder:text-muted-foreground focus:border-[#9C978B] focus:ring-[3px] focus:ring-[#ECE9E1] max-md:h-11 max-md:text-base"
                   placeholder={q.multiSelect ? "写下你的补充" : "写下你的答案"}
-                  aria-label={`其他回答:${q.question}`}
+                  aria-label={`其他回答：${q.question}`}
                   maxLength={2000}
                   disabled={busy}
                   value={other[qi] ?? ""}
@@ -640,6 +670,65 @@ function QuestionBlock({
             <span className="text-sm text-muted-foreground">把你的选择当成一条新消息发出去</span>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+function clockOf(ms: number): string {
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/** 已回答:选项照样列出,选中的标出来;自己填写的单独一行 */
+function AnsweredOptions({
+  options,
+  answer,
+  raw,
+}: {
+  options: { label: string; description?: string }[];
+  answer: string | null;
+  raw: string;
+}) {
+  if (answer === null) {
+    return (
+      <p className="whitespace-pre-wrap break-words text-sm" data-testid="question-answer">
+        <span className="text-muted-foreground">你的回答：</span>
+        {raw}
+      </p>
+    );
+  }
+  const { picked, other } = answeredOptions(options, answer);
+  return (
+    <div data-testid="question-answer">
+      <div className="flex flex-wrap gap-1.5">
+        {options.map((o) => {
+          const on = picked.includes(o.label);
+          return (
+            <span
+              key={o.label}
+              title={o.description}
+              className={cn(
+                "inline-flex min-h-[34px] items-center gap-1 rounded-[10px] border px-3 py-1.5 text-[13px]",
+                on
+                  ? "border-foreground bg-card shadow-[inset_0_0_0_1px_var(--foreground)]"
+                  : "border-border bg-[#FBFAF7] text-muted-foreground",
+              )}
+            >
+              {on && <Check className="size-3.5" />}
+              {o.label}
+            </span>
+          );
+        })}
+      </div>
+      {other && (
+        <p
+          className="mt-1.5 whitespace-pre-wrap break-words text-sm"
+          data-testid="question-answer-other"
+        >
+          <span className="text-muted-foreground">自己填写：</span>
+          {other}
+        </p>
       )}
     </div>
   );
@@ -754,8 +843,16 @@ const TurnView = memo(function TurnView({
   selectedToolLocator,
   readOnly,
   awaitingTools,
+  onOpenFileAction,
+  branchText,
+  localSteers,
 }: {
   awaitingTools?: readonly string[];
+  onOpenFileAction?: (path: string) => void;
+  /** 分叉标记的文案(从第几轮之后分叉) */
+  branchText?: string;
+  /** 已提交、还没确认交给智能体的追加消息(只在最后一轮显示) */
+  localSteers?: readonly { id: string; text: string }[];
   turn: Turn;
   turnIndex: number;
   turnKey: string;
@@ -849,7 +946,7 @@ const TurnView = memo(function TurnView({
       {turn.branchedFrom && (
         <p className="-mb-1 flex items-center gap-1.5 self-end text-[12.5px] text-muted-foreground">
           <GitBranch className="size-3.5" />
-          从上文某轮分叉重跑
+          {branchText ?? "从上文某轮分叉重跑"}
         </p>
       )}
       <div className="max-w-[78%] self-end whitespace-pre-wrap break-words rounded-[14px_14px_4px_14px] bg-[#E2E9E3] px-3.5 py-2 text-[14.5px] leading-[1.6] max-md:max-w-[88%] max-md:text-base">
@@ -908,6 +1005,7 @@ const TurnView = memo(function TurnView({
                     onLocate={onLocateToolAction}
                     selected={selectedToolLocator}
                     awaiting={awaitingTools}
+                    times={turn.toolTimes}
                   />
                 );
               });
@@ -980,10 +1078,25 @@ const TurnView = memo(function TurnView({
                 key={blockId}
                 className="chat-md min-w-0 text-[14.5px] leading-[1.75] max-md:text-base"
               >
-                <MessageResponse isAnimating={turn.running}>{block.text}</MessageResponse>
+                <MessageResponse isAnimating={turn.running} onOpenWorkspaceFile={onOpenFileAction}>
+                  {block.text}
+                </MessageResponse>
               </div>
             );
           })}
+
+          {localSteers?.map((steer) => (
+            <div
+              key={steer.id}
+              className="max-w-[72%] self-end rounded-[14px_14px_4px_14px] border border-dashed border-[#C9C4B8] bg-[#FAF9F5] px-3.5 py-2 text-sm max-md:max-w-[88%]"
+            >
+              <div className="mb-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Spin className="size-3 border-[1.5px]" />
+                已提交，等待智能体接收
+              </div>
+              <span className="whitespace-pre-wrap break-words">{steer.text}</span>
+            </div>
+          ))}
 
           {resultEvent && <ResultCard event={resultEvent} />}
 
@@ -1057,11 +1170,14 @@ export function scrollModeForDistance(distanceFromEnd: number): ScrollMode {
 function RerunDialog({
   target,
   laterTurns,
+  estimate,
   onCancel,
   onConfirm,
 }: {
   target: { index: number; runId: string; prompt: string } | null;
   laterTurns: number;
+  /** 花费预估(如「预计约 20 积分」) */
+  estimate?: string | null;
   onCancel(): void;
   onConfirm(runId: string, prompt: string): void;
 }) {
@@ -1108,7 +1224,7 @@ function RerunDialog({
           )}
           <p className="flex items-center gap-2 rounded-[10px] bg-[#F4F2EC] px-3 py-2 text-sm text-[#3C3A35]">
             <Coins className="size-4 shrink-0" />
-            重跑会重新调用模型并计费
+            重跑会重新调用模型并计费{estimate ? `，${estimate}` : ""}
           </p>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onCancel}>
@@ -1139,7 +1255,16 @@ export function ChatThread({
   readOnly,
   awaitingTools,
   renderTurnExtra,
+  onOpenFileAction,
+  localSteers,
+  rerunEstimateAction,
 }: {
+  /** 对话里点了指向工作区文件的链接(不传则链接照旧渲染) */
+  onOpenFileAction?: (path: string) => void;
+  /** 已提交、还没确认交给智能体的追加消息 */
+  localSteers?: readonly { id: string; text: string }[];
+  /** 重跑这一轮的花费预估文案(如「预计约 20 积分」);算不出返回 null */
+  rerunEstimateAction?: (turn: Turn) => string | null;
   turns: Turn[];
   onRerunAction?: (runId: string, prompt: string) => void;
   onAnswerAction?: (text: string) => void;
@@ -1338,6 +1463,11 @@ export function ChatThread({
                     selectedToolLocator={selectedToolLocator}
                     readOnly={readOnly}
                     awaitingTools={awaitingTools}
+                    onOpenFileAction={onOpenFileAction}
+                    branchText={
+                      turn.branchedFrom ? branchLabel(turns, turn.branchedFrom) : undefined
+                    }
+                    localSteers={virtualRow.index === turns.length - 1 ? localSteers : undefined}
                   />
                   {renderTurnExtra?.(turn, virtualRow.index)}
                 </div>
@@ -1364,7 +1494,7 @@ export function ChatThread({
                   index === currentTurn &&
                     "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground",
                 )}
-                title={`第 ${index + 1} 轮: ${turn.prompt.slice(0, 40)}`}
+                title={`第 ${index + 1} 轮：${turn.prompt.slice(0, 40)}`}
                 aria-label={`跳到第 ${index + 1} 轮`}
                 aria-current={index === currentTurn ? "true" : undefined}
                 onClick={() => {
@@ -1399,6 +1529,7 @@ export function ChatThread({
             : null
         }
         laterTurns={rerunIndex !== null ? turns.length - 1 - rerunIndex : 0}
+        estimate={rerunTurn ? rerunEstimateAction?.(rerunTurn) : null}
         onCancel={() => setRerunIndex(null)}
         onConfirm={(runId, prompt) => {
           setRerunIndex(null);

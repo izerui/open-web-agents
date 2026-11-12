@@ -15,6 +15,7 @@ import type { VariableDef } from "@/lib/modules/agent/domain/config";
 import { KeyRound } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { missingRequired, variableUpdates } from "./workbench.logic";
 
 interface VariableState {
   variables: VariableDef[];
@@ -34,10 +35,16 @@ export function VariablePrompt({
   agentId,
   sessionId,
   onReady,
+  onMissingChangeAction,
+  openSignal = 0,
 }: {
   agentId: string;
   sessionId?: string | null;
   onReady?: () => void;
+  /** 还没填的必填变量(页面据此在发送前拦下);读不到变量定义时按没有缺失处理 */
+  onMissingChangeAction?: (missing: string[]) => void;
+  /** 变化时打开「填写变量」弹窗(发送被拦下时) */
+  openSignal?: number;
 }) {
   const [state, setState] = useState<VariableState | null>(null);
   const [open, setOpen] = useState(false);
@@ -55,7 +62,12 @@ export function VariablePrompt({
       );
       setState(data);
       if (data.variables.length > 0) {
-        setDraft(data.values);
+        // 已保存的密钥不回显:输入框留空,占位写「已保存，留空不修改」
+        setDraft(
+          Object.fromEntries(
+            data.variables.map((v) => [v.name, v.secret ? "" : (data.values[v.name] ?? "")]),
+          ),
+        );
       }
     } catch {}
   }, [agentId, sessionId]);
@@ -64,9 +76,23 @@ export function VariablePrompt({
     void load();
   }, [load]);
 
+  const missingNames = state ? missingRequired(state.variables, state.values) : [];
+  const missingKey = missingNames.join("\n");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 只在缺失集合变化时通知
+  useEffect(() => {
+    onMissingChangeAction?.(missingKey ? missingKey.split("\n") : []);
+  }, [missingKey]);
+  // 卸载(换智能体、换会话)时清掉,别让上一个智能体的缺失拦住下一个
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 只在卸载时执行
+  useEffect(() => () => onMissingChangeAction?.([]), []);
+
+  useEffect(() => {
+    if (openSignal > 0) setOpen(true);
+  }, [openSignal]);
+
   if (!state || state.variables.length === 0) return null;
 
-  const missing = state.variables.filter((v) => v.required && !state.values[v.name]?.trim());
+  const missing = state.variables.filter((v) => missingNames.includes(v.name));
 
   async function save() {
     setBusy(true);
@@ -75,7 +101,7 @@ export function VariablePrompt({
       await fetchJson(`/api/agents/${encodeURIComponent(agentId)}/variables`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(draft),
+        body: JSON.stringify(variableUpdates(state?.variables ?? [], state?.values ?? {}, draft)),
       });
       toast.success("变量已保存");
       setOpen(false);
@@ -146,7 +172,10 @@ export function VariablePrompt({
                   type={v.secret ? "password" : "text"}
                   value={draft[v.name] ?? ""}
                   onChange={(e) => setDraft({ ...draft, [v.name]: e.target.value })}
-                  placeholder={v.secret ? "输入密钥" : "输入值"}
+                  autoComplete="off"
+                  placeholder={
+                    v.secret ? (state.values[v.name] ? "已保存，留空不修改" : "输入密钥") : "输入值"
+                  }
                 />
               </label>
             ))}

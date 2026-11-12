@@ -4,6 +4,7 @@ import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { hasResourceAccess } from "@/lib/modules/access/domain/grants";
 import { canAccessSession } from "@/lib/modules/access/domain/principal";
+import { countWaits } from "@/lib/modules/approval/domain/wait-counts";
 import { workspacePathFor } from "@/lib/modules/session/domain/workspace";
 import type { SessionListFilter } from "@/lib/modules/session/ports";
 import { NextResponse } from "next/server";
@@ -13,7 +14,7 @@ export const dynamic = "force-dynamic";
 
 /** 列出调用方有权访问的会话。 */
 export async function GET(req: Request) {
-  const { sessions, auth, runs, releases } = getContainer();
+  const { sessions, auth, runs, releases, approval } = getContainer();
   try {
     const principal = await auth.resolveWeb(req);
 
@@ -72,6 +73,20 @@ export async function GET(req: Request) {
       .catch(() => new Map<string, { runs: number; lastRunAt: number; active: number }>());
     // 会话实际运行的模型(锁定版本或草稿):工作台据此显示名称与售价,不按智能体当前草稿猜
     const models = await releases.modelsOf(visible).catch(() => new Map<string, string>());
+    // 运行中的会话在等什么(待你确认 / 等你回答):列表里没打开的会话也要标出来。
+    // 只查运行中的那几个;审批服务不可用时不标,不连累列表
+    const waits = new Map(
+      await Promise.all(
+        visible
+          .filter((s) => (stats.get(s.id)?.active ?? 0) > 0)
+          .map(async (s) => {
+            const pending = await Promise.resolve()
+              .then(() => approval.listPending(s.id))
+              .catch(() => []);
+            return [s.id, countWaits(pending)] as const;
+          }),
+      ),
+    );
 
     return NextResponse.json({
       // 设计状态是设计器的内部数据(整份草稿),列表用不到,也不该随列表外流
@@ -83,6 +98,8 @@ export async function GET(req: Request) {
           runCount: st?.runs ?? 0,
           // 还没结束的运行:列表里画「运行中」
           activeRuns: st?.active ?? 0,
+          pendingApprovals: waits.get(s.id)?.approvals ?? 0,
+          pendingQuestions: waits.get(s.id)?.questions ?? 0,
           // 没跑过就退回创建时间 —— 列表要按"最近动过"排序,不能有空洞
           lastActiveAt: st?.lastRunAt ?? s.createdAt,
         };

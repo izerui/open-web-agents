@@ -134,11 +134,15 @@ test.describe("智能体提问", () => {
       await card.getByRole("button", { name: "Word" }).click();
       // 「其他（自己填写）」是一个选项,点开才出现输入框
       await card.getByRole("button", { name: "其他（自己填写）" }).click();
-      await card.getByLabel("其他回答:报告用哪种格式?").fill("另外要带目录");
+      await card.getByLabel("其他回答：报告用哪种格式?").fill("另外要带目录");
       await card.getByRole("button", { name: "提交回答" }).click();
 
       await expect(card.getByTestId("question-state")).toHaveText("已回答", { timeout: 30_000 });
-      await expect(card.getByTestId("question-answer")).toContainText("Word、另外要带目录");
+      // 已回答:选中的选项标出来(Word),自己填写的单独一行
+      await expect(
+        card.getByTestId("question-answer").getByText("Word", { exact: true }),
+      ).toBeVisible();
+      await expect(card.getByTestId("question-answer-other")).toHaveText("自己填写：另外要带目录");
       await expect(page.getByText("收到,按你的要求做。")).toBeVisible();
       expect(gw.turns()).toBe(2);
 
@@ -146,7 +150,7 @@ test.describe("智能体提问", () => {
       await page.reload();
       const again = page.getByTestId("question-card");
       await expect(again.getByTestId("question-state")).toHaveText("已回答", { timeout: 15_000 });
-      await expect(again.getByTestId("question-answer")).toContainText("Word、另外要带目录");
+      await expect(again.getByTestId("question-answer-other")).toHaveText("自己填写：另外要带目录");
       // 提问的工具结果并进卡片,不再单独列出 SDK 的原文
       await expect(page.getByText("The user answered")).toHaveCount(0);
     } finally {
@@ -192,7 +196,7 @@ test.describe("智能体提问", () => {
       for (const [i, [q, a]] of Object.entries(answers).entries()) {
         expect(a.length).toBe(1500);
         await card.getByRole("button", { name: "其他（自己填写）" }).nth(i).click();
-        await card.getByLabel(`其他回答:${q}`).fill(a);
+        await card.getByLabel(`其他回答：${q}`).fill(a);
       }
       await card.getByRole("button", { name: "提交回答" }).click();
       await expect(page.getByText("三题都收到了。")).toBeVisible({ timeout: 30_000 });
@@ -200,8 +204,8 @@ test.describe("智能体提问", () => {
       const check = async () => {
         const c = page.getByTestId("question-card");
         await expect(c.getByTestId("question-state")).toHaveText("已回答", { timeout: 15_000 });
-        const shown = await c.getByTestId("question-answer").allTextContents();
-        expect(shown).toEqual(Object.values(answers).map((a) => `你的回答：${a}`));
+        const shown = await c.getByTestId("question-answer-other").allTextContents();
+        expect(shown).toEqual(Object.values(answers).map((a) => `自己填写：${a}`));
       };
       await check();
       await page.reload();

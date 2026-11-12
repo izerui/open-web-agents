@@ -84,4 +84,36 @@ describe("GET /api/sessions(对话页)", () => {
     };
     expect(body.sessions[0]).toMatchObject({ id: "web-live", activeRuns: 1, runCount: 1 });
   });
+
+  it("运行中的会话带回待确认、待回答的计数;审批服务不可用时记 0,列表照常", async () => {
+    await container.runs.create({ id: "r1", sessionId: "web-live" });
+    const listPending = vi.fn(async (_id: string) => [
+      { id: "a1", questions: undefined },
+      { id: "q1", questions: [{ question: "?", options: [] }] },
+      { id: "q2", questions: [{ question: "?", options: [] }] },
+    ]);
+    (container as unknown as { approval: unknown }).approval = { listPending };
+    const body = (await (await get("/api/sessions")).json()) as {
+      sessions: { id: string; pendingApprovals: number; pendingQuestions: number }[];
+    };
+    expect(body.sessions[0]).toMatchObject({
+      id: "web-live",
+      pendingApprovals: 1,
+      pendingQuestions: 2,
+    });
+    expect(listPending).toHaveBeenCalledWith("web-live");
+
+    listPending.mockRejectedValue(new Error("redis down"));
+    const down = (await (await get("/api/sessions")).json()) as {
+      sessions: { pendingApprovals: number; pendingQuestions: number }[];
+    };
+    expect(down.sessions[0]).toMatchObject({ pendingApprovals: 0, pendingQuestions: 0 });
+  });
+
+  it("没在运行的会话不查待审", async () => {
+    const listPending = vi.fn(async () => []);
+    (container as unknown as { approval: unknown }).approval = { listPending };
+    await get("/api/sessions");
+    expect(listPending).not.toHaveBeenCalled();
+  });
 });

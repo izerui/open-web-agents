@@ -11,9 +11,10 @@ import { math } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
 import type { UIMessage } from "ai";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
-import type { ComponentProps, HTMLAttributes, ReactElement } from "react";
+import type { ComponentProps, HTMLAttributes, ReactElement, ReactNode } from "react";
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { Streamdown } from "streamdown";
+import { Streamdown, defaultRemarkPlugins } from "streamdown";
+import { WORKSPACE_LINK_TAG, remarkWorkspaceLinks } from "./workspace-link";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -269,20 +270,56 @@ export const MessageBranchPage = ({ className, ...props }: MessageBranchPageProp
   );
 };
 
-export type MessageResponseProps = ComponentProps<typeof Streamdown>;
+export type MessageResponseProps = ComponentProps<typeof Streamdown> & {
+  /**
+   * 可选:指向工作区文件的相对路径链接(如 `[初审结果.md](初审结果.md)`)渲染成按钮,点了交给它
+   * (对话页据此打开文件面板并预览)。不传时链接渲染与以前完全一样。
+   */
+  onOpenWorkspaceFile?: (path: string) => void;
+};
 
 const streamdownPlugins = { cjk, code, math, mermaid };
+const workspaceRemarkPlugins = [...Object.values(defaultRemarkPlugins), remarkWorkspaceLinks];
+const workspaceAllowedTags = { [WORKSPACE_LINK_TAG]: ["path"] };
 
 export const MessageResponse = memo(
-  ({ className, ...props }: MessageResponseProps) => (
-    <Streamdown
-      className={cn("size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0", className)}
-      plugins={streamdownPlugins}
-      {...props}
-    />
-  ),
+  ({ className, onOpenWorkspaceFile, ...props }: MessageResponseProps) => {
+    const fileLinks = useMemo(
+      () =>
+        onOpenWorkspaceFile
+          ? {
+              remarkPlugins: workspaceRemarkPlugins,
+              allowedTags: workspaceAllowedTags,
+              components: {
+                [WORKSPACE_LINK_TAG]: ({ path, children }: { path?: string; children?: ReactNode }) => (
+                  <button
+                    type="button"
+                    title={path ? `在工作区文件里打开 ${path}` : undefined}
+                    className="inline cursor-pointer appearance-none p-0 text-left font-medium text-primary underline decoration-[#C9C4B8] underline-offset-[3px] hover:decoration-current"
+                    onClick={() => path && onOpenWorkspaceFile(path)}
+                  >
+                    {children}
+                  </button>
+                ),
+              },
+            }
+          : null,
+      [onOpenWorkspaceFile],
+    );
+    return (
+      <Streamdown
+        className={cn("size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0", className)}
+        plugins={streamdownPlugins}
+        {...fileLinks}
+        {...props}
+        components={fileLinks ? { ...fileLinks.components, ...props.components } : props.components}
+      />
+    );
+  },
   (prevProps, nextProps) =>
-    prevProps.children === nextProps.children && nextProps.isAnimating === prevProps.isAnimating,
+    prevProps.children === nextProps.children &&
+    nextProps.isAnimating === prevProps.isAnimating &&
+    prevProps.onOpenWorkspaceFile === nextProps.onOpenWorkspaceFile,
 );
 
 MessageResponse.displayName = "MessageResponse";

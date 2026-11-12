@@ -62,7 +62,7 @@ export function SessionActions({
       toast.success(done);
       return true;
     } catch (e) {
-      toast.error(`操作失败:${errorText(e)}`);
+      toast.error(`操作失败：${errorText(e)}`);
       return false;
     } finally {
       setBusy(false);
@@ -91,7 +91,7 @@ export function SessionActions({
       setDialog(null);
       onRemoved(session.id);
     } catch (e) {
-      toast.error(`删除失败:${errorText(e)}`);
+      toast.error(`删除失败：${errorText(e)}`);
     } finally {
       setBusy(false);
     }
@@ -103,7 +103,7 @@ export function SessionActions({
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            aria-label={`会话操作:${label}`}
+            aria-label={`会话操作：${label}`}
             className={cn(
               "flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-[#E6E3DB] hover:text-foreground data-[state=open]:bg-[#E6E3DB] max-md:size-11 [&_svg]:size-4",
               className,

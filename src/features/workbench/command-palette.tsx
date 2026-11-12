@@ -68,7 +68,7 @@ export function CommandPalette({
       title="命令面板"
       description="搜索会话、切换智能体或跳转页面"
     >
-      <CommandInput placeholder="搜索会话,或输入命令…" />
+      <CommandInput placeholder="搜索会话，或输入命令…" />
       <CommandList>
         <CommandEmpty>没有匹配项</CommandEmpty>
 
@@ -111,7 +111,7 @@ export function CommandPalette({
         {!running && agents.length > 1 && (
           <>
             <CommandSeparator />
-            <CommandGroup heading="切换智能体(会开一个新会话)">
+            <CommandGroup heading="切换智能体（会开一个新会话）">
               {agents.map((a) => (
                 <CommandItem
                   key={a.id}

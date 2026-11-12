@@ -7,7 +7,13 @@ import { Archive, ArrowLeft, Plus, RefreshCw, Search, Sparkles } from "lucide-re
 import Link from "next/link";
 import { useMemo } from "react";
 import { Spin } from "./chat-bits";
-import { chatBuckets, designSessionHref, filterSessions, rowTime } from "./chat-view.logic";
+import {
+  chatBuckets,
+  designSessionHref,
+  filterSessions,
+  rowTime,
+  sessionWaitOf,
+} from "./chat-view.logic";
 import { SessionActions } from "./session-actions";
 import { activityOf, sessionLabel } from "./session-groups";
 import type { AgentSummary, SessionSummary } from "./types";
@@ -40,7 +46,10 @@ export function SessionList({
   onChangedAction,
   onRemovedAction,
   onRestoreAction,
+  draft,
 }: {
+  /** 还没发消息的新会话(只在本地):列表顶上显示「新会话，刚刚」 */
+  draft?: { agentId: string; agentName: string; icon?: string } | null;
   view: ListView;
   onViewChangeAction: (view: ListView) => void;
   query: string;
@@ -72,6 +81,8 @@ export function SessionList({
     const on = s.id === activeSessionId;
     const design = s.source === "design";
     const busy = (on && running) || (s.activeRuns ?? 0) > 0;
+    // 没打开的会话也标:列表接口带回了运行中会话的待确认 / 待回答计数
+    const waiting = sessionWaitOf(s, { id: activeSessionId, running, wait });
     const agent = byId.get(s.agentId);
     const agentName = design ? "智能体设计器" : (agent?.name ?? s.agentId);
     const meta = (
@@ -79,14 +90,9 @@ export function SessionList({
         <span className="block truncate text-sm leading-[1.35]">{sessionLabel(s)}</span>
         <span className="flex items-center gap-1.5 overflow-hidden text-xs leading-[1.4] whitespace-nowrap text-muted-foreground">
           {busy && <Spin className="size-3.5 border-[1.5px]" />}
-          {on && running && wait === "approval" && (
+          {waiting && (
             <span className="shrink-0 rounded-full bg-warning-soft px-1.5 leading-[18px] text-warning-text">
-              待你确认
-            </span>
-          )}
-          {on && running && wait === "ask" && (
-            <span className="shrink-0 rounded-full bg-warning-soft px-1.5 leading-[18px] text-warning-text">
-              等你回答
+              {waiting === "approval" ? "待你确认" : "等你回答"}
             </span>
           )}
           {design && (
@@ -170,7 +176,7 @@ export function SessionList({
   if (error) {
     body = (
       <div className="px-3.5 py-7 text-center text-sm">
-        <p className="text-destructive">会话列表加载失败:{error}</p>
+        <p className="text-destructive">会话列表加载失败：{error}</p>
         <Button variant="outline" size="sm" className="mt-3" onClick={onRetryAction}>
           <RefreshCw />
           重试
@@ -199,19 +205,50 @@ export function SessionList({
         )}
       </>
     );
-  } else if (groups.length === 0) {
+  } else if (groups.length === 0 && !(draft && !q)) {
     body = (
       <p className="px-3.5 py-7 text-center text-sm text-muted-foreground">
         {q ? `没有匹配「${q}」的会话` : "还没有会话"}
       </p>
     );
   } else {
-    body = groups.map((g) => (
-      <section key={g.bucket} aria-label={g.bucket}>
-        <h2 className="px-3 pt-3 pb-1 text-xs font-normal text-muted-foreground">{g.bucket}</h2>
-        <ul className="space-y-0.5">{g.sessions.map(row)}</ul>
-      </section>
-    ));
+    // 新会话还没发消息时也在「今天」顶上占一行,让人知道自己正在哪
+    const draftRow =
+      draft && !q ? (
+        <li
+          key="draft"
+          aria-current="page"
+          className="relative flex min-h-[46px] items-center gap-2 rounded-xl border border-border bg-card py-2 pr-2 pl-2.5 shadow-[0_1px_3px_rgb(0_0_0/4%)]"
+        >
+          <AgentAvatar id={draft.agentId} icon={draft.icon} size={26} className="shrink-0" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm leading-[1.35]">新会话</span>
+            <span className="block truncate text-xs leading-[1.4] text-muted-foreground">
+              {draft.agentName}，刚刚
+            </span>
+          </span>
+        </li>
+      ) : null;
+    const hasToday = groups.some((g) => g.bucket === "今天");
+    body = (
+      <>
+        {draftRow && !hasToday && (
+          <section aria-label="今天">
+            <h2 className="px-3 pt-3 pb-1 text-xs font-normal text-muted-foreground">今天</h2>
+            <ul className="space-y-0.5">{draftRow}</ul>
+          </section>
+        )}
+        {groups.map((g) => (
+          <section key={g.bucket} aria-label={g.bucket}>
+            <h2 className="px-3 pt-3 pb-1 text-xs font-normal text-muted-foreground">{g.bucket}</h2>
+            <ul className="space-y-0.5">
+              {g.bucket === "今天" && draftRow}
+              {g.sessions.map(row)}
+            </ul>
+          </section>
+        ))}
+      </>
+    );
   }
 
   return (

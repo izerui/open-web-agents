@@ -14,7 +14,7 @@ import { ChevronRight, Info, RefreshCw, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useMemo } from "react";
 import { Spin } from "./chat-bits";
-import { groupPickerAgents, runTargetLabel } from "./chat-view.logic";
+import { groupPickerAgents, pickerNote } from "./chat-view.logic";
 import type { AgentSummary } from "./types";
 
 /**
@@ -109,7 +109,7 @@ export function NewSessionDialog({
                             )}
                           </span>
                           <span className="block truncate text-[13px] text-muted-foreground">
-                            {runTargetLabel(a)}
+                            {pickerNote(a, g.group)}
                           </span>
                         </span>
                         <ChevronRight className="size-4 shrink-0 text-muted-foreground" />

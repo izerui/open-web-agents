@@ -59,7 +59,7 @@ export async function sendSteer(
       return { kind: "resend", id };
     }
     if (res.status >= 500) continue;
-    return { kind: "invalid", id, message: body?.error ?? `追加失败(${res.status})` };
+    return { kind: "invalid", id, message: body?.error ?? `追加失败（${res.status}）` };
   }
   return { kind: "unconfirmed", id };
 }

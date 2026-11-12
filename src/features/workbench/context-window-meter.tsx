@@ -47,9 +47,9 @@ export function ContextWindowMeter({
           type="button"
           className="inline-flex h-[30px] shrink-0 items-center gap-1.5 rounded-full px-1.5 text-[12.5px] whitespace-nowrap text-muted-foreground hover:bg-[#F1EFE9] max-md:h-11"
           aria-label={`上下文已用 ${percentageStr ?? formatContextWindowTokens(usedTokens)}${
-            totalProcessed ? `,累计 ${formatContextWindowTokens(totalProcessed)} token` : ""
+            totalProcessed ? `，累计 ${formatContextWindowTokens(totalProcessed)} token` : ""
           }`}
-          title="上下文用量:上限按 200k 计"
+          title="上下文用量：上限按 200k 计"
         >
           <svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true" className="shrink-0">
             <circle cx="10" cy="10" r="8" fill="none" stroke="#E2DFD7" strokeWidth="3" />
@@ -67,7 +67,7 @@ export function ContextWindowMeter({
           </svg>
           <span className="max-md:hidden">
             上下文 {percentageStr ?? "0%"}
-            {totalProcessed ? `,累计 ${formatContextWindowTokens(totalProcessed)} token` : ""}
+            {totalProcessed ? `，累计 ${formatContextWindowTokens(totalProcessed)} token` : ""}
           </span>
           <span className="md:hidden">{percentageStr ?? "0%"}</span>
         </button>

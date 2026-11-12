@@ -134,11 +134,14 @@ const FileTreeFolderContext = createContext<FileTreeFolderContextType>({
 export type FileTreeFolderProps = HTMLAttributes<HTMLDivElement> & {
   path: string;
   name: string;
+  /** 可选:名字右侧的附加信息(如子项数) */
+  meta?: ReactNode;
 };
 
 export const FileTreeFolder = ({
   path,
   name,
+  meta,
   className,
   children,
   ...props
@@ -202,6 +205,7 @@ export const FileTreeFolder = ({
                 )}
               </FileTreeIcon>
               <FileTreeName>{name}</FileTreeName>
+              {meta}
             </button>
           </div>
           <CollapsibleContent>

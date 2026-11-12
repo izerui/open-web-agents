@@ -4,6 +4,8 @@ import { AgentAvatar } from "@/components/agent-avatar";
 import { AppShell } from "@/components/shell/app-shell";
 import { followRun } from "@/features/chat/follow-run";
 import { fetchJson } from "@/lib/fetch-json";
+import { formatTime } from "@/lib/format-time";
+import type { AgentEvent } from "@/lib/shared";
 import { useMe } from "@/lib/use-me";
 import { cn } from "@/lib/utils";
 import type { FileUIPart } from "ai";
@@ -47,15 +49,29 @@ import { sendSteer } from "./steer-client";
 import type { AgentSummary, SessionSummary, Turn } from "./types";
 import { VariablePrompt } from "./variable-prompt";
 import {
+  type ToolTimes,
   agentIdFromSearch,
+  errorSummary,
   promptFromSearch,
+  recordToolTime,
+  rerunEstimateMicro,
   sessionIdFromSearch,
+  stopConfirmBody,
+  submitGate,
   updateTurnByLocalId,
   withSessionInUrl,
 } from "./workbench.logic";
 import { makeWorkspaceFileDropHandlers } from "./workspace-file-drop";
 
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -66,7 +82,8 @@ import {
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 
 import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
-import { refreshModelCatalog } from "@/features/builder/model-select";
+import { modelOf, refreshModelCatalog, useModelCatalog } from "@/features/builder/model-select";
+import { creditsText } from "@/features/models/model-shared";
 
 const RIGHT_KEY = "owa.chat.right";
 
@@ -89,13 +106,13 @@ function dataUrlToBlob(url: string): Blob {
 
 async function responseError(res: Response, prefix: string): Promise<Error> {
   const body = (await res.json().catch(() => null)) as { error?: string } | null;
-  return new Error(body?.error ? `${prefix}:${body.error}` : `${prefix}(HTTP ${res.status})`);
+  return new Error(body?.error ? `${prefix}：${body.error}` : `${prefix}（HTTP ${res.status}）`);
 }
 
 function assertEventStreamResponse(res: Response): void {
   const contentType = res.headers.get("Content-Type") ?? "";
   if (!contentType.toLowerCase().includes("text/event-stream")) {
-    throw new Error(`运行接口返回了非事件流响应(${contentType || "未知类型"})`);
+    throw new Error(`运行接口返回了非事件流响应（${contentType || "未知类型"}）`);
   }
 }
 
@@ -110,7 +127,7 @@ async function uploadPromptFiles(
     if (!file.url.startsWith("data:")) throw new Error("附件必须先转换为本地数据");
     const blob = dataUrlToBlob(file.url);
     const filename = file.filename ?? "attachment";
-    if (blob.size > MAX_UPLOAD_BYTES) throw new Error(`文件过大: ${filename}`);
+    if (blob.size > MAX_UPLOAD_BYTES) throw new Error(`文件过大：${filename}`);
     form.append("files", blob, filename);
   }
   const res = await fetch(`/api/sessions/${sessionId}/files`, {
@@ -119,7 +136,7 @@ async function uploadPromptFiles(
     signal,
   });
   const body = (await res.json().catch(() => null)) as { files?: string[]; error?: string } | null;
-  if (!res.ok || !body?.files) throw new Error(body?.error ?? `上传文件失败(HTTP ${res.status})`);
+  if (!res.ok || !body?.files) throw new Error(body?.error ?? `上传文件失败（HTTP ${res.status}）`);
   return body.files;
 }
 
@@ -219,6 +236,19 @@ export function Workbench() {
   const [selectedTool, setSelectedTool] = useState<string | null>(null);
   /** 待你确认的工具名(审批条轮询带回) */
   const [awaitingTools, setAwaitingTools] = useState<string[]>([]);
+  /** 运行在等回答的提问(审批条轮询带回,在对话里的提问卡片上作答) */
+  const [pendingQuestions, setPendingQuestions] = useState<PendingQuestion[]>([]);
+  /** 对话里点了文件链接:让文件面板打开并预览它 */
+  const [fileRequest, setFileRequest] = useState<{ path: string; seq: number } | null>(null);
+  /** 停止确认框 */
+  const [stopConfirm, setStopConfirm] = useState(false);
+  /** 还没填的必填变量(变量条带回);发送前据此拦下 */
+  const [missingVars, setMissingVars] = useState<string[]>([]);
+  /** 递增即打开「填写变量」弹窗 */
+  const [varsOpenSignal, setVarsOpenSignal] = useState(0);
+  /** 已提交、还没确认交给智能体的追加消息(对话里显示「已提交，等待智能体接收」) */
+  const [localSteers, setLocalSteers] = useState<{ id: string; text: string }[]>([]);
+  const catalog = useModelCatalog();
   const abortRef = useRef<AbortController | null>(null);
   const activeRunRef = useRef<{ abort: AbortController; runId?: string } | null>(null);
   /** 打开会话的序号:用来丢弃"切走之后才回来"的过期响应。 */
@@ -254,7 +284,8 @@ export function Workbench() {
   // 右侧面板的状态从上次离开时恢复
   useEffect(() => {
     const right = localStorage.getItem(RIGHT_KEY);
-    if (right === "files") setRightTab("files");
+    // 第一次来(没有记忆)默认打开工作区文件;窄屏下面的判断会再把它关掉
+    if (right === "files" || right === null) setRightTab("files");
     else if (right === "runs") setRightTab("runs");
     setRightReady(true);
   }, []);
@@ -360,7 +391,7 @@ export function Workbench() {
       })
       .catch((e: unknown) => {
         // 智能体拉不到不该连累会话列表
-        toast.error(`智能体列表加载失败:${e instanceof Error ? e.message : String(e)}`);
+        toast.error(`智能体列表加载失败：${e instanceof Error ? e.message : String(e)}`);
         setAgentsState("error");
       });
   }, []);
@@ -378,6 +409,7 @@ export function Workbench() {
     openSeqRef.current += 1;
     pendingSteerRef.current.clear();
     setQueued([]);
+    setLocalSteers([]);
     abortRef.current?.abort();
     abortRef.current = null;
     activeRunRef.current = null;
@@ -441,6 +473,7 @@ export function Workbench() {
       activeRun?.abort.abort();
       activeRunRef.current = null;
       markLocalCancelled("已取消发送");
+      toast.success("已停止");
       return;
     }
 
@@ -459,6 +492,7 @@ export function Workbench() {
         markLocalCancelled(body.note ?? "已请求停止");
         activeRun.abort.abort();
         if (activeRunRef.current === activeRun) activeRunRef.current = null;
+        toast.success("已停止");
       }
     } catch (error) {
       if (seq === openSeqRef.current && activeRunRef.current === activeRun) {
@@ -489,6 +523,7 @@ export function Workbench() {
     const seq = ++openSeqRef.current;
     pendingSteerRef.current.clear();
     setQueued([]);
+    setLocalSteers([]);
     const targetSession =
       sessions.find((session) => session.id === id) ?? archived.find((s) => s.id === id);
     if (targetSession) {
@@ -540,7 +575,7 @@ export function Workbench() {
       await followRun({ sessionId: id, runId: activeRunId, push, signal: abort.signal });
     } catch (err) {
       if (!abort.signal.aborted) {
-        push({ kind: "result", status: "failed", summary: String(err) });
+        push({ kind: "result", status: "failed", summary: errorSummary(err) });
       }
     } finally {
       batcher.flush();
@@ -592,6 +627,14 @@ export function Workbench() {
   const activeSession = sessionId
     ? (sessions.find((s) => s.id === sessionId) ?? archived.find((s) => s.id === sessionId))
     : undefined;
+
+  /** 有没填的必填变量时提示并打开填写弹窗;返回是否拦下 */
+  function blockForMissingVars(): boolean {
+    if (missingVars.length === 0) return false;
+    toast.warning(`先填写必填变量 ${missingVars.join("、")}`);
+    setVarsOpenSignal((n) => n + 1);
+    return true;
+  }
   const isArchived = activeSession?.status === "archived";
 
   /**
@@ -615,7 +658,7 @@ export function Workbench() {
       error?: string;
     } | null;
     if (!res.ok || !body?.session) {
-      throw new Error(body?.error ?? `创建会话失败(HTTP ${res.status})`);
+      throw new Error(body?.error ?? `创建会话失败（HTTP ${res.status}）`);
     }
     const session = body.session;
     signal.throwIfAborted();
@@ -635,6 +678,8 @@ export function Workbench() {
     const prompt = (text ?? input).trim();
     if (!contextReady || agentContextError || !agentId || isArchived) return;
     if (!prompt || running || historyLoading || historyError !== null) return;
+    // 必填变量没填:先拦下并打开填写弹窗,别建出一个空会话再收一张失败卡片
+    if (blockForMissingVars()) throw new Error("必填变量未填写");
     setRunning(true);
     // 这一轮按服务端当前的模型与价格运行:顺便刷新标题栏显示
     void refreshModelCatalog();
@@ -648,10 +693,15 @@ export function Workbench() {
     ]);
     const patch = (fn: (turn: Turn) => Turn) =>
       setTurns((all) => updateTurnByLocalId(all, localId, fn));
+    // 工具调用的起止按【收到事件的时刻】记(事件里没有时间戳),用于显示耗时
+    let toolTimes: ToolTimes | undefined;
     const batcher = createEventBatcher((events) =>
-      patch((turn) => ({ ...turn, events: [...turn.events, ...events] })),
+      patch((turn) => ({ ...turn, events: [...turn.events, ...events], toolTimes })),
     );
-    const push = batcher.push;
+    const push = (event: AgentEvent) => {
+      toolTimes = recordToolTime(toolTimes, event, Date.now());
+      batcher.push(event);
+    };
 
     const abort = new AbortController();
     abortRef.current = abort;
@@ -698,7 +748,7 @@ export function Workbench() {
           });
         } catch (error) {
           if (!abort.signal.aborted) {
-            push({ kind: "result", status: "failed", summary: String(error), runId });
+            push({ kind: "result", status: "failed", summary: errorSummary(error), runId });
           }
         } finally {
           batcher.flush();
@@ -714,7 +764,7 @@ export function Workbench() {
       })();
     } catch (error) {
       if (!abort.signal.aborted) {
-        push({ kind: "result", status: "failed", summary: String(error) });
+        push({ kind: "result", status: "failed", summary: errorSummary(error) });
       }
       batcher.flush();
       if (seq === openSeqRef.current) {
@@ -752,10 +802,14 @@ export function Workbench() {
     ]);
     const patch = (fn: (turn: Turn) => Turn) =>
       setTurns((all) => updateTurnByLocalId(all, localId, fn));
+    let toolTimes: ToolTimes | undefined;
     const batcher = createEventBatcher((events) =>
-      patch((turn) => ({ ...turn, events: [...turn.events, ...events] })),
+      patch((turn) => ({ ...turn, events: [...turn.events, ...events], toolTimes })),
     );
-    const push = batcher.push;
+    const push = (event: AgentEvent) => {
+      toolTimes = recordToolTime(toolTimes, event, Date.now());
+      batcher.push(event);
+    };
 
     const abort = new AbortController();
     abortRef.current = abort;
@@ -777,12 +831,12 @@ export function Workbench() {
         code?: string;
       } | null;
       if (res.status === 409 && data?.code === "rewind_unavailable") {
-        toast.message("这一轮之前的对话状态无法精确定位(较早的记录),改为干净上下文重跑");
+        toast.message("这一轮之前的对话状态无法精确定位（较早的记录），改为干净上下文重跑");
         res = await branch("fresh");
         data = (await res.json().catch(() => null)) as typeof data;
       }
       if (!res.ok || !data?.runId) {
-        throw new Error(data?.error ?? `重跑失败(HTTP ${res.status})`);
+        throw new Error(data?.error ?? `重跑失败（HTTP ${res.status}）`);
       }
       rerunHandle.runId = data.runId;
       patch((turn) => ({ ...turn, runId: data.runId }));
@@ -795,7 +849,7 @@ export function Workbench() {
       });
     } catch (error) {
       if (!abort.signal.aborted) {
-        push({ kind: "result", status: "failed", summary: String(error) });
+        push({ kind: "result", status: "failed", summary: errorSummary(error) });
       }
     } finally {
       batcher.flush();
@@ -867,16 +921,30 @@ export function Workbench() {
       const text = message.text.trim() || (message.files.length > 0 ? "请查看附件。" : "");
       if (!text) return;
       if (running) {
+        const gate = submitGate({
+          approvals: awaitingTools.length,
+          questions: pendingQuestions.length,
+        });
+        // 等你回答提问时追加的话智能体收不到:拦下,文字和附件都留在输入框里
+        if (gate === "block") {
+          toast.warning("智能体在等你回答上面的提问，先回答或选择不回答");
+          return Promise.reject(new Error("等待回答提问"));
+        }
         const runId = activeRunRef.current?.runId;
-        // 纯文本:直接追加进正在跑的这一轮;带附件的(追加只能带文本)或还拿不到 runId 时照旧排队
-        if (message.files.length === 0 && runId && sessionId) {
+        // 纯文本:直接追加进正在跑的这一轮;等你确认工具调用时、带附件的(追加只能带文本)
+        // 或还拿不到 runId 时排队,本轮结束后发送
+        if (gate === "steer" && message.files.length === 0 && runId && sessionId) {
           setInput("");
           void steerOrQueue(sessionId, runId, text);
           return;
         }
         setQueued((q) => [...q, { id: crypto.randomUUID(), text, files: message.files }]);
         setInput("");
-        toast.message("已排队,本轮结束后发送");
+        toast.message(
+          gate === "queue"
+            ? "智能体在等你确认，这条消息已排队，本轮结束后发送"
+            : "已排队，本轮结束后发送",
+        );
         return;
       }
       return send(text, message.files, true);
@@ -893,6 +961,9 @@ export function Workbench() {
       historyLoading,
       historyError,
       isArchived,
+      awaitingTools,
+      pendingQuestions,
+      missingVars,
     ],
   );
 
@@ -906,29 +977,35 @@ export function Workbench() {
     const id = crypto.randomUUID();
     // The stream may report delivery before the HTTP acknowledgement arrives.
     pendingSteerRef.current.add(id);
+    setLocalSteers((all) => [...all, { id, text }]);
+    const settle = () => setLocalSteers((all) => all.filter((x) => x.id !== id));
     const r = await sendSteer({ sessionId: sid, runId, id, text });
     if (seq !== openSeqRef.current) return;
     switch (r.kind) {
       case "delivered":
+        settle();
         if (pendingSteerRef.current.delete(id)) toast.success("已交给智能体");
         return;
       case "pending":
-        if (pendingSteerRef.current.has(id)) toast.message("已提交,等待智能体接收");
+        // 对话里那条一直显示「已提交，等待智能体接收」,等事件流给出结局
         return;
       case "unconfirmed":
+        settle();
         // 结局若之后从事件流里来(未送达),照样会自动改为排队
         if (pendingSteerRef.current.has(id)) {
-          toast.warning("暂时无法确认这条是否已交给智能体,请留意它的回答;确认没收到再重新发送");
+          toast.warning("暂时无法确认这条是否已交给智能体，请留意它的回答；确认没收到再重新发送");
         }
         return;
       case "invalid":
+        settle();
         pendingSteerRef.current.delete(id);
         toast.error(r.message);
         return;
       case "resend":
+        settle();
         if (!pendingSteerRef.current.delete(id)) return;
         setQueued((q) => [...q, { id: crypto.randomUUID(), text, files: [] }]);
-        toast.message("这一轮正在收尾,本轮结束后作为新消息发送");
+        toast.message("这一轮正在收尾，本轮结束后作为新消息发送");
         return;
     }
   }
@@ -938,6 +1015,11 @@ export function Workbench() {
     for (const turn of turns) {
       for (const e of turn.events) {
         if (e.kind !== "steer" || !e.id) continue;
+        const steerId = e.id;
+        // 事件流里已经有了这条的结局:对话里的「等待接收」换成正式的追加记录
+        setLocalSteers((all) =>
+          all.some((x) => x.id === steerId) ? all.filter((x) => x.id !== steerId) : all,
+        );
         if (!pendingSteerRef.current.delete(e.id)) continue;
         if (e.outcome === "dropped") {
           setQueued((q) => [...q, { id: crypto.randomUUID(), text: e.text, files: [] }]);
@@ -945,6 +1027,11 @@ export function Workbench() {
       }
     }
   }, [turns]);
+
+  // 本轮结束:还没等到结局的追加消息不再显示「等待接收」(没送达的会由事件流改为排队)
+  useEffect(() => {
+    if (!running) setLocalSteers([]);
+  }, [running]);
 
   // 本轮结束、且当前会话可以发送时,发出排在最前的一条
   // biome-ignore lint/correctness/useExhaustiveDependencies: send 每次渲染都是新闭包,只在状态变化时触发
@@ -960,12 +1047,14 @@ export function Workbench() {
   const rerunRef = useRef(rerun);
   sendRef.current = send;
   rerunRef.current = rerun;
-  const stableAnswerAction = useCallback(
-    (text: string) => void sendRef.current(text).catch(() => {}),
-    [],
-  );
-  /** 运行在等回答的提问(审批条轮询带回,在对话里的提问卡片上作答) */
-  const [pendingQuestions, setPendingQuestions] = useState<PendingQuestion[]>([]);
+  // 提问卡片「作为新消息发送」:先放进输入框,让用户看一眼再发
+  const stableAnswerAction = useCallback((text: string) => {
+    setInput(text);
+    toast("已放进输入框，确认后发送");
+    requestAnimationFrame(() =>
+      document.querySelector<HTMLTextAreaElement>('textarea[aria-label="消息"]')?.focus(),
+    );
+  }, []);
   /** 作答后让审批条立刻重新拉取,卡片马上从"待回答"变过来 */
   const [approvalRefresh, setApprovalRefresh] = useState(0);
   const submitAnswerAction = useCallback<SubmitAnswer>(
@@ -980,6 +1069,9 @@ export function Workbench() {
             : { approvalId, decision: "approved", answers: body.answers },
         ),
       });
+      toast.success(
+        "decline" in body ? "已选择不回答，智能体按自己的判断继续" : "回答已交给智能体",
+      );
       setApprovalRefresh((n) => n + 1);
     },
     [sessionId],
@@ -988,6 +1080,10 @@ export function Workbench() {
     (runId: string, prompt: string) => void rerunRef.current(runId, prompt),
     [],
   );
+  const openWorkspaceFile = useCallback((path: string) => {
+    setFileRequest((cur) => ({ path, seq: (cur?.seq ?? 0) + 1 }));
+    setRightTab("files");
+  }, []);
   const locateTool = useCallback((locator: string) => {
     setSelectedTool(locator);
     setRightTab("runs");
@@ -1012,11 +1108,13 @@ export function Workbench() {
         name: "stop",
         label: "停止当前运行",
         icon: Square,
-        disabled: !running,
-        run: () => void cancelRun(),
+        run: () => {
+          if (running) setStopConfirm(true);
+          else toast("当前没有在运行的任务");
+        },
       },
     ],
-    [cancelRun, openPicker, router, running],
+    [openPicker, router, running],
   );
 
   const pickAgent = (id: string) => {
@@ -1042,7 +1140,7 @@ export function Workbench() {
       setArchived((all) => all.filter((s) => s.id !== id));
       void loadSessions();
     } catch (e) {
-      toast.error(`恢复失败:${e instanceof Error ? e.message : String(e)}`);
+      toast.error(`恢复失败：${e instanceof Error ? e.message : String(e)}`);
     }
   };
 
@@ -1057,9 +1155,26 @@ export function Workbench() {
     }
   };
 
+  // 别的会话还在跑:定时刷新列表,它们开始等你确认 / 回答时左栏能标出来
+  const othersRunning = sessions.some((s) => s.id !== sessionId && (s.activeRuns ?? 0) > 0);
+  useEffect(() => {
+    if (!othersRunning) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void loadSessions();
+    }, 10_000);
+    return () => window.clearInterval(timer);
+  }, [othersRunning, loadSessions]);
+
   const wait: SessionWait =
     awaitingTools.length > 0 ? "approval" : pendingQuestions.length > 0 ? "ask" : null;
-  const runningSession = running && activeSession ? sessionLabel(activeSession) : null;
+  // 新会话弹层的提示:当前或别的会话还在跑,新会话都不会打断它们
+  const runningSession =
+    running && activeSession
+      ? sessionLabel(activeSession)
+      : (() => {
+          const other = sessions.find((s) => s.source !== "design" && (s.activeRuns ?? 0) > 0);
+          return other ? sessionLabel(other) : null;
+        })();
   const badge = versionBadge({ running, session: activeSession, agent: current });
 
   const sessionList = (
@@ -1085,6 +1200,11 @@ export function Workbench() {
       onChangedAction={() => void loadSessions()}
       onRemovedAction={onRemoved}
       onRestoreAction={(id) => void restoreSession(id)}
+      draft={
+        !sessionId && contextReady && !agentContextError && current
+          ? { agentId: current.id, agentName: current.name, icon: current.icon }
+          : null
+      }
     />
   );
 
@@ -1096,13 +1216,15 @@ export function Workbench() {
           key={`${agentId}-${sessionId ?? ""}`}
           agentId={agentId}
           sessionId={sessionId}
+          onMissingChangeAction={setMissingVars}
+          openSignal={varsOpenSignal}
         />
       )}
       {purgedAt && (
         <output className="mx-5 mt-2.5 flex items-start gap-2 rounded-[10px] bg-[#EEF1F4] px-3 py-2 text-sm text-[#34465A] max-md:mx-3">
           <Info className="mt-0.5 size-[15px] shrink-0" />
           <span>
-            这个会话长期未活动，工作目录已于 {new Date(purgedAt).toLocaleString()}{" "}
+            这个会话长期未活动，工作目录已于 {formatTime(purgedAt)}{" "}
             自动清理，之前生成的文件已不在。对话记录还在；继续对话会在新的空目录里进行。
           </span>
         </output>
@@ -1121,6 +1243,17 @@ export function Workbench() {
         </div>
       )}
     </>
+  );
+
+  /** 重跑预估:按这一轮的 token 用量与当前模型单价 */
+  const rerunModel = modelOf(catalog, shownModel ?? "");
+  const rerunEstimate = useCallback(
+    (turn: Turn) => {
+      if (!rerunModel) return null;
+      const micro = rerunEstimateMicro(rerunModel.rates, sumUsage(turn.events));
+      return micro === null ? null : `预计约 ${creditsText(micro.toString())} 积分`;
+    },
+    [rerunModel],
   );
 
   let stream: React.ReactNode;
@@ -1149,6 +1282,8 @@ export function Workbench() {
     );
   } else if (agentContextError) {
     const recent = sessions.find((s) => s.source !== "design");
+    const requestedAgentId =
+      typeof window === "undefined" ? null : agentIdFromSearch(window.location.search);
     stream = (
       <EmptyBlock
         icon={<BadIcon />}
@@ -1168,7 +1303,17 @@ export function Workbench() {
           </>
         }
       >
-        可能链接拼错了、智能体已被删除，或作者没有分享给你。
+        {requestedAgentId ? (
+          <>
+            链接里的智能体 ID 是{" "}
+            <code className="rounded bg-[#F4F2EC] px-1.5 py-0.5 font-mono text-[13px] text-foreground">
+              {requestedAgentId}
+            </code>
+            。可能拼错了、已被删除，或作者没有分享给你。
+          </>
+        ) : (
+          "可能链接拼错了、智能体已被删除，或作者没有分享给你。"
+        )}
       </EmptyBlock>
     );
   } else if (historyLoading) {
@@ -1252,6 +1397,9 @@ export function Workbench() {
         selectedToolLocator={rightTab === "runs" ? selectedTool : null}
         readOnly={isArchived}
         awaitingTools={awaitingTools}
+        onOpenFileAction={openWorkspaceFile}
+        localSteers={localSteers}
+        rerunEstimateAction={rerunEstimate}
       />
     );
   }
@@ -1264,14 +1412,31 @@ export function Workbench() {
         ? "运行中也可以继续补充"
         : "说点什么，或输入 /";
 
-  const chatCard = (
+  // 没有可用智能体、链接里的智能体不存在:整张卡只有空态,不留对话头和灰掉的输入框
+  const onlyEmpty = (agentsState === "ok" && !hasAgents) || agentContextError !== null;
+  const chatCard = onlyEmpty ? (
     <div
       data-conversation-shell=""
       className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-[18px] border border-border bg-card max-md:rounded-none max-md:border-0"
-      onDragEnter={dropHandlers.onDragEnter as React.DragEventHandler}
-      onDragOver={dropHandlers.onDragOver as React.DragEventHandler}
-      onDragLeave={dropHandlers.onDragLeave as React.DragEventHandler}
-      onDrop={dropHandlers.onDrop as React.DragEventHandler}
+    >
+      {mobileLayout && (
+        <div className="flex shrink-0 items-center border-b border-line-soft px-1.5 py-1">
+          <button
+            type="button"
+            aria-label="会话列表"
+            onClick={() => setListOpen(true)}
+            className="flex size-11 items-center justify-center rounded-full hover:bg-[#F0EEE8]"
+          >
+            <MessageSquare className="size-[18px]" />
+          </button>
+        </div>
+      )}
+      {stream}
+    </div>
+  ) : (
+    <div
+      data-conversation-shell=""
+      className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-[18px] border border-border bg-card max-md:rounded-none max-md:border-0"
     >
       <ChatHeader
         title={activeSession ? sessionLabel(activeSession) : "新会话"}
@@ -1300,7 +1465,7 @@ export function Workbench() {
           blocked={composerBlocked}
           placeholder={placeholder}
           onSubmitAction={handlePromptSubmit}
-          onStopAction={() => void cancelRun()}
+          onStopAction={() => setStopConfirm(true)}
           commands={slashCommands}
           queued={queued}
           onUnqueueAction={(id) => setQueued((all) => all.filter((x) => x.id !== id))}
@@ -1346,6 +1511,9 @@ export function Workbench() {
       </button>
     </div>
   );
+  // 最近一轮开始之后改过的文件标「新」
+  const lastStartedAt = turns.at(-1)?.startedAt;
+  const freshSince = lastStartedAt ? Date.parse(lastStartedAt) || undefined : undefined;
   const panelBody =
     rightTab === "runs" ? (
       <RunTree
@@ -1354,12 +1522,16 @@ export function Workbench() {
         selected={selectedTool}
         onSelectAction={setSelectedTool}
         running={running}
+        awaitingTools={awaitingTools}
       />
     ) : (
       <FilePanel
         sessionId={sessionId}
         refreshKey={filesKey}
         live={running}
+        openRequest={fileRequest}
+        autoPreview={!mobileLayout}
+        freshSince={freshSince}
         onSuggestAction={
           isArchived
             ? undefined
@@ -1396,8 +1568,40 @@ export function Workbench() {
         onPickAction={pickAgent}
       />
 
+      <Dialog open={stopConfirm} onOpenChange={setStopConfirm}>
+        <DialogContent className="sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle>停止这一轮？</DialogTitle>
+            <DialogDescription>{stopConfirmBody(queued.length)}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStopConfirm(false)}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                setStopConfirm(false);
+                // 停下来就不再发排队的消息
+                setQueued([]);
+                void cancelRun();
+              }}
+            >
+              停止
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <AppShell fullBleed onSearchAction={() => setPaletteOpen(true)}>
-        <div className="flex min-h-0 flex-1">
+        {/* 拖放:拖到整页任何位置(左栏、对话、右侧面板)都出现覆盖层 */}
+        <div
+          className="flex min-h-0 flex-1"
+          onDragEnter={onlyEmpty ? undefined : (dropHandlers.onDragEnter as React.DragEventHandler)}
+          onDragOver={onlyEmpty ? undefined : (dropHandlers.onDragOver as React.DragEventHandler)}
+          onDragLeave={onlyEmpty ? undefined : (dropHandlers.onDragLeave as React.DragEventHandler)}
+          onDrop={onlyEmpty ? undefined : (dropHandlers.onDrop as React.DragEventHandler)}
+        >
           <aside className="w-[268px] shrink-0 border-r border-border max-md:hidden">
             {sessionList}
           </aside>
@@ -1417,11 +1621,14 @@ export function Workbench() {
                   id="chat"
                   defaultSize="66%"
                   minSize="40%"
-                  className={cn("flex min-w-0 flex-col py-4 pl-4", !rightTab && "pr-4")}
+                  className={cn(
+                    "flex min-w-0 flex-col py-4 pl-4",
+                    (!rightTab || onlyEmpty) && "pr-4",
+                  )}
                 >
                   {chatCard}
                 </ResizablePanel>
-                {rightTab && (
+                {rightTab && !onlyEmpty && (
                   <>
                     <ResizableHandle className="w-4 bg-transparent before:absolute before:top-[40%] before:left-[7px] before:h-[20%] before:w-[3px] before:rounded-sm before:bg-[#D9D5CB] before:transition-colors hover:before:bg-[#8E897D] focus-visible:before:bg-[#8E897D] data-[separator=active]:before:bg-[#8E897D]" />
                     <ResizablePanel

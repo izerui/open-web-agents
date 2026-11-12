@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { Activity } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CallStateIcon, callStateOf } from "./chat-bits";
-import { shortenPaths, summarizeToolInput, toolNameClass } from "./conversation";
+import { ToolDuration, shortenPaths, summarizeToolInput, toolNameClass } from "./conversation";
 import { type ToolCall, foldEvents, toolLocator, turnKeyOf } from "./conversation.logic";
 import type { Turn } from "./types";
 
@@ -23,7 +23,8 @@ function pretty(value: unknown): string {
  * 【为什么要有】对话流里工具调用只留一行汇总,要知道到底哪一步失败、传了什么参数,
  * 得在长对话里逐个展开。这里按轮列出全部调用,失败项标红,点开看输入输出。
  *
- * 【为什么没有耗时】事件流里没有每次调用的起止时间,编一个数字比不写更糟。
+ * 【耗时只对本页实时收到的调用显示】事件流里没有每次调用的起止时间,
+ * 只能按本页收到 tool_use / tool_result 的时刻算;历史还原的轮次没有,编一个数字比不写更糟。
  *
  * 选中项可以由外面控制(对话流里点工具摘要 → 这里定位并高亮);不传时自己管。
  */
@@ -33,7 +34,10 @@ export function RunTree({
   selected: selectedProp,
   onSelectAction,
   running = false,
+  awaitingTools,
 }: {
+  /** 正在等你确认的工具名:对应的调用标「等你确认」,并自动选中展开 */
+  awaitingTools?: readonly string[];
   turns: Turn[];
   /** 主智能体的名字(详情里的「发起者」) */
   agentName?: string;
@@ -53,6 +57,7 @@ export function RunTree({
             locator: toolLocator(key, call.key),
             call,
             state: callStateOf(call, turn.running),
+            time: turn.toolTimes?.[call.key],
           })),
         };
       }),
@@ -81,6 +86,17 @@ export function RunTree({
   }, [selected]);
 
   const all = rounds.flatMap((r) => r.nodes);
+  const isAwaiting = (n: (typeof all)[number]) =>
+    n.state === "running" && (awaitingTools?.includes(n.call.tool) ?? false);
+  // 有调用在等你确认时自动选中展开它(每个等待项只自动选一次,之后用户怎么点都依他)
+  const awaitingLocator = all.find(isAwaiting)?.locator ?? null;
+  const autoSelectedRef = useRef<string | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 只在新的等待项出现时选中
+  useEffect(() => {
+    if (!awaitingLocator || autoSelectedRef.current === awaitingLocator) return;
+    autoSelectedRef.current = awaitingLocator;
+    select(awaitingLocator);
+  }, [awaitingLocator]);
   const failed = all.filter((n) => n.state === "error").length;
 
   if (all.length === 0) {
@@ -162,6 +178,12 @@ export function RunTree({
                                 子代理
                               </span>
                             )}
+                            {isAwaiting(n) && (
+                              <span className="shrink-0 rounded-full bg-warning-soft px-1.5 text-xs leading-5 text-warning-text">
+                                等你确认
+                              </span>
+                            )}
+                            <ToolDuration time={n.time} />
                           </button>
                           {open && (
                             <section

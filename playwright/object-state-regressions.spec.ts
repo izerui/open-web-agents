@@ -578,6 +578,11 @@ for (const next of ["另一会话", "同会话下一轮", "原运行"] as const)
     await expect(page.getByRole("button", { name: "停止运行", exact: true })).toBeVisible();
     await expect.poll(() => Boolean(stream)).toBe(true);
     await page.getByRole("button", { name: "停止运行", exact: true }).click();
+    // 停止前先确认
+    await page
+      .getByRole("dialog", { name: "停止这一轮？" })
+      .getByRole("button", { name: "停止", exact: true })
+      .click();
     await expect.poll(() => Boolean(cancellation)).toBe(true);
     if (next === "另一会话") {
       await sessionRow(page.getByRole("navigation", { name: "会话列表" }), "A 历史会话").click();

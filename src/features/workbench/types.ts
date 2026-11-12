@@ -27,6 +27,10 @@ export interface SessionSummary {
   status?: string;
   /** 还没结束的运行数(列表据此画「运行中」) */
   activeRuns?: number;
+  /** 等你确认的工具调用数(仅运行中的会话,列表标「待你确认」) */
+  pendingApprovals?: number;
+  /** 等你回答的提问数(仅运行中的会话,列表标「等你回答」) */
+  pendingQuestions?: number;
 }
 
 export interface AgentSummary {
@@ -92,4 +96,6 @@ export interface Turn {
   branchedFrom?: string;
   /** 该轮开始运行的时间(ISO 时间戳),用于计时标签。 */
   startedAt?: string;
+  /** 本页实时收到的工具调用起止(按 toolUseId),用于显示耗时;历史还原的轮次没有 */
+  toolTimes?: Record<string, { start: number; end?: number }>;
 }

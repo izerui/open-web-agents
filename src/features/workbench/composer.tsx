@@ -9,6 +9,7 @@ import {
   PromptInputTextarea,
   usePromptInputAttachments,
 } from "@/components/ai-elements/prompt-input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { ArrowUp, Clock, File, Image, Paperclip, Square, X } from "lucide-react";
 import { useState } from "react";
@@ -103,19 +104,40 @@ function AttachmentChips() {
   );
 }
 
+/** 添加附件:先弹一个小菜单说明大小上限与拖放,再打开系统选择框 */
 function AttachButton({ disabled }: { disabled: boolean }) {
   const { openFileDialog } = usePromptInputAttachments();
+  const [open, setOpen] = useState(false);
   return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={openFileDialog}
-      title="单个文件不超过 10MB；也可以把文件直接拖进窗口"
-      className="inline-flex h-[30px] shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] whitespace-nowrap text-[#4D4A43] hover:bg-[#EFEDE7] disabled:cursor-not-allowed disabled:opacity-40 max-md:size-11 max-md:justify-center max-md:px-0"
-    >
-      <Paperclip className="size-[15px]" />
-      <span className="max-md:sr-only">添加图片或文件</span>
-    </button>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          disabled={disabled}
+          className="inline-flex h-[30px] shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] whitespace-nowrap text-[#4D4A43] hover:bg-[#EFEDE7] disabled:cursor-not-allowed disabled:opacity-40 max-md:size-11 max-md:justify-center max-md:px-0"
+        >
+          <Paperclip className="size-[15px]" />
+          <span className="max-md:sr-only">添加图片或文件</span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent side="top" align="start" className="w-[250px] p-1.5">
+        <p className="px-2.5 pt-1.5 pb-0.5 text-xs text-muted-foreground">单个文件不超过 10MB</p>
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false);
+            openFileDialog();
+          }}
+          className="flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-[#F4F2EC] max-md:min-h-11"
+        >
+          <Image className="size-[15px] text-muted-foreground" />
+          选择图片或文件
+        </button>
+        <p className="px-2.5 pt-0.5 pb-1.5 text-xs text-muted-foreground">
+          也可以把文件直接拖进窗口，发送时上传到这个会话的工作目录
+        </p>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -151,7 +173,9 @@ export function Composer({
   totalProcessed: number | null;
 }) {
   const [slashIndex, setSlashIndex] = useState(0);
-  const slashOpen = /^\/[^\s]*$/.test(input);
+  /** Esc 只关菜单、不清空输入;再改输入时菜单重新出现 */
+  const [slashDismissed, setSlashDismissed] = useState(false);
+  const slashOpen = /^\/[^\s]*$/.test(input) && !slashDismissed;
   const query = slashOpen ? input.slice(1).toLocaleLowerCase() : "";
   const matching = slashOpen ? commands.filter((c) => c.name.startsWith(query)) : [];
   const active = Math.min(slashIndex, Math.max(0, matching.length - 1));
@@ -225,12 +249,13 @@ export function Composer({
               onChange={(event) => {
                 onInputChangeAction(event.target.value);
                 setSlashIndex(0);
+                setSlashDismissed(false);
               }}
               onKeyDown={(event) => {
                 if (!slashOpen) return;
                 if (event.key === "Escape") {
                   event.preventDefault();
-                  onInputChangeAction("");
+                  setSlashDismissed(true);
                   return;
                 }
                 if (matching.length === 0) return;

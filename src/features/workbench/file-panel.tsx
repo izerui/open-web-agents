@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FileNode, FilePreview } from "./types";
+import { isFreshFile, latestPreviewable } from "./workbench.logic";
 
 import { CodeBlock } from "@/components/ai-elements/code-block";
 import {
@@ -154,6 +155,9 @@ export function FilePanel({
   refreshKey,
   live = false,
   onSuggestAction,
+  openRequest,
+  autoPreview = false,
+  freshSince,
 }: {
   sessionId: string | null;
   refreshKey: number;
@@ -161,6 +165,12 @@ export function FilePanel({
   live?: boolean;
   /** 空目录时的「让智能体生成点东西」:由页面决定怎么做(比如预填输入框) */
   onSuggestAction?: () => void;
+  /** 要打开预览的文件(对话里点了文件链接);seq 变化即重新打开 */
+  openRequest?: { path: string; seq: number } | null;
+  /** 打开会话后还没选文件时,自动预览根目录里最新的 md / html */
+  autoPreview?: boolean;
+  /** 这个时刻之后改过的文件标「新」(最近一轮的开始时间) */
+  freshSince?: number;
 }) {
   /** 目录路径 → 该目录下的一层子节点。没有条目 = 还没拉过。 */
   const [dirs, setDirs] = useState<Map<string, FileNode[]>>(new Map());
@@ -239,8 +249,12 @@ export function FilePanel({
     [sessionId],
   );
 
+  /** 每个会话只自动预览一次:之后用户关掉预览就别再弹回来 */
+  const autoPreviewedRef = useRef(false);
+
   // 换会话:清空整棵树,重新从根拉
   useEffect(() => {
+    autoPreviewedRef.current = false;
     previewSeqRef.current += 1;
     setDirs(new Map());
     setExpanded(new Set());
@@ -324,6 +338,29 @@ export function FilePanel({
     [sessionId],
   );
 
+  // 对话里点了文件链接:展开它所在的各级目录,并预览这个文件
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 只在新的打开请求到来时执行
+  useEffect(() => {
+    if (!openRequest || !sessionId) return;
+    autoPreviewedRef.current = true;
+    const parts = openRequest.path.split("/");
+    const parents = parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join("/"));
+    if (parents.length > 0) {
+      for (const dir of parents) if (!dirsRef.current.has(dir)) void loadDir(dir);
+      setExpanded((cur) => new Set([...cur, ...parents]));
+    }
+    void openFile(openRequest.path);
+  }, [openRequest?.seq, sessionId]);
+
+  // 首次打开:还没选任何文件时,自动预览根目录里最新生成的 md / html
+  const rootForAuto = dirs.get(ROOT);
+  useEffect(() => {
+    if (!autoPreview || autoPreviewedRef.current || !rootForAuto || selected) return;
+    autoPreviewedRef.current = true;
+    const latest = latestPreviewable(rootForAuto);
+    if (latest) void openFile(latest);
+  }, [autoPreview, rootForAuto, selected, openFile]);
+
   const refreshAll = useCallback(() => {
     for (const dir of new Set([ROOT, ...dirs.keys()])) void loadDir(dir);
   }, [dirs, loadDir]);
@@ -362,7 +399,18 @@ export function FilePanel({
 
     return nodes.map((n) =>
       n.type === "dir" ? (
-        <FileTreeFolder key={n.path} name={n.name} path={n.path}>
+        <FileTreeFolder
+          key={n.path}
+          name={n.name}
+          path={n.path}
+          meta={
+            dirs.get(n.path) ? (
+              <span className="ml-auto shrink-0 pl-2 text-xs text-muted-foreground">
+                {dirs.get(n.path)?.length} 个
+              </span>
+            ) : null
+          }
+        >
           {renderLevel(n.path)}
         </FileTreeFolder>
       ) : (
@@ -374,7 +422,16 @@ export function FilePanel({
         >
           <span className="size-4 shrink-0" />
           <FileTreeIcon>{fileIconOf(n.name)}</FileTreeIcon>
-          <FileTreeName className="flex-1 text-sm">{n.name}</FileTreeName>
+          <FileTreeName className="min-w-0 truncate text-sm">{n.name}</FileTreeName>
+          {isFreshFile(n, freshSince) && (
+            <span
+              title="最近一轮生成或修改的文件"
+              className="shrink-0 rounded-lg bg-[#FBE7BD] px-1.5 text-xs leading-[18px] text-[#7A4F0C]"
+            >
+              新
+            </span>
+          )}
+          <span className="flex-1" />
           {n.size !== undefined && (
             <span className="shrink-0 pl-2 text-xs text-muted-foreground">
               {formatSize(n.size)}
@@ -451,10 +508,17 @@ export function FilePanel({
             expanded={expanded}
             onExpandedChange={handleExpandedChange}
             onSelect={(path) => {
-              // 目录的展开收起由箭头负责,点名字只对文件有意义。
-              // 这里必须查节点类型:dirs 只装【已展开过】的目录,
+              // 必须查节点类型:dirs 只装【已展开过】的目录,
               // 拿它判断会把没展开过的目录当成文件送去预览。
-              if (findNode(path)?.type === "file") void openFile(path);
+              const node = findNode(path);
+              if (node?.type === "file") void openFile(path);
+              else if (node?.type === "dir") {
+                // 点目录名与点箭头一样:展开或收起
+                const next = new Set(expanded);
+                if (next.has(path)) next.delete(path);
+                else next.add(path);
+                handleExpandedChange(next);
+              }
             }}
             selectedPath={selected}
           >
@@ -595,8 +659,9 @@ export function FilePanel({
               />
             ) : isMarkdown && showRendered && preview.text !== null ? (
               // Markdown 用对话正文同一套渲染
-              <div className="chat-md text-sm leading-[1.7]">
-                <MessageResponse>{preview.text}</MessageResponse>
+              // 侧栏窄:表格不要复制 / 下载 / 全屏工具条,单元格不折行、整表横向滚动
+              <div className="chat-md text-sm leading-[1.7] [&_td]:whitespace-nowrap [&_th]:whitespace-nowrap">
+                <MessageResponse controls={{ table: false }}>{preview.text}</MessageResponse>
               </div>
             ) : preview.text === null ? (
               <div className="px-4 py-8 text-center text-muted-foreground">

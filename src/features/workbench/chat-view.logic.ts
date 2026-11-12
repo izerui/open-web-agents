@@ -61,6 +61,20 @@ export function filterSessions(
   );
 }
 
+/**
+ * 列表行上的等待标签。当前打开的会话以审批条的实时轮询为准;
+ * 其余会话用列表接口带回的计数(只有运行中的会话才有)。待确认优先于待回答。
+ */
+export function sessionWaitOf(
+  session: SessionSummary,
+  current: { id: string | null; running: boolean; wait: "approval" | "ask" | null } | null,
+): "approval" | "ask" | null {
+  if (current && current.id === session.id) return current.wait;
+  if ((session.pendingApprovals ?? 0) > 0) return "approval";
+  if ((session.pendingQuestions ?? 0) > 0) return "ask";
+  return null;
+}
+
 export type BadgeTone = "warning" | "success" | "outline";
 
 /**
@@ -121,6 +135,17 @@ export function runTargetLabel(agent: AgentSummary): string {
     return `跑草稿，你有编辑权限（已发布 v${v}${agent.hasUnpublishedChanges ? "，草稿有未发布的修改" : ""}）`;
   }
   return `跑已发布 v${v}`;
+}
+
+/** 新会话弹层里每一项的说明:跑哪一版,外加分享来的是只读还是可编辑、市场的平均花费 */
+export function pickerNote(agent: AgentSummary, group: PickerGroup): string {
+  const target = runTargetLabel(agent);
+  if (group === "分享给我") return `${agent.canWrite ? "可编辑" : "只读"}，${target}`;
+  if (group === "市场") {
+    const avg = (agent as AgentSummary & { avgCredits?: number | null }).avgCredits;
+    return `市场，${target}${avg ? `，平均每次约 ${avg} 积分` : ""}`;
+  }
+  return target;
 }
 
 export function groupPickerAgents(
