@@ -21,6 +21,7 @@ import { KeyRateLimit, type PlatformRateLimits } from "@/features/integration/ke
 import { WebhookDeliveries } from "@/features/integration/webhook-deliveries";
 import { WebhookSecretCard } from "@/features/integration/webhook-secret-card";
 import { errorText, fetchJson } from "@/lib/fetch-json";
+import { agentHref } from "@/lib/nav/routes";
 
 interface KeyRecord {
   id: string;
@@ -54,11 +55,12 @@ function expiryText(k: KeyRecord, now: number): { text: string; urgent: boolean 
  * 【为什么合并】以前集成方要跑四个地方:这里签 Key、构建器底部翻 curl、
  * 「模型凭证」页设回调签名密钥。
  */
-export function AccessCenterView() {
+export function AccessCenterView({ agentId }: { agentId?: string } = {}) {
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
-  const requestedAgent = searchParams.get("agent");
+  // 构建页的「接入」阶段直接传入智能体;旧的 ?agent= 仍然认
+  const requestedAgent = agentId ?? searchParams.get("agent");
   const objectMode = requestedAgent !== null;
   const initialAgent = useRef(requestedAgent);
   const keyBindingInitialized = useRef(false);
@@ -149,6 +151,11 @@ export function AccessCenterView() {
   }, [reload]);
 
   function selectDocAgent(id: string) {
+    // 构建页「接入」阶段(地址里固定了智能体):换智能体就换到那个智能体的接入页
+    if (agentId) {
+      if (id) router.push(agentHref({ id, stage: "access" }), { scroll: false });
+      return;
+    }
     const query = new URLSearchParams(searchParams.toString());
     if (id) query.set("agent", id);
     else query.delete("agent");
@@ -276,7 +283,7 @@ export function AccessCenterView() {
           </Select>
           {objectMode && (
             <Button variant="link" size="sm" asChild>
-              <Link href="/settings/keys" onClick={() => setSection("keys")}>
+              <Link href="/developer/keys" onClick={() => setSection("keys")}>
                 全部 API Key
               </Link>
             </Button>
@@ -329,7 +336,7 @@ export function AccessCenterView() {
                   </CardTitle>
                   {docAgent && (
                     <Button variant="link" size="sm" asChild>
-                      <Link href="/settings/keys" onClick={() => setSection("keys")}>
+                      <Link href="/developer/keys" onClick={() => setSection("keys")}>
                         全部 API Key
                       </Link>
                     </Button>
@@ -587,7 +594,7 @@ export function AccessCenterView() {
                     />
                     <p className="text-xs text-muted-foreground">
                       <Link
-                        href={`/settings/runs?agent=${encodeURIComponent(docAgent.id)}`}
+                        href={agentHref({ id: docAgent.id, stage: "runs" })}
                         className="underline"
                       >
                         运行记录
@@ -610,9 +617,7 @@ export function AccessCenterView() {
                         {docAgent.webhookUrl || "尚未配置回调地址"}
                       </p>
                       <Button variant="outline" size="sm" asChild>
-                        <Link href={`/agents?id=${encodeURIComponent(docAgent.id)}`}>
-                          配置回调地址
-                        </Link>
+                        <Link href={agentHref({ id: docAgent.id })}>配置回调地址</Link>
                       </Button>
                       {section === "webhook" && (
                         <WebhookDeliveries
@@ -631,7 +636,7 @@ export function AccessCenterView() {
                 <p className="text-sm text-muted-foreground">
                   回调使用智能体所有者的账号签名密钥。
                   <Link
-                    href="/settings/keys"
+                    href="/developer/keys"
                     onClick={() => setSection("webhook")}
                     className="ml-1 underline"
                   >

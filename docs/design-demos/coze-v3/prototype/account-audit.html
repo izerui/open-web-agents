@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>操作日志 · Open Web Agents</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/owa.css">
+<style>
+.aa-tools{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.aa-tools select.inp{width:260px}
+.aa-num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.aa-actor{display:flex;align-items:center;gap:8px;white-space:nowrap}
+.aa-face{width:24px;height:24px;border-radius:50%;background:#D9D1C1;display:grid;place-items:center;font-size:12px;font-weight:600;color:#3B362D;flex:none}
+.aa-face.k{background:#1F1E1C;color:#fff}
+.aa-face.n{background:#F1EFEA;color:var(--sub)}
+.aa-act{white-space:nowrap}
+.aa-sens{color:var(--warnt);font-weight:600}
+.aa-foot{display:flex;justify-content:center;align-items:center;gap:8px;padding:14px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="assets/owa.js"></script>
+<script>
+"use strict";
+/* 账户，操作日志（原 /settings/audit）：本人资源上的操作和本人的操作。动作名称与后端 audit/labels.ts 一致 */
+const GROUPS = [
+  ["智能体", [["agent.create", "创建智能体"], ["agent.update", "修改智能体"], ["agent.delete", "删除智能体"], ["agent.publish", "发布版本"], ["agent.activate_version", "切换发布版本"], ["agent.restore_version", "载入版本到草稿"], ["agent.share", "分享智能体"], ["agent.unshare", "撤销分享"]]],
+  ["知识", [["knowledge.add", "添加知识文档"], ["knowledge.update", "修改知识文档"], ["knowledge.delete", "删除知识文档"]]],
+  ["Key", [["api_key.issue", "签发 API Key"], ["api_key.revoke", "吊销 API Key"], ["api_key.rotate", "轮换 API Key"], ["api_key.rate_limit", "调整 Key 限额"], ["api_key.monthly_limit", "调整 Key 月度积分上限"]]],
+  ["审批", [["approval.decide", "审批"], ["approval.revoke_grant", "撤销同类授权"]]],
+  ["账号", [["account.create", "创建账号"], ["account.update", "修改账号"], ["account.reset_password", "重置密码"], ["me.password_change", "修改密码"], ["me.credentials_update", "修改模型凭证（已停用）"]]],
+  ["登录", [["auth.register", "注册"], ["auth.login", "登录"], ["auth.login_failed", "登录失败"]]],
+  ["Webhook", [["webhook.test", "测试回调"], ["webhook.redeliver", "重发回调"], ["me.webhook_secret_set", "设置回调签名密钥"], ["me.webhook_secret_clear", "清除回调签名密钥"]]],
+  ["评测", [["eval.run", "运行评测"]]],
+  ["模型", [["capability.update", "更新模型能力与价目"], ["provider.create", "新建模型提供者"], ["provider.update", "更新模型提供者"], ["provider.key_replace", "替换提供者 API Key"], ["provider.test", "测试提供者连接"], ["model.update", "更新模型与价目"], ["model.alias_update", "更新模型别名映射"]]],
+  ["计费", [["billing.credit", "人工发放积分"], ["billing.mode_update", "切换计费模式"], ["billing.package_update", "更新积分套餐"]]],
+  ["订单", [["billing.order_create", "创建套餐订单"], ["billing.order_cancel", "取消套餐订单"], ["billing.order_confirm", "人工确认套餐入账"]]],
+  ["用户组", [["group.create", "创建用户组"], ["group.member_add", "添加组成员"], ["group.member_remove", "移除组成员"]]],
+  ["克隆", [["agent.clone", "克隆智能体"]]],
+];
+const LABEL = Object.fromEntries(GROUPS.flatMap(([, a]) => a));
+const SENS = new Set(["auth.login_failed", "approval.decide", "approval.revoke_grant", "account.reset_password", "account.update", "api_key.issue", "agent.activate_version", "agent.share"]);
+const ME = { t: "u", n: "林舟", f: "舟" }, KEY = { t: "k", n: "Key 报销系统对接（生产）", f: "K" }, ADM = { t: "u", n: "周岚（管理员）", f: "岚" }, ANON = { t: "n", n: "未登录", f: "?" };
+const rows = [
+  { t: "11-11 14:36", who: ME, a: "api_key.issue", d: "「报销系统对接（预发）」，仅限智能体「报销审核助手」", ip: "10.20.3.41" },
+  { t: "11-11 14:31", who: ME, a: "approval.decide", d: "批准 erp-finance.submit（运行 run_8f2b77）", ip: "10.20.3.41" },
+  { t: "11-11 14:02", who: ME, a: "eval.run", d: "报销审核助手，草稿，6 个用例，4 个通过", ip: "10.20.3.41" },
+  { t: "11-11 10:41", who: ME, a: "agent.update", d: "「报销审核助手」（通过 AI 设计师）：改动 prompt、subagents", ip: "10.20.3.41" },
+  { t: "11-11 10:12", who: ME, a: "knowledge.add", d: "「差旅报销制度 2026 版.pdf」", ip: "10.20.3.41" },
+  { t: "11-11 09:58", who: ME, a: "me.webhook_secret_set", d: "重新生成，旧密钥过渡期至 11-12 21:40", ip: "10.20.3.41" },
+  { t: "11-11 09:40", who: ME, a: "billing.order_create", d: "ORD-20261111-0107，团队包 v1，20,000 积分", ip: "10.20.3.41" },
+  { t: "11-11 09:31", who: ME, a: "auth.login", d: "", ip: "10.20.3.41" },
+  { t: "11-11 09:30", who: ANON, a: "auth.login_failed", d: "linzhou@xinghe.example：密码错误", ip: "10.20.3.41" },
+  { t: "11-10 17:20", who: ADM, a: "billing.credit", d: "5,000 积分，订单 ORD-20261108-0042", ip: "10.20.1.5" },
+  { t: "11-10 17:20", who: ADM, a: "billing.order_confirm", d: "ORD-20261108-0042：财务已转账", ip: "10.20.1.5" },
+  { t: "11-10 15:02", who: ME, a: "api_key.monthly_limit", d: "「报销系统对接（生产）」本月积分上限 不限 → 3,000", ip: "10.20.3.41" },
+  { t: "11-10 11:15", who: ME, a: "agent.share", d: "分享给 qianxiao@xinghe.example（只读）", ip: "10.20.3.41" },
+  { t: "11-09 18:40", who: KEY, a: "webhook.redeliver", d: "报销审核助手，运行 run_8f1f02，第 2 次", ip: "172.16.8.12" },
+];
+const moreRows = [
+  { t: "10-28 16:05", who: ME, a: "agent.publish", d: "发布 v3：规则补充外币换算", ip: "10.20.3.41" },
+  { t: "10-28 15:58", who: ME, a: "agent.activate_version", d: "发布版本 v2 → v3", ip: "10.20.3.41" },
+  { t: "10-27 10:20", who: ME, a: "agent.clone", d: "从市场克隆「会议纪要整理」v5", ip: "10.20.3.41" },
+  { t: "10-26 09:12", who: ME, a: "api_key.rotate", d: "「会议纪要，飞书机器人」签发新 Key，旧 Key 于 10-27 09:12 失效", ip: "10.20.3.41" },
+];
+let filter = "", loaded = false, loading = false;
+
+OWA.mount({
+  nav: "account",
+  body: `<div class="bwrap">${sideNav("account")}
+    <main class="main">
+      <div class="ph"><div><h1>操作日志</h1><p class="muted" style="margin:6px 0 0">你做过的操作，以及别人（管理员、你的 Key）对你的资源做的操作。标黄的是需要留意的操作。</p></div></div>
+      <div class="aa-tools">
+        <select class="inp" id="aa-f" aria-label="按操作类型筛选"><option value="">全部操作类型</option>${GROUPS.map(([g, a]) => `<optgroup label="${g}">${a.map(([k, n]) => `<option value="${k}">${n}</option>`).join("")}</optgroup>`).join("")}</select>
+        <span class="muted small" id="aa-n"></span>
+        <button class="btn ghost sm" style="margin-left:auto" data-a="refresh">${ic("refresh", 15)}刷新</button>
+      </div>
+      <section class="card" id="aa-tb" style="overflow:hidden"></section>
+    </main></div>`,
+});
+$("#aa-f").addEventListener("change", (e) => { filter = e.target.value; render(); });
+
+function render() {
+  const all = loaded ? rows.concat(moreRows) : rows;
+  const list = all.filter((r) => !filter || r.a === filter);
+  $("#aa-n").textContent = loading ? "" : `${list.length} 条`;
+  if (loading) { $("#aa-tb").innerHTML = `<div class="aa-foot" style="padding:60px"><span class="spin"></span><span class="muted">正在载入…</span></div>`; return; }
+  if (!list.length) {
+    $("#aa-tb").innerHTML = `<div class="empty-state"><div class="serif">没有「${LABEL[filter] || "任何"}」的记录</div><p class="muted" style="margin:0 0 16px">换一个操作类型，或者加载更早的记录。</p><div class="row" style="justify-content:center"><button class="btn ghost sm" data-a="clear">看全部类型</button>${loaded ? "" : `<button class="btn ghost sm" data-a="more">加载更早的</button>`}</div></div>`;
+    return;
+  }
+  $("#aa-tb").innerHTML = `<table class="tb"><thead><tr><th style="padding-left:22px">时间</th><th>操作者</th><th>操作</th><th>内容</th><th style="padding-right:22px">来源地址</th></tr></thead><tbody>
+    ${list.map((r) => `<tr><td style="padding-left:22px" class="aa-num">${r.t}</td>
+      <td><span class="aa-actor"><span class="aa-face ${r.who.t === "k" ? "k" : r.who.t === "n" ? "n" : ""}">${r.who.f}</span>${esc(r.who.n)}</span></td>
+      <td class="aa-act ${SENS.has(r.a) ? "aa-sens" : ""}">${SENS.has(r.a) ? ic("warn", 14) + " " : ""}${LABEL[r.a]}</td>
+      <td>${r.d ? esc(r.d) : '<span class="muted">—</span>'}</td>
+      <td style="padding-right:22px;font-family:var(--mono);font-size:12.5px">${r.ip}</td></tr>`).join("")}</tbody></table>
+    <div class="aa-foot">${loaded ? '<span class="muted small">没有更早的记录了</span>' : `<button class="btn ghost sm" data-a="more">加载更多</button>`}</div>`;
+}
+OWA.on("clear", () => { filter = ""; $("#aa-f").value = ""; render(); });
+OWA.on("refresh", () => { loading = true; render(); setTimeout(() => { loading = false; render(); toast("已刷新"); }, 700); });
+OWA.on("more", (el) => { el.outerHTML = '<span class="spin"></span>'; setTimeout(() => { loaded = true; render(); }, 600); });
+render();
+</script>
+</body>
+</html>

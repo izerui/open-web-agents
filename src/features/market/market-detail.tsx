@@ -34,7 +34,7 @@ export function MarketDetail({ id }: { id: string }) {
   return (
     <SpaceShell area="market" title={agent?.name ?? "智能体详情"}>
       <Link
-        href="/market"
+        href="/"
         className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="size-4" />

@@ -1,6 +1,6 @@
 "use client";
 
-import { BrandMark } from "@/components/ide/brand-mark";
+import { BrandMark } from "@/components/shell/brand-mark";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -61,7 +61,7 @@ export function LoginForm({
       <Card>
         <CardHeader>
           {/* 和全站侧栏同一个徽标 —— 登录是第一眼,不该是唯一没有品牌的页面 */}
-          <BrandMark className="mb-1 size-8 rounded-md text-xs" />
+          <BrandMark className="mb-1 size-9" />
           <CardTitle className="text-xl">Open Web Agents</CardTitle>
           <CardDescription>
             {mode === "register"

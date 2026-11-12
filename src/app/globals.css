@@ -44,127 +44,93 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-info: var(--info);
+  /* 状态的浅底与浅底上的文字(标签、横幅用;浅底上直接用 success 文字对比度不够) */
+  --color-success-soft: var(--success-soft);
+  --color-success-text: var(--success-text);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-text: var(--warning-text);
+  --color-destructive-soft: var(--destructive-soft);
+  /* 次一级分割线、整段色带、「刚更新」高亮 */
+  --color-line-soft: var(--line-soft);
+  --color-band: var(--band);
+  --color-fresh: var(--fresh);
   /* IDE 语法高亮色:给工具类别等需要区分但不表达成败的地方用 */
   --color-ide-cyan: var(--ide-cyan);
   --color-ide-purple: var(--ide-purple);
   --font-sans: var(--font-sans), ui-sans-serif, system-ui, "PingFang SC", sans-serif;
   --font-mono: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* 大标题与智能体名用衬线;不从网络下载,按系统字体栈回落 */
+  --font-display: "Noto Serif SC", "Songti SC", "STSong", serif;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
   --radius-2xl: calc(var(--radius) + 8px);
 
-  /* IDE 的紧凑排版:正文 13px、辅助 12px(Tailwind 默认是 14 / 12) */
-  --text-sm: 0.8125rem;
-  --text-sm--line-height: 1.25rem;
+  /* 正文 14px、辅助 12px */
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.375rem;
   --text-xs: 0.75rem;
   --text-xs--line-height: 1.125rem;
-  /* IDE 控件是平的:只有浮起来的弹层才有投影 */
-  --shadow-xs: 0 0 #0000;
-  --shadow-sm: 0 0 #0000;
-  --shadow-lg: var(--shadow-popup, 0 10px 28px rgb(0 0 0 / 45%));
-  --shadow-md: var(--shadow-popup, 0 10px 28px rgb(0 0 0 / 45%));
+  /* 投影只给浮起来的东西:卡片悬停、弹层、抽屉 */
+  --shadow-xs: 0 1px 2px rgb(40 35 25 / 5%);
+  --shadow-sm: 0 1px 3px rgb(40 35 25 / 7%);
+  --shadow-md: 0 10px 30px rgb(60 50 30 / 8%);
+  --shadow-lg: var(--shadow-popup);
 }
 
-/* ── Light theme:JetBrains New UI 亮色(暂未启用,与暗色同一套语义) ── */
+/* ── 主题:暖纸浅色(coze-v3「对话搭建」,值取自 docs/design-demos/coze-v3/prototype/assets/owa.css) ── */
 :root {
   color-scheme: light;
-  --radius: 0.5rem;
-  --brand: #3574f0;
-  --brand-dim: rgb(53 116 240 / 12%);
-  --background: #ffffff;
-  --foreground: #1e1f22;
-  --card: #f7f8fa;
-  --card-foreground: #1e1f22;
+  --radius: 0.625rem;
+  --background: #f7f6f2;
+  --foreground: #1b1b1a;
+  --card: #ffffff;
+  --card-foreground: #1b1b1a;
   --popover: #ffffff;
-  --popover-foreground: #1e1f22;
-  --primary: #3574f0;
+  --popover-foreground: #1b1b1a;
+  /* 主按钮是近黑胶囊;品牌色同为近黑,链接靠下划线区分 */
+  --primary: #1c1c1c;
   --primary-foreground: #ffffff;
-  --secondary: #ebecf0;
-  --secondary-foreground: #1e1f22;
-  --muted: #f7f8fa;
-  --muted-foreground: #6c707e;
-  --accent: #dfe1e5;
-  --accent-foreground: #1e1f22;
-  --destructive: #db3b4b;
-  --border: #ebecf0;
-  --input: #c9ccd6;
-  --ring: rgb(53 116 240 / 70%);
-  --success: #208a3c;
-  --warning: #c27d04;
-  --info: #3574f0;
-  --ide-cyan: #00627a;
-  --ide-purple: #871094;
-  --sidebar: #f7f8fa;
-  --sidebar-foreground: #1e1f22;
-  --sidebar-primary: #3574f0;
+  --brand: #1c1c1c;
+  --brand-dim: rgb(28 28 28 / 8%);
+  --secondary: #eceae3;
+  --secondary-foreground: #1b1b1a;
+  --muted: #efede7;
+  --muted-foreground: #6b6860;
+  /* 悬停底色 */
+  --accent: #efede7;
+  --accent-foreground: #1b1b1a;
+  --destructive: #b4442f;
+  --destructive-soft: #f8e7e2;
+  --success: #3f7a57;
+  --success-soft: #e8efe9;
+  --success-text: #2f6345;
+  --warning: #b7791f;
+  --warning-soft: #fbf1de;
+  --warning-text: #85570f;
+  --info: #3c5a80;
+  --border: #e6e3db;
+  --line-soft: #efece5;
+  --band: #efeee8;
+  --fresh: #fff6e3;
+  --input: #e6e3db;
+  --ring: #9c978b;
+  /* 工具名区分色(只表达类别,不表达成败) */
+  --ide-cyan: #2f6f79;
+  --ide-purple: #7a4f8c;
+  --sidebar: #f7f6f2;
+  --sidebar-foreground: #1b1b1a;
+  --sidebar-primary: #1c1c1c;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #dfe1e5;
-  --sidebar-accent-foreground: #1e1f22;
-  --sidebar-border: #ebecf0;
-  --sidebar-ring: rgb(53 116 240 / 70%);
-  --sidebar-active: #d4e2ff;
-  --sidebar-active-foreground: #1e1f22;
-  --shadow-popup: 0 8px 24px rgb(0 0 0 / 15%);
-}
-
-/* ── Dark theme:JetBrains New UI 暗色(对齐 imux/docs/prototypes 的 IDE 风格) ── */
-.dark {
-  /**
-   * 告诉浏览器这是暗色界面。
-   *
-   * 【为什么必须有】原生控件(select 的下拉列表、日期选择器、滚动条)由系统绘制,
-   * 不吃我们的 Tailwind 类。少了这一行,深色页面上的 <select> 会是白底黑字,
-   * 展开的选项列表更是一整块刺眼的白 —— 用量页右上角那两个筛选器就是这么露馅的。
-   */
-  color-scheme: dark;
-
-  /* 中性灰两层:主区是编辑器底 #1e1f22,侧栏 / 卡片 / 弹层是工具窗口面板 #2b2d30 */
-  --background: #1e1f22;
-  --foreground: #dfe1e5;
-  --card: #2b2d30;
-  --card-foreground: #dfe1e5;
-  --popover: #2b2d30;
-  --popover-foreground: #dfe1e5;
-
-  /* 强调色是 IDE 的主按钮蓝;链接、运行态用更亮的 #548af7 */
-  --brand: #548af7;
-  --brand-dim: rgb(84 138 247 / 14%);
-  --primary: #3574f0;
-  --primary-foreground: #ffffff;
-
-  --secondary: #393b40;
-  --secondary-foreground: #dfe1e5;
-  --muted: #2b2d30;
-  --muted-foreground: #8c8f96;
-  /* 悬停底色;选中用 sidebar-active 的蓝 */
-  --accent: #393b40;
-  --accent-foreground: #dfe1e5;
-  --destructive: #db5c5c;
-  --success: #5fb865;
-  --warning: #e0b153;
-  --info: #548af7;
-  --ide-cyan: #2aacb8;
-  --ide-purple: #c77dbb;
-
-  --border: #393b40;
-  --input: #4e5157;
-  --ring: rgb(53 116 240 / 70%);
-
-  --sidebar: #2b2d30;
-  --sidebar-foreground: #dfe1e5;
-  --sidebar-primary: #3574f0;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #393b40;
-  --sidebar-accent-foreground: #dfe1e5;
-  --sidebar-border: #393b40;
-  --sidebar-ring: rgb(53 116 240 / 70%);
-  --sidebar-active: #2e436e;
-  --sidebar-active-foreground: #dfe1e5;
-
-  /* 弹出菜单 / 对话框的重投影,和原型的 popup 一致 */
-  --shadow-popup: 0 10px 28px rgb(0 0 0 / 45%);
+  --sidebar-accent: #efede7;
+  --sidebar-accent-foreground: #1b1b1a;
+  --sidebar-border: #e6e3db;
+  --sidebar-ring: #9c978b;
+  /* 选中项是白底细边,不是色块 */
+  --sidebar-active: #ffffff;
+  --sidebar-active-foreground: #1b1b1a;
+  --shadow-popup: 0 14px 40px rgb(40 35 25 / 14%);
 }
 
 /* ── Base layer: scrollbar, borders, body ── */
@@ -175,7 +141,7 @@
 
   body {
     @apply bg-background text-foreground;
-    font-size: 13px;
+    font-size: 14px;
   }
 
   /* Styled scrollbar (matches open-agents) */
@@ -189,14 +155,14 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: rgb(140 143 150 / 35%);
+    background: rgb(107 104 96 / 30%);
     border-radius: 9999px;
     border: 2px solid transparent;
     background-clip: content-box;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: rgb(140 143 150 / 55%);
+    background: rgb(107 104 96 / 50%);
     border: 2px solid transparent;
     background-clip: content-box;
   }
@@ -362,10 +328,6 @@
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
 }
 
-.dark .object-frame {
-  --muted-foreground: #a7abb3;
-}
-
 .object-frame [data-conversation-shell] [data-slot="input-group"] {
   border-radius: 12px;
 }
@@ -487,9 +449,9 @@
 .chat-md [data-streamdown="inline-code"] {
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: var(--card);
+  background: #f1efea;
   padding: 0 0.35em;
-  font-size: 0.78rem;
+  font-size: 0.85em;
   word-break: break-all;
 }
 

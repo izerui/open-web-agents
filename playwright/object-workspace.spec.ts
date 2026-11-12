@@ -118,29 +118,33 @@ test.describe("B 对象工作区", () => {
   });
 
   test("对象树、四个页签与会话详情保持同一智能体", async ({ page }) => {
-    await page.goto(`/?session=${sessions[0]}`);
+    await page.goto(`/chat?session=${sessions[0]}`);
     await expect(page.getByRole("heading", { level: 1, name: "接口开发助手" })).toBeVisible();
     const tabs = page.getByRole("navigation", { name: "当前智能体工作区" });
     await expect(tabs.getByRole("link")).toHaveCount(4);
     await expect(tabs.getByRole("link", { name: "配置", exact: true })).toHaveAttribute(
       "href",
-      `/agents?id=${first}`,
+      `/agents/${first}`,
     );
     await expect(tabs.getByRole("link", { name: "运行", exact: true })).toHaveAttribute(
       "href",
-      `/settings/runs?agent=${first}`,
+      `/agents/${first}?stage=runs`,
     );
     await expect(tabs.getByRole("link", { name: "接入", exact: true })).toHaveAttribute(
       "href",
-      `/settings/keys?agent=${first}`,
+      `/agents/${first}?stage=access`,
     );
     await expect(page.getByText("接口结构已整理。", { exact: false })).toBeVisible();
-    await expect(page.getByRole("navigation", { name: "主导航", exact: true })).toHaveCount(0);
+    // coze-v3:顶栏有一组空间导航,对话页处于「对话」
+    await expect(
+      page.getByRole("navigation", { name: "主导航", exact: true }).getByRole("link", { name: "对话" }),
+    ).toHaveAttribute("aria-current", "page");
     await expect(page.getByRole("navigation", { name: "打开的会话" })).toHaveCount(0);
     const size = await page
-      .locator(".ide-layout > aside")
+      .locator("#main-content aside")
+      .first()
       .evaluate((node) => node.getBoundingClientRect().width);
-    expect(size).toBe(264);
+    expect(size).toBe(268);
     await page.getByRole("button", { name: "查看执行详情", exact: true }).click();
     await page
       .getByRole("list", { name: "工具调用" })
@@ -148,23 +152,23 @@ test.describe("B 对象工作区", () => {
       .click();
     await expect(page.getByRole("region", { name: "调用详情" })).toContainText("尚未配置测试脚本");
     await page.getByRole("button", { name: "查看执行详情", exact: true }).click();
-    await page.locator(`aside a[href="/?agent=${second}"]`).click();
+    await page.locator(`aside a[href="/chat?agent=${second}"]`).click();
     await expect(page.getByRole("heading", { level: 1, name: "文档整理助手" })).toBeVisible();
     await expect(tabs.getByRole("link", { name: "运行", exact: true })).toHaveAttribute(
       "href",
-      `/settings/runs?agent=${second}`,
+      `/agents/${second}?stage=runs`,
     );
-    await expect(page.locator(`aside a[href="/?session=${sessions[1]}"]`)).toBeVisible();
+    await expect(page.locator(`aside a[href="/chat?session=${sessions[1]}"]`)).toBeVisible();
   });
 
   test("配置、运行、接入之间保持对象深链", async ({ page }) => {
-    await page.goto(`/?session=${sessions[0]}`);
+    await page.goto(`/chat?session=${sessions[0]}`);
     await page
       .getByRole("navigation", { name: "当前智能体工作区" })
       .getByRole("link", { name: "配置", exact: true })
       .click();
     await expect(page.getByRole("heading", { level: 1, name: "接口开发助手" })).toBeVisible();
-    await expect(page).toHaveURL(new RegExp(`/agents\\?id=${first}`));
+    await expect(page).toHaveURL(new RegExp(`/agents/${first}$`));
     const request = page.waitForRequest((r) => {
       const url = new URL(r.url());
       return url.pathname === "/api/runs" && url.searchParams.get("agentId") === first;
@@ -180,7 +184,7 @@ test.describe("B 对象工作区", () => {
       .getByRole("link", { name: "接入", exact: true })
       .click();
     await expect(page.getByRole("heading", { level: 1, name: "接口开发助手" })).toBeVisible();
-    await expect(page).toHaveURL(new RegExp(`/settings/keys\\?agent=${first}`));
+    await expect(page).toHaveURL(new RegExp(`/agents/${first}\\?stage=access`));
     await page
       .getByRole("navigation", { name: "当前智能体工作区" })
       .getByRole("link", { name: "对话", exact: true })
@@ -192,12 +196,12 @@ test.describe("B 对象工作区", () => {
 
   test("375px 下对象树和执行详情可操作且无横向溢出", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
-    await page.goto(`/?session=${sessions[0]}`);
+    await page.goto(`/chat?session=${sessions[0]}`);
     await expect(page.getByRole("heading", { level: 1, name: "接口开发助手" })).toBeVisible();
     await page.getByRole("button", { name: "打开智能体树" }).click();
     const drawer = page.getByRole("dialog", { name: "智能体与会话" });
     await expect(drawer).toBeVisible();
-    await drawer.locator(`a[href="/?session=${sessions[0]}"]`).click();
+    await drawer.locator(`a[href="/chat?session=${sessions[0]}"]`).click();
     await expect(drawer).not.toBeVisible();
     await page.getByRole("button", { name: "查看执行详情", exact: true }).click();
     await expect(page.getByRole("dialog", { name: "执行详情" })).toBeVisible();
@@ -217,7 +221,7 @@ test.describe("B 对象工作区", () => {
   });
 
   test("配置分区保留草稿，离开对象前提示未保存修改", async ({ page }) => {
-    await page.goto(`/agents?id=${first}`);
+    await page.goto(`/agents/${first}`);
     const prompt = page.getByRole("textbox", { name: "系统提示词 *", exact: true });
     await prompt.fill("验证 B 工作区跨分区保留草稿");
     await page.getByRole("tab", { name: "能力", exact: true }).click();
@@ -228,7 +232,7 @@ test.describe("B 对象工作区", () => {
       .getByRole("navigation", { name: "当前智能体工作区" })
       .getByRole("link", { name: "运行", exact: true })
       .click();
-    await expect(page).toHaveURL(new RegExp(`/agents\\?id=${first}`));
+    await expect(page).toHaveURL(new RegExp(`/agents/${first}$`));
     await expect(prompt).toHaveValue("验证 B 工作区跨分区保留草稿");
     const saved = page.waitForResponse(
       (response) =>
@@ -245,7 +249,7 @@ test.describe("B 对象工作区", () => {
     page.on("request", (request) => {
       if (new URL(request.url()).pathname === "/api/runs") requested.push(request.url());
     });
-    await page.goto("/settings/runs?agent=missing-object-workspace");
+    await page.goto("/agents/missing-object-workspace?stage=runs");
     await expect(page.getByText("找不到指定的智能体", { exact: false })).toBeVisible();
     expect(requested).toEqual([]);
   });
@@ -262,7 +266,7 @@ test.describe("B 对象工作区", () => {
     const dir = path.resolve("docs/design-demos/ia-v2/implementation");
     await fs.mkdir(dir, { recursive: true });
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto(`/?session=${sessions[0]}`);
+    await page.goto(`/chat?session=${sessions[0]}`);
     await expect(page.getByText("接口结构已整理。", { exact: false })).toBeVisible();
     await page.locator("[data-conversation-scroll]").evaluate((node) => {
       node.scrollTop = 0;
@@ -282,13 +286,13 @@ test.describe("B 对象工作区", () => {
         .getByRole("link", { name: "配置", exact: true }),
     ).toHaveAttribute("aria-current", "page");
     await expect(page.getByRole("tab", { name: "能力", exact: true })).toBeVisible();
-    await expect(page.locator(`aside a[href="/agents?id=${first}"]`)).toBeVisible();
+    await expect(page.locator(`aside a[href="/agents/${first}"]`)).toBeVisible();
     await page.screenshot({
       path: path.join(dir, "agent-config.png"),
       style: "nextjs-portal { display:none !important }",
     });
     await page.setViewportSize({ width: 375, height: 812 });
-    await page.goto(`/?session=${sessions[0]}`);
+    await page.goto(`/chat?session=${sessions[0]}`);
     await expect(page.getByText("接口结构已整理。", { exact: false })).toBeVisible();
     await page.locator("[data-conversation-scroll]").evaluate((node) => {
       node.scrollTop = 0;

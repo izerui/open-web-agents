@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>运行记录 · Open Web Agents</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/owa.css">
+<style>
+.dr-filters{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.dr-filters select.inp{width:auto;min-width:150px}
+.dr-in.small{font-size:14px}
+.dr-in{max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dr-ag{display:flex;align-items:center;gap:8px;white-space:nowrap}
+.dr-num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.dr-kv{display:grid;grid-template-columns:84px 1fr;gap:6px 12px;font-size:14px}
+.dr-kv dt{color:var(--sub)}
+.dr-kv dd{margin:0;min-width:0;word-break:break-all}
+.dr-md h4{margin:10px 0 4px;font-size:14px}
+.dr-md p{margin:0 0 8px}
+.dr-md ul{margin:0 0 8px;padding-left:20px}
+.dr-err{border:1px solid #EBC5BB;background:var(--badbg);color:#8F3423;border-radius:12px;padding:10px 12px}
+.dr-foot{display:flex;align-items:center;justify-content:center;gap:10px;padding:14px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="assets/owa.js"></script>
+<script>
+"use strict";
+/* 开发者，运行记录：计费在本人名下的全部运行（原 /settings/runs）。单个智能体的运行在构建页，运行阶段 */
+const SRC = { workbench: "工作台", session: "API 会话", invoke: "接口调用", eval: "评测", design: "AI 编辑" };
+const STS = { queued: ["排队中", ""], running: ["运行中", "warn"], ok: ["成功", "ok"], failed: ["失败", "bad"], cancelled: ["已取消", "line"] };
+const AG = (id) => MY_AGENTS.find((a) => a.id === id) || MARKET.find((a) => a.id === id) || { n: id, k: "default" };
+const ans1 = `<h4>初审结论：需要审批</h4><p>这批 11 月差旅报销共 7 张发票，合计 <b>6,842.50 元</b>。</p><ul><li>上海—深圳机票 2,380 元，抬头「星河数据科技有限公司」正确</li><li>深圳福田酒店 3 晚 2,940 元，超出差旅标准 450 元/晚，<b>超额 1,590 元</b></li><li>单笔未超过 5,000 元，但合计超额，需部门负责人审批</li></ul><p>已生成审批单草稿，等待你确认提交。</p>`;
+let runs = [
+  { id: "run_8f2c1a", t: "14:32:08", a: "expense-reviewer", v: "草稿", src: "workbench", st: "running", in: "这批 11 月差旅报销能过吗？附 7 张发票", dur: "1 分 12 秒", tok: "18.4k", cost: 9.6, part: true, task: "task_01JCX8Q2", sess: true },
+  { id: "run_8f2b77", t: "14:31:40", a: "expense-reviewer", v: "v3", src: "invoke", st: "queued", in: '{ "invoice_url": "https://oss.xinghe.example/inv/1107-22.pdf", "amount": 1280, "currency": "CNY" }', dur: "—", tok: "—", cost: 0, task: "task_01JCX8P9" },
+  { id: "run_8f2a03", t: "14:20:15", a: "expense-reviewer", v: "v3", src: "invoke", st: "ok", in: '{ "invoice_url": "https://oss.xinghe.example/inv/1107-18.pdf", "amount": 6200, "currency": "CNY" }', dur: "38 秒", tok: "12.1k", cost: 7.2, task: "task_01JCX7ZK", result: '{\n  "verdict": "need_approval",\n  "reasons": [\n    "单笔 6,200 元超过 5,000 元",\n    "需部门负责人审批"\n  ]\n}', ans: ans1 },
+  { id: "run_8f29c4", t: "14:02:51", a: "expense-reviewer", v: "草稿", src: "eval", st: "failed", in: "评测用例「外币换算」：USD 412.00 发票，开票日 2026-10-30", dur: "22 秒", tok: "6.8k", cost: 3.1, task: "task_01JCX6M1", err: { kind: "contract_violation", msg: "结构化结果不符合输出契约：reasons 缺失；verdict 取值「approve」不在 pass / reject / need_approval 之内" } },
+  { id: "run_8f2911", t: "13:47:09", a: "meeting-notes", v: "v5", src: "session", st: "ok", in: "整理周三项目例会录音（42 分钟）", dur: "2 分 05 秒", tok: "41.0k", cost: 18.4, task: "task_01JCX5T0", sess: true, ans: "<h4>决议</h4><ul><li>报销系统 11 月 20 日切换到新审批流</li></ul><h4>待办</h4><ul><li>林舟：周五前补齐外币发票用例</li><li>何晴：导出上月各部门报销总额</li></ul>" },
+  { id: "run_8f27aa", t: "11:05:33", a: "meeting-notes", v: "v5", src: "workbench", st: "cancelled", in: "只列出待办和负责人", dur: "9 秒", tok: "1.2k", cost: 0.6, part: true, task: "task_01JCX3A2", sess: true },
+  { id: "run_8f2610", t: "10:41:02", a: "expense-reviewer", v: "草稿", src: "design", st: "ok", in: "把外币换算规则改成按开票日汇率，并加一个汇率子代理", dur: "1 分 40 秒", tok: "24.6k", cost: 11.9, task: "task_01JCX2Q8", sess: true, ans: "<p>已修改草稿：规则第 3 条改为「外币按开票日汇率换算」，新增子代理 <code>currency-converter</code>。差异已应用到草稿。</p>" },
+  { id: "run_8f2502", t: "昨天 18:22", a: "weekly-report", v: "v4", src: "invoke", st: "failed", in: '{ "week": "2026-W45", "owner": "linzhou" }', dur: "4 秒", tok: "0.3k", cost: 0.1, task: "task_01JCW9H3", err: { kind: "rate_limited", msg: "该 Key 每分钟调用超过 30 次，返回 429" } },
+  { id: "run_8f24e9", t: "昨天 16:10", a: "sql-helper", v: "v4", src: "workbench", st: "ok", in: "上月各部门报销总额", dur: "17 秒", tok: "5.4k", cost: 1.0, task: "task_01JCW8B1", sess: true, ans: "<p>按部门汇总 10 月已审核通过的报销：</p><pre class=\"code\">SELECT dept, SUM(amount) AS total\nFROM expense_claims\nWHERE status = 'approved'\n  AND approved_at >= '2026-10-01' AND approved_at < '2026-11-01'\nGROUP BY dept ORDER BY total DESC;</pre>" },
+  { id: "run_8f2391", t: "昨天 15:02", a: "expense-reviewer", v: "草稿", src: "eval", st: "ok", in: "评测用例「超额需审批」：单笔 7,800 元酒店发票", dur: "26 秒", tok: "7.9k", cost: 3.8, task: "task_01JCW7C4", result: '{\n  "verdict": "need_approval",\n  "reasons": ["单笔 7,800 元超过 5,000 元"]\n}' },
+  { id: "run_8f2280", t: "昨天 11:30", a: "contract-diff", v: "v3", src: "session", st: "failed", in: "比对两版采购合同（v2 与 v3）", dur: "1 分 02 秒", tok: "9.2k", cost: 4.4, part: true, task: "task_01JCW5D7", sess: true, err: { kind: "tool_error", msg: "读取附件失败：采购合同-v3.docx 超过 20 MB 上限" } },
+];
+const more = [
+  { id: "run_8f1f02", t: "11-09 17:45", a: "expense-reviewer", v: "v3", src: "invoke", st: "ok", in: '{ "invoice_url": "https://oss.xinghe.example/inv/1109-03.pdf", "amount": 420, "currency": "CNY" }', dur: "21 秒", tok: "6.2k", cost: 2.9, task: "task_01JCT2K0", result: '{\n  "verdict": "pass",\n  "reasons": []\n}' },
+  { id: "run_8f1e77", t: "11-09 10:12", a: "weekly-report", v: "v4", src: "workbench", st: "ok", in: "生成我这周的周报", dur: "44 秒", tok: "10.8k", cost: 2.2, task: "task_01JCS9V5", sess: true, ans: "<p>第 45 周周报已生成，共 4 项进展、3 项下周计划。</p>" },
+  { id: "run_8f1d10", t: "11-08 16:40", a: "rival-weekly-draft", v: "草稿", src: "workbench", st: "failed", in: "这周竞品有什么新动作", dur: "3 分 10 秒", tok: "52.3k", cost: 21.0, part: true, task: "task_01JCR1E2", sess: true, err: { kind: "max_turns", msg: "达到最大轮次 20，运行被终止" } },
+];
+const f = { agent: new URLSearchParams(location.search).get("agent") || "", st: "", src: "" };
+let loading = false, moreLoaded = false;
+
+OWA.mount({
+  nav: "dev",
+  body: `<div class="bwrap">${sideNav("dev")}
+    <main class="main">
+      <div class="ph"><div><h1>运行记录</h1><p class="muted" style="margin:6px 0 0">计费在你名下的全部运行，包括你调用别人的智能体、别人用你的 Key 调用。单个智能体的运行分析在它的构建页「运行」阶段。</p></div></div>
+      <div class="dr-filters">
+        <select class="inp" id="f-agent" aria-label="智能体"><option value="">全部智能体</option>${[...new Set(runs.concat(more).map((r) => r.a))].map((id) => `<option value="${id}">${esc(AG(id).n)}</option>`).join("")}</select>
+        <select class="inp" id="f-st" aria-label="状态"><option value="">全部状态</option>${Object.entries(STS).map(([k, [n]]) => `<option value="${k}">${n}</option>`).join("")}</select>
+        <select class="inp" id="f-src" aria-label="来源"><option value="">全部来源</option>${Object.entries(SRC).map(([k, n]) => `<option value="${k}">${n}</option>`).join("")}</select>
+        <span class="muted small" id="f-count"></span>
+        <button class="btn ghost sm" style="margin-left:auto" data-a="refresh">${ic("refresh", 15)}刷新</button>
+      </div>
+      <section class="card" id="dr-tb" style="overflow:hidden"></section>
+    </main></div>`,
+});
+$("#f-agent").value = f.agent;
+["agent", "st", "src"].forEach((k) => $("#f-" + k).addEventListener("change", (e) => { f[k] = e.target.value; render(); }));
+
+function stTag(st) { const [n, c] = STS[st]; return `<span class="tag ${c}">${st === "running" ? '<span class="spin" style="width:10px;height:10px;border-width:1.5px"></span>' : ""}${n}</span>`; }
+function render() {
+  const all = moreLoaded ? runs.concat(more) : runs;
+  const list = all.filter((r) => (!f.agent || r.a === f.agent) && (!f.st || r.st === f.st) && (!f.src || r.src === f.src));
+  $("#f-count").textContent = loading ? "" : `${list.length} 条`;
+  if (loading) {
+    $("#dr-tb").innerHTML = `<div class="dr-foot" style="padding:60px"><span class="spin"></span><span class="muted">正在载入运行记录…</span></div>`;
+    return;
+  }
+  if (!list.length) {
+    $("#dr-tb").innerHTML = `<div class="empty-state"><div class="serif">没有符合条件的运行</div><p class="muted" style="margin:0 0 16px">换个筛选条件，或者去对话里用一次智能体。</p><button class="btn ghost" data-a="clear">清除筛选</button></div>`;
+    return;
+  }
+  $("#dr-tb").innerHTML = `<table class="tb"><thead><tr><th style="padding-left:20px">时间</th><th>智能体</th><th>来源</th><th>状态</th><th>输入</th><th>耗时</th><th style="text-align:right;padding-right:20px">花费</th></tr></thead><tbody>
+    ${list.map((r) => `<tr class="click" data-a="open" data-id="${r.id}" tabindex="0">
+      <td style="padding-left:20px" class="dr-num">${r.t}</td>
+      <td><span class="dr-ag">${av(AG(r.a).k, 24)}${esc(AG(r.a).n)}<span class="tag ${r.v === "草稿" ? "warn" : "line"}">${r.v}</span></span></td>
+      <td>${SRC[r.src]}</td>
+      <td>${stTag(r.st)}</td>
+      <td><div class="dr-in ${/^\{/.test(r.in) ? "small" : ""}" style="${/^\{/.test(r.in) ? "font-family:var(--mono)" : ""}" title="${esc(r.in)}">${esc(r.in)}</div></td>
+      <td class="dr-num">${r.dur}</td>
+      <td class="dr-num" style="text-align:right;padding-right:20px">${r.tok === "—" ? '<span class="muted">—</span>' : `${r.tok} tokens${r.part ? ' <span class="tag warn" title="有模型调用没回报用量，统计不完整">部分</span>' : ""}<div class="small muted">${r.cost.toFixed(1)} 积分</div>`}</td>
+    </tr>`).join("")}</tbody></table>
+    <div class="dr-foot">${moreLoaded ? '<span class="muted small">没有更早的运行了</span>' : `<button class="btn ghost sm" data-a="more">加载更多</button>`}</div>`;
+}
+OWA.on("clear", () => { f.agent = f.st = f.src = ""; ["agent", "st", "src"].forEach((k) => ($("#f-" + k).value = "")); render(); });
+OWA.on("refresh", () => { loading = true; render(); setTimeout(() => { loading = false; render(); toast("已刷新"); }, 800); });
+OWA.on("more", (el) => { el.outerHTML = '<span class="spin"></span><span class="muted small">载入中…</span>'; setTimeout(() => { moreLoaded = true; render(); }, 700); });
+
+function drawer(r) {
+  const a = AG(r.a);
+  const live = r.st === "running" || r.st === "queued";
+  openDrawer(`<div class="dh">${av(a.k, 36)}<div style="min-width:0"><div style="font-weight:600">${esc(a.n)} <span class="tag ${r.v === "草稿" ? "warn" : "line"}">${r.v}</span></div><div class="small muted">${r.t}，${SRC[r.src]}，${r.dur}</div></div><button class="xbtn" data-a="owa-drawer-close" aria-label="关闭">${ic("x", 18)}</button></div>
+    <div class="db">
+      <div class="row" style="margin-bottom:14px">${stTag(r.st)}${r.tok !== "—" ? `<span class="muted small">${r.tok} tokens，${r.cost.toFixed(1)} 积分${r.part ? "（部分，统计不完整）" : ""}</span>` : `<span class="muted small">前面还有 2 个运行在排队</span>`}
+        ${live ? `<button class="btn danger sm" style="margin-left:auto" data-a="cancel" data-id="${r.id}">${ic("stop", 14)}取消运行</button>` : ""}</div>
+      <div class="dsec"><h4>输入</h4>${/^\{/.test(r.in) ? `<pre class="snap" style="margin:6px 0 0">${esc(JSON.stringify(JSON.parse(r.in), null, 2))}</pre>` : `<p style="margin:4px 0 0">${esc(r.in)}</p>`}</div>
+      ${r.err ? `<div class="dsec"><h4>错误</h4><div class="dr-err"><div class="small" style="font-family:var(--mono);margin-bottom:2px">kind: ${r.err.kind}</div>${esc(r.err.msg)}</div></div>` : ""}
+      ${r.result ? `<div class="dsec"><h4>结构化结果</h4><pre class="snap" style="margin:6px 0 0">${esc(r.result)}</pre></div>` : ""}
+      ${r.ans ? `<div class="dsec"><h4>最终回答</h4><div class="dr-md">${r.ans}</div></div>` : ""}
+      ${live ? `<div class="dsec"><h4>最终回答</h4><p class="muted" style="margin:4px 0 0">运行结束后显示。</p></div>` : ""}
+      ${r.st === "cancelled" ? `<div class="dsec"><h4>最终回答</h4><p class="muted" style="margin:4px 0 0">运行在完成前被取消，没有最终回答。已消耗的 tokens 照常计费。</p></div>` : ""}
+      <div class="dsec"><dl class="dr-kv" style="margin:0"><dt>运行 ID</dt><dd style="font-family:var(--mono);font-size:12.5px">${r.id}</dd><dt>taskId</dt><dd style="font-family:var(--mono);font-size:12.5px">${r.task} <button class="ibtn" data-a="copy-task" data-v="${r.task}" aria-label="复制 taskId">${ic("copy", 14)}</button></dd></dl></div>
+      ${r.sess ? `<a class="btn ghost" style="width:100%;text-decoration:none" href="chat.html">${ic("chat", 16)}在对话里查看完整过程</a>` : `<p class="small muted" style="margin:0">接口调用和评测不产生可查看的对话；完整过程可用 <code>GET /api/sessions/{id}/events</code> 读取事件流。</p>`}
+    </div>`, 520);
+  $$("tr.sel").forEach((x) => x.classList.remove("sel"));
+  $(`tr[data-id="${r.id}"]`)?.classList.add("sel");
+}
+OWA.on("open", (el) => drawer(runs.concat(more).find((r) => r.id === el.dataset.id)));
+OWA.on("copy-task", (el) => { navigator.clipboard?.writeText(el.dataset.v).catch(() => {}); toast("taskId 已复制"); });
+OWA.on("cancel", (el) => {
+  const r = runs.find((x) => x.id === el.dataset.id);
+  confirmBox({
+    title: "取消这次运行？",
+    body: `<p style="margin:0">「${esc(AG(r.a).n)}」会立即停止，${r.st === "queued" ? "排队中的运行不会产生费用。" : "已经消耗的 tokens 照常计费，冻结的多余积分会退回。"}</p>`,
+    ok: "取消运行", danger: true,
+    onOk() {
+      el.disabled = true;
+      setTimeout(() => { r.st = "cancelled"; if (r.dur === "—") r.dur = "0 秒"; render(); drawer(r); toast("运行已取消"); }, 600);
+    },
+  });
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.matches("tr[data-a=open]")) e.target.click(); });
+render();
+</script>
+</body>
+</html>

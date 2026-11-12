@@ -1,9 +1,6 @@
-import { BillingView } from "@/features/billing/billing-view";
-import { requireLogin } from "@/lib/server-guard";
+import { type PageSearchParams, redirectLegacy } from "@/lib/nav/legacy-page";
 
-export const dynamic = "force-dynamic";
-
-export default async function Page() {
-  await requireLogin();
-  return <BillingView />;
+/** 旧地址,已迁到 /account/billing(见 src/lib/nav/routes.ts) */
+export default async function Page({ searchParams }: { searchParams: PageSearchParams }) {
+  return redirectLegacy("/settings/billing", searchParams);
 }

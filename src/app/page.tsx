@@ -1,34 +1,18 @@
-import { Workbench } from "@/features/workbench/workbench";
-import { getContainer } from "@/lib/container";
-import { headers } from "next/headers";
+import { MarketView } from "@/features/market/market-view";
+import { type PageSearchParams, toSearchParams } from "@/lib/nav/legacy-page";
+import { legacyRedirect } from "@/lib/nav/routes";
+import { requireLogin } from "@/lib/server-guard";
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
-export default async function Home({
-  searchParams,
-}: { searchParams: Promise<{ session?: string; agent?: string }> }) {
-  const { authService, env, sessions, auth } = getContainer();
-
-  // 服务端就把未登录的人挡在工作台之外,避免先渲染再被 API 全线 401
-  if (env.authRequired) {
-    const h = await headers();
-    const req = new Request("http://internal/", { headers: { cookie: h.get("cookie") ?? "" } });
-    if (!(await authService.currentUser(req))) redirect("/login");
-  }
-  const { session, agent } = await searchParams;
-  if (session) {
-    const h = await headers();
-    const req = new Request("http://internal/", { headers: { cookie: h.get("cookie") ?? "" } });
-    try {
-      await auth.assertSessionAccess(await auth.resolveWeb(req), session);
-    } catch {
-      return <Workbench key={session} />;
-    }
-    if ((await sessions.get(session))?.source === "design") {
-      redirect(`/agents/design?session=${encodeURIComponent(session)}`);
-    }
-  }
-
-  return <Workbench key={session ?? agent ?? "default"} />;
+/**
+ * 首页 = 探索(coze-v3 信息架构)。阶段 1 先渲染市场,阶段 2 换成探索页。
+ * 旧的 /?session= / /?agent= 是工作台地址,对话已搬到 /chat。
+ */
+export default async function Home({ searchParams }: { searchParams: PageSearchParams }) {
+  const target = legacyRedirect("/", await toSearchParams(searchParams));
+  if (target) redirect(target);
+  await requireLogin();
+  return <MarketView />;
 }

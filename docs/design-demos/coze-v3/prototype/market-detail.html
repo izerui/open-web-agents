@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>智能体详情 · Open Web Agents</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/owa.css">
+<style>
+.md-wrap{max-width:1180px;margin:0 auto;padding:22px 40px 64px}
+.md-back{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px 0 8px;border-radius:17px;color:var(--sub);text-decoration:none;font-size:14px;margin-left:-8px}
+.md-back:hover{background:#EFEDE7;color:var(--ink)}
+.md-hero{display:flex;align-items:center;gap:26px;padding:22px 0 30px;border-bottom:1px solid var(--line)}
+.md-hero h1{font-family:var(--serif);font-size:40px;line-height:1.2;margin:0 0 6px}
+.md-hero .by{color:var(--sub);font-size:15px}
+.md-hero .meta{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.md-acts{margin-left:auto;display:flex;flex-direction:column;gap:10px;align-items:stretch;width:220px}
+.md-acts .btn{height:44px;border-radius:22px}
+.md-cols{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:40px;padding-top:30px}
+.md-sec{margin-bottom:34px}
+.md-sec h2{font-family:var(--serif);font-size:22px;margin:0 0 12px}
+.md-desc{font-size:16px;line-height:1.8;color:#3C3A35;margin:0}
+.md-desc+.md-desc{margin-top:10px}
+.md-starter{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:14px 16px;border:1px solid var(--line);background:#fff;border-radius:14px;margin-bottom:8px;font-size:15px;text-decoration:none;color:var(--ink)}
+.md-starter:hover{border-color:#BDB8AC;box-shadow:0 4px 14px rgba(60,50,30,.06)}
+.md-starter .go{margin-left:auto;color:var(--sub);font-size:13px;display:flex;align-items:center;gap:4px}
+.md-contract .code{font-size:14px;min-height:210px;white-space:pre-wrap;word-break:break-word}
+.md-contract .lab{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;font-size:14px;font-weight:600}
+.md-side .card{padding:20px 22px;margin-bottom:16px}
+.md-side h3{margin:0 0 12px;font-size:15px}
+.md-kv{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line2);font-size:14px}
+.md-kv:last-child{border-bottom:0}
+.md-kv span:first-child{color:var(--sub);white-space:nowrap}
+.md-kv span:last-child{text-align:right}
+.md-price{font-family:var(--serif);font-size:28px;font-weight:700}
+.md-ver{padding:10px 0;border-bottom:1px solid var(--line2)}
+.md-ver:last-child{border-bottom:0}
+.md-ver .h{display:flex;align-items:center;gap:8px;font-size:14px}
+.md-ver .h b{font-family:var(--serif);font-size:16px}
+.md-ver ul{margin:6px 0 0;padding-left:18px;color:#3C3A35;font-size:14px}
+.md-skel i{display:block;border-radius:8px;background:linear-gradient(90deg,#EFEDE7 0%,#F7F6F2 50%,#EFEDE7 100%);background-size:200% 100%;animation:mdsh 1.2s linear infinite}
+@keyframes mdsh{from{background-position:200% 0}to{background-position:-200% 0}}
+.md-state{background:#fff;border:1px solid var(--line);border-radius:18px;padding:56px 24px;text-align:center;margin-top:24px}
+.md-state .serif{font-size:22px;margin-bottom:6px}
+.md-state p{margin:0 0 18px;color:var(--sub);font-size:15px}
+.md-proto{position:fixed;left:122px;bottom:14px;z-index:100;min-height:30px;display:flex;align-items:center;gap:8px;padding:2px 3px 2px 12px;border-radius:16px;background:#2A2926;color:#E9E6DE;font-size:12px;opacity:.86}
+.md-proto:hover{opacity:1}
+.md-proto>button{height:26px;color:#E9E6DE;padding-right:8px}
+.md-proto .seg[hidden]{display:none}
+.md-proto .seg{padding:2px}.md-proto .seg button{height:24px;padding:0 10px;font-size:12px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="assets/owa.js"></script>
+<script>
+"use strict";
+/* 智能体详情（原 /market/[id]），默认演示「会议纪要整理」 */
+const qid = new URLSearchParams(location.search).get("id") || "meeting-notes";
+const M = MARKET.find((m) => m.id === qid);
+
+/* 详情数据：会议纪要整理写全，其他智能体给通用版本 */
+const DETAIL = {
+  "meeting-notes": {
+    long: ["上传会议录音（mp3、m4a、wav，单个不超过 200 MB）或贴入速记，智能体会先转写，再按议题归纳讨论要点，最后列出决议和待办，每条待办带负责人与截止日期。", "识别不出负责人时会在待办后标「待确认」，不会自己编一个名字。整理结果可以直接复制到飞书、企业微信或邮件里。"],
+    model: "claude-sonnet-4-5", unit: "输入 300／输出 1500 积分每百万 token", listed: "10-12",
+    input: `{
+  "type": "object",
+  "required": ["source"],
+  "properties": {
+    "source": {
+      "type": "string",
+      "description": "录音 URL 或速记文本"
+    },
+    "split_by_project": {
+      "type": "boolean"
+    },
+    "language": {
+      "enum": ["zh", "en"]
+    }
+  }
+}`,
+    output: `{
+  "type": "object",
+  "properties": {
+    "summary": { "type": "string" },
+    "decisions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "todos": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "task": { "type": "string" },
+          "owner": { "type": "string" },
+          "due": { "type": "string" }
+        }
+      }
+    }
+  }
+}`,
+    vers: [
+      ["v5", "11-08", "当前版本", ["待办识别出截止日期时自动换算成具体日期", "识别不出负责人时标「待确认」"]],
+      ["v4", "10-21", "", ["支持按项目拆分纪要", "转写改用分段处理，长录音更稳"]],
+      ["v3", "09-30", "", ["新增英文会议支持"]],
+    ],
+  },
+};
+const D = DETAIL[qid] || (M && {
+  long: [M.d], model: "claude-sonnet-4-5", unit: "输入 300／输出 1500 积分每百万 token", listed: "10-20",
+  input: `{
+  "type": "object",
+  "properties": {
+    "text": { "type": "string" },
+    "files": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}`,
+  output: "", vers: [["v" + M.v, "11-02", "当前版本", ["修正若干回答格式问题"]]],
+});
+
+let state = M ? "loading" : "missing";
+
+OWA.mount({
+  nav: "explore",
+  body: `<div class="pbody"><div class="md-wrap">
+    <a class="md-back" href="explore.html">${ic("back", 16)}返回探索</a>
+    <div id="md-main"></div>
+  </div></div>
+  <div class="md-proto" title="原型演示用，不属于产品界面"><button data-a="md-proto-t">原型开关：页面状态</button>
+    <div class="seg" id="md-proto" hidden>${[["ok", "正常"], ["loading", "加载中"], ["error", "加载失败"]].map(([v, n]) => `<button data-a="md-proto" data-v="${v}">${n}</button>`).join("")}</div></div>`,
+});
+
+function render() {
+  $$("#md-proto button").forEach((b) => b.classList.toggle("on", b.dataset.v === state));
+  const box = $("#md-main");
+  if (state === "missing") {
+    box.innerHTML = `<div class="md-state"><div class="serif">没有找到这个智能体</div><p>它可能已经下架，或者链接有误。</p><a class="btn" style="text-decoration:none" href="explore.html">回到探索</a></div>`;
+    return;
+  }
+  if (state === "loading") {
+    box.innerHTML = `<div class="md-skel"><div class="md-hero"><i style="width:112px;height:112px;border-radius:50%"></i><div style="flex:1"><i style="height:36px;width:280px"></i><i style="height:16px;width:200px;margin-top:12px"></i><i style="height:22px;width:320px;margin-top:14px"></i></div></div>
+      <div class="md-cols"><div><i style="height:18px;width:90%"></i><i style="height:18px;width:80%;margin-top:10px"></i><i style="height:52px;margin-top:30px"></i><i style="height:52px;margin-top:8px"></i></div><div><i style="height:220px;border-radius:16px"></i></div></div>
+      <div class="row muted" style="margin-top:24px;justify-content:center"><span class="spin"></span>正在加载…</div></div>`;
+    return;
+  }
+  if (state === "error") {
+    box.innerHTML = `<div class="md-state"><div class="serif">详情加载失败</div><p>网络异常或服务暂时不可用（请求超时）。</p><div class="row" style="justify-content:center"><a class="btn ghost" style="text-decoration:none" href="explore.html">回到探索</a><button class="btn" data-a="md-retry">${ic("refresh", 16)}重试</button></div></div>`;
+    return;
+  }
+  const latest = D.vers[0];
+  box.innerHTML = `<div class="md-hero rise">
+      ${av(M.k, 112)}
+      <div style="min-width:0">
+        <h1>${M.n}</h1>
+        <div class="by">${M.by} 发布，${D.listed} 上架${gap("A10", "作者")}</div>
+        <div class="meta"><span class="tag">${M.cat}</span><span class="tag ok">已发布 v${M.v}</span><span class="tag line">${M.uses}使用</span>${gap("A10", "使用次数")}<span class="tag line">${M.price}</span>${gap("A11")}${D.output ? `<span class="tag line">${ic("brace", 13)}有输出契约，可当接口调用</span>` : ""}</div>
+      </div>
+      <div class="md-acts">
+        <button class="btn" data-a="md-use">${ic("chat", 16)}立即使用</button>
+        <button class="btn ghost" data-a="md-clone">${ic("copy", 16)}克隆到我的智能体</button>
+        <button class="btn ghost" data-a="md-api">${ic("terminal", 16)}API 接入</button>
+      </div>
+    </div>
+    <div class="md-cols">
+      <div>
+        <div class="md-sec"><h2>它能做什么</h2>${D.long.map((p) => `<p class="md-desc">${p}</p>`).join("")}</div>
+        <div class="md-sec"><h2>试试这样问</h2>
+          ${M.starters.map((s) => `<a class="md-starter" href="chat.html?agent=${M.id}&q=${encodeURIComponent(s)}">${ic("chat", 18)}${s}<span class="go">直接开始对话${ic("chev", 14)}</span></a>`).join("")}
+        </div>
+        <div class="md-sec md-contract"><h2>输入与输出</h2>
+          <p class="muted" style="margin:-4px 0 14px">用 API 调用时按输入契约传参，返回结果符合输出契约，可以直接被你的系统解析。</p>
+          <div class="grid2">
+            <div><div class="lab">输入契约<button class="ibtn" data-a="md-copy" data-w="in">${ic("copy", 14)}复制</button></div><pre class="code">${esc(D.input)}</pre></div>
+            <div><div class="lab">输出契约${D.output ? `<button class="ibtn" data-a="md-copy" data-w="out">${ic("copy", 14)}复制</button>` : ""}</div>${D.output ? `<pre class="code">${esc(D.output)}</pre>` : `<div class="card muted" style="padding:20px;min-height:210px">未声明输出契约，返回自由文本。</div>`}</div>
+          </div>
+        </div>
+      </div>
+      <aside class="md-side">
+        <div class="card"><h3>价格${gap("A11", "按次估算")}</h3>
+          <div class="md-price">${M.price.replace("/次", "")}<span class="muted" style="font-size:15px;font-family:var(--sans);font-weight:400"> 每次</span></div>
+          <p class="muted" style="margin:6px 0 12px;font-size:13px">按实际 token 结算，从你的积分里扣；单次用量随${qid === "meeting-notes" ? "录音" : "输入"}长度变化。</p>
+          <div class="md-kv"><span>模型</span><span style="font-family:var(--mono);font-size:13px">${D.model}</span></div>
+          <div class="md-kv"><span>模型单价</span><span>${D.unit}</span></div>
+          <div class="md-kv"><span>你的余额</span><span>${OWA.me().credits} 积分</span></div>
+          <a class="link small" href="account-prices.html">查看全部模型价格</a>
+        </div>
+        <div class="card"><h3>版本说明</h3>
+          ${D.vers.map(([v, d, cur, notes]) => `<div class="md-ver"><div class="h"><b>${v}</b><span class="muted">${d}</span>${cur ? `<span class="tag ok" style="margin-left:auto">${cur}</span>` : ""}</div><ul>${notes.map((n) => `<li>${n}</li>`).join("")}</ul></div>`).join("")}
+          <p class="muted small" style="margin:10px 0 0">立即使用跑的是当前发布版；API 调用可以传 version 锁定某一版。</p>
+        </div>
+        <div class="card"><h3>基本信息</h3>
+          <div class="md-kv"><span>ID</span><span style="font-family:var(--mono);font-size:13px">${M.id}</span></div>
+          <div class="md-kv"><span>分类</span><span>${M.cat}</span></div>
+          <div class="md-kv"><span>作者</span><span>${M.by}</span></div>
+          <div class="md-kv"><span>当前版本</span><span>v${M.v}（${latest[1]}）</span></div>
+        </div>
+      </aside>
+    </div>`;
+}
+function load(ms = 700) { state = "loading"; render(); setTimeout(() => { state = "ok"; render(); }, ms); }
+
+OWA.on("md-use", async () => { toast(`已用「${M.n}」v${M.v} 新建会话`); await later(600); location.href = "chat.html?agent=" + M.id; });
+OWA.on("md-api", () => { location.href = "build.html?agent=" + M.id + "#acc"; });
+OWA.on("md-clone", () => confirmBox({
+  title: `克隆「${M.n}」`,
+  body: `<p style="margin:0 0 8px">把发布版 v${M.v} 的配置复制成你名下的新草稿，ID 为 <code>${M.id}-copy</code>。</p><p class="muted" style="margin:0">提示词、能力、契约一并复制；原作者之后的更新不会同步过来。克隆后进入编排，可以直接改。</p>`,
+  ok: "克隆并编辑",
+  onOk: async () => { toast(`已克隆「${M.n}」到我的智能体`); await later(900); location.href = "build.html"; },
+}));
+OWA.on("md-copy", (t) => { navigator.clipboard?.writeText(t.dataset.w === "in" ? D.input : D.output).catch(() => {}); toast(t.dataset.w === "in" ? "已复制输入契约" : "已复制输出契约"); });
+OWA.on("md-retry", () => load(800));
+OWA.on("md-proto-t", () => { $("#md-proto").hidden = !$("#md-proto").hidden; });
+OWA.on("md-proto", (t) => { if (!M) return; state = t.dataset.v; render(); });
+
+if (M) { document.title = M.n + "，智能体详情，Open Web Agents"; load(500); } else render();
+</script>
+</body>
+</html>

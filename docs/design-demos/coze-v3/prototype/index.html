@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>原型目录 · Open Web Agents（coze-v3 · 对话搭建）</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/owa.css">
+<style>
+.ix{max-width:1120px;margin:0 auto;padding:40px 40px 80px}
+.ix h1{font-family:var(--serif);font-size:40px;margin:18px 0 8px;line-height:1.2}
+.ix h2{font-family:var(--serif);font-size:24px;margin:40px 0 14px}
+.ix-lead{font-size:16px;color:var(--sub);max-width:760px}
+.ix-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.ix-g{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px 18px}
+.ix-g h3{margin:0 0 8px;font-size:15px;display:flex;align-items:center;gap:8px}
+.ix-g a{display:flex;align-items:center;gap:8px;padding:7px 0;color:var(--ink);text-decoration:none;border-top:1px solid var(--line2);font-size:14px}
+.ix-g a:first-of-type{border-top:0}
+.ix-g a:hover{color:#000;text-decoration:underline;text-underline-offset:3px}
+.ix-g a{flex-wrap:wrap}
+.ix-g a .muted{flex-basis:100%;margin-left:0;font-size:14px}
+.ix-flow{display:flex;flex-direction:column;gap:0;background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.ix-step{display:grid;grid-template-columns:120px 1fr 200px;gap:16px;padding:14px 18px;border-top:1px solid var(--line2);align-items:center}
+.ix-step:first-child{border-top:0}
+.ix-step b{font-family:var(--serif);font-size:16px}
+.ix-bar{display:flex;gap:10px;align-items:center;margin-top:22px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div id="app" style="height:auto;overflow:visible"></div>
+<script src="assets/owa.js"></script>
+<script>
+"use strict";
+const groups = [
+  ["探索与对话", "globe", [["explore.html", "探索首页", "原 /market"], ["market-detail.html", "智能体详情", "原 /market/[id]"], ["chat.html", "对话", "原 /"], ["login.html", "登录 / 注册 / 首次部署", "原 /login"]]],
+  ["工作室", "tool", [["studio.html", "我的智能体", "原 /agents"], ["studio.html#new", "新建智能体", "原 /agents?new=1"], ["build.html#orch", "构建 / 编排（智能体设计器、档案、试聊）", "原 /agents?id=、/agents/design"], ["build.html#eval", "构建 / 评测", "原 评测 tab"], ["build.html#pub", "构建 / 发布与分享", "原 发布与分享 tab"], ["build.html#acc", "构建 / 接入", "原 /settings/keys?agent="], ["build.html#run", "构建 / 运行", "原 /settings/runs?agent="], ["build.html?ro=1", "只读智能体", "原 只读态"]]],
+  ["开发者", "key", [["dev-keys.html", "API Key 与签名密钥", "原 /settings/keys"], ["dev-runs.html", "运行记录", "原 /settings/runs"]]],
+  ["账户", "coin", [["account-billing.html", "积分与套餐", "原 /settings/billing、/settings/packages"], ["account-usage.html", "用量分析", "原 /settings/usage、/usage"], ["account-prices.html", "模型价格", "原 /settings/credentials"], ["account-security.html", "账号安全", "原 /settings/account、/settings"], ["account-audit.html", "操作日志", "原 /settings/audit"]]],
+  ["平台管理（管理员）", "shield", [["admin-accounts.html", "账号", "原 /admin/accounts"], ["admin-models.html", "模型与提供者", "原 /admin/providers、/admin/providers/[id]、/admin/models、/admin/capabilities"], ["admin-market.html", "市场上架", "原 /admin/market"], ["admin-packages.html", "套餐与订单", "原 /admin/packages"], ["admin-billing.html", "计费", "原 /admin/billing"], ["admin-ops.html", "平台运行、用量、审计", "原 /admin/runs、/admin/usage、/admin/audit"]]],
+  ["移动端", "chat", [["mobile.html", "移动端全貌（7 屏）", "探索、详情、会话、对话、构建进度、我的、登录"]]],
+];
+const flow = [
+  ["新建", "工作室点「新建」，或在探索首页直接说「做一个审核报销单的助手」。描述生成 / 空白创建 / 从市场克隆，确认后立即有草稿，没有保存按钮。", "studio.html#new"],
+  ["编排", "左边和智能体设计器对话改需求，右边档案卡逐节长出来，每节也能手动改；右侧「试聊」用草稿直接聊，不开新标签。", "build.html#orch"],
+  ["评测", "试聊里的回复点「存为评测用例」；评测阶段一键运行，失败项「让设计器修复」后再跑全绿。", "build.html#eval"],
+  ["发布", "「上线清单」逐项变绿：编排完整、评测通过、有修改可发布，填版本说明发布为 v4。", "build.html#pub"],
+  ["接入", "发布后直接在这里签一个只给本智能体用的 Key，复制 curl / Python / Node，在线试调一次。", "build.html#acc"],
+];
+OWA.mount({
+  nav: false,
+  body: `<div class="ix">
+    ${brand()}
+    <h1>全量原型 / 对话搭建</h1>
+    <p class="ix-lead">基于选定的方向 2「对话搭建」，按代码盘点出的功能清单（features.md）逐项对齐。原有 27 个路由全部有新位置，见每个入口右侧的「原 …」。所有按钮都能点，演示数据是虚构的。</p>
+    <div class="ix-bar">
+      <a class="btn" href="studio.html#new">从新建开始走主流程</a>
+      <button class="btn ghost" data-a="ix-reset">重置演示状态</button>
+      <button class="btn ghost" data-a="owa-role">切换为${OWA.admin ? "普通账号" : "管理员"}视角</button>
+      <span class="muted small">当前：${OWA.me().name}，${OWA.me().role}</span>
+    </div>
+    <h2>主流程：新建 → 编排 → 评测 → 发布 → 接入</h2>
+    <div class="ix-flow">${flow.map(([t, d, h]) => `<div class="ix-step"><b>${t}</b><span>${d}</span><a class="btn ghost sm" href="${h}" style="justify-self:end">打开这一步</a></div>`).join("")}</div>
+    <h2>全部页面</h2>
+    <div class="ix-grid">${groups.map(([g, i, its]) => `<div class="ix-g"><h3>${ic(i, 17)}${g}</h3>${its.map(([h, n, o]) => `<a href="${h}">${n}<span class="muted">${o}</span></a>`).join("")}</div>`).join("")}</div>
+    <h2>设计依据</h2>
+    <div class="ix-g" style="max-width:760px">
+      <a href="../features.md">功能清单 features.md<span class="muted">从代码逐页盘点</span></a>
+      <a href="../information-architecture.md">信息架构 information-architecture.md<span class="muted">一级空间、构建页五阶段、路由映射</span></a>
+      <a href="../gaps.md">设计与现有功能的差异 gaps.md<span class="muted">A1–A17 已决定全部补上；页面左下「新增功能标注」开关显示位置</span></a>
+      <a href="../direction-approved.md">方向选择记录<span class="muted">选定 dir-2</span></a>
+      <a href="../dir-2.html">方向 2 初稿 dir-2.html<span class="muted">视觉基准</span></a>
+    </div>
+  </div>`,
+});
+$("#proto-fab")?.remove();
+OWA.on("ix-reset", () => { OWA.st.reset(); toast("演示状态已重置：v3、4 处修改、评测未通过、未签 Key"); });
+</script>
+</body>
+</html>

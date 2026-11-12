@@ -1,0 +1,1592 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Open Web Agents · 方向 1 · 编排台</title>
+<style>
+:root{
+  --bg:#F7F7FA; --panel:#FFFFFF; --line:#E8E8EE; --line2:#F0F0F4;
+  --tx:#1C1F23; --tx2:#5E6470;
+  --pri:#4D53E8; --pri-h:#3C42D6; --pri-bg:#EEF0FF; --pri-tx:#3C42D6;
+  --ok:#2BA471; --ok-tx:#1B7A50; --ok-bg:#E8F6EF;
+  --warn:#D97706; --warn-tx:#A85A04; --warn-bg:#FEF4E6;
+  --err:#E5484D; --err-tx:#C42F34; --err-bg:#FDECEC;
+  --r:8px; --rp:12px;
+  --mono:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:#DCDDE5;font-family:"PingFang SC",Inter,system-ui,-apple-system,sans-serif;font-size:14px;line-height:1.6;color:var(--tx);-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+svg.i{width:16px;height:16px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;vertical-align:middle}
+svg.i.s14{width:14px;height:14px} svg.i.s18{width:18px;height:18px} svg.i.s20{width:20px;height:20px}
+
+/* 原型切换条（不属于产品） */
+#proto{height:36px;background:#24262B;color:#C9CCD3;display:flex;align-items:center;gap:4px;padding:0 12px;font-size:12px;position:sticky;top:0;z-index:100}
+#proto .pt{color:#9AA0AA;margin-right:8px}
+#proto button{background:none;border:0;color:#C9CCD3;padding:5px 10px;border-radius:6px;font-size:12px}
+#proto button:hover{background:#353840;color:#fff}
+#proto button.on{background:#4D53E8;color:#fff}
+#proto .sp{flex:1}
+#proto .hint{color:#9AA0AA}
+
+#board{width:1440px;height:900px;margin:0 auto;position:relative;overflow:hidden;background:var(--bg)}
+#root{height:100%}
+
+/* 通用控件 */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 12px;border-radius:var(--r);border:1px solid var(--line);background:#fff;color:var(--tx);font-size:14px;white-space:nowrap;transition:background .12s,border-color .12s}
+.btn:hover{background:#F4F4F8;border-color:#DCDCE4}
+.btn.pri{background:var(--pri);border-color:var(--pri);color:#fff}
+.btn.pri:hover{background:var(--pri-h);border-color:var(--pri-h)}
+.btn.soft{background:var(--pri-bg);border-color:var(--pri-bg);color:var(--pri-tx)}
+.btn.soft:hover{background:#E2E5FF}
+.btn.ghost{border-color:transparent;background:transparent}
+.btn.ghost:hover{background:#F0F0F5}
+.btn.danger{color:var(--err-tx);border-color:#F3C6C8}
+.btn.danger:hover{background:var(--err-bg)}
+.btn.dangerfill{background:var(--err);border-color:var(--err);color:#fff}
+.btn.sm{height:28px;padding:0 10px;font-size:13px}
+.btn.lg{height:40px;padding:0 18px;font-size:15px}
+.btn:disabled,.btn.dis{opacity:.45;cursor:not-allowed;pointer-events:none}
+.icbtn{width:32px;height:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:var(--r);border:0;background:transparent;color:var(--tx2)}
+.icbtn:hover{background:#EFEFF4;color:var(--tx)}
+.icbtn.sm{width:28px;height:28px}
+.link{color:var(--pri-tx);background:none;border:0;padding:0;font-size:inherit;display:inline-flex;align-items:center;gap:4px}
+.link:hover{text-decoration:underline}
+.tag{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 8px;border-radius:6px;font-size:12px;background:#F0F1F5;color:var(--tx2);white-space:nowrap;line-height:1}
+.tag.ok{background:var(--ok-bg);color:var(--ok-tx)}
+.tag.warn{background:var(--warn-bg);color:var(--warn-tx)}
+.tag.err{background:var(--err-bg);color:var(--err-tx)}
+.tag.pri{background:var(--pri-bg);color:var(--pri-tx)}
+.tag.line{background:#fff;border:1px solid var(--line)}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex:none}
+.dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.err{background:var(--err)} .dot.gray{background:#A3A8B2} .dot.pri{background:var(--pri)}
+.inp,.sel,.ta{width:100%;border:1px solid var(--line);border-radius:var(--r);background:#fff;font-size:14px;color:var(--tx);outline:none;transition:border-color .12s,box-shadow .12s}
+.inp,.sel{height:34px;padding:0 10px}
+.sel{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235E6470' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:28px}
+.ta{padding:8px 10px;resize:vertical;line-height:1.6}
+.inp:focus,.sel:focus,.ta:focus{border-color:var(--pri);box-shadow:0 0 0 3px rgba(77,83,232,.14)}
+.inp.err{border-color:var(--err)}
+.mono{font-family:var(--mono);font-size:13px}
+.ta.mono{font-size:12.5px;line-height:1.55}
+.lbl{display:block;font-size:12px;color:var(--tx2);margin-bottom:4px}
+.lbl b{color:var(--err-tx);font-weight:500}
+.hint{font-size:12px;color:var(--tx2);line-height:1.5}
+.fld{margin-bottom:12px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.seg{display:inline-flex;background:#F0F1F5;border-radius:var(--r);padding:2px;gap:2px}
+.seg button{border:0;background:transparent;height:28px;padding:0 12px;border-radius:6px;font-size:13px;color:var(--tx2)}
+.seg button.on{background:#fff;color:var(--tx);box-shadow:0 1px 2px rgba(28,31,35,.08)}
+.seg button:disabled{opacity:.5;cursor:not-allowed}
+.chk{display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer}
+.chk input{accent-color:var(--pri);width:15px;height:15px}
+.sw{position:relative;width:36px;height:20px;border-radius:10px;background:#C9CCD4;border:0;padding:0;flex:none;transition:background .15s}
+.sw::after{content:"";position:absolute;left:2px;top:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s}
+.sw.on{background:var(--pri)} .sw.on::after{left:18px}
+.card{background:#fff;border:1px solid var(--line);border-radius:var(--rp)}
+.ch{display:flex;align-items:center;gap:8px;padding:14px 16px;border-bottom:1px solid var(--line)}
+.ch h3{margin:0;font-size:15px;font-weight:600}
+.cb{padding:16px}
+.mut{color:var(--tx2)}
+.sp1{flex:1}
+.row-f{display:flex;align-items:center;gap:8px}
+.spin{width:14px;height:14px;border-radius:50%;border:2px solid #CBD0F5;border-top-color:var(--pri);animation:sp .8s linear infinite;flex:none;display:inline-block}
+@keyframes sp{to{transform:rotate(360deg)}}
+.av{display:inline-flex;align-items:center;justify-content:center;border-radius:10px;color:#fff;font-weight:600;position:relative;overflow:hidden;flex:none}
+.av::after{content:"";position:absolute;width:60%;height:60%;right:-18%;bottom:-18%;border-radius:50%;background:rgba(255,255,255,.18)}
+.av span{position:relative;z-index:1}
+.uav{display:inline-flex;align-items:center;justify-content:center;border-radius:50%;background:#E3E5F7;color:var(--pri-tx);font-weight:600;flex:none}
+table.tbl{width:100%;border-collapse:collapse;font-size:14px}
+.tbl th{font-size:12px;font-weight:500;color:var(--tx2);text-align:left;padding:9px 12px;background:#FAFAFC;border-bottom:1px solid var(--line);white-space:nowrap}
+.tbl td{padding:11px 12px;border-bottom:1px solid var(--line2);vertical-align:middle}
+.tbl tr.ck{cursor:pointer}
+.tbl tr.ck:hover td{background:#FAFAFD}
+.tbl tr.sel td{background:#F3F4FF}
+.code{background:#191B22;color:#E4E6EE;border-radius:10px;padding:14px 16px;font-family:var(--mono);font-size:12.5px;line-height:1.65;white-space:pre;overflow:auto;margin:0}
+.code .c{color:#8C93A6} .code .s{color:#9FD8A8} .code .k{color:#A9AEFF} .code .n{color:#F2C47C}
+.jsonv{background:#F7F8FB;border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;font-family:var(--mono);font-size:12.5px;line-height:1.6;white-space:pre-wrap;margin:0;color:#2A2E36}
+.sec-t{font-size:12px;color:var(--tx2);font-weight:500;margin:0 0 8px}
+.empty{padding:28px;text-align:center;color:var(--tx2)}
+
+/* 全局骨架 */
+.app{display:flex;height:100%}
+.nav{width:64px;flex:none;background:#fff;border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:12px 0 10px}
+.logo{width:36px;height:36px;border-radius:10px;background:var(--pri);display:flex;align-items:center;justify-content:center;margin-bottom:14px}
+.nav .ni{width:52px;height:54px;border:0;background:transparent;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:var(--tx2);font-size:12px;margin-bottom:2px}
+.nav .ni svg{width:20px;height:20px}
+.nav .ni:hover{background:#F2F2F6;color:var(--tx)}
+.nav .ni.on{background:var(--pri-bg);color:var(--pri-tx);font-weight:500}
+.nav .nsp{flex:1}
+.nav .credit{font-size:12px;color:var(--tx2);text-align:center;line-height:1.3;margin:6px 0 8px;background:none;border:0;padding:4px 2px;border-radius:6px}
+.nav .credit:hover{background:#F2F2F6}
+.nav .credit b{display:block;color:var(--tx);font-weight:600;font-size:12px}
+.nav .me{border:0;background:none;padding:0;border-radius:50%}
+.main{flex:1;min-width:0;display:flex;flex-direction:column;position:relative}
+.scroll{overflow:auto}
+.pagehead{display:flex;align-items:center;gap:12px;padding:20px 28px 0}
+.pagehead h1{font-size:20px;margin:0;font-weight:600}
+.subnav{width:200px;flex:none;border-right:1px solid var(--line);background:#fff;padding:16px 10px}
+.subnav h2{font-size:15px;margin:2px 8px 12px;font-weight:600}
+.subnav button{display:flex;align-items:center;gap:8px;width:100%;height:36px;border:0;background:none;border-radius:8px;padding:0 10px;color:var(--tx2);font-size:14px;text-align:left}
+.subnav button:hover{background:#F3F3F7;color:var(--tx)}
+.subnav button.on{background:var(--pri-bg);color:var(--pri-tx);font-weight:500}
+.subnav .grp{font-size:12px;color:var(--tx2);margin:14px 10px 4px}
+
+/* 弹层 */
+.mask{position:absolute;inset:0;background:rgba(28,31,35,.36);display:flex;align-items:center;justify-content:center;z-index:50}
+.modal{background:#fff;border-radius:14px;box-shadow:0 18px 50px rgba(28,31,35,.22);max-height:840px;display:flex;flex-direction:column;overflow:hidden}
+.mh{display:flex;align-items:center;gap:10px;padding:18px 22px 14px}
+.mh h2{margin:0;font-size:17px;font-weight:600}
+.mb{padding:4px 22px 18px;overflow:auto}
+.mf{display:flex;align-items:center;gap:8px;justify-content:flex-end;padding:14px 22px;border-top:1px solid var(--line)}
+.drawer{position:absolute;top:0;right:0;bottom:0;width:412px;background:#fff;border-left:1px solid var(--line);box-shadow:-12px 0 32px rgba(28,31,35,.08);z-index:40;display:flex;flex-direction:column}
+#toast{position:absolute;left:50%;bottom:28px;transform:translateX(-50%);z-index:90;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
+.toast{background:#24262B;color:#fff;border-radius:10px;padding:10px 14px;font-size:14px;display:flex;align-items:center;gap:12px;box-shadow:0 10px 28px rgba(0,0,0,.2);pointer-events:auto;animation:tin .2s ease}
+.toast button{background:none;border:0;color:#AEB2FF;font-size:14px;padding:0}
+@keyframes tin{from{opacity:0;transform:translateY(8px)}}
+.pop{position:absolute;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 32px rgba(28,31,35,.14);z-index:60;padding:6px}
+.pop .pi{display:flex;align-items:center;gap:8px;width:100%;height:36px;padding:0 10px;border:0;background:none;border-radius:6px;font-size:14px;text-align:left}
+.pop .pi:hover{background:#F3F3F7}
+
+/* 市场 */
+.mk-wrap{padding:24px 32px 40px;max-width:1300px;margin:0 auto}
+.mk-top{display:flex;align-items:flex-end;gap:24px;margin-bottom:18px}
+.mk-top h1{margin:0;font-size:24px;font-weight:600}
+.mk-top p{margin:4px 0 0;color:var(--tx2)}
+.search{position:relative;width:420px}
+.search svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--tx2)}
+.search .inp{height:40px;padding-left:36px;border-radius:10px;background:#fff}
+.cats{display:flex;gap:6px;margin-bottom:18px;border-bottom:1px solid var(--line)}
+.cats button{border:0;background:none;padding:10px 12px;font-size:14px;color:var(--tx2);border-bottom:2px solid transparent;margin-bottom:-1px}
+.cats button:hover{color:var(--tx)}
+.cats button.on{color:var(--pri-tx);border-bottom-color:var(--pri);font-weight:500}
+.banner{height:196px;border-radius:16px;background:linear-gradient(115deg,#3F45D9 0%,#5B61F0 55%,#8C8FF7 100%);position:relative;overflow:hidden;display:flex;align-items:center;padding:0 40px;color:#fff;margin-bottom:24px}
+.banner h2{margin:6px 0 6px;font-size:26px;font-weight:600}
+.banner p{margin:0 0 16px;color:#E4E6FF;font-size:14px;max-width:460px}
+.banner .btn{background:#fff;color:var(--pri-tx);border-color:#fff}
+.banner .btn.tr{background:rgba(255,255,255,.14);color:#fff;border-color:rgba(255,255,255,.35)}
+.bn-art{position:absolute;right:56px;top:0;bottom:0;width:470px}
+.bn-sheet{position:absolute;background:#fff;border-radius:12px;box-shadow:0 14px 30px rgba(20,22,80,.25)}
+.bn-line{height:7px;border-radius:4px;background:#E6E8F5;margin:8px 0}
+.bn-ring{position:absolute;border-radius:50%;border:2px solid rgba(255,255,255,.25)}
+.mk-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+.mcard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;position:relative;cursor:pointer;transition:box-shadow .15s,border-color .15s;min-height:188px;display:flex;flex-direction:column}
+.mcard:hover{border-color:#D6D8F5;box-shadow:0 8px 24px rgba(77,83,232,.1)}
+.mcard h4{margin:0;font-size:15px;font-weight:600}
+.mcard .au{font-size:12px;color:var(--tx2)}
+.mcard .ds{color:var(--tx2);font-size:13.5px;line-height:1.55;margin:10px 0 12px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:42px}
+.mcard .ft{display:flex;align-items:center;gap:14px;white-space:nowrap;font-size:12px;color:var(--tx2);margin-top:auto}
+.mcard .hov{position:absolute;left:12px;right:12px;bottom:12px;display:flex;gap:8px;opacity:0;transform:translateY(4px);transition:all .15s;background:#fff}
+.mcard:hover .hov,.mcard:focus-within .hov{opacity:1;transform:none}
+.mcard .hov .btn{flex:1}
+
+/* 工作室 */
+.st-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding:20px 28px}
+.scard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px;cursor:pointer;transition:all .15s}
+.scard:hover{border-color:#D6D8F5;box-shadow:0 8px 24px rgba(77,83,232,.08)}
+.scard.new{border:1.5px dashed #C9CCF2;background:#FAFAFF;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--pri-tx);gap:8px;min-height:170px}
+
+/* 构建页 */
+.bp{display:flex;flex-direction:column;height:100%}
+.bp-top{height:60px;flex:none;background:#fff;border-bottom:1px solid var(--line);display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 16px 0 10px;gap:16px}
+.bp-id{display:flex;align-items:center;gap:10px;min-width:0}
+.bp-id .nm{font-size:15px;font-weight:600;display:flex;align-items:center;gap:4px}
+.bp-id .meta{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--tx2);line-height:1.4}
+.stages{display:flex;gap:2px;background:#F2F3F7;border-radius:10px;padding:3px}
+.stages button{border:0;background:none;height:34px;padding:0 14px;border-radius:8px;display:flex;align-items:center;gap:6px;font-size:14px;color:var(--tx2)}
+.stages button:hover{color:var(--tx)}
+.stages button.on{background:#fff;color:var(--pri-tx);font-weight:600;box-shadow:0 1px 3px rgba(28,31,35,.08)}
+.stages .st{font-size:12px;font-weight:500;padding:0 6px;height:18px;border-radius:5px;display:inline-flex;align-items:center;background:#E6E7EE;color:var(--tx2)}
+.stages .st.ok{background:var(--ok-bg);color:var(--ok-tx)} .stages .st.warn{background:var(--warn-bg);color:var(--warn-tx)} .stages .st.pri{background:var(--pri-bg);color:var(--pri-tx)}
+.bp-act{display:flex;align-items:center;gap:8px;justify-content:flex-end}
+.chg{font-size:13px;color:var(--warn-tx);display:flex;align-items:center;gap:6px;background:none;border:0;padding:4px 8px;border-radius:6px}
+.chg:hover{background:var(--warn-bg)}
+.chg.clean{color:var(--ok-tx)}
+.chg.clean:hover{background:var(--ok-bg)}
+.bp-body{flex:1;min-height:0;display:flex;position:relative}
+.colhead{height:48px;flex:none;display:flex;align-items:center;gap:8px;padding:0 16px;border-bottom:1px solid var(--line);background:#fff}
+.colhead h3{margin:0;font-size:14px;font-weight:600}
+.compose{flex:1;min-width:0;display:flex;flex-direction:column;background:#fff}
+.compose-in{flex:1;min-height:0;display:flex}
+.c-prompt{width:430px;flex:none;border-right:1px solid var(--line);display:flex;flex-direction:column}
+.c-cap{flex:1;min-width:0;display:flex;flex-direction:column;background:#FCFCFD}
+.prompt-ed{flex:1;overflow:auto;padding:14px 18px 20px;white-space:pre-wrap;font-size:14px;line-height:1.75;outline:none;color:var(--tx)}
+.prompt-ed .h{color:var(--pri-tx);font-weight:600}
+.prompt-ed .v{background:var(--pri-bg);color:var(--pri-tx);border-radius:4px;padding:0 3px;font-family:var(--mono);font-size:12.5px}
+.prompt-ed .t{background:#EEF6F2;color:var(--ok-tx);border-radius:4px;padding:0 3px;font-family:var(--mono);font-size:12.5px}
+.prompt-ed .new{background:#E8F6EF;display:inline;box-shadow:-3px 0 0 var(--ok)}
+.prompt-foot{flex:none;height:38px;display:flex;align-items:center;gap:8px;padding:0 16px;border-top:1px solid var(--line);font-size:12px;color:var(--tx2)}
+.capscroll{flex:1;overflow:auto;padding:4px 16px 24px}
+.cgrp{font-size:12px;color:var(--tx2);font-weight:500;margin:16px 4px 6px;display:flex;align-items:center;gap:8px}
+.crow{background:#fff;border:1px solid var(--line);border-radius:10px;margin-bottom:6px}
+.crow.open{border-color:#D9DBF4;box-shadow:0 2px 8px rgba(77,83,232,.05)}
+.crh{display:flex;align-items:center;gap:8px;height:44px;padding:0 6px 0 10px;cursor:pointer;border-radius:10px}
+.crh:hover{background:#FAFAFD}
+.crh .chev{color:var(--tx2);transition:transform .15s}
+.crow.open .crh .chev{transform:rotate(90deg)}
+.crh .ci{width:26px;height:26px;border-radius:7px;background:#F1F2F8;color:#4A4F5C;display:flex;align-items:center;justify-content:center;flex:none}
+.crh .nm{font-weight:500;white-space:nowrap}
+.crh .cnt{min-width:20px;height:18px;padding:0 6px;border-radius:9px;background:var(--pri-bg);color:var(--pri-tx);font-size:12px;display:inline-flex;align-items:center;justify-content:center;font-weight:600;line-height:1}
+.crh .sum{flex:1;min-width:0;color:var(--tx2);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right;padding-right:4px}
+.crb{padding:4px 14px 14px 44px}
+.item{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:8px;background:#fff}
+.item-h{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.item-h .nm{font-family:var(--mono);font-size:13px;font-weight:600}
+.chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.pill{display:inline-flex;align-items:center;gap:4px;height:26px;padding:0 4px 0 10px;border-radius:6px;background:#F1F2F8;font-family:var(--mono);font-size:12.5px}
+.pill button{border:0;background:none;width:20px;height:20px;border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--tx2);padding:0}
+.pill button:hover{background:#E3E4EC;color:var(--tx)}
+.result{display:flex;align-items:flex-start;gap:8px;font-size:13px;padding:8px 10px;border-radius:8px;background:var(--ok-bg);color:var(--ok-tx);margin-top:8px}
+.result.err{background:var(--err-bg);color:var(--err-tx)}
+.fl{display:flex;align-items:center;gap:8px;height:34px;padding:0 8px;border-radius:6px;font-family:var(--mono);font-size:12.5px}
+.fl:hover{background:#F6F6FA}
+.hit{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:6px;font-size:13px}
+.hit .sc{font-family:var(--mono);font-size:12px;color:var(--pri-tx)}
+
+/* 预览与调试 */
+.prev{width:400px;flex:none;border-left:1px solid var(--line);background:#fff;display:flex;flex-direction:column;min-height:0}
+.prev-rail{width:44px;flex:none;border-left:1px solid var(--line);background:#fff;display:flex;flex-direction:column;align-items:center;padding-top:10px;gap:8px}
+.prev-rail button{writing-mode:vertical-rl;border:0;background:var(--pri-bg);color:var(--pri-tx);border-radius:8px;padding:12px 6px;font-size:13px;letter-spacing:2px;display:flex;align-items:center;gap:6px}
+.ptabs{display:flex;gap:4px}
+.ptabs button{border:0;background:none;height:30px;padding:0 10px;border-radius:7px;font-size:14px;color:var(--tx2);display:inline-flex;align-items:center;gap:5px}
+.ptabs button.on{background:var(--pri-bg);color:var(--pri-tx);font-weight:600}
+.varbar{flex:none;display:flex;align-items:center;gap:8px;padding:8px 16px;font-size:12px;color:var(--tx2);border-bottom:1px solid var(--line2);background:#FCFCFD}
+.msgs{flex:1;overflow:auto;padding:14px 16px 8px}
+.msg{display:flex;gap:10px;margin-bottom:14px}
+.msg .who{font-size:12px;color:var(--tx2);margin-bottom:4px}
+.msg.user{justify-content:flex-end}
+.bub{border-radius:12px;padding:9px 12px;font-size:14px;line-height:1.65}
+.msg.user .bub{background:var(--pri);color:#fff;border-top-right-radius:4px;max-width:280px}
+.msg.bot .bub{background:#F4F5F8;border-top-left-radius:4px}
+.bub ul{margin:4px 0;padding-left:18px}
+.bub p{margin:0 0 4px}
+.runbox{border:1px solid var(--line);border-radius:10px;margin-bottom:8px;background:#fff;font-size:13px}
+.runbox .rh{display:flex;align-items:center;gap:6px;padding:7px 10px;cursor:pointer;color:var(--tx2)}
+.runbox .rh:hover{color:var(--tx)}
+.runbox .rs{padding:0 10px 8px 10px}
+.runbox .rs div{display:flex;align-items:center;gap:6px;height:26px}
+.runbox .okbar{display:inline-flex;font-size:12px;background:var(--ok-bg);color:var(--ok-tx);border-radius:5px;padding:1px 7px;margin-top:2px}
+.mfoot{display:flex;align-items:center;gap:2px;margin-top:6px;font-size:12px;color:var(--tx2)}
+.mfoot .icbtn{width:28px;height:28px}
+.savecase{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 8px;border-radius:7px;border:1px solid #D9DBF4;background:#fff;color:var(--pri-tx);font-size:12px}
+.savecase:hover{background:var(--pri-bg)}
+.savecase.done{border-color:transparent;color:var(--ok-tx);background:var(--ok-bg);cursor:default}
+.follow{display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin:4px 0 10px 42px}
+.follow button{border:1px solid var(--line);background:#fff;border-radius:10px;padding:6px 12px;font-size:13px;text-align:left;color:var(--tx)}
+.follow button:hover{border-color:#C9CCF2;background:#FAFAFF}
+.composer{flex:none;padding:10px 14px 12px;border-top:1px solid var(--line2)}
+.cbox{border:1px solid var(--line);border-radius:12px;display:flex;align-items:flex-end;gap:4px;padding:6px 6px 6px 12px;transition:border-color .12s}
+.cbox:focus-within{border-color:var(--pri)}
+.cbox textarea{flex:1;border:0;outline:none;resize:none;height:44px;font-size:14px;line-height:1.55;padding:4px 0;background:transparent}
+.sendb{width:34px;height:34px;border-radius:9px;border:0;background:var(--pri);color:#fff;display:flex;align-items:center;justify-content:center}
+.sendb:hover{background:var(--pri-h)}
+.cnote{font-size:12px;color:var(--tx2);text-align:center;margin-top:6px}
+.diff{border:1px solid var(--line);border-radius:8px;overflow:hidden;font-family:var(--mono);font-size:12.5px;line-height:1.6}
+.diff div{padding:2px 10px;white-space:pre-wrap}
+.diff .a{background:#E9F7EF;color:#165C3C} .diff .d{background:#FDEDED;color:#9B2226} .diff .h{background:#F5F6FA;color:var(--tx2)}
+
+/* 阶段主区 */
+.stage{flex:1;min-width:0;overflow:auto;padding:22px 28px 40px}
+.stage h2{margin:0;font-size:18px;font-weight:600}
+.shead{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.sumbar{display:flex;align-items:center;gap:16px;padding:14px 16px;border-radius:12px;background:#fff;border:1px solid var(--line);margin-bottom:14px}
+.big{font-size:26px;font-weight:600;line-height:1.1;font-variant-numeric:tabular-nums}
+.prog{height:6px;border-radius:3px;background:#ECEDF2;overflow:hidden;flex:1;display:flex}
+.prog i{display:block;height:100%}
+.case-st{display:inline-flex;align-items:center;gap:6px;font-size:13px;white-space:nowrap}
+.ck-list .ckr{display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid var(--line2)}
+.ck-list .ckr:last-child{border-bottom:0}
+.ckic{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:none;margin-top:1px}
+.ckic.ok{background:var(--ok);color:#fff} .ckic.no{background:var(--err);color:#fff} .ckic.wait{background:#E6E7EE;color:var(--tx2)}
+.ckic svg{width:14px;height:14px;stroke-width:2.6}
+.ver{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line2)}
+.ver:last-child{border-bottom:0}
+.vn{font-weight:600;font-family:var(--mono);font-size:14px;width:30px}
+.onetime{border:1.5px solid #F5C77E;background:#FFFAF0;border-radius:10px;padding:12px}
+.onetime .kv{font-family:var(--mono);font-size:13px;background:#fff;border:1px solid #F1D8AB;border-radius:6px;padding:8px 10px;word-break:break-all;margin:8px 0}
+.ctabs{display:flex;gap:2px;border-bottom:1px solid #2C2F38;background:#191B22;border-radius:10px 10px 0 0;padding:6px 8px 0}
+.ctabs button{border:0;background:none;color:#A2A7B5;padding:6px 12px;font-size:13px;border-radius:6px 6px 0 0}
+.ctabs button.on{background:#262934;color:#fff}
+.stat{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.stat .k{font-size:12px;color:var(--tx2)}
+.stat .v{font-size:22px;font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums}
+
+/* 对话工作台 */
+.ss-col{width:264px;flex:none;border-right:1px solid var(--line);background:#fff;display:flex;flex-direction:column}
+.ss-item{display:flex;align-items:center;gap:8px;width:100%;border:0;background:none;text-align:left;padding:8px 10px;border-radius:8px;font-size:14px}
+.ss-item:hover{background:#F3F3F7}
+.ss-item.on{background:var(--pri-bg);color:var(--pri-tx)}
+.ss-grp{display:flex;align-items:center;gap:8px;padding:10px 10px 4px;font-size:13px;font-weight:600}
+.toolline{display:flex;align-items:center;gap:8px;font-size:13px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;margin-bottom:6px}
+.approval{border:1.5px solid #F2C27A;background:#FFFBF3;border-radius:12px;padding:12px 14px;margin:0 20px 10px}
+.askcard{border:1px solid #D9DBF4;background:#FAFAFF;border-radius:12px;padding:12px 14px;margin:6px 0 12px}
+.opt{display:flex;align-items:center;gap:8px;border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 10px;margin-bottom:6px;cursor:pointer;font-size:14px}
+.opt.on{border-color:var(--pri);background:var(--pri-bg)}
+.opt .rd{width:16px;height:16px;border-radius:50%;border:1.5px solid #B5B9C4;flex:none}
+.opt.on .rd{border:5px solid var(--pri)}
+.ftree .fn{display:flex;align-items:center;gap:6px;height:32px;padding:0 8px;border-radius:6px;font-size:13px;cursor:pointer;border:0;background:none;width:100%;text-align:left}
+.ftree .fn:hover{background:#F3F3F7}
+.ftree .fn.on{background:var(--pri-bg);color:var(--pri-tx)}
+
+/* 移动端 */
+.mob-stage{height:100%;display:flex;align-items:flex-start;justify-content:center;gap:48px;padding:22px 0 0;background:#ECEDF3}
+.phone-w{display:flex;flex-direction:column;align-items:center;gap:8px}
+.phone-w .cap{font-size:13px;color:var(--tx2);font-weight:500}
+.phone{width:375px;height:812px;border-radius:44px;background:#fff;box-shadow:0 0 0 10px #1F2127,0 20px 40px rgba(0,0,0,.18);overflow:hidden;position:relative;display:flex;flex-direction:column;font-size:16px;transform:scale(.97);transform-origin:top center}
+.sbar{height:44px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 28px;font-size:14px;font-weight:600}
+.notch{position:absolute;top:8px;left:50%;transform:translateX(-50%);width:110px;height:30px;border-radius:16px;background:#111}
+.ph-body{flex:1;overflow:auto;min-height:0;scrollbar-width:none}
+.phone *::-webkit-scrollbar{display:none}
+.phone *{scrollbar-width:none}
+.ph-tab{height:78px;flex:none;border-top:1px solid var(--line);display:flex;justify-content:space-around;align-items:flex-start;padding-top:6px;background:#fff}
+.ph-tab button{border:0;background:none;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:12px;color:var(--tx2);width:64px;height:48px;justify-content:center}
+.ph-tab button.on{color:var(--pri-tx)}
+.ph-tab svg{width:22px;height:22px}
+.mrow{display:flex;gap:12px;padding:14px 16px;border-bottom:1px solid var(--line2);cursor:pointer;min-height:44px}
+.mrow:active{background:#F6F6FA}
+.pbtn{height:48px;border-radius:12px;border:0;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;width:100%}
+</style>
+</head>
+<body>
+<div id="proto"></div>
+<div id="board"><div id="root"></div><div id="toast"></div></div>
+<script>
+/* ========== 图标 ========== */
+const IC={
+back:'<path d="M15 18l-6-6 6-6"/>',chevR:'<path d="M9 6l6 6-6 6"/>',chevD:'<path d="M6 9l6 6 6-6"/>',
+plus:'<path d="M12 5v14M5 12h14"/>',x:'<path d="M18 6L6 18M6 6l12 12"/>',check:'<path d="M20 6L9 17l-5-5"/>',
+edit:'<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/>',
+history:'<path d="M3 12a9 9 0 109-9 9.7 9.7 0 00-6.7 2.8L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>',
+search:'<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
+compass:'<circle cx="12" cy="12" r="10"/><path d="M16.2 7.8l-2.1 6.3-6.3 2.1 2.1-6.3z"/>',
+chat:'<path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>',
+studio:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+code:'<path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/>',user:'<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0116 0"/>',
+shield:'<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+copy:'<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>',
+refresh:'<path d="M21 12a9 9 0 11-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
+flask:'<path d="M9 3h6M10 3v6L4.5 18.5A2 2 0 006.2 21h11.6a2 2 0 001.7-2.5L14 9V3"/><path d="M7 15h10"/>',
+play:'<path d="M6 4l14 8-14 8z"/>',send:'<path d="M12 19V5M5 12l7-7 7 7"/>',
+sparkle:'<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
+file:'<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/>',
+upload:'<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M17 8l-5-5-5 5M12 3v12"/>',
+download:'<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
+trash:'<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>',
+key:'<circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3L21 2M16 7l3 3M18 5l2 2"/>',
+link:'<path d="M10 13a5 5 0 007.5.5l3-3a5 5 0 00-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 00-7.5-.5l-3 3a5 5 0 007 7l1.7-1.7"/>',
+globe:'<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 010 20M12 2a15 15 0 000 20"/>',
+lock:'<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/>',
+eye:'<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+more:'<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+alert:'<path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+tool:'<path d="M14.7 6.3a4 4 0 00-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 005.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/>',
+plug:'<path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 01-12 0zM12 18v4"/>',
+bot:'<rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 4v4M9 14h.01M15 14h.01"/>',
+book:'<path d="M4 19.5A2.5 2.5 0 016.5 17H20V3H6.5A2.5 2.5 0 004 5.5z"/><path d="M4 19.5A2.5 2.5 0 006.5 22H20v-5"/>',
+brace:'<path d="M8 3H7a2 2 0 00-2 2v5a2 2 0 01-2 2 2 2 0 012 2v5a2 2 0 002 2h1M16 3h1a2 2 0 012 2v5a2 2 0 002 2 2 2 0 00-2 2v5a2 2 0 01-2 2h-1"/>',
+pkg:'<path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8M12 13v8"/>',
+cpu:'<rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>',
+hook:'<path d="M18 17h-6c-1.1 0-2 .9-2.5 1.9A4 4 0 012 17c0-.7.2-1.4.6-2"/><path d="M6 17l3.1-5.8c.5-1 .1-2.2-.5-3.1a4 4 0 116.9-4"/><path d="M12 6l3.1 5.7c.5 1 1.8 1.3 2.9 1.3a4 4 0 010 8"/>',
+coin:'<circle cx="12" cy="12" r="9"/><path d="M14.5 9.5c-.5-1-1.5-1.5-2.5-1.5-1.4 0-2.5.8-2.5 2s1.1 1.6 2.5 2 2.5.8 2.5 2-1.1 2-2.5 2c-1 0-2-.5-2.5-1.5M12 6.5V8M12 16v1.5"/>',
+panel:'<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18"/>',
+folder:'<path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>',
+star:'<path d="M12 2l3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z"/>',
+users:'<circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0114 0M16 4a4 4 0 010 8M22 21a7 7 0 00-4-6.3"/>',
+stop:'<rect x="6" y="6" width="12" height="12" rx="2"/>',chart:'<path d="M3 3v18h18M7 15l4-4 3 3 5-6"/>',
+attach:'<path d="M21.4 11l-9.2 9.2a6 6 0 01-8.5-8.5l9.2-9.2a4 4 0 015.7 5.7l-9.2 9.2a2 2 0 01-2.8-2.8l8.5-8.5"/>',
+list:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+broom:'<path d="M3 21l7-7M14 4l6 6-7.5 7.5a3 3 0 01-4.2 0l-1.8-1.8a3 3 0 010-4.2z"/>',
+home:'<path d="M3 11l9-8 9 8v10a1 1 0 01-1 1h-5v-7H9v7H4a1 1 0 01-1-1z"/>',
+logout:'<path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/>',
+rocket:'<path d="M4.5 16.5c-1.5 1.3-2 5-2 5s3.7-.5 5-2c.7-.8.7-2.1-.1-2.9a2.2 2.2 0 00-2.9-.1z"/><path d="M12 15l-3-3a22 22 0 012-4A12.9 12.9 0 0122 2c0 2.7-.8 7.5-6 11a22 22 0 01-4 2z"/><path d="M9 12H4s.6-3 2-4c1.6-1.1 5 0 5 0M12 15v5s3-.6 4-2c1.1-1.6 0-5 0-5"/>',
+};
+const ic=(n,c='')=>`<svg class="i ${c}" viewBox="0 0 24 24" aria-hidden="true">${IC[n]||''}</svg>`;
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const pad=n=>String(n).padStart(2,'0');
+const nowT=()=>{const d=new Date();return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`};
+const nowHM=()=>nowT().slice(0,5);
+const av=(a,size=36,r)=>`<span class="av" style="width:${size}px;height:${size}px;background:${a.color};font-size:${Math.round(size*.44)}px;border-radius:${r||Math.round(size*.28)}px"><span>${a.glyph}</span></span>`;
+const uav=(t,s=32)=>`<span class="uav" style="width:${s}px;height:${s}px;font-size:${Math.round(s*.42)}px">${t}</span>`;
+
+/* ========== 演示数据 ========== */
+const AGENTS=[
+ {id:'expense-reviewer',name:'报销审核助手',glyph:'报',color:'#4D53E8',author:'林舟',cat:'办公运营',v:3,price:9,uses:'1,286',desc:'读取发票和报销单，按公司制度做初审，超额提醒审批。'},
+ {id:'meeting-notes',name:'会议纪要整理',glyph:'纪',color:'#0E9F9A',author:'周岚',cat:'办公运营',v:5,price:2,uses:'3.2 万',desc:'上传录音转写或聊天记录，按议题、结论、待办和负责人整理成纪要，可直接贴进团队文档。'},
+ {id:'competitor-weekly',name:'竞品周报',glyph:'竞',color:'#7C3AED',author:'陈序',cat:'研究分析',v:3,price:12,uses:'8,640',desc:'每周一抓取指定竞品的官网、公众号和应用商店更新，生成带来源链接的对比周报。'},
+ {id:'code-reviewer',name:'代码审查员',glyph:'审',color:'#334155',author:'宋一鸣',cat:'开发工具',v:7,price:6,uses:'1.9 万',desc:'读取 PR diff，按团队规范指出缺陷、安全问题和可简化的写法，给出可直接应用的修改建议。'},
+ {id:'sql-helper',name:'SQL 助手',glyph:'数',color:'#0369A1',author:'宋一鸣',cat:'开发工具',v:4,price:3,uses:'2.4 万',desc:'用中文描述要查的数据，生成 MySQL 或 PostgreSQL 查询，并解释每个 JOIN 和过滤条件。'},
+ {id:'xhs-copy',name:'小红书文案',glyph:'书',color:'#E5484D',author:'苏晚',cat:'内容创作',v:2,price:2,uses:'5.1 万',desc:'给出产品卖点和目标人群，写出 3 版标题和正文，附带话题标签与配图建议。'},
+ {id:'contract-diff',name:'合同条款比对',glyph:'约',color:'#B45309',author:'林舟',cat:'办公运营',v:1,price:8,uses:'2,310',desc:'对比两版合同，逐条标出新增、删除和改动条款，并提示付款、违约和保密相关风险。'},
+ {id:'cs-qa',name:'客服知识问答',glyph:'答',color:'#1B8A5A',author:'何田',cat:'通用助手',v:6,price:1,uses:'12.7 万',desc:'基于企业知识库回答客户问题，答不了时转人工并附上对话摘要。'},
+ {id:'weekly-report',name:'周报生成器',glyph:'周',color:'#C026D3',author:'苏晚',cat:'办公运营',v:3,price:1,uses:'6.8 万',desc:'把本周的待办、提交记录和会议纪要汇总成结构化周报，可按汇报对象调整语气。'},
+];
+const AG=id=>AGENTS.find(a=>a.id===id);
+const CATS=['全部','通用助手','研究分析','内容创作','开发工具','办公运营'];
+
+const PROMPT_BASE=`# 角色
+你是公司财务的报销初审员，负责读取员工提交的发票和报销单，按《差旅报销制度 2026 版》给出初审结论。
+
+## 规则
+1. 单笔超过 5000 元需要部门负责人审批，结论为 need_approval
+2. 发票抬头必须是公司全称『星河数据科技有限公司』，否则 reject
+3. 外币按开票日汇率换算`;
+const PROMPT_FIX=`
+4. 外币金额交给 currency-converter 换算，保留两位小数，reasons 里写明汇率和换算后金额
+5. 餐饮按人均判定：一线城市每人每餐上限 150 元，超出时结论为 need_approval`;
+const PROMPT_TAIL=`
+
+## 工作流程
+1. 用 invoice-ocr 识别发票字段（抬头、税号、金额、币种、开票日）
+2. 用 policy-lookup 查对应条款，必要时检索知识库
+3. 调用 erp-finance 查询 {{DEPT}} 的预算余额
+4. 按输出契约返回 { verdict, reasons[] }
+
+## 限制
+- 不替员工补全发票信息；字段缺失直接写进 reasons
+- 其他部门的预算只读不写，提交审批前必须等人确认`;
+
+function mkCases(){return [
+ {id:'c1',name:'抬头不全应拒绝',input:'{ "invoice_url": "https://files.xinghe.example/inv/0412.pdf", "amount": 860, "currency": "CNY" }',json:true,ok:true,must:'抬头',mustNot:'',fields:'verdict = "reject"',cost:'0.5',time:'60',fix:false},
+ {id:'c2',name:'外币换算',input:'{ "invoice_url": "https://files.xinghe.example/inv/usd-hotel.pdf", "amount": 420, "currency": "USD" }',json:true,ok:true,must:'汇率\n换算后',mustNot:'',fields:'verdict = "pass"',cost:'0.5',time:'60',fix:true,
+  reason:'正文未包含「汇率」「换算后」；reasons 只写了原币金额 420 USD',snap:'{ "verdict": "pass", "reasons": ["金额 420 USD，在住宿标准内"] }'},
+ {id:'c3',name:'多张发票合并',input:'{ "invoice_url": "https://files.xinghe.example/inv/batch-3.zip", "amount": 2140, "currency": "CNY" }',json:true,ok:true,must:'3 张',mustNot:'',fields:'verdict = "pass"',cost:'0.8',time:'90',fix:false},
+ {id:'c4',name:'餐饮超标准',input:'{ "invoice_url": "https://files.xinghe.example/inv/dinner-4p.pdf", "amount": 1280, "currency": "CNY" }',json:true,ok:true,must:'人均',mustNot:'',fields:'verdict = "need_approval"',cost:'0.5',time:'60',fix:true,
+  reason:'verdict 期望 "need_approval"，实际为 "pass"；正文未包含「人均」',snap:'{ "verdict": "pass", "reasons": ["餐饮发票 1280 元，未超过单笔 5000 元"] }'},
+ {id:'c5',name:'正常差旅放行',input:'{ "invoice_url": "https://files.xinghe.example/inv/train-sh.pdf", "amount": 553, "currency": "CNY" }',json:true,ok:true,must:'',mustNot:'需要审批',fields:'verdict = "pass"',cost:'0.5',time:'60',fix:false},
+];}
+
+const RUNS=[
+ {id:'run_8f21c3',t:'11-11 14:02',src:'接口调用',st:'成功',in:'{ amount: 6800, currency: "CNY" }',dur:'4.1s',cost:'9.2',ver:'v3'},
+ {id:'run_a1d07e',t:'11-11 13:47',src:'工作台',st:'运行中',in:'帮我看下这 4 张杭州出差的发票',dur:'—',cost:'部分 3.1',ver:'草稿'},
+ {id:'run_77a0d4',t:'11-10 18:40',src:'接口调用',st:'失败',in:'{ amount: 12000, currency: "EUR" }',dur:'12.6s',cost:'4.0',ver:'v3'},
+ {id:'run_5b9e10',t:'11-10 16:12',src:'评测',st:'成功',in:'正常差旅放行',dur:'3.3s',cost:'7.8',ver:'草稿'},
+ {id:'run_31c4f2',t:'11-10 11:05',src:'API 会话',st:'成功',in:'打车费能报吗？',dur:'2.9s',cost:'5.1',ver:'v3'},
+ {id:'run_0e7a55',t:'11-09 20:31',src:'工作台',st:'已取消',in:'核对 10 月所有餐饮发票',dur:'8.0s',cost:'2.6',ver:'草稿'},
+ {id:'run_c8d913',t:'11-09 15:20',src:'AI 编辑',st:'成功',in:'把输出改成 JSON',dur:'6.2s',cost:'11.4',ver:'草稿'},
+ {id:'run_44be08',t:'11-09 09:58',src:'接口调用',st:'成功',in:'{ amount: 320, currency: "CNY" }',dur:'3.0s',cost:'6.7',ver:'v3'},
+];
+
+const ACCOUNTS=[
+ {e:'zhoulan@xinghe.example',n:'周岚',role:'管理员',self:true,reg:'2026-03-02',ag:4,used:12000,lim:null},
+ {e:'linzhou@xinghe.example',n:'林舟',role:'普通账号',reg:'2026-03-05',ag:6,used:28400,lim:50000},
+ {e:'chenxu@xinghe.example',n:'陈序',role:'普通账号',reg:'2026-04-11',ag:3,used:64100,lim:80000},
+ {e:'songyiming@xinghe.example',n:'宋一鸣',role:'管理员',reg:'2026-03-02',ag:9,used:91300,lim:null},
+ {e:'suwan@xinghe.example',n:'苏晚',role:'普通账号',reg:'2026-05-20',ag:5,used:33000,lim:50000},
+ {e:'hetian@xinghe.example',n:'何田',role:'普通账号',reg:'2026-06-01',ag:2,used:42000,lim:50000},
+ {e:'wangqi@xinghe.example',n:'王琪',role:'普通账号',reg:'2026-06-18',ag:0,used:0,lim:10000,off:true},
+ {e:'liming@xinghe.example',n:'黎明',role:'普通账号',reg:'2026-07-02',ag:1,used:2140,lim:20000},
+ {e:'zhaoyu@xinghe.example',n:'赵雨',role:'普通账号',reg:'2026-07-15',ag:4,used:16000,lim:30000},
+ {e:'qianmo@xinghe.example',n:'钱墨',role:'普通账号',reg:'2026-08-08',ag:0,used:0,lim:500,legacy:true},
+ {e:'fangyuan@xinghe.example',n:'方圆',role:'普通账号',reg:'2026-09-01',ag:2,used:8920,lim:20000},
+ {e:'guoning@xinghe.example',n:'郭宁',role:'普通账号',reg:'2026-09-23',ag:1,used:3410,lim:10000},
+];
+
+/* ========== 状态 ========== */
+let S;
+function initState(){
+ S={
+  page:'market', stage:'compose', modal:null, pop:null,
+  agentName:'报销审核助手',
+  savedAt:'14:32:08', saving:false, changes:4, version:3, edited:false,
+  prompt:PROMPT_BASE+PROMPT_TAIL, fixed:false,
+  open:{}, prevTab:'preview', prevOpen:{}, showRun:{},
+  effort:'中', model:'claude-sonnet-4-5', turns:20,
+  starters:['打车费能报吗？','这张 6800 元的会议费发票需要审批吗？','美元发票怎么换算？'],
+  tools:['Read','Grep','WebFetch'],
+  skills:[{name:'invoice-ocr',desc:'需要识别发票抬头、税号、金额、币种和开票日时使用',md:false,files:['references/fields.md','scripts/normalize.py'],err:''},
+          {name:'policy-lookup',desc:'需要按费用类型查找报销制度条款时使用',md:false,files:['references/categories.md'],err:''}],
+  mcpTest:'idle', mcpLast:'14:20',
+  docs:[{t:'差旅报销制度 2026 版.pdf',m:'18 页 · 1.2 万字'},{t:'发票抬头规范.docx',m:'3 页 · 1,320 字'},{t:'常见问题',m:'手动添加 · 410 字'}],
+  kq:'打车费能报吗', khits:true, kraw:false, kmanual:false,
+  vars:[{n:'ERP_TOKEN',d:'ERP 接口令牌',req:true,sec:true},{n:'DEPT',d:'所属部门，用于查预算',req:false,sec:false}],
+  perm:'default', unattended:'entry', apprTools:['erp-finance.submit'],
+  msgs:[
+   {r:'bot',greet:true,html:'你好，我是报销审核助手。把发票或报销单发给我，我会按《差旅报销制度 2026 版》先做一遍初审。'},
+   {r:'user',text:'打车费能报吗？'},
+   {r:'bot',id:'m1',html:'<p>可以报，按《差旅报销制度 2026 版》第 4.2 条：</p><ul><li>出差期间市内打车可全额报销，需要上传行程单和发票</li><li>非出差日加班打车，21:00 以后可报，单次上限 100 元</li><li>往返机场优先公共交通，打车需在报销单备注原因</li></ul>',
+    steps:[['book','检索知识 · 命中 3 段','0.3s'],['pkg','policy-lookup · 查询「市内交通」条款','0.6s']],time:'3.2s',tok:'1,842',follow:['加班打车需要什么凭证？','网约车电子发票抬头怎么开？','这张 6800 元的会议费发票需要审批吗？']},
+  ],
+  input:'', busy:false,
+  cases:mkCases(), evalRunning:false, lastEval:null, evalStale:false, editCase:null, evalTarget:'draft',
+  evalHist:[{l:'v3',h:'b41e07',mark:'= v3',p:5,t:5,time:'10-28 15:40'}],
+  versions:[{v:3,d:'10-28 16:02',note:'接入 erp-finance MCP，支持查询部门预算',ev:'5/5 通过',cur:true},{v:2,d:'10-12 10:21',note:'新增发票抬头校验规则',ev:'4/4 通过'},{v:1,d:'09-30 17:45',note:'首个版本',ev:'3/3 通过'}],
+  pubNote:'', publishing:false, pubDone:false,
+  isPublic:true, grants:[{e:'chenxu@xinghe.example',p:'可编辑'}],
+  key:null, keyForm:{memo:'财务系统对接',rpm:'60',exp:'90 天',lim:'5000'}, codeTab:'curl',
+  tryBody:'{\n  "input": {\n    "invoice_url": "https://files.xinghe.example/inv/2026-1103-6800.pdf",\n    "amount": 6800,\n    "currency": "CNY"\n  }\n}',
+  tryState:'idle', tryLog:[], tryRes:null,
+  deliv:[{ok:true,trig:'运行 run_8f21c3 · 第 1 次',t:'11-11 14:02',code:'200 · 182ms'},{ok:false,trig:'运行 run_77a0d4 · 第 1 次',t:'11-10 18:40',code:'502 Bad Gateway'},{ok:true,trig:'测试',t:'11-09 10:15',code:'200 · 96ms'}],
+  runs:RUNS.slice(), runSel:null, runSrc:'全部',
+  mkCat:'全部', mkQ:'', mkDetail:null,
+  newMode:'ai', newDesc:'读取发票和报销单，按公司制度做初审，超额提醒审批', gen:'idle', genStep:0, newName:'', cloneSel:'meeting-notes',
+  acc:ACCOUNTS.map(a=>({...a})), accSel:'linzhou@xinghe.example', accQ:'', accRole:'全部', accPwd:null, accConfirmOff:false, accLimit:'50000',
+  adminTab:'账号', acctTab:'积分概览', devTab:'API Key',
+  chatSel:'s1', approval:'pending', ask:null, askDone:false, wsTab:'files', fileSel:'output/初审结果.md', showArch:false,
+  mob1:'list', mobAsk:null, mobAskDone:false, mobTools:false, mobPub:'idle',
+ };
+}
+initState();
+const identity=()=>S.page==='admin'?{n:'周岚',e:'zhoulan@xinghe.example',role:'管理员',admin:true,credit:'不限'}:{n:'林舟',e:'linzhou@xinghe.example',role:'普通账号',admin:false,credit:'12,480'};
+const passCount=()=>S.cases.filter(c=>c.st==='pass').length;
+const evalOK=()=>S.lastEval&&!S.evalStale&&S.lastEval.p===S.lastEval.t&&S.lastEval.t>0;
+
+/* ========== 渲染引擎 ========== */
+function render(){
+ const ae=document.activeElement; let fid=null,s0=null,s1=null;
+ if(ae&&ae.id&&ae!==document.body){fid=ae.id;try{s0=ae.selectionStart;s1=ae.selectionEnd}catch(e){}}
+ const sc={};document.querySelectorAll('[data-sk]').forEach(el=>sc[el.dataset.sk]=el.scrollTop);
+ document.getElementById('proto').innerHTML=rProto();
+ document.getElementById('root').innerHTML=rPage();
+ document.querySelectorAll('[data-sk]').forEach(el=>{if(sc[el.dataset.sk]!=null)el.scrollTop=sc[el.dataset.sk]});
+ document.querySelectorAll('[data-bottom]').forEach(el=>{if(el.dataset.bottom==='1'||S.toBottom)el.scrollTop=el.scrollHeight});S.toBottom=false;
+ if(fid){const el=document.getElementById(fid);if(el){el.focus();try{if(s0!=null)el.setSelectionRange(s0,s1)}catch(e){}}}
+}
+function toast(text,actLabel,act){
+ const box=document.getElementById('toast');const d=document.createElement('div');d.className='toast';
+ d.innerHTML=`${ic('check','s14')}<span>${text}</span>`+(actLabel?`<button data-a="${act}">${actLabel}</button>`:'');
+ box.appendChild(d);setTimeout(()=>d.remove(),3600);
+}
+const PROTO=[['market','1 探索·市场'],['build','2 构建·编排'],['flow','3 主流程（从工作室新建）'],['admin','4 平台管理·账号'],['mobile','5 移动端'],['chat','6 对话工作台']];
+function rProto(){
+ const cur=S.page==='studio'?'flow':S.page;
+ return `<span class="pt">原型页面</span>`+PROTO.map(([k,l])=>`<button class="${cur===k?'on':''}" data-a="proto" data-v="${k}">${l}</button>`).join('')+
+ `<span class="sp"></span><span class="hint">演示：新建后沿用「报销审核助手」（已发布 v3）走完评测、发布、接入</span><button data-a="reset">重置演示</button>`;
+}
+function rPage(){
+ if(S.page==='mobile') return rMobile();
+ let body='';
+ switch(S.page){
+  case 'market':body=rMarket();break; case 'studio':body=rStudio();break; case 'build':body=rBuild();break;
+  case 'chat':body=rChat();break; case 'dev':body=rDev();break; case 'account':body=rAccount();break; case 'admin':body=rAdmin();break;
+ }
+ return `<div class="app">${rNav()}<div class="main">${body}</div></div>${rModal()}${rPop()}`;
+}
+function rNav(){
+ const me=identity();
+ const map={market:'market',chat:'chat',studio:'studio',build:'studio',dev:'dev',account:'account',admin:'admin'};
+ const on=map[S.page];
+ const items=[['market','compass','探索'],['chat','chat','对话'],['studio','studio','工作室'],['dev','code','开发者'],['account','user','账户']];
+ if(me.admin) items.push(['admin','shield','管理']);
+ return `<nav class="nav"><div class="logo" title="Open Web Agents"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><circle cx="8" cy="12" r="4"/><path d="M14 8h6M14 12h6M14 16h4"/></svg></div>`+
+ items.map(([k,i,l])=>`<button class="ni ${on===k?'on':''}" data-a="go" data-v="${k}">${ic(i)}<span>${l}</span></button>`).join('')+
+ `<div class="nsp"></div><button class="credit" data-a="go" data-v="account">积分<b>${me.credit}</b></button><button class="me" data-a="pop" data-v="me" title="${me.e}">${uav(me.n[0],36)}</button></nav>`;
+}
+function rPop(){
+ if(S.pop!=='me')return '';
+ const me=identity();
+ return `<div class="mask" style="background:transparent" data-a="closePop"></div><div class="pop" style="left:70px;bottom:16px;width:240px">
+ <div style="padding:10px 10px 8px;border-bottom:1px solid var(--line);margin-bottom:4px"><div style="font-weight:600">${me.n}</div><div class="hint">${me.e}</div><span class="tag ${me.admin?'pri':''}" style="margin-top:6px">${me.role}</span></div>
+ <button class="pi" data-a="go" data-v="account">${ic('coin')}积分与套餐</button><button class="pi" data-a="go" data-v="account">${ic('lock')}账号安全</button><button class="pi" data-a="toastOnly" data-v="已登出（原型不执行）">${ic('logout')}登出</button></div>`;
+}
+
+/* ========== 事件 ========== */
+const A={};
+document.addEventListener('click',e=>{
+ const t=e.target.closest('[data-a]'); if(!t) return;
+ if(t.tagName==='A') e.preventDefault();
+ const f=A[t.dataset.a]; if(f){ if(t.dataset.stop) e.stopPropagation(); f(t.dataset.v,t,e); }
+});
+document.addEventListener('input',e=>{
+ const t=e.target; if(t.id==='promptEd'){S.prompt=t.innerText;markDirty();return;} const k=t.dataset&&t.dataset.m; if(!k) return;
+ setPath(k,t.type==='checkbox'?t.checked:t.value);
+ if(t.dataset.dirty) markDirty();
+ if(t.dataset.live) render();
+});
+document.addEventListener('change',e=>{
+ const t=e.target; const k=t.dataset&&t.dataset.m; if(!k) return;
+ setPath(k,t.type==='checkbox'?t.checked:t.value);
+ if(t.dataset.dirty) markDirty();
+ if(t.dataset.r) render();
+});
+document.addEventListener('keydown',e=>{
+ const t=e.target;
+ if(e.key==='Enter'&&t.dataset&&t.dataset.enter&&!e.shiftKey){e.preventDefault();const f=A[t.dataset.enter];f&&f(t.value,t,e);}
+ if(e.key==='Escape'&&(S.modal||S.pop||S.runSel!=null)){if(S.modal&&!S.publishing){S.modal=null}S.pop=null;S.runSel=null;render();}
+});
+function setPath(k,v){const p=k.split('.');let o=S;for(let i=0;i<p.length-1;i++)o=o[p[i]];o[p[p.length-1]]=v;}
+
+/* 自动保存：只局部更新顶栏，不打断输入 */
+let saveTimer=null;
+function markDirty(){
+ if(!S.edited){S.edited=true;S.changes+=1;}
+ if(S.lastEval&&!S.evalStale) S.evalStale=true;
+ S.saving=true; patchTop();
+ clearTimeout(saveTimer); saveTimer=setTimeout(()=>{S.saving=false;S.savedAt=nowT();patchTop();},900);
+}
+function patchTop(){const el=document.getElementById('bpTop'); if(el) el.outerHTML=rTop();}
+
+A.proto=v=>{
+ S.modal=null;S.pop=null;S.runSel=null;
+ if(v==='flow'){const keep=S.page;initState();S.page='studio';S.modal='new';}
+ else if(v==='build'){S.page='build';S.stage='compose';}
+ else S.page=v;
+ render();
+ document.getElementById('board').scrollIntoView({block:'start'});
+};
+A.reset=()=>{const p=S.page;initState();S.page=p==='studio'?'studio':p;render();toast('演示数据已重置');};
+A.go=v=>{S.pop=null;S.modal=null;S.page=v;if(v==='build')S.stage='compose';render();};
+A.pop=v=>{S.pop=S.pop===v?null:v;render();};
+A.closePop=()=>{S.pop=null;render();};
+A.close=()=>{S.modal=null;render();};
+A.maskClose=(v,t,e)=>{if(e.target===t&&!S.publishing){S.modal=null;render();}};
+A.toastOnly=v=>{S.pop=null;render();toast(v);};
+A.copy=v=>{try{navigator.clipboard&&navigator.clipboard.writeText(v||'').catch(()=>{})}catch(e){};toast('已复制到剪贴板');};
+
+/* ========== 1 探索 · 市场 ========== */
+function rMarket(){
+ const feat=S.mkCat==='全部'&&!S.mkQ;const list=AGENTS.filter(a=>!(feat&&a.id==='expense-reviewer')).filter(a=>(S.mkCat==='全部'||a.cat===S.mkCat)&&(!S.mkQ||(a.name+a.desc).includes(S.mkQ.trim())));
+ return `<div class="scroll" data-sk="mk" style="flex:1"><div class="mk-wrap">
+ <div class="mk-top"><div><h1>探索智能体</h1><p>挑一个直接开聊，或者克隆到工作室改成你自己的。</p></div><div class="sp1"></div>
+  <div class="search">${ic('search')}<input id="mkq" class="inp" placeholder="搜索名称或说明，例如：发票、周报、SQL" value="${esc(S.mkQ)}" data-m="mkQ" data-live="1"></div></div>
+ <div class="cats">${CATS.map(c=>`<button class="${S.mkCat===c?'on':''}" data-a="mkCat" data-v="${c}">${c}</button>`).join('')}</div>
+ ${S.mkCat==='全部'&&!S.mkQ?rBanner():''}
+ <div class="row-f" style="margin-bottom:12px"><h3 style="margin:0;font-size:16px;font-weight:600">${S.mkCat==='全部'?'热门智能体':S.mkCat}</h3><span class="hint">${list.length} 个</span><span class="sp1"></span><span class="hint">按使用次数排序</span></div>
+ ${list.length?`<div class="mk-grid">${list.map(mCard).join('')}</div>`:`<div class="card empty">没有符合条件的智能体<div style="margin-top:8px"><button class="btn sm" data-a="mkClear">清除筛选</button></div></div>`}
+ </div></div>`;
+}
+function rBanner(){
+ const a=AG('expense-reviewer');
+ return `<div class="banner"><div style="position:relative;z-index:2">
+  <span class="tag" style="background:rgba(255,255,255,.18);color:#fff">本周精选 · 办公运营</span>
+  <h2>报销审核助手</h2><p>发票识别、制度比对、超额提醒审批，一条消息完成报销初审。林舟发布于 10-28，已被使用 1,286 次。</p>
+  <div class="row-f"><button class="btn" data-a="useAgent" data-v="expense-reviewer">${ic('chat')}立即使用</button><button class="btn tr" data-a="mkOpen" data-v="expense-reviewer">查看详情</button></div></div>
+  <div class="bn-art">
+   <div class="bn-ring" style="width:300px;height:300px;right:-70px;top:-90px"></div><div class="bn-ring" style="width:180px;height:180px;right:200px;bottom:-110px"></div>
+   <div class="bn-sheet" style="left:70px;top:30px;width:190px;height:140px;padding:14px 16px;transform:rotate(-6deg)">
+     <div style="display:flex;justify-content:space-between;font-size:12px;color:#5E6470"><span>增值税电子发票</span><span>No.0412</span></div>
+     <div class="bn-line" style="width:80%"></div><div class="bn-line" style="width:60%"></div><div class="bn-line" style="width:70%"></div>
+     <div style="font-size:18px;font-weight:600;color:#1C1F23;margin-top:6px">¥ 6,800.00</div></div>
+   <div class="bn-sheet" style="left:200px;top:58px;width:200px;padding:12px 14px">
+     <div style="display:flex;align-items:center;gap:8px">${av(a,30)}<div style="font-size:13px;color:#1C1F23;font-weight:600">初审结论</div></div>
+     <div style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:13px;color:#A85A04;background:#FEF4E6;border-radius:6px;padding:4px 8px">${ic('alert','s14')}需部门负责人审批</div>
+     <div class="bn-line" style="width:90%"></div><div class="bn-line" style="width:65%"></div></div>
+   <div style="position:absolute;left:380px;top:40px;width:44px;height:44px;border-radius:12px;background:#2BA471;display:flex;align-items:center;justify-content:center;color:#fff;box-shadow:0 10px 20px rgba(0,0,0,.18)">${ic('check','s20')}</div>
+  </div></div>`;
+}
+function mCard(a){
+ return `<div class="mcard" data-a="mkOpen" data-v="${a.id}" tabindex="0">
+  <div class="row-f">${av(a,44)}<div style="min-width:0;flex:1"><h4>${a.name}</h4><div class="au">${a.author} · v${a.v}</div></div><span class="tag" style="align-self:flex-start">${a.cat}</span></div>
+  <div class="ds">${a.desc}</div>
+  <div class="ft"><span class="row-f" style="gap:4px">${ic('users','s14')}${a.uses} 次使用</span><span class="row-f" style="gap:4px">${ic('coin','s14')}约 ${a.price} 积分/次</span></div>
+  <div class="hov"><button class="btn pri" data-a="useAgent" data-v="${a.id}" data-stop="1">立即使用</button><button class="btn" data-a="cloneAgent" data-v="${a.id}" data-stop="1">克隆</button></div>
+ </div>`;
+}
+A.mkCat=v=>{S.mkCat=v;render();};
+A.mkClear=()=>{S.mkCat='全部';S.mkQ='';render();};
+A.mkOpen=v=>{S.mkDetail=v;S.modal='agentDetail';render();};
+A.useAgent=v=>{S.modal=null;S.page='chat';S.chatSel=v==='expense-reviewer'?'s1':'new:'+v;render();toast(`已用「${AG(v).name}」已发布版本新建会话`);};
+A.cloneAgent=v=>{S.modal='new';S.newMode='clone';S.cloneSel=v;S.gen='idle';render();};
+A.apiAgent=v=>{S.modal=null;S.page='build';S.stage='access';render();};
+function mDetail(){
+ const a=AG(S.mkDetail);
+ const ex={'expense-reviewer':['这张 6800 元的会议费发票需要审批吗？','打车费能报吗？','美元发票怎么换算？']}[a.id]||['帮我看看这个怎么做','给我一个示例','你能做什么？'];
+ return `<div class="modal" style="width:720px"><div class="mh">${av(a,52)}<div><h2>${a.name}</h2><div class="hint">${a.author} · v${a.v} · ${a.cat} · ${a.uses} 次使用 · 约 ${a.price} 积分/次</div></div><span class="sp1"></span><button class="icbtn" data-a="close">${ic('x')}</button></div>
+ <div class="mb"><p style="margin:0 0 14px">${a.desc}</p>
+  <div class="sec-t">可以这样问</div><div class="chips" style="margin-bottom:16px">${ex.map(x=>`<button class="btn sm" data-a="useAgent" data-v="${a.id}">${x}</button>`).join('')}</div>
+  ${a.id==='expense-reviewer'?`<div class="grid2"><div><div class="sec-t">输入契约</div><pre class="jsonv">{ "invoice_url": "string",
+  "amount": "number",
+  "currency": "string" }</pre></div><div><div class="sec-t">输出契约</div><pre class="jsonv">{ "verdict": "pass | reject | need_approval",
+  "reasons": ["string"] }</pre></div></div>`:`<div class="hint">这个智能体没有声明输入输出契约，调用时按文本输入、文本结果处理。</div>`}
+ </div>
+ <div class="mf"><span class="hint sp1">使用的是作者发布的 v${a.v}，会话只有你自己能看到。</span><button class="btn" data-a="apiAgent" data-v="${a.id}">${ic('code')}API 接入</button><button class="btn" data-a="cloneAgent" data-v="${a.id}">${ic('copy')}克隆到我的智能体</button><button class="btn pri" data-a="useAgent" data-v="${a.id}">${ic('chat')}立即使用</button></div></div>`;
+}
+
+/* ========== 工作室 · 我的智能体 ========== */
+function rStudio(){
+ const mine=[
+  {a:AG('expense-reviewer'),st:'<span class="tag ok"><span class="dot ok"></span>已发布 v'+S.version+'</span>'+(S.changes?'<span class="tag warn">'+S.changes+' 处修改未发布</span>':''),meta:'今天 14:32 编辑 · '+S.cases.length+' 个评测用例'},
+  {a:AG('contract-diff'),st:'<span class="tag ok"><span class="dot ok"></span>已发布 v1</span>',meta:'11-06 编辑 · 3 个评测用例'},
+  {a:{name:'差旅行程规划',glyph:'旅',color:'#0891B2'},st:'<span class="tag">未发布 · 调用跑草稿</span>',meta:'11-02 编辑 · 还没有评测用例'},
+ ];
+ return `<div class="pagehead"><h1>工作室</h1><span class="hint">我的智能体 · 6 个</span><span class="sp1"></span>
+  <div class="search" style="width:260px">${ic('search')}<input class="inp" style="height:34px" placeholder="搜索我的智能体"></div>
+  <button class="btn pri" data-a="openNew">${ic('plus')}新建智能体</button></div>
+ <div class="cats" style="margin:14px 28px 0"><button class="on">我创建的</button><button data-a="toastOnly" data-v="分享给我的：SQL 助手（只读）、竞品周报（可编辑）">分享给我的 · 2</button></div>
+ <div class="st-grid scroll" style="flex:1;align-content:start">
+  <div class="scard new" data-a="openNew"><div style="width:44px;height:44px;border-radius:12px;background:var(--pri-bg);display:flex;align-items:center;justify-content:center">${ic('plus','s20')}</div><b>新建智能体</b><span class="hint">描述生成、空白创建或从市场克隆</span></div>
+  ${mine.map((m,i)=>`<div class="scard" data-a="${i===0?'openBuild':'toastOnly'}" data-v="${i===0?'':'原型只展开了「报销审核助手」'}">
+    <div class="row-f">${av(m.a,44)}<div style="min-width:0"><div style="font-weight:600;font-size:15px">${m.a.name}</div><div class="hint">${m.meta}</div></div></div>
+    <p class="mut" style="margin:10px 0 12px;font-size:13.5px;min-height:42px">${m.a.desc||'规划出差路线、酒店和交通，按差旅标准给出预算。'}</p>
+    <div class="row-f" style="flex-wrap:wrap">${m.st}</div></div>`).join('')}
+  <div class="scard" data-a="toastOnly" data-v="SQL 助手由宋一鸣分享给你（只读）"><div class="row-f">${av(AG('sql-helper'),44)}<div><div style="font-weight:600;font-size:15px">SQL 助手</div><div class="hint">宋一鸣 分享给你</div></div></div><p class="mut" style="margin:10px 0 12px;font-size:13.5px;min-height:42px">${AG('sql-helper').desc}</p><span class="tag">只读</span></div>
+ </div>`;
+}
+A.openNew=()=>{S.modal='new';S.gen='idle';S.newMode='ai';render();};
+A.openBuild=()=>{S.page='build';S.stage='compose';render();};
+
+/* 新建弹层 */
+function mNew(){
+ const opts=[['ai','sparkle','描述生成','说说你想要什么，AI 写好人设、规则并推荐能力'],['blank','edit','空白创建','只填名称，其他在编排里慢慢补'],['clone','copy','从市场克隆','拿一个现成的智能体改成自己的']];
+ let right='';
+ if(S.newMode==='ai'){
+  const steps=['起名与描述','写人设与规则（4 条）','推荐能力：invoice-ocr、policy-lookup、erp-finance','生成 3 条开场建议'];
+  right=`<label class="lbl">描述你想要的智能体</label><textarea id="newDesc" class="ta" style="height:112px" data-m="newDesc">${esc(S.newDesc)}</textarea>
+  <div class="chips" style="margin:8px 0 14px"><span class="hint">试试：</span>${['把会议录音整理成纪要','每周汇总竞品动态','审查 PR 并给出修改建议'].map(x=>`<button class="btn sm ghost" style="background:#F4F5F8" data-a="newEx" data-v="${x}">${x}</button>`).join('')}</div>
+  ${S.gen==='idle'?`<div class="hint">生成后会直接建好草稿并进入编排，之后的修改都会自动保存。</div>`:
+   `<div class="card" style="padding:12px 14px">${steps.map((s,i)=>`<div class="row-f" style="height:28px;font-size:13px">${i<S.genStep?`<span style="color:var(--ok)">${ic('check','s14')}</span>`:i===S.genStep&&S.gen==='run'?'<span class="spin"></span>':`<span class="dot gray" style="margin:0 3px"></span>`}<span class="${i<=S.genStep?'':'mut'}">${s}</span></div>`).join('')}
+   ${S.gen==='done'?`<div class="row-f" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">${av(AG('expense-reviewer'),40)}<div><div style="font-weight:600">报销审核助手</div><div class="hint">读取发票和报销单，按公司制度做初审，超额提醒审批</div></div></div>`:''}</div>`}`;
+ } else if(S.newMode==='blank'){
+  right=`<div class="fld"><label class="lbl">名称 <b>*</b></label><input id="newName" class="inp" placeholder="例如：报销审核助手" value="${esc(S.newName)}" data-m="newName" data-live="1"></div>
+  <div class="fld"><label class="lbl">ID</label><input class="inp mono" placeholder="留空自动生成，例如 expense-reviewer"><div class="hint" style="margin-top:4px">创建后不能再改，会出现在调用地址里。</div></div>
+  <div class="fld"><label class="lbl">描述</label><input class="inp" placeholder="一句话说明它做什么"></div>
+  <label class="lbl">头像</label><div class="row-f">${['#4D53E8','#0E9F9A','#7C3AED','#E5484D','#B45309','#1B8A5A'].map((c,i)=>`<span class="av" style="width:36px;height:36px;background:${c};font-size:16px;${i===0?'box-shadow:0 0 0 2px #fff,0 0 0 4px #4D53E8':''}"><span>${(S.newName||'报')[0]}</span></span>`).join('')}</div>`;
+ } else {
+  right=`<div class="search" style="width:100%;margin-bottom:10px">${ic('search')}<input class="inp" style="height:34px" placeholder="搜索市场里的智能体"></div>
+  <div style="max-height:300px;overflow:auto">${AGENTS.slice(1).map(a=>`<div class="opt ${S.cloneSel===a.id?'on':''}" data-a="cloneSel" data-v="${a.id}"><span class="rd"></span>${av(a,30)}<div style="min-width:0;flex:1"><div style="font-weight:500">${a.name} <span class="hint">· ${a.author} · v${a.v}</span></div><div class="hint" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${a.desc}</div></div></div>`).join('')}</div>
+  <div class="hint" style="margin-top:8px">克隆会复制发布版的配置、技能包和知识，评测用例不复制。</div>`;
+ }
+ const can=S.newMode==='ai'?S.gen!=='run':S.newMode==='blank'?!!S.newName.trim():true;
+ const label=S.newMode==='ai'?(S.gen==='done'?'进入编排':S.gen==='run'?'生成中…':'生成草稿'):S.newMode==='blank'?'创建并进入编排':'克隆到我的智能体';
+ return `<div class="modal" style="width:820px"><div class="mh"><h2>新建智能体</h2><span class="sp1"></span><button class="icbtn" data-a="close">${ic('x')}</button></div>
+ <div class="mb" style="display:flex;gap:20px;min-height:340px">
+  <div style="width:240px;flex:none">${opts.map(([k,i,t,d])=>`<div class="opt ${S.newMode===k?'on':''}" style="align-items:flex-start;padding:12px" data-a="newMode" data-v="${k}"><span style="color:var(--pri-tx);margin-top:2px">${ic(i)}</span><div><div style="font-weight:600">${t}</div><div class="hint">${d}</div></div></div>`).join('')}</div>
+  <div style="flex:1;min-width:0">${right}</div></div>
+ <div class="mf"><span class="hint sp1">不用手动保存：建好就是一份自动保存的草稿。</span><button class="btn" data-a="close">取消</button><button class="btn pri ${can?'':'dis'}" data-a="newGo">${label}</button></div></div>`;
+}
+A.newMode=v=>{S.newMode=v;render();};
+A.newEx=v=>{S.newDesc=v;render();};
+A.cloneSel=v=>{S.cloneSel=v;render();};
+A.newGo=()=>{
+ if(S.newMode==='ai'&&S.gen==='idle'){
+  S.gen='run';S.genStep=0;render();
+  const tick=()=>{S.genStep++;if(S.genStep>=4){S.gen='done';render();return;}render();setTimeout(tick,520);};
+  setTimeout(tick,520);return;
+ }
+ if(S.newMode==='blank'&&S.newName.trim()) S.agentName=S.newName.trim();
+ S.modal=null;S.page='build';S.stage='compose';S.savedAt=nowT();render();
+ toast(S.newMode==='clone'?'已克隆并建好草稿，自动保存已开启':'草稿已建好，自动保存已开启');
+};
+
+/* ========== 2 构建页 ========== */
+function rBuild(){
+ const showPrev=S.prevOpen[S.stage]!=null?S.prevOpen[S.stage]:(S.stage==='compose'||S.stage==='eval');
+ let main='';
+ if(S.stage==='compose') main=rCompose();
+ else if(S.stage==='eval') main=`<div class="stage" data-sk="st-eval">${rEval()}</div>`;
+ else if(S.stage==='publish') main=`<div class="stage" data-sk="st-pub">${rPublish()}</div>`;
+ else if(S.stage==='access') main=`<div class="stage" data-sk="st-acc">${rAccess()}</div>`;
+ else main=`<div class="stage" data-sk="st-run">${rRuns()}</div>`;
+ return `<div class="bp">${rTop()}<div class="bp-body">${main}${showPrev?rPreview():`<div class="prev-rail"><button data-a="prevToggle" data-v="1">${ic('chat','s14')}预览与调试</button></div>`}</div></div>`;
+}
+function stageBadge(k){
+ if(k==='compose') return `<span class="st ok">${ic('check','s14')}</span>`;
+ if(k==='eval'){
+  if(S.evalRunning) return `<span class="st pri">${passCount()+S.cases.filter(c=>c.st==='fail').length}/${S.cases.length}</span>`;
+  if(!S.lastEval) return `<span class="st">${S.cases.length} 例</span>`;
+  if(S.evalStale) return `<span class="st warn">需重跑</span>`;
+  return `<span class="st ${S.lastEval.p===S.lastEval.t?'ok':'warn'}">${S.lastEval.p}/${S.lastEval.t}</span>`;
+ }
+ if(k==='publish') return `<span class="st ${S.changes?'':'ok'}">v${S.version}</span>`;
+ if(k==='access') return S.key?`<span class="st ok">${ic('key','s14')}</span>`:'';
+ if(k==='runs') return `<span class="st">${S.runs.length+120}</span>`;
+ return '';
+}
+function rTop(){
+ const a={...AG('expense-reviewer'),name:S.agentName};
+ const st=[['compose','编排'],['eval','评测'],['publish','发布'],['access','接入'],['runs','运行']];
+ return `<div class="bp-top" id="bpTop">
+ <div class="bp-id"><button class="icbtn" data-a="go" data-v="studio" title="返回工作室">${ic('back','s20')}</button>${av(a,36)}
+  <div style="min-width:0"><div class="nm">${esc(a.name)}<button class="icbtn sm" data-a="basicInfo" title="编辑名称、头像与描述">${ic('edit','s14')}</button></div>
+  <div class="meta"><span class="row-f" style="gap:4px;color:var(--ok-tx)"><span class="dot ok"></span>已发布 v${S.version}</span><span>·</span>${S.saving?'<span class="row-f" style="gap:4px"><span class="spin" style="width:10px;height:10px"></span>正在保存…</span>':`<span>草稿自动保存于 ${S.savedAt}</span>`}</div></div></div>
+ <div class="stages">${st.map(([k,l])=>`<button class="${S.stage===k?'on':''}" data-a="stage" data-v="${k}">${l}${stageBadge(k)}</button>`).join('')}</div>
+ <div class="bp-act">${S.changes?`<button class="chg" data-a="openPublish"><span class="dot warn"></span>${S.changes} 处修改未发布</button>`:`<button class="chg clean" data-a="stage" data-v="publish">${ic('check','s14')}与 v${S.version} 一致</button>`}
+  <button class="icbtn" title="版本记录" data-a="stage" data-v="publish">${ic('history','s18')}</button>
+  <button class="btn pri" style="height:34px;padding:0 18px" data-a="openPublish">发布</button></div></div>`;
+}
+A.stage=v=>{S.stage=v;S.runSel=null;render();};
+A.prevToggle=v=>{S.prevOpen[S.stage]=v==='1';render();};
+A.basicInfo=()=>{S.modal='basic';render();};
+function mBasic(){
+ return `<div class="modal" style="width:520px"><div class="mh"><h2>基本信息</h2><span class="sp1"></span><button class="icbtn" data-a="close">${ic('x')}</button></div><div class="mb">
+ <div class="row-f" style="margin-bottom:14px">${av({...AG('expense-reviewer'),name:S.agentName},56)}<div><div class="hint">头像：彩色底＋一个字</div><div class="row-f" style="margin-top:6px">${['#4D53E8','#0E9F9A','#7C3AED','#E5484D','#B45309'].map((c,i)=>`<span style="width:22px;height:22px;border-radius:6px;background:${c};${i===0?'box-shadow:0 0 0 2px #fff,0 0 0 4px #4D53E8':''}"></span>`).join('')}</div></div></div>
+ <div class="fld"><label class="lbl">名称 <b>*</b></label><input class="inp" value="${esc(S.agentName)}" data-m="agentName" data-dirty="1"></div>
+ <div class="fld"><label class="lbl">ID</label><input class="inp mono" value="expense-reviewer" disabled style="background:#F7F7FA"><div class="hint" style="margin-top:4px">创建后不能修改。</div></div>
+ <div class="fld"><label class="lbl">描述</label><textarea class="ta" style="height:64px" data-m="x" data-dirty="1">读取发票和报销单，按公司制度做初审，超额提醒审批</textarea></div></div>
+ <div class="mf"><span class="hint sp1">修改即自动保存到草稿</span><button class="btn pri" data-a="close">完成</button></div></div>`;
+}
+
+/* ---------- 编排 ---------- */
+function hlPrompt(){
+ let base=esc(S.prompt);
+ base=base.replace(/^(#{1,3} .*)$/gm,'<span class="h">$1</span>')
+  .replace(/\{\{(\w+)\}\}/g,'<span class="v">{{$1}}</span>')
+  .replace(/(invoice-ocr|policy-lookup|erp-finance|currency-converter)/g,'<span class="t">$1</span>');
+ if(S.fixed){base=base.replace(/(4\. 外币金额[^\n]*)/,'<span class="new">$1</span>').replace(/(5\. 餐饮[^\n]*)/,'<span class="new">$1</span>');}
+ return base;
+}
+function rCompose(){
+ const len=S.prompt.length;
+ return `<div class="compose"><div class="colhead"><h3 style="font-size:16px">编排</h3>
+  <button class="btn sm" style="margin-left:8px" data-a="capJump" data-v="model">${ic('cpu','s14')}${S.model}<span class="mut">· 最多 ${S.turns} 轮 · 推理${S.effort}</span>${ic('chevD','s14')}</button>
+  <span class="sp1"></span><span class="hint">共 ${capTotal()} 项能力 · 改动自动保存</span></div>
+ <div class="compose-in">
+  <div class="c-prompt"><div class="colhead" style="border-bottom:0"><h3>人设与回复逻辑</h3><span class="sp1"></span>
+   <button class="btn sm soft" data-a="aiOptimize">${ic('sparkle','s14')}AI 优化</button></div>
+   <div class="prompt-ed" id="promptEd" contenteditable="true" spellcheck="false" data-sk="prompt">${hlPrompt()}</div>
+   <div class="prompt-foot"><span>${len} 字</span><span>·</span><span>用 <span class="mono" style="font-size:12px">{{变量名}}</span> 引用变量</span><span class="sp1"></span>${S.fixed?'<span class="tag ok">已应用 AI 修复</span>':''}</div></div>
+  <div class="c-cap"><div class="capscroll" data-sk="caps">${rCaps()}</div></div>
+ </div></div>`;
+}
+function capTotal(){return S.tools.length+S.skills.length+1+1+S.docs.length+S.vars.length+2+S.apprTools.length+1;}
+function capDefs(){return [
+ {g:'模型与对话',rows:[
+  {k:'model',i:'cpu',n:'模型',sum:`${S.model} · 输入 300 / 输出 1500 积分每百万 token`,b:bModel},
+  {k:'starters',i:'chat',n:'开场白与建议',c:S.starters.length,sum:S.starters[0],b:bStarters}]},
+ {g:'技能',rows:[
+  {k:'tools',i:'tool',n:'工具白名单',c:S.tools.length,sum:S.tools.join('、'),b:bTools},
+  {k:'skills',i:'pkg',n:'技能包',c:S.skills.length,sum:S.skills.map(s=>s.name).join('、'),b:bSkills},
+  {k:'mcp',i:'plug',n:'MCP 服务',c:1,sum:'erp-finance · 已连通 · 12 个工具',b:bMcp},
+  {k:'sub',i:'bot',n:'子代理',c:1,sum:'currency-converter',b:bSub}]},
+ {g:'知识',extra:'<span class="tag line" style="margin-left:auto">运行时按问题自动检索</span>',rows:[
+  {k:'kb',i:'book',n:'文档',c:S.docs.length,sum:S.docs.map(d=>d.t.replace(/\..+$/,'')).join('、'),b:bKb}]},
+ {g:'记忆',rows:[
+  {k:'vars',i:'brace',n:'变量与密钥',c:S.vars.length,sum:S.vars.map(v=>v.n).join('、'),b:bVars}]},
+ {g:'契约与安全',rows:[
+  {k:'contract',i:'file',n:'输入输出契约',c:2,sum:'schema 合法 · 结构化入参与结果',b:bContract},
+  {k:'appr',i:'shield',n:'审批与权限',c:S.apprTools.length,sum:'询问权限 · erp-finance.submit 需审批',b:bAppr},
+  {k:'hook',i:'hook',n:'Webhook',c:1,sum:'hooks.xinghe.example/owa',b:bHook}]},
+];}
+function rCaps(){
+ return capDefs().map(g=>`<div class="cgrp">${g.g}${g.extra||''}</div>`+g.rows.map(r=>{
+  const o=!!S.open[r.k];
+  return `<div class="crow ${o?'open':''}" id="cap-${r.k}"><div class="crh" data-a="capToggle" data-v="${r.k}">${ic('chevR','s14 chev')}<span class="ci">${ic(r.i,'s14')}</span><span class="nm">${r.n}</span>${r.c!=null?`<span class="cnt">${r.c}</span>`:''}<span class="sum">${o?'':esc(r.sum||'')}</span><button class="icbtn sm" title="添加" data-a="capAdd" data-v="${r.k}">${ic('plus','s14')}</button></div>${o?`<div class="crb">${r.b()}</div>`:''}</div>`;
+ }).join('')).join('');
+}
+A.capToggle=v=>{S.open[v]=!S.open[v];render();};
+A.capAdd=v=>{S.open[v]=true;render();const el=document.querySelector(`#cap-${v} [data-addfocus]`);if(el)el.focus();};
+A.capJump=v=>{S.open[v]=true;render();const el=document.getElementById('cap-'+v);el&&el.scrollIntoView({block:'nearest'});};
+
+function bModel(){
+ const opts=[['跟随平台默认（sonnet 别名）',''],['claude-sonnet-4-5','输入 300 / 输出 1500 积分每百万 token'],['claude-opus-4-1','输入 1500 / 输出 7500'],['claude-haiku-4-5','输入 100 / 输出 500'],['qwen3-max（内网代理）','输入 80 / 输出 320']];
+ return `<div class="fld"><label class="lbl">模型</label><select class="sel" data-m="model" data-dirty="1" data-r="1">${opts.map(([n,p])=>`<option value="${n}" ${S.model===n?'selected':''}>${n}${p?' · '+p:''}</option>`).join('')}</select></div>
+ <div class="grid2"><div><label class="lbl">最大轮次</label><input class="inp" type="number" value="${S.turns}" data-m="turns" data-dirty="1"></div>
+ <div><label class="lbl">推理强度</label><div class="seg">${['低','中','高'].map(x=>`<button class="${S.effort===x?'on':''}" data-a="effort" data-v="${x}">${x}</button>`).join('')}</div></div></div>
+ <div class="hint" style="margin-top:8px">按实际 token 结算；一次典型初审约 9 积分。</div>`;
+}
+A.effort=v=>{S.effort=v;markDirty();render();};
+function bStarters(){
+ return `<div class="fld"><label class="lbl">开场白</label><textarea class="ta" style="height:58px" data-m="x" data-dirty="1">你好，我是报销审核助手。把发票或报销单发给我，我会按《差旅报销制度 2026 版》先做一遍初审。</textarea></div>
+ <label class="lbl">开场建议（最多 4 条）</label>${S.starters.map((s,i)=>`<div class="row-f" style="margin-bottom:6px"><input class="inp" value="${esc(s)}" data-m="starters.${i}" data-dirty="1"><button class="icbtn sm" data-a="delStarter" data-v="${i}">${ic('trash','s14')}</button></div>`).join('')}
+ ${S.starters.length<4?`<button class="btn sm ghost" data-addfocus data-a="addStarter">${ic('plus','s14')}添加建议</button>`:''}`;
+}
+A.delStarter=v=>{S.starters.splice(+v,1);markDirty();render();};
+A.addStarter=()=>{S.starters.push('新的开场建议');markDirty();render();};
+function bTools(){
+ return `<div class="chips" style="margin-bottom:8px">${S.tools.map((t,i)=>`<span class="pill">${t}<button data-a="delTool" data-v="${i}" title="移除">${ic('x','s14')}</button></span>`).join('')}</div>
+ <input class="inp" id="toolIn" data-addfocus placeholder="输入工具名，回车添加，例如 Bash" data-enter="addTool">
+ <div class="hint" style="margin-top:6px">留空表示不限制；填了就只允许这些工具。MCP 工具按「服务名.工具名」写。</div>`;
+}
+A.delTool=v=>{S.tools.splice(+v,1);markDirty();render();};
+A.addTool=v=>{v=v.trim();if(!v)return;if(!S.tools.includes(v))S.tools.push(v);markDirty();render();const el=document.getElementById('toolIn');el&&(el.value='',el.focus());};
+function bSkills(){
+ const md={'invoice-ocr':`---\nname: invoice-ocr\ndescription: 识别发票字段\n---\n# 发票识别\n1. 下载 invoice_url 指向的文件，PDF 逐页转图片\n2. 提取抬头、税号、金额、币种、开票日、发票号码\n3. 字段缺失时返回 null，不要猜`,'policy-lookup':`---\nname: policy-lookup\ndescription: 按费用类型查制度条款\n---\n# 制度查询\n先按 references/categories.md 归类，再检索知识库，引用时写明条款编号。`};
+ return S.skills.map((s,i)=>`<div class="item"><div class="item-h"><span class="nm">${s.name}</span><span class="sp1"></span><button class="icbtn sm" data-a="delSkill" data-v="${i}" title="删除技能">${ic('trash','s14')}</button></div>
+  <div class="grid2" style="grid-template-columns:150px 1fr;margin-bottom:8px"><div><label class="lbl">技能名</label><input class="inp mono" value="${s.name}" data-m="skills.${i}.name" data-dirty="1"></div><div><label class="lbl">何时使用</label><input class="inp" value="${esc(s.desc)}" data-m="skills.${i}.desc" data-dirty="1"></div></div>
+  <button class="link" data-a="skillMd" data-v="${i}">${ic(s.md?'chevD':'chevR','s14')}SKILL.md · ${(md[s.name]||'').length} 字符</button>
+  ${s.md?`<textarea class="ta mono" style="height:130px;margin-top:6px" data-m="x" data-dirty="1">${esc(md[s.name]||'# '+s.name)}</textarea>`:''}
+  <div class="sec-t" style="margin:10px 0 2px">附属文件 · ${s.files.length}</div>
+  ${s.files.map((f,j)=>`<div class="fl">${ic('file','s14')}<span>${f}</span><span class="sp1"></span><button class="icbtn sm" data-a="delFile" data-v="${i}:${j}">${ic('trash','s14')}</button></div>`).join('')}
+  <div class="row-f" style="margin-top:4px"><input class="inp mono ${s.err?'err':''}" id="fin${i}" placeholder="相对路径，例如 references/rates.md" data-enter="addFile" data-i="${i}" style="height:30px"><button class="btn sm" data-a="addFileBtn" data-v="${i}">添加文件</button></div>
+  ${s.err?`<div class="hint" style="color:var(--err-tx);margin-top:4px">${s.err}</div>`:''}</div>`).join('')+
+  `<button class="btn sm ghost" data-addfocus data-a="addSkill">${ic('plus','s14')}添加技能</button>`;
+}
+A.skillMd=v=>{S.skills[+v].md=!S.skills[+v].md;render();};
+A.delSkill=v=>{S.skills.splice(+v,1);markDirty();render();};
+A.addSkill=()=>{S.skills.push({name:'new-skill',desc:'',md:true,files:[],err:''});markDirty();render();};
+A.delFile=v=>{const [i,j]=v.split(':').map(Number);S.skills[i].files.splice(j,1);markDirty();render();};
+function addFile(i,val){
+ const s=S.skills[i];val=(val||'').trim();let err='';
+ if(!val) err='请填写路径';
+ else if(!/^[A-Za-z0-9._\-\/]+$/.test(val)) err='只允许字母、数字、._- 和 /';
+ else if(val.startsWith('/')||val.split('/').includes('..')) err='不能用绝对路径或 ..';
+ else if(s.files.includes(val)) err='已有同名文件';
+ else if(s.files.some(f=>f.startsWith(val+'/')||val.startsWith(f+'/'))) err='路径和已有文件冲突';
+ s.err=err; if(!err){s.files.push(val);markDirty();}
+ render();
+}
+A.addFile=(v,t)=>addFile(+t.dataset.i,v);
+A.addFileBtn=v=>addFile(+v,document.getElementById('fin'+v).value);
+function bMcp(){
+ return `<div class="item"><div class="grid2" style="grid-template-columns:150px 1fr;margin-bottom:8px"><div><label class="lbl">名称</label><input class="inp mono" value="erp-finance" data-m="x" data-dirty="1"></div>
+  <div><label class="lbl">类型</label><div class="seg"><button class="on">http</button><button disabled title="平台未启用">stdio · 平台未启用</button></div></div></div>
+  <label class="lbl">URL</label><input class="inp mono" value="https://erp.example.com/mcp" data-m="x" data-dirty="1">
+  <div class="row-f" style="margin-top:10px"><button class="btn sm" data-a="mcpTest">${S.mcpTest==='run'?'<span class="spin"></span>测试中…':ic('plug','s14')+'测试连接'}</button><span class="hint">会带上你保存过的变量值（ERP_TOKEN）</span><span class="sp1"></span><button class="icbtn sm" data-a="toastOnly" data-v="原型里不删除 erp-finance">${ic('trash','s14')}</button></div>
+  ${S.mcpTest!=='run'?`<div class="result">${ic('check','s14')}<span>连接成功：erp-finance · streamable-http · 12 个工具（未调用）<span class="mut" style="margin-left:6px">${S.mcpLast} 测试</span></span></div>`:''}</div>
+  <button class="btn sm ghost" data-addfocus data-a="toastOnly" data-v="已添加一个空的 MCP 服务">${ic('plus','s14')}添加 MCP 服务</button>`;
+}
+A.mcpTest=()=>{S.mcpTest='run';render();setTimeout(()=>{S.mcpTest='ok';S.mcpLast=nowHM();render();},1100);};
+function bSub(){
+ return `<div class="item"><div class="grid2" style="grid-template-columns:180px 1fr;margin-bottom:8px"><div><label class="lbl">名称</label><input class="inp mono" value="currency-converter" data-m="x" data-dirty="1"></div>
+  <div><label class="lbl">模型</label><select class="sel" data-m="x" data-dirty="1"><option>同主 agent（claude-sonnet-4-5）</option><option>claude-haiku-4-5</option></select></div></div>
+  <div class="fld"><label class="lbl">何时使用</label><input class="inp" value="需要把外币金额按开票日汇率换算成人民币时" data-m="x" data-dirty="1"></div>
+  <label class="lbl">提示词</label><textarea class="ta" style="height:60px" data-m="x" data-dirty="1">按开票日中国人民银行中间价换算，保留两位小数，返回汇率、来源和换算后金额。</textarea>
+  <div class="hint" style="margin-top:4px">名称和提示词都填了才会生效；子代理在前台运行。</div></div>
+  <button class="btn sm ghost" data-addfocus data-a="toastOnly" data-v="已添加一个空的子代理">${ic('plus','s14')}添加子代理</button>`;
+}
+function bKb(){
+ return `<div class="row-f hint" style="margin-bottom:8px"><span>已用 ${S.docs.length} / 50 篇</span><span>·</span><span>1.36 万 / 50 万字</span><span>·</span><span>单篇上限 5 万字</span></div>
+ <div class="row-f" style="margin-bottom:8px"><button class="btn sm" data-addfocus data-a="kbUpload">${ic('upload','s14')}上传文件</button><button class="btn sm" data-a="kbManual">${ic('edit','s14')}手动添加</button><span class="hint">PDF、docx、pptx、xlsx、文本，单个 20MB 内</span></div>
+ ${S.kmanual?`<div class="item"><input class="inp" placeholder="标题" style="margin-bottom:6px" id="kbt"><textarea class="ta" style="height:60px" placeholder="正文"></textarea><div class="row-f" style="margin-top:6px;justify-content:flex-end"><button class="btn sm" data-a="kbManual">取消</button><button class="btn sm pri" data-a="kbAdd">添加文档</button></div></div>`:''}
+ ${S.docs.map((d,i)=>`<div class="fl" style="font-family:inherit;font-size:14px">${ic('file','s14')}<span>${d.t}</span><span class="hint">${d.m}</span><span class="sp1"></span><button class="icbtn sm" data-a="kbDel" data-v="${i}">${ic('trash','s14')}</button></div>`).join('')}
+ <div class="sec-t" style="margin:12px 0 6px">检索测试</div>
+ <div class="row-f"><input class="inp" id="kq" value="${esc(S.kq)}" data-m="kq" data-enter="kbSearch"><button class="btn sm" data-a="kbSearch">测试</button></div>
+ ${S.khits?`<div style="margin-top:8px">${[['0.82','差旅报销制度 2026 版 · 4.2','出差期间市内交通费用凭行程单和发票据实报销……'],['0.71','常见问题','加班打车：工作日 21:00 后离开公司，可报销单次不超过 100 元……'],['0.64','差旅报销制度 2026 版 · 4.5','往返机场应优先选择机场大巴或地铁，确需打车的在备注说明原因。']].map((h,i)=>`<div class="hit"><div class="row-f"><span class="sc">#${i+1} · ${h[0]}</span><span class="hint">${h[1]}</span></div><div>${h[2]}</div></div>`).join('')}
+ <button class="link" data-a="kbRaw">${ic(S.kraw?'chevD':'chevR','s14')}查看实际注入给模型的文本</button>${S.kraw?`<pre class="jsonv" style="margin-top:6px">&lt;knowledge&gt;\n[1] 差旅报销制度 2026 版 · 4.2：出差期间市内交通费用凭行程单和发票据实报销……\n[2] 常见问题：加班打车……\n[3] 差旅报销制度 2026 版 · 4.5：往返机场……\n&lt;/knowledge&gt;</pre>`:''}</div>`:''}`;
+}
+A.kbUpload=()=>{S.docs.push({t:'2026 餐饮标准补充说明.pdf',m:'2 页 · 860 字'});markDirty();render();toast('已上传并提取文字：2 页 · 860 字');};
+A.kbManual=()=>{S.kmanual=!S.kmanual;render();};
+A.kbAdd=()=>{const t=(document.getElementById('kbt').value||'未命名文档');S.docs.push({t,m:'手动添加 · 0 字'});S.kmanual=false;markDirty();render();};
+A.kbDel=v=>{S.docs.splice(+v,1);markDirty();render();};
+A.kbSearch=()=>{S.khits=!!S.kq.trim();render();};
+A.kbRaw=()=>{S.kraw=!S.kraw;render();};
+function bVars(){
+ return `<table class="tbl" style="font-size:13px"><tr><th>变量名</th><th>说明</th><th>必填</th><th>密钥</th><th></th></tr>
+ ${S.vars.map((v,i)=>`<tr><td class="mono">${v.n}</td><td>${v.d}</td><td><input type="checkbox" ${v.req?'checked':''} style="accent-color:var(--pri)" data-m="vars.${i}.req" data-dirty="1"></td><td>${v.sec?`<span class="tag pri">${ic('lock','s14')}加密</span>`:'<span class="hint">—</span>'}</td><td><button class="icbtn sm" data-a="delVar" data-v="${i}">${ic('trash','s14')}</button></td></tr>`).join('')}</table>
+ <div class="row-f" style="margin-top:8px"><input class="inp mono" id="varIn" data-addfocus placeholder="变量名，自动转大写" style="height:30px;width:200px" data-enter="addVar"><button class="btn sm" data-a="addVarBtn">添加变量</button></div>
+ <div class="hint" style="margin-top:6px">在配置里用 {{变量名}} 引用；密钥加密存储，不会写进提示词。值按「用户＋智能体」保存。</div>`;
+}
+A.delVar=v=>{S.vars.splice(+v,1);markDirty();render();};
+A.addVar=v=>{v=(v||'').toUpperCase().replace(/[^A-Z0-9_]/g,'');if(!v)return;S.vars.push({n:v,d:'',req:false,sec:false});markDirty();render();};
+A.addVarBtn=()=>A.addVar(document.getElementById('varIn').value);
+function bContract(){
+ return `<div class="row-f" style="margin-bottom:4px"><span class="lbl" style="margin:0">inputSchema</span><span class="tag ok">${ic('check','s14')}schema 合法</span></div>
+ <textarea class="ta mono" style="height:118px" data-m="x" data-dirty="1">{
+  "type": "object",
+  "required": ["invoice_url", "amount", "currency"],
+  "properties": {
+    "invoice_url": { "type": "string" },
+    "amount": { "type": "number" },
+    "currency": { "type": "string" }
+  }
+}</textarea>
+ <div class="row-f" style="margin:10px 0 4px"><span class="lbl" style="margin:0">outputSchema</span><span class="tag ok">${ic('check','s14')}schema 合法</span><span class="sp1"></span><button class="link" data-a="toastOnly" data-v="已填入示例 schema">填入示例 schema</button></div>
+ <textarea class="ta mono" style="height:96px" data-m="x" data-dirty="1">{
+  "type": "object",
+  "properties": {
+    "verdict": { "enum": ["pass", "reject", "need_approval"] },
+    "reasons": { "type": "array", "items": { "type": "string" } }
+  }
+}</textarea><div class="hint" style="margin-top:4px">填了 inputSchema 后，invoke 入参不符合会直接返回 400。</div>`;
+}
+function bAppr(){
+ const pm=[['default','询问权限','敏感操作前停下来问你'],['acceptEdits','自动接受编辑','文件修改直接放行'],['plan','规划模式','只规划不执行'],['auto','自动判定','由模型判断风险'],['bypass','跳过权限检查','子代理会一并继承'],['never','从不询问','不能确认时直接拒绝']];
+ return `<div class="fld"><label class="lbl">权限模式</label><select class="sel" data-m="perm" data-dirty="1" data-r="1">${pm.map(([k,n,d])=>`<option value="${k}" ${S.perm===k?'selected':''}>${n} — ${d}</option>`).join('')}</select>${S.perm==='bypass'?'<div class="hint" style="color:var(--warn-tx);margin-top:4px">子代理会一并继承这个设置。</div>':''}</div>
+ <div class="fld"><label class="lbl">无人值守审批（接口调用等没人在线时）</label><div class="seg">${[['entry','按入口默认'],['deny','一律拒绝'],['allow','一律放行']].map(([k,n])=>`<button class="${S.unattended===k?'on':''}" data-a="unatt" data-v="${k}">${n}</button>`).join('')}</div><div class="hint" style="margin-top:4px">网页里始终等人审批；「按入口默认」时接口调用放行。</div></div>
+ <div class="fld"><label class="lbl">需审批的工具</label><div class="chips">${S.apprTools.map(t=>`<span class="pill">${t}<button data-a="toastOnly" data-v="原型保留这一项">${ic('x','s14')}</button></span>`).join('')}<input class="inp" data-addfocus style="width:180px;height:28px" placeholder="添加工具名"></div></div>
+ <label class="lbl">需审批的命令模式</label><input class="inp mono" value="rm *, curl * -X POST" data-m="x" data-dirty="1">`;
+}
+A.unatt=v=>{S.unattended=v;markDirty();render();};
+function bHook(){
+ return `<label class="lbl">回调 URL（仅所有者和管理员可见）</label><input class="inp mono" data-addfocus value="https://hooks.xinghe.example/owa" data-m="x" data-dirty="1">
+ <div class="hint" style="margin-top:6px">运行到终态时推送，用账号级签名密钥签名（X-OWA-Signature、X-OWA-Timestamp）。</div>
+ <div class="row-f" style="margin-top:8px;font-size:13px"><span class="tag ok">${S.deliv.filter(d=>d.ok).length} 成功</span><span class="tag err">${S.deliv.filter(d=>!d.ok).length} 失败</span><button class="link" data-a="stage" data-v="access">在接入里查看投递记录</button></div>`;
+}
+A.aiOptimize=()=>{S.prevOpen.compose=true;S.prevTab='ai';render();};
+
+/* ---------- 预览与调试 ---------- */
+function rPreview(){
+ const closeBtn=`<button class="icbtn sm" title="收起" data-a="prevToggle" data-v="0">${ic('panel','s14')}</button>`;
+ const head=`<div class="colhead"><div class="ptabs"><button class="${S.prevTab==='preview'?'on':''}" data-a="prevTab" data-v="preview">预览</button><button class="${S.prevTab==='ai'?'on':''}" data-a="prevTab" data-v="ai">${ic('sparkle','s14')}AI 助手</button></div><span class="sp1"></span>
+  ${S.prevTab==='preview'?`<span class="tag line">跑草稿</span><button class="icbtn sm" title="清空对话" data-a="clearChat">${ic('broom','s14')}</button>`:''}${closeBtn}</div>`;
+ if(S.prevTab==='ai') return `<div class="prev">${head}${rAiPanel()}</div>`;
+ return `<div class="prev">${head}
+ <div class="varbar">${ic('brace','s14')}<span>DEPT = 财务部 · ERP_TOKEN 已填写</span><span class="sp1"></span><button class="link" data-a="toastOnly" data-v="变量值按「你＋本智能体」保存">管理变量</button></div>
+ <div class="msgs" data-sk="msgs" data-bottom="${S.busy?'1':'0'}" id="msgs">${S.msgs.map(rMsg).join('')}</div>
+ <div class="composer"><div class="cbox"><textarea id="chatIn" placeholder="${S.busy?'运行中也可以继续补充':'说点什么，或输入 /'}" data-m="input" data-enter="sendChat">${esc(S.input)}</textarea>
+  <button class="icbtn sm" title="添加图片或文件">${ic('attach','s14')}</button><button class="sendb" data-a="sendChatBtn" title="${S.busy?'停止':'发送'}">${ic(S.busy?'stop':'send','s14')}</button></div>
+  <div class="cnote">预览用草稿运行，会真实计费；回复可直接存为评测用例</div></div></div>`;
+}
+function rMsg(m,idx){
+ const a={...AG('expense-reviewer'),name:S.agentName};
+ if(m.r==='user') return `<div class="msg user"><div class="bub">${esc(m.text)}</div></div>`;
+ let inner='';
+ if(m.steps){
+  const open=S.showRun[m.id]||m.running;
+  inner+=`<div class="runbox"><div class="rh" data-a="runToggle" data-v="${m.id}">${m.running?'<span class="spin"></span>':ic('list','s14')}<span>${m.running?'运行中…':(open?'收起运行过程':'运行过程')} · ${m.steps.length} 步</span><span class="sp1"></span>${m.running?'':`<span>${m.time}</span>`}${ic(open?'chevD':'chevR','s14')}</div>
+  ${open?`<div class="rs">${m.steps.map(s=>`<div>${s[2]==='…'?'<span class="spin" style="width:12px;height:12px"></span>':`<span style="color:var(--ok)">${ic('check','s14')}</span>`}${ic(s[0],'s14')}<span>${s[1]}</span><span class="sp1"></span><span class="mut">${s[2]}</span></div>`).join('')}${m.running?'':`<span class="okbar">运行完毕 ${m.time}（模型 ${(parseFloat(m.time)*0.62).toFixed(1)}s · 工具 ${(parseFloat(m.time)*0.38).toFixed(1)}s）</span>`}</div>`:''}</div>`;
+ }
+ if(m.html) inner+=`<div class="bub">${m.html}</div>`;
+ if(m.tok) inner+=`<div class="mfoot"><span>${m.time} · ${m.tok} Tokens</span><span class="sp1"></span>
+  <button class="icbtn" title="复制" data-a="copy" data-v="${esc(m.html.replace(/<[^>]+>/g,' '))}">${ic('copy','s14')}</button><button class="icbtn" title="重新生成" data-a="regen" data-v="${idx}">${ic('refresh','s14')}</button>
+  ${m.saved?`<span class="savecase done">${ic('check','s14')}已存为用例</span>`:`<button class="savecase" data-a="saveCase" data-v="${idx}">${ic('flask','s14')}存为评测用例</button>`}</div>`;
+ let fol='';
+ if(m.follow&&idx===S.msgs.length-1&&!S.busy) fol=`<div class="follow">${m.follow.map(f=>`<button data-a="ask" data-v="${esc(f)}">${esc(f)}</button>`).join('')}</div>`;
+ if(m.greet&&S.msgs.length===1) fol=`<div class="follow">${S.starters.map(f=>`<button data-a="ask" data-v="${esc(f)}">${esc(f)}</button>`).join('')}</div>`;
+ return `<div class="msg bot">${av(a,32)}<div style="flex:1;min-width:0"><div class="who">${esc(a.name)}</div>${inner}</div></div>${fol}`;
+}
+A.prevTab=v=>{S.prevTab=v;render();};
+A.runToggle=v=>{S.showRun[v]=!S.showRun[v];render();};
+A.clearChat=()=>{S.msgs=S.msgs.slice(0,1);render();};
+A.ask=v=>sendChat(v);
+A.sendChat=v=>sendChat(v);
+A.sendChatBtn=()=>{if(S.busy){S.busy=false;const m=S.msgs[S.msgs.length-1];if(m.running){m.running=false;m.html='<p class="mut">已停止。</p>';}render();return;}sendChat(S.input);};
+A.regen=v=>{const m=S.msgs[+v];const q=S.msgs[+v-1];if(q&&q.r==='user'){S.msgs.splice(+v,1);sendChat(q.text,true);}};
+function reply(q){
+ if(/6800|6,800|会议费|审批/.test(q)) return {steps:[['pkg','invoice-ocr · 识别发票字段','0.9s'],['pkg','policy-lookup · 查询「会议费」条款','0.4s'],['book','检索知识 · 命中 2 段','0.2s'],['plug','erp-finance.query_budget · 财务部','0.7s']],time:'4.6s',tok:'2,316',
+  html:'<p>初审结论：<b>需要审批（need_approval）</b></p><ul><li>发票抬头「星河数据科技有限公司」与税号一致，校验通过</li><li>金额 6,800.00 元，超过单笔 5,000 元上限，需要部门负责人审批</li><li>财务部本季度会议费预算余额 2.3 万元，足够覆盖</li></ul><p>审批单草稿已生成，提交前会请你确认。</p>',
+  follow:['帮我提交给部门负责人','如果拆成两张发票还需要审批吗？','会议费需要附哪些材料？']};
+ if(/美元|外币|USD|换算/.test(q)) return {steps:[['bot','currency-converter · 11-03 汇率 7.1102','0.8s'],['pkg','policy-lookup · 查询「外币」条款','0.3s']],time:'3.0s',tok:'1,507',
+  html:S.fixed?'<p>按开票日 11-03 人民银行中间价 7.1102 换算：420.00 USD ≈ <b>2,986.28 元</b>，在住宿标准内，结论 pass。</p>':'<p>外币发票按开票日汇率换算后再比对标准。这张 420 USD 的住宿发票在标准内，结论 pass。</p>',
+  follow:['汇率按哪天算？','欧元发票也一样吗？']};
+ return {steps:[['book','检索知识 · 命中 1 段','0.3s']],time:'2.4s',tok:'1,120',html:'<p>按《差旅报销制度 2026 版》，这类费用需要提供发票和支付凭证，金额在标准内可以直接报销。需要我帮你核对具体发票吗？</p>',follow:['好的，我上传发票']};
+}
+function sendChat(q,regen){
+ q=(q||'').trim(); if(!q||S.busy) return;
+ S.prevTab='preview';
+ if(!regen) S.msgs.push({r:'user',text:q});
+ S.input='';const ci=document.getElementById('chatIn');if(ci)ci.value='';
+ const r=reply(q);const id='m'+Date.now();
+ const m={r:'bot',id,running:true,steps:[]};S.msgs.push(m);S.busy=true;render();
+ let i=0;
+ const step=()=>{
+  if(!S.busy) return;
+  if(i<r.steps.length){m.steps=r.steps.slice(0,i).concat([[r.steps[i][0],r.steps[i][1],'…']]);i++;render();setTimeout(step,480);return;}
+  m.steps=r.steps;m.running=false;m.html=r.html;m.time=r.time;m.tok=r.tok;m.follow=r.follow;S.busy=false;S.toBottom=true;render();
+ };
+ setTimeout(step,300);
+}
+
+/* ---------- AI 助手 ---------- */
+function fixDiff(){
+ return `<div class="diff"><div class="h">提示词 · ## 规则</div><div>  3. 外币按开票日汇率换算</div><div class="a">+ 4. 外币金额交给 currency-converter 换算，保留两位小数，reasons 里写明汇率和换算后金额</div><div class="a">+ 5. 餐饮按人均判定：一线城市每人每餐上限 150 元，超出时结论为 need_approval</div></div>`;
+}
+function rAiPanel(){
+ const a={...AG('expense-reviewer'),name:'AI 助手',color:'#7C3AED',glyph:'改'};
+ return `<div class="msgs" data-sk="aimsgs"><div class="hint" style="margin-bottom:12px">用对话修改草稿。改动先显示差异，你确认后才会应用；应用后自动保存。</div>
+ <div class="msg user"><div class="bub">评测里「外币换算」和「餐饮超标准」没过，帮我把规则补上</div></div>
+ <div class="msg bot">${av(a,32)}<div style="flex:1;min-width:0"><div class="who">AI 助手</div><div class="bub"><p>看了两条失败用例的输出快照：外币没写换算后金额，餐饮没按人均判断。建议在「规则」里加两条：</p></div>
+  <div style="margin-top:8px">${fixDiff()}</div>
+  <div class="row-f" style="margin-top:8px">${S.fixed?`<span class="tag ok">${ic('check','s14')}已应用到草稿</span><button class="link" data-a="stage" data-v="eval">去评测重新运行</button>`:`<button class="btn sm pri" data-a="applyFix">应用到草稿</button><button class="btn sm" data-a="toastOnly" data-v="已放弃这次修改">放弃</button>`}</div></div></div>
+ <div class="sec-t" style="margin-top:16px">从试运行结果反馈</div>
+ ${[['成功','这张 6800 元的会议费发票需要审批吗？','14:41'],['失败','欧元发票 12000 怎么报','11-10 18:40']].map(r=>`<div class="item" style="padding:10px 12px"><div class="row-f"><span class="tag ${r[0]==='成功'?'ok':'err'}">${r[0]}</span><span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r[1]}</span><span class="hint">${r[2]}</span></div><button class="link" style="margin-top:4px" data-a="toastOnly" data-v="已把输入、输出和错误填进输入框">反馈给 AI</button></div>`).join('')}
+ </div>
+ <div class="composer"><div class="cbox"><textarea placeholder="例：把输出改成 JSON；超额时附上预算余额"></textarea><button class="sendb">${ic('send','s14')}</button></div><div class="cnote">AI 助手只改草稿，不会创建或切换发布版本</div></div>`;
+}
+function applyFix(){
+ if(S.fixed) return;
+ S.fixed=true; S.prompt=S.prompt.replace(PROMPT_BASE,PROMPT_BASE+PROMPT_FIX);
+ S.changes+=1; S.edited=true; if(S.lastEval) S.evalStale=true;
+ S.saving=true; setTimeout(()=>{S.saving=false;S.savedAt=nowT();patchTop();},700);
+}
+A.applyFix=()=>{applyFix();S.modal=null;render();toast('已应用到草稿：规则新增 2 条','去评测','gotoEval');};
+A.gotoEval=()=>{S.stage='eval';render();};
+
+/* ---------- 存为评测用例 ---------- */
+A.saveCase=v=>{S.saveIdx=+v;S.modal='saveCase';render();};
+function mSaveCase(){
+ const m=S.msgs[S.saveIdx];const q=S.msgs[S.saveIdx-1];const big=/6800/.test(q.text);
+ S.draftCase={name:big?'超额需审批':(q.text.slice(0,10)),input:big?'{ "invoice_url": "https://files.xinghe.example/inv/2026-1103-6800.pdf", "amount": 6800, "currency": "CNY" }':`"${q.text}"`,must:big?'部门负责人':'',fields:big?'verdict = "need_approval"':''};
+ const d=S.draftCase;
+ return `<div class="modal" style="width:600px"><div class="mh"><h2>存为评测用例</h2><span class="sp1"></span><button class="icbtn" data-a="close">${ic('x')}</button></div><div class="mb">
+ <div class="result" style="background:var(--pri-bg);color:var(--pri-tx);margin:0 0 14px">${ic('sparkle','s14')}<span>已按输入契约把这轮对话转成 JSON 入参，并从回复里提取了期望。</span></div>
+ ${caseFields(d,'dc')}</div>
+ <div class="mf"><span class="hint sp1">保存后之前的评测结论作废，需要重新运行</span><button class="btn" data-a="close">取消</button><button class="btn pri" data-a="saveCaseGo">保存用例</button></div></div>`;
+}
+function caseFields(c,p){
+ return `<div class="fld"><label class="lbl">用例名 <b>*</b></label><input class="inp" id="${p}-name" value="${esc(c.name)}"></div>
+ <div class="fld"><div class="row-f" style="margin-bottom:4px"><span class="lbl" style="margin:0">输入 <b>*</b></span><span class="sp1"></span><label class="chk"><input type="checkbox" checked>按 JSON 对象解析</label></div><textarea class="ta mono" style="height:58px" id="${p}-input">${esc(c.input)}</textarea></div>
+ <div class="grid2"><div class="fld"><label class="lbl">正文须包含（每行一个）</label><textarea class="ta" style="height:56px">${esc(c.must||'')}</textarea></div><div class="fld"><label class="lbl">正文不得包含（每行一个）</label><textarea class="ta" style="height:56px">${esc(c.mustNot||'')}</textarea></div></div>
+ <div class="fld"><label class="lbl">结构化字段等于（每行「路径 = 值」）</label><input class="inp mono" value="${esc(c.fields||'')}"></div>
+ <div class="row-f" style="gap:16px;flex-wrap:wrap"><label class="chk"><input type="checkbox" checked>期望运行成功</label><span class="row-f" style="gap:6px"><span class="lbl" style="margin:0">花费上限（美元）</span><input class="inp" style="width:80px;height:30px" value="${c.cost||'0.5'}"></span><span class="row-f" style="gap:6px"><span class="lbl" style="margin:0">耗时上限（秒）</span><input class="inp" style="width:70px;height:30px" value="${c.time||'60'}"></span></div>`;
+}
+A.saveCaseGo=()=>{
+ const d=S.draftCase;const name=document.getElementById('dc-name').value||d.name;
+ S.cases.push({id:'c'+Date.now(),name,input:document.getElementById('dc-input').value,json:true,ok:true,must:d.must,mustNot:'',fields:d.fields,cost:'0.5',time:'60',fix:false,fromChat:true});
+ S.msgs[S.saveIdx].saved=true; if(S.lastEval)S.evalStale=true; S.changes+=1;
+ S.modal=null;render();toast(`已存为评测用例「${name}」· 共 ${S.cases.length} 个`,'去评测','gotoEval');
+};
+
+/* ---------- 评测 ---------- */
+function caseStatus(c){
+ const m={idle:['dot gray','未运行'],queued:['dot gray','排队中'],run:['spin','运行中'],pass:['dot ok','通过'],fail:['dot err','未通过']}[c.st||'idle'];
+ return `<span class="case-st ${c.st==='fail'?'':''}" style="color:${c.st==='pass'?'var(--ok-tx)':c.st==='fail'?'var(--err-tx)':'var(--tx2)'}"><span class="${m[0]}"></span>${m[1]}</span>`;
+}
+function rEval(){
+ const n=S.cases.length,p=passCount(),f=S.cases.filter(c=>c.st==='fail').length,done=p+f;
+ let sum;
+ if(S.evalRunning) sum=`<span class="spin" style="width:22px;height:22px;border-width:3px"></span><div><div class="big">${done}/${n}</div><div class="hint">正在运行（草稿），每个用例真实调用一次模型</div></div>`;
+ else if(!S.lastEval) sum=`<span class="ckic wait" style="width:36px;height:36px">${ic('flask','s18')}</span><div><div style="font-weight:600;font-size:16px">当前草稿还没有评测</div><div class="hint">上次评测针对 v3（5/5 通过），草稿已改过，需要重新运行</div></div>`;
+ else if(S.evalStale) sum=`<span class="ckic wait" style="width:36px;height:36px;background:var(--warn-bg);color:var(--warn-tx)">${ic('refresh','s18')}</span><div><div style="font-weight:600;font-size:16px">配置或用例已改动，上次结果 ${S.lastEval.p}/${S.lastEval.t} 已作废</div><div class="hint">发布要求对当前草稿重新跑一遍且全部通过</div></div>`;
+ else if(S.lastEval.p===S.lastEval.t) sum=`<span class="ckic ok" style="width:36px;height:36px">${ic('check','s18')}</span><div><div class="big" style="color:var(--ok-tx)">${S.lastEval.p}/${S.lastEval.t} 通过</div><div class="hint">${S.changes?'当前草稿全部通过，可以发布':'当前草稿全部通过，已发布为 v'+S.version}</div></div>`;
+ else sum=`<span class="ckic no" style="width:36px;height:36px">${ic('x','s18')}</span><div><div class="big" style="color:var(--err-tx)">${S.lastEval.p}/${S.lastEval.t} 通过</div><div class="hint">${S.lastEval.t-S.lastEval.p} 个未通过，看下方失败原因或用「修复建议」</div></div>`;
+ const right=S.evalRunning?'':(S.lastEval&&!S.evalStale&&S.lastEval.p===S.lastEval.t&&S.changes)?`<button class="btn pri" data-a="openPublish">${ic('rocket','s14')}去发布</button>`:(S.lastEval&&!S.evalStale&&f)?`<button class="btn soft" data-a="openFix">${ic('sparkle','s14')}修复建议</button>`:'';
+ return `<div class="shead"><h2>评测</h2><span class="hint">每个用例真实调用一次模型，费用记在你名下。发布要求：对当前草稿全部通过，之后没改过配置或用例。</span></div>
+ <div class="sumbar">${sum}<div class="sp1"></div>
+  ${S.evalRunning?`<div class="prog" style="max-width:220px"><i style="width:${p/n*100}%;background:var(--ok)"></i><i style="width:${f/n*100}%;background:var(--err)"></i></div>`:''}
+  ${right}
+  <select class="sel" style="width:170px" data-m="evalTarget"><option value="draft">目标：草稿（当前）</option>${S.versions.map(v=>`<option>目标：v${v.v}${v.cur?'（发布版）':''}</option>`).join('')}</select>
+  <button class="btn ${S.lastEval&&!S.evalStale&&S.lastEval.p===S.lastEval.t?'':'pri'} ${S.evalRunning||!n?'dis':''}" data-a="runEvalAsk">${ic('play','s14')}${S.lastEval?'重新运行':'运行评测'}</button></div>
+ <div class="card"><div class="ch"><h3>用例</h3><span class="cnt tag pri">${n}</span><span class="sp1"></span><button class="btn sm" data-a="newCase">${ic('plus','s14')}新增用例</button></div>
+ <table class="tbl"><tr><th style="width:26%">用例</th><th>断言</th><th style="width:110px">状态</th><th style="width:92px">花费</th><th style="width:70px">耗时</th><th style="width:90px"></th></tr>
+ ${S.cases.map((c,i)=>`<tr><td><button class="link" style="color:var(--tx);font-weight:500" data-a="editCase" data-v="${c.id}">${esc(c.name)}</button>${c.fromChat?' <span class="tag pri">来自预览</span>':''}</td>
+  <td class="mut" style="font-size:13px">${[c.fields,c.must&&('含「'+c.must.split('\n').join('」「')+'」'),c.mustNot&&('不含「'+c.mustNot+'」')].filter(Boolean).join(' · ')}</td>
+  <td style="${S.evalStale?'opacity:.45':''}">${caseStatus(c)}</td><td class="mut" style="white-space:nowrap">${c.cu||'—'}</td><td class="mut" style="white-space:nowrap">${c.du||'—'}</td>
+  <td style="text-align:right"><button class="icbtn sm" data-a="editCase" data-v="${c.id}" title="编辑">${ic('edit','s14')}</button><button class="icbtn sm" data-a="delCase" data-v="${i}" title="删除">${ic('trash','s14')}</button></td></tr>
+  ${c.st==='fail'&&!S.evalStale&&!S.evalRunning?`<tr><td colspan="6" style="background:#FFF8F8;padding:10px 14px"><div class="row-f" style="align-items:flex-start;gap:16px"><div style="flex:1"><div class="sec-t" style="color:var(--err-tx)">失败原因</div><div style="font-size:13px">${c.reason}</div><div class="hint" style="margin-top:4px">运行 ID ${c.rid}</div></div><div style="flex:1.2"><div class="sec-t">判分时的输出快照</div><pre class="jsonv" style="background:#fff">${esc(c.snap)}</pre></div><button class="btn sm soft" style="align-self:center" data-a="openFix">${ic('sparkle','s14')}修复建议</button></div></td></tr>`:''}
+  ${S.editCase===c.id?`<tr><td colspan="6" style="background:#FAFAFD;padding:14px 16px">${caseFields(c,'ec')}<div class="row-f" style="justify-content:flex-end;margin-top:8px"><button class="btn sm" data-a="editCase" data-v="">取消</button><button class="btn sm pri" data-a="saveEditCase" data-v="${c.id}">保存用例</button></div></td></tr>`:''}`).join('')}
+ </table></div>
+ <div class="card" style="margin-top:14px"><div class="ch"><h3>评测历史</h3><span class="sp1"></span><span class="hint">配置哈希相同才算同一份草稿</span></div>
+ ${S.evalHist.map(h=>`<div class="ver"><span class="tag ${h.l==='草稿'?'pri':''}">${h.l}</span><span class="mono mut">${h.h}</span><span class="tag ${h.mark.startsWith('=')?'ok':'warn'}">${h.mark}</span><span class="sp1"></span><b style="color:${h.p===h.t?'var(--ok-tx)':'var(--err-tx)'}">${h.p}/${h.t}</b><span class="hint">（${Math.round(h.p/h.t*100)}%）</span><span class="hint" style="width:90px;text-align:right">${h.time}</span></div>`).join('')}</div>`;
+}
+A.newCase=()=>{const c={id:'c'+Date.now(),name:'新用例',input:'{ "invoice_url": "", "amount": 0, "currency": "CNY" }',json:true,ok:true,must:'',mustNot:'',fields:'',cost:'0.5',time:'60',fix:false};S.cases.push(c);S.editCase=c.id;if(S.lastEval)S.evalStale=true;render();};
+A.editCase=v=>{S.editCase=v||null;render();};
+A.saveEditCase=v=>{const c=S.cases.find(x=>x.id===v);c.name=document.getElementById('ec-name').value||c.name;c.input=document.getElementById('ec-input').value;c.st='idle';S.editCase=null;if(S.lastEval)S.evalStale=true;render();toast('用例已保存，需要重新运行评测');};
+A.delCase=v=>{S.cases.splice(+v,1);if(S.lastEval)S.evalStale=true;render();};
+A.runEvalAsk=()=>{S.modal='runConfirm';render();};
+function mRunConfirm(){
+ return `<div class="modal" style="width:440px"><div class="mh"><h2>运行评测</h2></div><div class="mb"><p style="margin:0 0 8px">对<b>当前草稿</b>运行 ${S.cases.length} 个用例。</p><div class="hint">每个用例真实调用一次模型，预计约 ${S.cases.length*9} 积分，记在你名下。</div></div>
+ <div class="mf"><button class="btn" data-a="close">取消</button><button class="btn pri" data-a="runEval">开始运行</button></div></div>`;
+}
+A.runEval=()=>{
+ S.modal=null;S.evalRunning=true;S.editCase=null;S.cases.forEach(c=>{c.st='queued';c.cu=null;c.du=null;});render();
+ let i=0;
+ const next=()=>{
+  if(i>=S.cases.length){
+   const p=passCount(),t=S.cases.length;S.evalRunning=false;S.lastEval={p,t};S.evalStale=false;
+   S.evalHist.forEach(h=>{if(h.l==='草稿')h.mark='配置已变化'});
+   S.evalHist.unshift({l:'草稿',h:(S.fixed?'e93c51':'c7e1a2'),mark:'= 当前草稿',p,t,time:nowHM()});
+   S.runs.unshift({id:'run_'+Math.random().toString(16).slice(2,8),t:'今天 '+nowHM(),src:'评测',st:'成功',in:'评测 · '+t+' 个用例',dur:'—',cost:String(t*8),ver:'草稿'});
+   render();
+   if(p===t) toast(`评测 ${p}/${t} 全部通过，可以发布`,'去发布','openPublish'); else toast(`评测 ${p}/${t} 通过，有 ${t-p} 个未通过`,'修复建议','openFix');
+   return;
+  }
+  const c=S.cases[i];c.st='run';render();
+  setTimeout(()=>{const fail=c.fix&&!S.fixed;c.st=fail?'fail':'pass';c.cu=(7+((i*37)%5)+(fail?0:.6)).toFixed(1)+' 积分';c.du=(2.6+((i*13)%20)/10).toFixed(1)+'s';c.rid='run_'+(0x3a1f00+i*977).toString(16);i++;render();setTimeout(next,160);},700+((i*211)%400));
+ };
+ setTimeout(next,250);
+};
+A.openFix=()=>{S.modal='fix';render();};
+function mFix(){
+ const fails=S.cases.filter(c=>c.st==='fail');
+ return `<div class="modal" style="width:640px"><div class="mh">${ic('sparkle','s20')}<h2>修复建议</h2><span class="tag pri">AI 助手</span><span class="sp1"></span><button class="icbtn" data-a="close">${ic('x')}</button></div><div class="mb">
+ <div class="sec-t">分析了 ${fails.length||2} 个未通过的用例</div>
+ ${(fails.length?fails:S.cases.filter(c=>c.fix)).map(c=>`<div class="row-f" style="align-items:flex-start;margin-bottom:8px;font-size:13px"><span class="ckic no" style="width:20px;height:20px">${ic('x')}</span><div><b>${c.name}</b><div class="mut">${c.reason}</div></div></div>`).join('')}
+ <div class="sec-t" style="margin-top:14px">建议的改动</div>${fixDiff()}
+ <div class="hint" style="margin-top:8px">只改草稿里的提示词；应用后上次评测作废，需要重新运行。</div></div>
+ <div class="mf"><button class="btn" data-a="aiFromFix">在 AI 助手里继续调整</button><button class="btn pri ${S.fixed?'dis':''}" data-a="applyFix">${S.fixed?'已应用':'应用到草稿'}</button></div></div>`;
+}
+A.aiFromFix=()=>{S.modal=null;S.prevOpen[S.stage]=true;S.prevTab='ai';render();};
+
+/* ---------- 发布 ---------- */
+function checklist(inModal){
+ const ev=evalOK();
+ let evTxt,evSub,evBtn='';
+ if(S.evalRunning){evTxt='评测运行中';evSub='跑完后这里会自动更新';}
+ else if(!S.lastEval){evTxt=`评测：当前草稿还没跑（${S.cases.length} 个用例）`;evSub='发布要求对当前草稿全部通过';evBtn=`<button class="btn sm" data-a="toEval">去评测</button>`;}
+ else if(S.evalStale){evTxt=`评测：上次 ${S.lastEval.p}/${S.lastEval.t} 已作废`;evSub='之后改过配置或用例，需要重新运行';evBtn=`<button class="btn sm" data-a="toEval">去评测</button>`;}
+ else if(!ev){evTxt=`评测 ${S.lastEval.p}/${S.lastEval.t} 通过`;evSub=`${S.lastEval.t-S.lastEval.p} 个未通过：${S.cases.filter(c=>c.st==='fail').map(c=>c.name).join('、')}`;evBtn=`<button class="btn sm soft" data-a="toFix">去修复</button>`;}
+ else {evTxt=`评测 ${S.lastEval.p}/${S.lastEval.t} 通过`;evSub=`当前草稿 · ${S.evalHist[0].time} 运行 · 配置 ${S.evalHist[0].h}`;}
+ const items=[
+  [true,'编排完整','名称、提示词、模型都已设置；schema 合法',''],
+  [ev,evTxt,evSub,evBtn],
+  [S.changes>0,S.changes>0?`有 ${S.changes} 处修改可发布`:'没有可发布的修改',S.changes>0?'提示词、MCP erp-finance、知识 +1、评测用例 +1'+(S.fixed?'、规则 +2':''):`草稿与 v${S.version} 相同`,S.changes>0?`<button class="btn sm ghost" data-a="diffDraft">对比 v${S.version}</button>`:''],
+ ];
+ return `<div class="ck-list">${items.map(([ok,t,s,b])=>`<div class="ckr"><span class="ckic ${ok?'ok':'no'}">${ic(ok?'check':'x')}</span><div style="flex:1;min-width:0"><div style="font-weight:500">${t}</div><div class="hint">${s}</div></div>${b}</div>`).join('')}</div>`;
+}
+const canPublish=()=>evalOK()&&S.changes>0&&!S.evalRunning;
+A.toEval=()=>{S.modal=null;S.stage='eval';render();};
+A.toFix=()=>{S.stage='eval';S.modal='fix';render();};
+A.openPublish=()=>{S.modal='publish';S.pubDone=false;render();};
+function mPublish(){
+ if(S.pubDone) return `<div class="modal" style="width:520px"><div class="mb" style="padding:34px 30px 20px;text-align:center">
+  <div style="width:56px;height:56px;border-radius:50%;background:var(--ok);color:#fff;display:flex;align-items:center;justify-content:center;margin:0 auto 14px">${ic('check','s20')}</div>
+  <h2 style="margin:0 0 6px;font-size:20px">v${S.version} 已发布</h2><p class="mut" style="margin:0 0 4px">接口调用和其他用户从现在起使用 v${S.version}；进行中的会话不受影响。</p><p class="hint" style="margin:0">调用方可以在请求里写 "version": ${S.version} 锁定这一版。</p>
+  <div class="card" style="text-align:left;margin-top:18px;padding:12px 14px"><div class="sec-t">下一步</div><div class="row-f">${ic('key')}<span>签发一把只能调用本智能体的 Key，复制代码，在线试调一次</span></div></div></div>
+  <div class="mf" style="justify-content:center"><button class="btn" data-a="close">留在这里</button><button class="btn pri lg" data-a="toAccess">${ic('code','s14')}去接入</button></div></div>`;
+ const ok=canPublish();
+ return `<div class="modal" style="width:580px"><div class="mh"><h2>发布为 v${S.version+1}</h2><span class="tag line">当前发布 v${S.version}</span><span class="sp1"></span><button class="icbtn" data-a="close">${ic('x')}</button></div><div class="mb">
+ <div class="sec-t">上线清单</div>${checklist(true)}
+ <div class="fld" style="margin-top:14px"><label class="lbl">版本说明（可选）</label><textarea id="pubNote" class="ta" style="height:64px" maxlength="512" placeholder="例如：补充外币换算和餐饮人均标准" data-m="pubNote">${esc(S.pubNote)}</textarea><div class="hint" style="text-align:right">${S.pubNote.length}/512</div></div>
+ <div class="hint">发布后接口调用和其他用户使用 v${S.version+1}；回滚到旧版本不受评测限制。</div></div>
+ <div class="mf">${ok?'':'<span class="hint sp1" style="color:var(--err-tx)">清单全部通过后才能发布</span>'}<button class="btn" data-a="close">取消</button><button class="btn pri ${ok?'':'dis'}" data-a="doPublish">${S.publishing?'<span class="spin" style="border-color:rgba(255,255,255,.4);border-top-color:#fff"></span>发布中…':'发布为 v'+(S.version+1)}</button></div></div>`;
+}
+A.doPublish=()=>{
+ if(!canPublish()||S.publishing)return;
+ S.publishing=true;render();
+ setTimeout(()=>{
+  S.publishing=false;S.version+=1;S.changes=0;S.edited=false;
+  S.versions.forEach(v=>v.cur=false);
+  S.versions.unshift({v:S.version,d:'今天 '+nowHM(),note:S.pubNote||'补充外币换算和餐饮人均标准',ev:`${S.lastEval.p}/${S.lastEval.t} 通过`,cur:true});
+  S.evalHist[0].mark='= v'+S.version;
+  S.pubDone=true;S.pubNote='';render();
+ },1100);
+};
+A.toAccess=()=>{S.modal=null;S.stage='access';render();};
+A.diffDraft=v=>{S.modal='diff';S.diffTitle=v||`草稿 对比 v${S.version}`;render();};
+A.snap=v=>{S.modal='snap';S.snapV=v;render();};
+function mDiff(){
+ return `<div class="modal" style="width:640px"><div class="mh"><h2>${S.diffTitle}</h2><span class="sp1"></span><button class="icbtn" data-a="close">${ic('x')}</button></div><div class="mb">
+ ${[['修改','systemPrompt',`<div class="diff"><div class="h">## 规则</div><div class="d">- 2. 发票抬头必须是公司全称</div><div class="a">+ 2. 发票抬头必须是公司全称『星河数据科技有限公司』，否则 reject</div>${S.fixed?'<div class="a">+ 4. 外币金额交给 currency-converter 换算……</div><div class="a">+ 5. 餐饮按人均判定……</div>':''}</div>`],['修改','mcpServers.erp-finance.url','<div class="diff"><div class="d">- https://erp-staging.example.com/mcp</div><div class="a">+ https://erp.example.com/mcp</div></div>'],['新增','knowledge','<div class="diff"><div class="a">+ 常见问题（手动添加 · 410 字）</div></div>'],['新增','evalCases','<div class="diff"><div class="a">+ 超额需审批</div></div>']].map(([k,f,d])=>`<div style="margin-bottom:12px"><div class="row-f" style="margin-bottom:4px"><span class="tag ${k==='新增'?'ok':'warn'}">${k}</span><span class="mono">${f}</span></div>${d}</div>`).join('')}</div></div>`;
+}
+function mSnap(){
+ return `<div class="modal" style="width:600px"><div class="mh"><h2>v${S.snapV} 完整快照</h2><span class="tag line">只读</span><span class="sp1"></span><button class="icbtn" data-a="close">${ic('x')}</button></div><div class="mb"><pre class="jsonv">{
+  "id": "expense-reviewer",
+  "version": ${S.snapV},
+  "name": "报销审核助手",
+  "model": "claude-sonnet-4-5",
+  "maxTurns": 20,
+  "effort": "medium",
+  "tools": ["Read", "Grep", "WebFetch"],
+  "skillPackages": ["invoice-ocr", "policy-lookup"],
+  "mcpServers": { "erp-finance": { "type": "http", "url": "https://erp.example.com/mcp" } },
+  "subagents": [{ "name": "currency-converter", "background": false }],
+  "variables": ["ERP_TOKEN*", "DEPT"],
+  "permissionMode": "default",
+  "approvalRules": { "tools": ["erp-finance.submit"] },
+  "webhookUrl": "（已隐藏）"
+}</pre></div><div class="mf"><button class="btn" data-a="loadDraft" data-v="${S.snapV}">载入草稿</button><button class="btn pri" data-a="close">关闭</button></div></div>`;
+}
+A.loadDraft=v=>{S.modal=null;render();toast(`已用 v${v} 覆盖草稿，已发布版本不受影响`);};
+function rPublish(){
+ const ok=canPublish();
+ return `<div class="shead"><h2>发布</h2><span class="hint">未发布时接口调用和其他用户都直接用草稿；发布后他们用发布版，调用方可用 version 锁版本。</span></div>
+ <div style="display:grid;grid-template-columns:1.25fr 1fr;gap:16px;align-items:start">
+ <div><div class="card"><div class="ch"><h3>上线清单</h3><span class="sp1"></span><span class="tag ${ok?'ok':'warn'}">${ok?'可以发布':'未就绪'}</span></div><div class="cb" style="padding-top:4px">${checklist()}
+  <div class="row-f" style="margin-top:12px"><input class="inp" placeholder="版本说明（可选，最多 512 字）" data-m="pubNote" id="pubNote2" value="${esc(S.pubNote)}"><button class="btn pri ${ok?'':'dis'}" data-a="openPublish">发布为 v${S.version+1}</button></div></div></div>
+ <div class="card" style="margin-top:16px"><div class="ch"><h3>版本</h3><span class="hint">回滚和设为发布版不受评测限制，秒级生效</span></div>
+ ${S.versions.map(v=>`<div class="ver"><span class="vn">v${v.v}</span><div style="flex:1;min-width:0"><div class="row-f">${v.cur?'<span class="tag ok">当前发布</span>':''}<span class="tag line">评测 ${v.ev}</span><span class="hint">${v.d}</span></div><div class="mut" style="font-size:13px;margin-top:2px">${esc(v.note)}</div></div>
+  ${v.cur?'':`<button class="btn sm" data-a="setCur" data-v="${v.v}">${v.v<S.versions.find(x=>x.cur).v?'回滚到此版':'设为发布版'}</button>`}<button class="btn sm ghost" data-a="diffDraft" data-v="草稿 对比 v${v.v}">对比草稿</button><button class="icbtn sm" title="查看快照" data-a="snap" data-v="${v.v}">${ic('eye','s14')}</button></div>`).join('')}</div></div>
+ <div><div class="card"><div class="ch"><h3>分享</h3></div><div class="cb">
+  <div class="row-f"><div style="flex:1"><div style="font-weight:500">公开给所有账号</div><div class="hint">所有账号可只读使用。公开不等于上架市场。</div></div><button class="sw ${S.isPublic?'on':''}" data-a="togglePublic" aria-label="公开"></button></div>
+  <div class="sec-t" style="margin-top:16px">定向授权</div>
+  ${S.grants.map((g,i)=>`<div class="row-f" style="height:36px">${uav(g.e[0].toUpperCase(),26)}<span style="flex:1">${g.e}</span><span class="tag">${g.p}</span><button class="link" data-a="revoke" data-v="${i}">撤销</button></div>`).join('')}
+  <div class="row-f" style="margin-top:6px"><input class="inp" id="grantE" placeholder="同事邮箱"><select class="sel" id="grantP" style="width:96px"><option>只读</option><option>可编辑</option></select><button class="btn" data-a="grant">添加</button></div></div></div>
+ <div class="card" style="margin-top:16px"><div class="ch"><h3>上架市场</h3><span class="tag warn">需后端</span></div><div class="cb">
+  <div class="hint" style="margin-bottom:10px">上架由管理员审核。提交后会出现在「平台管理 · 市场上架」的申请队列里。</div>
+  ${S.applied?`<div class="result" style="margin:0">${ic('clock','s14')}已提交上架申请（办公运营），等待管理员处理</div>`:`<div class="row-f"><select class="sel" style="width:140px"><option>办公运营</option><option>通用助手</option><option>研究分析</option></select><button class="btn" data-a="applyMarket">申请上架</button></div>`}</div></div></div></div>`;
+}
+A.setCur=v=>{S.versions.forEach(x=>x.cur=x.v===+v);render();toast(`v${v} 已设为发布版，进行中的会话不受影响`);};
+A.togglePublic=()=>{S.isPublic=!S.isPublic;render();};
+A.revoke=v=>{S.grants.splice(+v,1);render();};
+A.grant=()=>{const e=document.getElementById('grantE').value.trim();if(!e)return;S.grants.push({e,p:document.getElementById('grantP').value});render();};
+A.applyMarket=()=>{S.applied=true;render();};
+
+/* ---------- 接入 ---------- */
+function codeSample(){
+ const v=S.version;
+ if(S.codeTab==='curl') return `<span class="c"># 发起调用，立即返回 runId</span>
+curl -X POST https://owa.xinghe.example/api/agents/expense-reviewer/invoke \\
+  -H <span class="s">"Authorization: Bearer $OWA_KEY"</span> \\
+  -H <span class="s">"Content-Type: application/json"</span> \\
+  -d <span class="s">'{ "input": { "invoice_url": "https://…/2026-1103-6800.pdf",
+        "amount": 6800, "currency": "CNY" }, "version": ${v} }'</span>
+
+<span class="c"># 轮询结果（也可订阅 /api/sessions/:id/events 事件流）</span>
+curl https://owa.xinghe.example/api/agents/expense-reviewer/result?runId=<span class="n">RUN_ID</span> \\
+  -H <span class="s">"Authorization: Bearer $OWA_KEY"</span>`;
+ if(S.codeTab==='Python') return `<span class="k">import</span> os, time, requests
+
+BASE = <span class="s">"https://owa.xinghe.example/api/agents/expense-reviewer"</span>
+H = {<span class="s">"Authorization"</span>: <span class="s">"Bearer "</span> + os.environ[<span class="s">"OWA_KEY"</span>]}
+
+run = requests.post(BASE + <span class="s">"/invoke"</span>, headers=H, json={
+    <span class="s">"input"</span>: {<span class="s">"invoice_url"</span>: url, <span class="s">"amount"</span>: <span class="n">6800</span>, <span class="s">"currency"</span>: <span class="s">"CNY"</span>},
+    <span class="s">"version"</span>: <span class="n">${v}</span>,
+}).json()
+
+<span class="k">while True</span>:
+    r = requests.get(BASE + <span class="s">"/result"</span>, headers=H, params={<span class="s">"runId"</span>: run[<span class="s">"runId"</span>]}).json()
+    <span class="k">if</span> r[<span class="s">"status"</span>] != <span class="s">"running"</span>: <span class="k">break</span>
+    time.sleep(<span class="n">1</span>)
+print(r[<span class="s">"output"</span>][<span class="s">"verdict"</span>])`;
+ return `<span class="k">const</span> BASE = <span class="s">"https://owa.xinghe.example/api/agents/expense-reviewer"</span>;
+<span class="k">const</span> headers = { Authorization: <span class="s">"Bearer "</span> + process.env.OWA_KEY, <span class="s">"Content-Type"</span>: <span class="s">"application/json"</span> };
+
+<span class="k">const</span> run = <span class="k">await</span> (<span class="k">await</span> fetch(BASE + <span class="s">"/invoke"</span>, {
+  method: <span class="s">"POST"</span>, headers,
+  body: JSON.stringify({ input: { invoice_url: url, amount: <span class="n">6800</span>, currency: <span class="s">"CNY"</span> }, version: <span class="n">${v}</span> }),
+})).json();
+
+<span class="k">let</span> r;
+<span class="k">do</span> {
+  <span class="k">await</span> new Promise(ok => setTimeout(ok, <span class="n">1000</span>));
+  r = <span class="k">await</span> (<span class="k">await</span> fetch(BASE + <span class="s">"/result?runId="</span> + run.runId, { headers })).json();
+} <span class="k">while</span> (r.status === <span class="s">"running"</span>);
+console.log(r.output.verdict);`;
+}
+function rKeyCard(){
+ const k=S.key;
+ let body;
+ if(!k) body=`<div class="grid2"><div class="fld"><label class="lbl">用途备注</label><input class="inp" value="${esc(S.keyForm.memo)}" data-m="keyForm.memo"></div><div class="fld"><label class="lbl">限定智能体</label><div class="inp row-f" style="background:#F7F7FA">${ic('lock','s14')}仅 报销审核助手</div></div>
+  <div class="fld"><label class="lbl">每分钟上限</label><input class="inp" value="${S.keyForm.rpm}" data-m="keyForm.rpm"></div><div class="fld"><label class="lbl">有效期</label><select class="sel" data-m="keyForm.exp"><option>不过期</option><option>30 天</option><option selected>90 天</option><option>1 年</option></select></div>
+  <div class="fld" style="grid-column:span 2"><label class="lbl">月度积分上限</label><input class="inp" value="${S.keyForm.lim}" data-m="keyForm.lim"></div></div>
+  <div class="row-f"><span class="hint sp1">Key 只在后端用；平台默认每 Key 每分钟 60 次，超出返回 429。</span><button class="btn pri" data-a="issueKey">${ic('key','s14')}签发 Key</button></div>`;
+ else if(!k.saved) body=`<div class="onetime"><div class="row-f" style="color:var(--warn-tx);font-weight:600">${ic('alert','s14')}明文只显示这一次，关掉后无法再查看</div>
+  <div class="kv">${k.plain}</div><div class="row-f"><button class="btn sm" data-a="copyKey">${ic('copy','s14')}${k.copied?'已复制':'复制'}</button><span class="sp1"></span><button class="btn sm pri" data-a="keySaved">我已保存</button></div></div>`;
+ else body=`<table class="tbl" style="font-size:13px"><tr><th>Key</th><th>限定</th><th>每分钟</th><th>本月积分</th><th>过期</th><th></th></tr>
+  <tr><td><div class="mono">${k.plain.slice(0,13)}••••${k.plain.slice(-4)}</div><div class="hint">${esc(S.keyForm.memo)} · ${k.used?'刚刚使用':'从未使用'}</div></td><td>仅本智能体</td><td>${S.keyForm.rpm}</td><td>${k.used?'9':'0'} / ${S.keyForm.lim}</td><td class="hint">${S.keyForm.exp}后</td><td style="white-space:nowrap"><button class="link" data-a="rotateKey">轮换</button> <button class="link" style="color:var(--err-tx);margin-left:8px" data-a="revokeKey">吊销</button></td></tr></table>
+  <div class="hint" style="margin-top:8px">轮换会立即签发新 Key，旧 Key 24 小时内仍有效。账号下全部 Key 在「开发者」里管理。</div>`;
+ return `<div class="card"><div class="ch">${ic('key')}<h3>调用凭证</h3><span class="sp1"></span>${k&&k.saved?'<span class="tag ok">已签发 1 把</span>':'<span class="hint">本智能体还没有专用 Key</span>'}</div><div class="cb">${body}</div></div>`;
+}
+function rAccess(){
+ const tl=S.tryLog.map(l=>`<div class="row-f" style="font-size:13px;height:26px">${l[0]==='run'?'<span class="spin" style="width:12px;height:12px"></span>':`<span style="color:${l[0]==='ok'?'var(--ok)':'var(--err)'}">${ic(l[0]==='ok'?'check':'x','s14')}</span>`}<span class="mono" style="font-size:12.5px">${l[1]}</span><span class="sp1"></span><span class="hint">${l[2]}</span></div>`).join('');
+ return `<div class="shead"><h2>接入</h2><span class="tag ok"><span class="dot ok"></span>已发布 v${S.version}</span><span class="tag line">结构化入参</span><span class="tag line">结构化结果</span><span class="sp1"></span><button class="link" data-a="toastOnly" data-v="打开 /api/agents/expense-reviewer/openapi.json">${ic('file','s14')}OpenAPI 文档</button><button class="link" style="margin-left:12px" data-a="stage" data-v="runs">${ic('list','s14')}运行记录</button></div>
+ <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
+ <div>${rKeyCard()}
+  <div style="margin-top:16px"><div class="row-f" style="margin-bottom:8px"><span class="tag pri mono" style="font-family:var(--mono)">POST</span><span class="mono">/api/agents/expense-reviewer/invoke</span><span class="sp1"></span><span class="hint">version 可锁定某一版</span></div>
+  <div class="ctabs">${['curl','Python','Node'].map(t=>`<button class="${S.codeTab===t?'on':''}" data-a="codeTab" data-v="${t}">${t}</button>`).join('')}<span class="sp1"></span><button class="ctabs-copy" style="border:0;background:none;color:#C9CCF8;font-size:13px;display:flex;align-items:center;gap:4px" data-a="copy" data-v="code">${ic('copy','s14')}复制</button></div>
+  <pre class="code" style="border-radius:0 0 10px 10px;max-height:300px">${codeSample()}</pre>
+  <div class="hint" style="margin-top:6px">${ic('check','s14')} 示例入参已按 inputSchema 校验通过。代码覆盖 invoke、轮询 result、事件流和文件下载。</div></div><div class="card" style="margin-top:16px"><div class="ch">${ic('hook')}<h3>Webhook</h3><span class="sp1"></span><button class="btn sm" data-a="hookTest">发送测试</button><button class="icbtn sm" data-a="toastOnly" data-v="已刷新投递记录">${ic('refresh','s14')}</button></div><div class="cb" style="padding-bottom:6px">
+  <div class="row-f" style="margin-bottom:6px"><span class="lbl" style="margin:0;width:64px">回调地址</span><span class="mono">https://hooks.xinghe.example/owa</span><button class="link" data-a="hookEdit">修改</button></div>
+  <div class="row-f" style="margin-bottom:10px"><span class="lbl" style="margin:0;width:64px">签名密钥</span><span class="mono">whsec_••••••a91c</span><span class="tag line">账号级 · 所有智能体共用</span></div>
+  ${S.deliv.map((d,i)=>`<div class="row-f" style="height:38px;border-top:1px solid var(--line2);font-size:13px"><span class="tag ${d.ok?'ok':d.ok===null?'pri':'err'}">${d.ok===null?'重发中':d.ok?'成功':'失败'}</span><span style="flex:1;min-width:0">${d.trig}</span><span class="hint">${d.code}</span><span class="hint" style="width:76px;text-align:right">${d.t}</span>${d.ok===false?`<button class="btn sm" data-a="redeliver" data-v="${i}">重发</button>`:'<span style="width:50px"></span>'}</div>`).join('')}</div></div></div>
+ <div><div class="card"><div class="ch">${ic('play')}<h3>在线试调</h3><span class="sp1"></span><span class="hint">真实调用一次，计费</span></div><div class="cb">
+  <label class="lbl">请求体</label><textarea class="ta mono" id="tryBody" style="height:130px" data-m="tryBody">${esc(S.tryBody)}</textarea>
+  <div class="row-f" style="margin-top:10px">${S.key&&S.key.saved?`<span class="hint sp1">用 ${S.key.plain.slice(0,13)}•••• 调用 v${S.version}</span>`:`<span class="hint sp1" style="color:var(--warn-tx)">先在左侧签发 Key 并确认已保存</span>`}<button class="btn pri ${S.key&&S.key.saved&&S.tryState!=='run'?'':'dis'}" data-a="tryInvoke">${S.tryState==='run'?'<span class="spin" style="border-color:rgba(255,255,255,.4);border-top-color:#fff"></span>调用中…':ic('send','s14')+'发送请求'}</button></div>
+  ${tl?`<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:8px">${tl}</div>`:''}
+  ${S.tryRes?`<div class="sec-t" style="margin-top:10px">响应</div><pre class="jsonv">${esc(S.tryRes)}</pre>`:''}</div></div>
+ </div></div>`;
+}
+A.codeTab=v=>{S.codeTab=v;render();};
+A.issueKey=()=>{const r=()=>Math.random().toString(36).slice(2);S.key={plain:'owa_live_'+(r()+r()+r()).slice(0,32),saved:false};render();};
+A.copyKey=()=>{S.key.copied=true;A.copy(S.key.plain);render();};
+A.keySaved=()=>{S.key.saved=true;render();toast('Key 已签发，明文已隐藏');};
+A.rotateKey=()=>{A.issueKey();toast('已签发新 Key，旧 Key 24 小时内仍有效');};
+A.revokeKey=()=>{S.key=null;render();toast('Key 已吊销，立即生效');};
+A.hookEdit=()=>{S.stage='compose';S.open.hook=true;render();const el=document.getElementById('cap-hook');el&&el.scrollIntoView({block:'center'});};
+A.hookTest=()=>{S.deliv.unshift({ok:true,trig:'测试',t:nowHM(),code:'200 · 88ms'});render();};
+A.redeliver=v=>{const d=S.deliv[+v];d.ok=null;render();setTimeout(()=>{d.ok=true;d.trig=d.trig.replace('第 1 次','第 2 次');d.code='200 · 140ms';d.t=nowHM();render();toast('重发成功');},900);};
+A.tryInvoke=()=>{
+ if(!(S.key&&S.key.saved)||S.tryState==='run')return;
+ let body;try{body=JSON.parse(S.tryBody)}catch(e){S.tryLog=[['err','400 Bad Request','JSON 解析失败']];S.tryRes='{ "error": "invalid_json", "message": "请求体不是合法 JSON" }';render();return;}
+ const inp=body.input||{};const miss=['invoice_url','amount','currency'].filter(k=>inp[k]==null);
+ if(miss.length){S.tryLog=[['err','POST /invoke → 400','不符合 inputSchema']];S.tryRes=JSON.stringify({error:'input_schema',message:'缺少必填字段 '+miss.join(', ')},null,2);render();return;}
+ const rid='run_'+Math.random().toString(16).slice(2,8);
+ S.tryState='run';S.tryRes=null;S.tryLog=[['run','POST /invoke','…']];render();
+ setTimeout(()=>{S.tryLog=[['ok','POST /invoke → 202 Accepted',rid],['run','GET /result → running','…']];render();},700);
+ setTimeout(()=>{
+  const amt=+inp.amount||0;const verdict=amt>5000?'need_approval':'pass';
+  S.tryLog=[['ok','POST /invoke → 202 Accepted',rid],['ok','GET /result → 200 completed','3.8s · 2,104 tokens · 约 9 积分']];
+  S.tryRes=JSON.stringify({runId:rid,status:'completed',version:S.version,output:{verdict,reasons:amt>5000?[`金额 ${amt.toFixed(2)} ${inp.currency} 超过单笔 5000 元上限，需部门负责人审批`,'发票抬头与公司全称一致']:['金额在标准内','发票抬头与公司全称一致']}},null,2);
+  S.tryState='done';S.key.used=true;
+  S.runs.unshift({id:rid,t:'今天 '+nowHM(),src:'接口调用',st:'成功',in:`{ amount: ${amt}, currency: "${inp.currency}" }`,dur:'3.8s',cost:'9.0',ver:'v'+S.version});
+  S.deliv.unshift({ok:true,trig:`运行 ${rid} · 第 1 次`,t:nowHM(),code:'200 · 151ms'});
+  render();toast('试调成功，Webhook 已投递','看运行记录','toRuns');
+ },2200);
+};
+A.toRuns=()=>{S.stage='runs';render();};
+
+/* ---------- 运行 ---------- */
+function rRuns(){
+ const srcs=['全部','工作台','API 会话','接口调用','评测','AI 编辑'];
+ const list=S.runs.filter(r=>S.runSrc==='全部'||r.src===S.runSrc);
+ const stc={成功:'ok',失败:'err',运行中:'pri',已取消:'',排队中:''};
+ const bars=[14,22,18,25,19,9,21];
+ return `<div class="shead"><h2>运行</h2><span class="hint">只看本智能体，费用记在调用方名下</span></div>
+ <div style="display:grid;grid-template-columns:repeat(4,1fr) 1.4fr;gap:12px;margin-bottom:16px">
+  <div class="stat"><div class="k">近 7 天运行</div><div class="v">${S.runs.length+120}</div></div><div class="stat"><div class="k">失败率</div><div class="v">3.1%</div></div>
+  <div class="stat"><div class="k">消耗积分</div><div class="v">1.18 万</div></div><div class="stat"><div class="k">平均耗时</div><div class="v">4.8s</div></div>
+  <div class="stat"><div class="k">每日次数</div><div style="display:flex;align-items:flex-end;gap:6px;height:40px;margin-top:4px">${bars.map((b,i)=>`<i style="flex:1;height:${b*1.6}px;border-radius:3px;background:${i===6?'var(--pri)':'#C9CCF2'}"></i>`).join('')}</div></div></div>
+ <div class="card"><div class="ch"><div class="seg">${srcs.map(s=>`<button class="${S.runSrc===s?'on':''}" data-a="runSrc" data-v="${s}">${s}</button>`).join('')}</div><span class="sp1"></span><select class="sel" style="width:120px"><option>全部状态</option><option>运行中</option><option>失败</option></select><button class="icbtn" data-a="toastOnly" data-v="已刷新">${ic('refresh','s14')}</button></div>
+ <table class="tbl"><tr><th>时间</th><th>版本</th><th>来源</th><th>状态</th><th>输入</th><th>耗时</th><th>花费（积分）</th></tr>
+ ${list.map(r=>`<tr class="ck ${S.runSel===r.id?'sel':''}" data-a="runOpen" data-v="${r.id}"><td class="mut">${r.t}</td><td><span class="tag line">${r.ver}</span></td><td>${r.src}</td><td><span class="tag ${stc[r.st]}">${r.st==='运行中'?'<span class="spin" style="width:10px;height:10px"></span>':''}${r.st}</span></td><td style="max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" class="${r.in.startsWith('{')?'mono':''}">${esc(r.in)}</td><td class="mut">${r.dur}</td><td class="mut">${r.cost}</td></tr>`).join('')}</table>
+ <div style="padding:10px;text-align:center"><button class="btn sm ghost">加载更多</button></div></div>
+ ${S.runSel?rRunDrawer():''}`;
+}
+function rRunDrawer(){
+ const r=S.runs.find(x=>x.id===S.runSel);if(!r)return '';
+ return `<div class="drawer"><div class="mh" style="border-bottom:1px solid var(--line)"><h2 class="mono" style="font-size:15px">${r.id}</h2><span class="tag line">${r.ver}</span><span class="sp1"></span><button class="icbtn" data-a="runOpen" data-v="">${ic('x')}</button></div>
+ <div class="mb" style="padding-top:14px">
+  <div class="grid2" style="margin-bottom:14px;font-size:13px"><div><div class="lbl">状态</div>${r.st}</div><div><div class="lbl">来源</div>${r.src}</div><div><div class="lbl">耗时</div>${r.dur}</div><div><div class="lbl">花费</div>${r.cost} 积分</div></div>
+  <div class="sec-t">输入</div><pre class="jsonv">${esc(r.in)}</pre>
+  ${r.st==='失败'?`<div class="sec-t" style="margin-top:12px">错误 · upstream_timeout</div><pre class="jsonv" style="color:var(--err-tx)">erp-finance.query_budget 超时（10s），已重试 2 次</pre>`:''}
+  ${r.st==='成功'?`<div class="sec-t" style="margin-top:12px">结构化结果</div><pre class="jsonv">{ "verdict": "need_approval", "reasons": ["金额超过单笔 5000 元上限"] }</pre>`:''}
+  ${r.st==='运行中'?`<div class="result" style="background:var(--pri-bg);color:var(--pri-tx)"><span class="spin"></span>正在运行，已 1 分 12 秒</div>`:''}
+  <div class="hint" style="margin-top:12px">taskId ${r.id.replace('run_','task_')}</div></div>
+ <div class="mf">${r.st==='运行中'?`<button class="btn danger" data-a="cancelRun" data-v="${r.id}">${ic('stop','s14')}取消运行</button>`:''}<span class="sp1"></span><button class="btn" data-a="go" data-v="chat">在对话中查看完整过程</button></div></div>`;
+}
+A.runSrc=v=>{S.runSrc=v;render();};
+A.runOpen=v=>{S.runSel=v||null;render();};
+A.cancelRun=v=>{const r=S.runs.find(x=>x.id===v);r.st='已取消';r.dur='72.0s';render();toast('已取消运行');};
+
+/* ---------- 弹层分发 ---------- */
+function rModal(){
+ const m={new:mNew,agentDetail:mDetail,basic:mBasic,saveCase:mSaveCase,runConfirm:mRunConfirm,fix:mFix,publish:mPublish,diff:mDiff,snap:mSnap,createAcc:mCreateAcc}[S.modal];
+ if(!m) return '';
+ return `<div class="mask" data-a="maskClose">${m()}</div>`;
+}
+
+/* ========== 6 对话工作台 ========== */
+function rChat(){
+ const ex=AG('expense-reviewer');
+ const newAg=S.chatSel.startsWith('new:')?AG(S.chatSel.slice(4)):null;
+ const groups=[{a:ex,ss:[['s1','10 月杭州出差报销','14:46'],['s2','会议费 6800 审批','昨天'],['s3','美元酒店发票','11-08']]},{a:AG('meeting-notes'),ss:[['s4','周会纪要 11-10','周一'],['s5','产品评审会','11-05']]}];
+ if(newAg&&newAg.id!=='expense-reviewer') groups.unshift({a:newAg,ss:[[S.chatSel,'新会话','刚刚']]});
+ const side=`<div class="ss-col"><div style="padding:14px 12px 8px" class="row-f"><h2 style="margin:0;font-size:16px;font-weight:600;flex:1">对话</h2><button class="btn sm pri" data-a="toastOnly" data-v="已新建会话">${ic('plus','s14')}新会话</button></div>
+  <div style="padding:0 12px 6px"><div class="search" style="width:100%">${ic('search')}<input class="inp" style="height:32px" placeholder="搜索会话"></div></div>
+  <div class="scroll" style="flex:1;padding:0 6px">${groups.map(g=>`<div class="ss-grp">${av(g.a,22,6)}${g.a.name}</div>${g.ss.map(s=>`<button class="ss-item ${S.chatSel===s[0]?'on':''}" data-a="chatSel" data-v="${s[0]}"><span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s[1]}</span><span class="hint">${s[2]}</span></button>`).join('')}`).join('')}
+  <button class="ss-item" style="margin-top:10px;color:var(--tx2)" data-a="toggleArch">${ic(S.showArch?'chevD':'chevR','s14')}已归档 · 2</button>
+  ${S.showArch?[['9 月差旅汇总'],['旧版规则测试']].map(s=>`<div class="ss-item" style="padding-left:28px"><span style="flex:1" class="mut">${s[0]}</span><button class="link" data-a="toastOnly" data-v="已恢复「${s[0]}」">恢复</button></div>`).join(''):''}</div></div>`;
+ if(newAg&&newAg.id!=='expense-reviewer'){
+  return `<div style="display:flex;height:100%">${side}<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#fff">${av(newAg,64)}<h2 style="margin:0;font-size:20px">和「${newAg.name}」开始对话</h2><p class="mut" style="margin:0;max-width:420px;text-align:center">${newAg.desc}</p><div class="cbox" style="width:560px;margin-top:16px;background:#fff"><textarea placeholder="说点什么，或输入 /"></textarea><button class="sendb">${ic('send','s14')}</button></div></div></div>`;
+ }
+ const tools=[['pkg','invoice-ocr · 识别 4 张发票','ok','1.8s'],['book','检索知识 · 命中 2 段','ok','0.3s'],['plug','erp-finance.query_budget · 财务部','ok','0.7s'],['plug','erp-finance.submit · 提交审批单',S.approval==='pending'?'wait':S.approval==='ok'?'ok':'no','']];
+ const ws=S.wsTab==='files'?`<div class="hint mono" style="padding:10px 12px 4px">workspaces/a3f9c2e1</div><div class="ftree" style="padding:0 6px">
+   <div class="fn">${ic('folder','s14')}uploads</div>${['发票-01 高铁.pdf','发票-02 酒店.pdf','发票-03 餐饮.pdf','发票-04 打车.pdf'].map(f=>`<button class="fn" style="padding-left:24px" data-a="fileSel" data-v="uploads/${f}">${ic('file','s14')}${f}</button>`).join('')}
+   <div class="fn">${ic('folder','s14')}output</div><button class="fn ${S.fileSel==='output/初审结果.md'?'on':''}" style="padding-left:24px" data-a="fileSel" data-v="output/初审结果.md">${ic('file','s14')}初审结果.md</button></div>
+   <div style="border-top:1px solid var(--line);margin-top:8px;padding:10px 12px;flex:1;overflow:auto"><div class="row-f" style="margin-bottom:6px"><b style="font-size:13px">${S.fileSel.split('/').pop()}</b><span class="sp1"></span><div class="seg"><button class="on">预览</button><button>源码</button></div><button class="icbtn sm" title="下载">${ic('download','s14')}</button></div>
+   ${S.fileSel.endsWith('.md')?`<div style="font-size:13px;line-height:1.7"><b>10 月杭州出差 · 初审结果</b><br>合计 4 张，金额 3,412.50 元<br><span style="color:var(--ok-tx)">通过</span> 高铁 553.00 · 打车 86.50<br><span style="color:var(--warn-tx)">需审批</span> 酒店 2,180.00（超标准 380 元）<br><span style="color:var(--warn-tx)">需审批</span> 餐饮 593.00（人均 198 元）</div>`:`<div style="height:160px;border-radius:8px;background:#F4F5F8;display:flex;align-items:center;justify-content:center" class="mut">${ic('file','s20')} PDF 预览 · 1 页</div>`}</div>`
+  :`<div style="padding:12px"><div class="hint" style="margin-bottom:8px">共 4 次调用 · 0 失败</div><div class="sec-t">第 1 轮 · 4 次 · 0 失败</div>${tools.map(t=>`<div class="toolline">${ic(t[0],'s14')}<span style="flex:1">${t[1]}</span><span class="hint">${t[3]||(t[2]==='wait'?'等待审批':'')}</span></div>`).join('')}<div class="sec-t" style="margin-top:12px">erp-finance.query_budget · 输出</div><pre class="jsonv">{ "dept": "财务部", "category": "差旅", "remaining": 23000 }</pre></div>`;
+ return `<div style="display:flex;height:100%">${side}
+ <div style="flex:1;min-width:0;display:flex;flex-direction:column;background:#fff">
+  <div class="colhead" style="height:56px">${av(ex,30)}<div><div style="font-weight:600">10 月杭州出差报销</div><div class="hint" style="line-height:1.3">报销审核助手 · 已发布 v${S.version} · claude-sonnet-4-5 · 输入 300 / 输出 1500 积分每百万 token</div></div><span class="sp1"></span>
+   <span class="tag line">${ic('lock','s14')}仅你可见</span><button class="icbtn" title="会话操作">${ic('more')}</button></div>
+  <div class="varbar">${ic('brace','s14')}DEPT = 财务部 · ERP_TOKEN 已填写<span class="sp1"></span><button class="link" data-a="toastOnly" data-v="变量弹窗：密钥类用密码框">管理变量</button></div>
+  <div class="msgs" style="padding:18px 24px" data-sk="chatmsgs">
+   <div class="msg user"><div><div class="tag line" style="margin-bottom:6px;float:right">${ic('attach','s14')}杭州出差发票.zip · 4 个文件</div><div class="bub" style="clear:both;max-width:420px">帮我看下这 4 张杭州出差的发票，能报的直接提交审批</div></div></div>
+   <div class="msg bot">${av(ex,32)}<div style="flex:1;min-width:0;max-width:640px"><div class="who">报销审核助手</div>
+    <div class="runbox"><div class="rh">${ic('list','s14')}<span>调用了 4 次工具</span><span class="sp1"></span><span>${S.approval==='pending'?'1 个等待审批':'全部完成'}</span></div><div class="rs">${tools.map(t=>`<div>${t[2]==='ok'?`<span style="color:var(--ok)">${ic('check','s14')}</span>`:t[2]==='wait'?'<span class="spin" style="width:12px;height:12px"></span>':`<span style="color:var(--err)">${ic('x','s14')}</span>`}${ic(t[0],'s14')}<span>${t[1]}</span><span class="sp1"></span><span class="mut">${t[3]}</span></div>`).join('')}</div></div>
+    <div class="bub"><p>4 张发票合计 <b>3,412.50 元</b>：高铁和打车可以直接报；酒店超住宿标准 380 元、餐饮人均 198 元超出 150 元标准，需要部门负责人审批。</p><p>结果写在了 output/初审结果.md。</p></div>
+    <div class="askcard"><div class="row-f" style="margin-bottom:8px"><b>这 4 张发票要怎么提交？</b><span class="sp1"></span><span class="hint">${S.askDone?'已回答':'剩余 4:12'}</span></div>
+     ${['合并成一张报销单提交','可直接报的先提交，需审批的分开','其他（自己填写）'].map((o,i)=>`<div class="opt ${S.ask===i?'on':''}" data-a="${S.askDone?'noop':'askPick'}" data-v="${i}"><span class="rd"></span>${o}</div>`).join('')}
+     <div class="row-f" style="justify-content:flex-end;margin-top:4px">${S.askDone?`<span class="tag ok">${ic('check','s14')}已回答</span>`:`<button class="btn sm ghost" data-a="askSkip">不回答</button><button class="btn sm pri ${S.ask==null?'dis':''}" data-a="askSubmit">${S.ask==null?'请先回答每个问题':'提交回答'}</button>`}</div></div>
+    <div class="mfoot"><span>↑ 8,214 · ↓ 1,306 tokens</span><span class="sp1"></span><button class="icbtn">${ic('copy','s14')}</button><button class="icbtn" title="重跑">${ic('refresh','s14')}</button></div></div></div>
+   ${S.approval==='ok'?`<div class="msg bot">${av(ex,32)}<div><div class="bub">已提交审批单 EXP-20261111-0087，部门负责人审批后会通知你。</div></div></div>`:S.approval==='no'?`<div class="msg bot">${av(ex,32)}<div><div class="bub">好的，没有提交。需要调整哪张发票？</div></div></div>`:''}
+  </div>
+  ${S.approval==='pending'?`<div class="approval"><div class="row-f">${ic('alert','s18')}<b style="flex:1">报销审核助手在等你确认 —— 提交审批单到 ERP</b><span class="hint" style="color:var(--warn-tx)">4:32 后自动拒绝</span></div>
+   <pre class="jsonv" style="margin:8px 0;background:#fff">erp-finance.submit { "items": 4, "amount": 3412.50, "approver": "财务部负责人" }</pre>
+   <div class="row-f"><button class="btn sm pri" data-a="approve" data-v="ok">批准</button><button class="btn sm" data-a="approve" data-v="ok">批准，本会话内 erp-finance.submit 不再询问</button><span class="sp1"></span><button class="btn sm" data-a="approve" data-v="no">拒绝</button><button class="btn sm ghost" data-a="approve" data-v="no">拒绝并说明…</button></div></div>`:''}
+  <div class="composer" style="padding:10px 20px 14px"><div class="cbox"><textarea placeholder="说点什么，或输入 /"></textarea><span class="hint" style="align-self:center;margin-right:6px" title="上下文用量">上下文 12%</span><button class="icbtn sm">${ic('attach','s14')}</button><button class="sendb">${ic('send','s14')}</button></div></div>
+ </div>
+ <div style="width:320px;flex:none;border-left:1px solid var(--line);background:#fff;display:flex;flex-direction:column"><div class="colhead"><div class="ptabs"><button class="${S.wsTab==='files'?'on':''}" data-a="wsTab" data-v="files">工作空间</button><button class="${S.wsTab==='runs'?'on':''}" data-a="wsTab" data-v="runs">执行详情</button></div><span class="sp1"></span><button class="icbtn sm">${ic('refresh','s14')}</button></div>${ws}</div></div>`;
+}
+A.chatSel=v=>{S.chatSel=v;render();};
+A.toggleArch=()=>{S.showArch=!S.showArch;render();};
+A.fileSel=v=>{S.fileSel=v;render();};
+A.wsTab=v=>{S.wsTab=v;render();};
+A.askPick=v=>{S.ask=+v;render();};
+A.askSkip=()=>{S.askDone=true;render();};
+A.askSubmit=()=>{if(S.ask==null)return;S.askDone=true;render();};
+A.approve=v=>{S.approval=v;render();toast(v==='ok'?'已批准':'已拒绝');};
+A.noop=()=>{};
+
+/* ========== 开发者 / 账户 ========== */
+function subnav(title,items,cur,act){return `<div class="subnav"><h2>${title}</h2>${items.map(i=>i.startsWith('#')?`<div class="grp">${i.slice(1)}</div>`:`<button class="${cur===i?'on':''}" data-a="${act}" data-v="${i}">${i}</button>`).join('')}</div>`;}
+function rDev(){
+ return `<div style="display:flex;height:100%">${subnav('开发者',['API Key','Webhook 签名密钥','全部运行'],S.devTab,'devTab')}<div class="stage">
+ ${S.devTab==='API Key'?`<div class="shead"><h2>API Key</h2><span class="hint">账号级 Key；单个智能体的 Key 也可以在构建页「接入」里直接签发</span><span class="sp1"></span><button class="btn pri" data-a="toastOnly" data-v="签发表单与构建页接入相同">${ic('plus','s14')}签发 Key</button></div>
+ <div class="card"><table class="tbl"><tr><th>名称</th><th>限定智能体</th><th>每分钟</th><th>本月积分</th><th>过期</th><th>最近使用</th><th></th></tr>
+ ${[[ 'owa_live_k2P9••••x7Qa','ERP 对接（生产）','报销审核助手','60','1,204 / 5,000','2027-02-01','10 分钟前'],['owa_live_9fLm••••e3Rt','周报机器人','不限','30','312 / 不限','不过期','昨天'],['owa_live_Qw81••••b0Nz','临时测试','合同条款比对','默认 60','0 / 500','6 小时后过期','从未使用']].concat(S.key&&S.key.saved?[[S.key.plain.slice(0,13)+'••••'+S.key.plain.slice(-4),S.keyForm.memo,'报销审核助手',S.keyForm.rpm,'0 / '+S.keyForm.lim,S.keyForm.exp+'后','刚刚']]:[]).map(r=>`<tr><td><div class="mono">${r[0]}</div><div class="hint">${r[1]}</div></td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td><td class="mut">${r[5]}</td><td class="mut">${r[6]}</td><td><button class="link">轮换</button> <button class="link" style="color:var(--err-tx);margin-left:8px">吊销</button></td></tr>`).join('')}</table></div>`
+ :S.devTab==='Webhook 签名密钥'?`<div class="shead"><h2>Webhook 签名密钥</h2></div><div class="card cb" style="max-width:640px"><p style="margin:0 0 8px">所有智能体共用。请求头带 <span class="mono">X-OWA-Signature</span> 和 <span class="mono">X-OWA-Timestamp</span>，用 HMAC-SHA256 校验。</p><div class="row-f"><span class="mono">whsec_••••••a91c</span><span class="hint">09-14 生成</span><span class="sp1"></span><button class="btn">重新生成</button><button class="btn danger">清除</button></div><div class="hint" style="margin-top:8px">重新生成后，旧密钥在一段时间内会继续通过 Previous 头额外签名。</div></div>`
+ :`<div class="shead"><h2>全部运行</h2><span class="hint">计费在你名下的运行</span></div><div class="card"><table class="tbl"><tr><th>时间</th><th>智能体</th><th>来源</th><th>状态</th><th>花费</th></tr>${S.runs.slice(0,7).map(r=>`<tr><td class="mut">${r.t}</td><td>报销审核助手 <span class="tag line">${r.ver}</span></td><td>${r.src}</td><td>${r.st}</td><td>${r.cost}</td></tr>`).join('')}</table></div>`}
+ </div></div>`;
+}
+A.devTab=v=>{S.devTab=v;render();};
+function rAccount(){
+ const items=['积分概览','充值与订单','账户流水','运行消耗','用量分析','模型价格','#安全','账号安全','操作日志'];
+ let body;
+ if(S.acctTab==='积分概览') body=`<div class="shead"><h2>积分概览</h2></div>
+ <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px"><div class="stat"><div class="k">可用</div><div class="v">12,480</div></div><div class="stat"><div class="k">冻结中（运行中预扣）</div><div class="v">120</div></div><div class="stat"><div class="k">本月已用 / 月度上限</div><div class="v">28,400 <span class="mut" style="font-size:14px;font-weight:400">/ 50,000</span></div><div class="prog" style="margin-top:8px"><i style="width:57%;background:var(--pri)"></i></div></div></div>
+ <div class="card" style="margin-bottom:16px"><div class="ch"><h3>积分包</h3><span class="hint">长期有效；管理员人工处理，暂不支持在线支付</span></div><div class="cb" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">${[['1 万积分','¥ 100'],['5 万积分','¥ 480'],['20 万积分','¥ 1,800']].map(p=>`<div class="item" style="margin:0"><div style="font-weight:600;font-size:16px">${p[0]}</div><div class="mut">${p[1]} · v2</div><button class="btn sm" style="margin-top:8px" data-a="toastOnly" data-v="已创建订单，等待管理员确认（不会扣款）">创建订单</button></div>`).join('')}</div></div>
+ <div class="card"><div class="ch"><h3>最近流水</h3></div><table class="tbl"><tr><th>时间</th><th>类型</th><th>积分</th><th>可用余额</th><th>说明</th></tr>${[['11-11 14:02','结算','-9','12,480','报销审核助手 · run_8f21c3'],['11-11 13:47','冻结','-120','12,489','报销审核助手 · run_a1d07e'],['11-10 18:40','多扣退还','+2','12,609','run_77a0d4'],['11-01 09:00','人工入账','+10,000','12,607','11 月额度 · 周岚']].map(r=>`<tr>${r.map((c,i)=>`<td class="${i===0||i===4?'mut':''}">${c}</td>`).join('')}</tr>`).join('')}</table></div>`;
+ else body=`<div class="shead"><h2>${S.acctTab}</h2></div><div class="card empty">方向 1 原型只展开了「积分概览」；「${S.acctTab}」沿用同一套表格和卡片样式。</div>`;
+ return `<div style="display:flex;height:100%">${subnav('账户',items,S.acctTab,'acctTab')}<div class="stage">${body}</div></div>`;
+}
+A.acctTab=v=>{S.acctTab=v;render();};
+
+/* ========== 4 平台管理 · 账号 ========== */
+const fmtK=n=>n>=10000?(n/10000).toFixed(n%10000?1:0)+' 万':n.toLocaleString();
+function rAdmin(){
+ const items=['账号','模型与提供者','市场上架','套餐与订单','#计费与用量','计费','平台用量','平台运行','平台审计'];
+ let body;
+ if(S.adminTab!=='账号') body=`<div class="stage"><div class="shead"><h2>${S.adminTab}</h2></div><div class="card empty">方向 1 原型只展开了「账号」；「${S.adminTab}」沿用同一套表格＋详情抽屉。</div></div>`;
+ else {
+  const list=S.acc.filter(a=>(S.accRole==='全部'||a.role===S.accRole)&&(!S.accQ||a.e.includes(S.accQ.trim())));
+  body=`<div class="stage" style="padding-right:${S.accSel?440:28}px"><div class="shead"><h2>账号</h2><span class="hint">24 个账号 · 21 个启用中 · 本月消耗 38.6 万积分</span><span class="sp1"></span><button class="btn pri" data-a="createAcc">${ic('plus','s14')}创建账号</button></div>
+  <div class="row-f" style="margin-bottom:12px"><div class="search" style="width:280px">${ic('search')}<input id="accQ" class="inp" style="height:34px" placeholder="按邮箱搜索" value="${esc(S.accQ)}" data-m="accQ" data-live="1"></div><div class="seg">${['全部','管理员','普通账号'].map(r=>`<button class="${S.accRole===r?'on':''}" data-a="accRole" data-v="${r}">${r}</button>`).join('')}</div></div>
+  <div class="card"><table class="tbl"><tr><th>邮箱</th><th>角色</th><th>注册日期</th><th>智能体</th><th>本月消耗</th><th>月度上限</th></tr>
+  ${list.map(a=>`<tr class="ck ${S.accSel===a.e?'sel':''}" data-a="accSel" data-v="${a.e}"><td><div class="row-f">${uav(a.n[0],28)}<div><div class="row-f" style="gap:6px"><span>${a.e}</span>${a.self?'<span class="tag pri">你自己</span>':''}${a.off?'<span class="tag err">已停用</span>':''}${a.legacy?'<span class="tag warn">旧上限未重设</span>':''}</div></div></div></td>
+   <td style="white-space:nowrap">${a.role}</td><td class="mut" style="white-space:nowrap">${a.reg}</td><td>${a.ag}</td><td style="white-space:nowrap">${fmtK(a.used)}</td><td style="white-space:nowrap">${a.lim==null?'<span class="mut">不限</span>':`${fmtK(a.lim)}${a.lim&&a.used/a.lim>.8?' <span class="tag warn">'+Math.round(a.used/a.lim*100)+'%</span>':''}`}</td></tr>`).join('')}</table>
+  <div style="padding:10px;text-align:center" class="hint">显示 ${list.length} / 24 · <button class="link">加载更多</button></div></div></div>${S.accSel?rAccDrawer():''}`;
+ }
+ return `<div style="display:flex;height:100%">${subnav('平台管理',items,S.adminTab,'adminTab')}<div style="flex:1;min-width:0;position:relative;display:flex">${body}</div></div>`;
+}
+function rAccDrawer(){
+ const a=S.acc.find(x=>x.e===S.accSel);
+ return `<div class="drawer"><div class="mh" style="border-bottom:1px solid var(--line)">${uav(a.n[0],40)}<div><h2 style="font-size:16px">${a.n}</h2><div class="hint">${a.e}</div></div><span class="sp1"></span><button class="icbtn" data-a="accSel" data-v="">${ic('x')}</button></div>
+ <div class="mb" style="padding-top:16px">
+  <div class="row-f" style="margin-bottom:14px"><span class="tag ${a.role==='管理员'?'pri':''}">${a.role}</span>${a.off?'<span class="tag err">已停用</span>':'<span class="tag ok">启用中</span>'}<span class="hint">注册于 ${a.reg} · ${a.ag} 个智能体</span></div>
+  <div class="sec-t">本月消耗</div><div class="row-f" style="margin-bottom:4px"><b style="font-size:18px">${a.used.toLocaleString()}</b><span class="mut">/ ${a.lim==null?'不限':a.lim.toLocaleString()} 积分</span></div>
+  ${a.lim?`<div class="prog" style="margin-bottom:18px"><i style="width:${Math.min(100,a.used/a.lim*100)}%;background:${a.used/a.lim>.8?'var(--warn)':'var(--pri)'}"></i></div>`:'<div style="height:12px"></div>'}
+  <div class="sec-t">月度上限</div><div class="row-f"><input class="inp" id="accLim" value="${a.lim==null?'':a.lim}" placeholder="留空表示不限"><span class="mut" style="white-space:nowrap">积分</span><button class="btn" data-a="accSaveLim">保存</button></div>
+  <div class="hint" style="margin:4px 0 18px">留空表示不限，0 表示禁止消费；超过后新运行会被拒绝。</div>
+  <div class="sec-t">角色</div><div class="row-f" style="margin-bottom:18px"><span style="flex:1">${a.role==='管理员'?'可以访问平台管理':'只能管理自己的资源'}</span><button class="btn ${a.self?'dis':''}" data-a="accRoleT">${a.role==='管理员'?'取消管理员':'设为管理员'}</button></div>
+  ${a.self?'<div class="hint" style="margin:-12px 0 18px">不能修改自己的角色或停用自己。</div>':''}
+  <div class="sec-t">密码</div>
+  ${S.accPwd?`<div class="onetime" style="margin-bottom:18px"><div class="row-f" style="color:var(--warn-tx);font-weight:600">${ic('alert','s14')}一次性密码，只显示这一次</div><div class="kv">${S.accPwd}</div><button class="btn sm" data-a="copy" data-v="${S.accPwd}">${ic('copy','s14')}复制</button></div>`:`<div class="row-f" style="margin-bottom:18px"><span style="flex:1" class="mut">生成新的一次性密码，旧密码立即失效</span><button class="btn" data-a="accPwd">重置密码</button></div>`}
+  <div class="sec-t">${a.off?'恢复账号':'停用账号'}</div>
+  ${a.off?`<div class="row-f"><span style="flex:1" class="mut">恢复后该账号的 Key 需要重新签发</span><button class="btn" data-a="accOff">恢复</button></div>`:
+   S.accConfirmOff?`<div class="result err" style="display:block"><div>停用会立即登出该账号，并停用它的全部 Key；恢复后 Key 需要重新签发。</div><div class="row-f" style="margin-top:8px;justify-content:flex-end"><button class="btn sm" data-a="accOffCancel">取消</button><button class="btn sm dangerfill" data-a="accOff">确认停用</button></div></div>`:
+   `<div class="row-f"><span style="flex:1" class="mut">立即登出并停用该账号的 Key</span><button class="btn danger ${a.self?'dis':''}" data-a="accOffAsk">停用</button></div>`}
+  <div class="hint" style="margin-top:22px;padding-top:12px;border-top:1px solid var(--line)">${ic('lock','s14')} 会话是私有的，管理员也看不到这个账号的对话内容。</div></div></div>`;
+}
+A.adminTab=v=>{S.adminTab=v;render();};
+A.accRole=v=>{S.accRole=v;render();};
+A.accSel=v=>{S.accSel=v||null;S.accPwd=null;S.accConfirmOff=false;render();};
+A.accSaveLim=()=>{const a=S.acc.find(x=>x.e===S.accSel);const v=document.getElementById('accLim').value.trim();a.lim=v===''?null:+v;a.legacy=false;render();toast('月度上限已保存');};
+A.accRoleT=()=>{const a=S.acc.find(x=>x.e===S.accSel);if(a.self)return;a.role=a.role==='管理员'?'普通账号':'管理员';render();toast('角色已更新');};
+A.accPwd=()=>{S.accPwd='Xh-'+Math.random().toString(36).slice(2,6)+'-'+Math.random().toString(36).slice(2,6)+'-'+Math.floor(Math.random()*90+10);render();};
+A.accOffAsk=()=>{S.accConfirmOff=true;render();};
+A.accOffCancel=()=>{S.accConfirmOff=false;render();};
+A.accOff=()=>{const a=S.acc.find(x=>x.e===S.accSel);a.off=!a.off;S.accConfirmOff=false;render();toast(a.off?'已停用，该账号已登出':'已恢复，Key 需要重新签发');};
+A.createAcc=()=>{S.modal='createAcc';S.newPwd=null;render();};
+function mCreateAcc(){
+ return `<div class="modal" style="width:460px"><div class="mh"><h2>创建账号</h2><span class="sp1"></span><button class="icbtn" data-a="close">${ic('x')}</button></div><div class="mb">
+ ${S.newPwd?`<div class="onetime"><div class="row-f" style="color:var(--warn-tx);font-weight:600">${ic('alert','s14')}初始密码只显示这一次</div><div class="kv">${S.newPwd}</div><div class="hint">请通过安全渠道发给对方，首次登录后建议修改。</div></div>`:
+ `<div class="fld"><label class="lbl">邮箱 <b>*</b></label><input class="inp" id="caE" placeholder="name@xinghe.example"></div><label class="lbl">角色</label><div class="seg"><button class="on">普通账号</button><button>管理员</button></div>`}</div>
+ <div class="mf">${S.newPwd?`<button class="btn" data-a="copy" data-v="${S.newPwd}">复制</button><button class="btn pri" data-a="close">完成</button>`:`<button class="btn" data-a="close">取消</button><button class="btn pri" data-a="createAccGo">创建</button>`}</div></div>`;
+}
+A.createAccGo=()=>{const e=document.getElementById('caE').value.trim()||'newuser@xinghe.example';S.acc.push({e,n:e[0].toUpperCase(),role:'普通账号',reg:'2026-11-11',ag:0,used:0,lim:null});S.newPwd='Xh-'+Math.random().toString(36).slice(2,8)+'-'+Math.floor(Math.random()*90+10);render();};
+
+/* ========== 5 移动端 ========== */
+function phone(inner,tab){
+ const tabs=[['compass','探索'],['chat','对话'],['studio','工作室'],['user','账户']];
+ return `<div class="phone"><div class="notch"></div><div class="sbar"><span>14:52</span><span style="display:flex;gap:4px;align-items:center"><i style="width:16px;height:10px;border-radius:2px;border:1.5px solid #1C1F23;display:inline-block"></i></span></div>${inner}
+ ${tab!=null?`<div class="ph-tab">${tabs.map(([i,l],k)=>`<button class="${k===tab?'on':''}">${ic(i)}<span>${l}</span></button>`).join('')}</div>`:''}</div>`;
+}
+function rMobile(){
+ const ex=AG('expense-reviewer');
+ let p1;
+ if(S.mob1==='list') p1=phone(`<div class="ph-body"><div style="padding:6px 16px 10px"><div style="font-size:24px;font-weight:600">探索</div>
+  <div class="search" style="width:100%;margin-top:10px">${ic('search')}<input class="inp" style="height:44px;font-size:16px;border-radius:12px" placeholder="搜索智能体"></div></div>
+  <div style="display:flex;gap:8px;padding:0 16px 10px;overflow:auto">${CATS.map((c,i)=>`<span class="tag ${i===0?'pri':''}" style="height:32px;padding:0 12px;font-size:14px;border-radius:16px">${c}</span>`).join('')}</div>
+  <div style="margin:0 16px 8px;border-radius:14px;background:linear-gradient(115deg,#3F45D9,#7B7FF2);color:#fff;padding:16px;cursor:pointer" data-a="mob1" data-v="detail"><div style="font-size:12px;opacity:.85">本周精选</div><div style="font-size:18px;font-weight:600;margin:2px 0">报销审核助手</div><div style="font-size:14px;color:#E4E6FF">一条消息完成报销初审</div></div>
+  ${AGENTS.slice(0,6).map(a=>`<div class="mrow" data-a="mob1" data-v="${a.id==='expense-reviewer'?'detail':'list'}">${av(a,48)}<div style="flex:1;min-width:0"><div style="font-weight:600">${a.name}</div><div style="font-size:14px;color:var(--tx2);display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden">${a.desc}</div><div style="font-size:12px;color:var(--tx2);margin-top:2px">${a.uses} 次 · 约 ${a.price} 积分/次</div></div></div>`).join('')}</div>`,0);
+ else p1=phone(`<div class="ph-body"><div style="display:flex;align-items:center;height:44px;padding:0 8px"><button class="icbtn" style="width:44px;height:44px" data-a="mob1" data-v="list">${ic('back','s20')}</button></div>
+  <div style="text-align:center;padding:4px 20px 0">${av(ex,72)}<div style="font-size:22px;font-weight:600;margin-top:10px">报销审核助手</div><div style="font-size:14px;color:var(--tx2)">林舟 · v${S.version} · 办公运营</div>
+  <div style="display:flex;justify-content:center;gap:28px;margin:14px 0"><div><b>1,286</b><div style="font-size:12px;color:var(--tx2)">次使用</div></div><div><b>约 9</b><div style="font-size:12px;color:var(--tx2)">积分/次</div></div><div><b>6/6</b><div style="font-size:12px;color:var(--tx2)">评测通过</div></div></div></div>
+  <div style="padding:0 20px"><p style="margin:0 0 14px;line-height:1.6">读取发票和报销单，按公司制度做初审，超额提醒审批。</p><div style="font-size:13px;color:var(--tx2);margin-bottom:8px">可以这样问</div>
+  ${['这张 6800 元的会议费发票需要审批吗？','打车费能报吗？','美元发票怎么换算？'].map(q=>`<div style="border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:8px;font-size:15px">${q}</div>`).join('')}</div></div>
+  <div style="padding:10px 16px 28px;border-top:1px solid var(--line);display:flex;gap:10px"><button class="pbtn" style="background:#F0F1F5;width:110px">克隆</button><button class="pbtn" style="background:var(--pri);color:#fff">立即使用</button></div>`,null);
+ const p2=phone(`<div style="display:flex;align-items:center;gap:8px;height:52px;padding:0 8px;border-bottom:1px solid var(--line)"><button class="icbtn" style="width:44px;height:44px">${ic('back','s20')}</button>${av(ex,30)}<div style="flex:1;min-width:0"><div style="font-weight:600;font-size:16px">杭州出差报销</div><div style="font-size:12px;color:var(--tx2)">报销审核助手 · v${S.version}</div></div><button class="icbtn" style="width:44px;height:44px">${ic('more','s20')}</button></div>
+ <div class="ph-body" style="padding:14px 14px 0;background:#FAFAFC">
+  <div style="display:flex;justify-content:flex-end;margin-bottom:12px"><div style="background:var(--pri);color:#fff;border-radius:16px 4px 16px 16px;padding:10px 14px;max-width:260px">帮我看下这 4 张发票，能报的直接提交</div></div>
+  <div style="background:#fff;border:1px solid var(--line);border-radius:12px;margin-bottom:8px"><button style="display:flex;align-items:center;gap:8px;width:100%;min-height:44px;padding:0 12px;border:0;background:none;font-size:14px;color:var(--tx2)" data-a="mobTools">${ic('list','s14')}<span style="flex:1;text-align:left">调用了 3 次工具 · 全部成功</span>${ic(S.mobTools?'chevD':'chevR','s14')}</button>
+  ${S.mobTools?`<div style="padding:0 12px 10px;font-size:14px">${['invoice-ocr · 识别 4 张发票','检索知识 · 命中 2 段','erp-finance.query_budget'].map(t=>`<div style="display:flex;gap:6px;align-items:center;height:30px"><span style="color:var(--ok)">${ic('check','s14')}</span>${t}</div>`).join('')}</div>`:''}</div>
+  <div style="background:#fff;border-radius:4px 16px 16px 16px;padding:12px 14px;margin-bottom:10px;border:1px solid var(--line)">合计 3,412.50 元。高铁和打车可直接报；酒店超标 380 元、餐饮人均 198 元，需要审批。</div>
+  <div style="background:#fff;border:1.5px solid #D9DBF4;border-radius:14px;padding:14px;margin-bottom:14px"><div style="font-weight:600;margin-bottom:10px">这 4 张发票要怎么提交？</div>
+   ${['合并成一张报销单','能报的先提交，需审批的分开','其他（自己填写）'].map((o,i)=>`<div class="opt ${S.mobAsk===i?'on':''}" style="min-height:48px;font-size:16px" data-a="${S.mobAskDone?'noop':'mobAsk'}" data-v="${i}"><span class="rd"></span>${o}</div>`).join('')}
+   <button class="pbtn" style="margin-top:6px;background:${S.mobAskDone?'var(--ok-bg)':S.mobAsk==null?'#E6E7EE':'var(--pri)'};color:${S.mobAskDone?'var(--ok-tx)':S.mobAsk==null?'var(--tx2)':'#fff'}" data-a="mobAskGo">${S.mobAskDone?'已回答':S.mobAsk==null?'请先选择一项':'提交回答'}</button></div></div>
+ <div style="padding:8px 12px 30px;border-top:1px solid var(--line);background:#fff"><div class="cbox" style="border-radius:22px;align-items:center"><textarea style="height:28px;font-size:16px;overflow:hidden" placeholder="说点什么"></textarea><button class="sendb" style="width:36px;height:36px;border-radius:18px">${ic('send','s14')}</button></div></div>`,null);
+ const steps=[['编排','提示词与 12 项能力','ok'],['评测',evalOK()?`${S.lastEval.p}/${S.lastEval.t} 通过`:'6/6 通过','ok'],['发布',S.mobPub==='done'?`v${S.version+ (S.changes?1:0)} 已上线`:S.mobPub==='run'?'正在发布…':`草稿有 ${S.changes||4} 处修改`,S.mobPub==='done'?'ok':S.mobPub==='run'?'run':'cur'],['接入','签发 Key、复制代码',S.mobPub==='done'?'cur':'wait']];
+ const p3=phone(`<div style="display:flex;align-items:center;gap:8px;height:52px;padding:0 8px"><button class="icbtn" style="width:44px;height:44px">${ic('back','s20')}</button><div style="font-weight:600;font-size:17px">发布</div></div>
+ <div class="ph-body" style="padding:6px 18px">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">${av(ex,52)}<div><div style="font-weight:600;font-size:18px">报销审核助手</div><div style="font-size:14px;color:var(--tx2)">当前发布 v${S.version} · 自动保存于 14:32</div></div></div>
+  ${steps.map(([t,s,st],i)=>`<div style="display:flex;gap:12px;min-height:64px"><div style="display:flex;flex-direction:column;align-items:center"><span class="ckic ${st==='ok'?'ok':'wait'}" style="width:28px;height:28px;${st==='cur'?'background:var(--pri);color:#fff':''}">${st==='ok'?ic('check'):st==='run'?'<span class="spin"></span>':`<b style="font-size:13px">${i+1}</b>`}</span>${i<3?`<i style="flex:1;width:2px;background:${st==='ok'?'var(--ok)':'#E6E7EE'};margin:4px 0"></i>`:''}</div><div style="padding-top:2px"><div style="font-weight:600">${t}</div><div style="font-size:14px;color:var(--tx2)">${s}</div></div></div>`).join('')}
+  <div style="background:#F7F7FA;border-radius:12px;padding:12px 14px;margin-top:8px;font-size:14px;color:var(--tx2)">发布后接口调用和其他用户使用新版本，进行中的会话不受影响。</div></div>
+ <div style="padding:10px 16px 30px">${S.mobPub==='done'?`<button class="pbtn" style="background:var(--pri);color:#fff" data-a="noop">${ic('key','s18')}去接入</button>`:`<button class="pbtn" style="background:var(--pri);color:#fff" data-a="mobPub">${S.mobPub==='run'?'<span class="spin" style="border-color:rgba(255,255,255,.4);border-top-color:#fff"></span>发布中…':'发布为 v'+(S.version+1)}</button>`}</div>`,null);
+ return `<div class="mob-stage">${[['市场 / 详情（点卡片进入详情）',p1],['对话：工具调用摘要＋提问卡片',p2],['发布进度',p3]].map(([c,p])=>`<div class="phone-w"><div class="cap">${c}</div>${p}</div>`).join('')}</div>`;
+}
+A.mob1=v=>{S.mob1=v;render();};
+A.mobTools=()=>{S.mobTools=!S.mobTools;render();};
+A.mobAsk=v=>{S.mobAsk=+v;render();};
+A.mobAskGo=()=>{if(S.mobAsk!=null){S.mobAskDone=true;render();}};
+A.mobPub=()=>{if(S.mobPub!=='idle')return;S.mobPub='run';render();setTimeout(()=>{S.mobPub='done';render();},1200);};
+
+render();
+</script>
+</body>
+</html>

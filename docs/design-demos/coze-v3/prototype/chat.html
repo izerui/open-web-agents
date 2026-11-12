@@ -1,0 +1,1066 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>对话 · Open Web Agents</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/owa.css">
+<style>
+/* ===== 对话页（ch- 前缀） ===== */
+.slist{background:var(--bg)}
+.ch-lhead{padding:14px 12px 6px;display:flex;gap:8px;align-items:center}
+.ch-lsearch{position:relative;flex:1;min-width:0}
+.ch-lsearch svg{position:absolute;left:10px;top:10px;color:var(--sub)}
+.ch-lsearch .inp{padding-left:32px;height:36px}
+.ch-lbody{flex:1;overflow:auto;padding:0 10px 10px}
+.ch-row{position:relative;display:flex;align-items:center;gap:9px;padding:8px 8px 8px 10px;border-radius:12px;cursor:pointer;border:1px solid transparent;min-height:46px}
+.ch-row:hover{background:#EFEDE7}
+.ch-row.on{background:#fff;border-color:var(--line);box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.ch-row .tt{flex:1;min-width:0}
+.ch-row .t1{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.35}
+.ch-row .t2{font-size:12px;color:var(--sub);display:flex;align-items:center;gap:6px;line-height:1.4;white-space:nowrap;overflow:hidden}
+.ch-row .t2 .tag{height:18px;font-size:12px;padding:0 6px}
+.ch-row .more{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;color:var(--sub);opacity:0;flex:none}
+.ch-row:hover .more,.ch-row.on .more,.ch-row .more:focus-visible{opacity:1}
+.ch-row .more:hover{background:#E6E3DB;color:var(--ink)}
+.ch-row .spin{width:14px;height:14px}
+.ch-lfoot{padding:10px 12px 54px;border-top:1px solid var(--line)}
+.ch-lfoot .ibtn{width:100%;justify-content:flex-start;height:36px}
+.ch-lempty{padding:28px 14px;text-align:center;color:var(--sub);font-size:13px}
+
+.cmain{padding:16px 0 16px 16px}
+.ch-hd{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--line2);min-height:66px}
+.ch-hd .avl{display:flex;border-radius:50%}
+.ch-hd .ti{font-weight:600;font-size:15.5px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ch-hd .sub{font-size:14px;color:var(--sub);display:flex;align-items:center;gap:4px 8px;margin-top:2px;min-width:0;flex-wrap:wrap}
+.ch-hd .sub>*{white-space:nowrap}
+.ch-hd .sub a{color:var(--ink);font-weight:500;text-decoration:none}
+.ch-hd .sub a:hover{text-decoration:underline;text-underline-offset:3px}
+.ch-hd .sub .tag{height:20px}
+.ch-tog{height:34px;padding:0 12px;border-radius:17px;border:1px solid var(--line);background:#fff;display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#3C3A35;white-space:nowrap}
+.ch-tog:hover{background:#F4F2EC}
+.ch-tog.on{background:var(--btn);color:#fff;border-color:var(--btn)}
+.ch-bar{display:flex;align-items:center;gap:8px;margin:10px 20px 0;padding:8px 12px;border-radius:10px;font-size:14px;background:#F4F2EC;color:#3C3A35}
+.ch-bar.warn{background:var(--warnbg);color:var(--warnt)}
+.ch-bar.info{background:#EEF1F4;color:#34465A}
+.ch-bar .link{margin-left:auto;white-space:nowrap}
+
+.ch-sw{flex:1;min-height:0;position:relative;display:flex}
+.ch-stream{flex:1;overflow:auto;padding:22px 64px 28px 36px;scroll-behavior:smooth}
+.ch-inner{max-width:780px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+.ch-turn{display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px}
+.ch-turn+.ch-turn{padding-top:18px;border-top:1px dashed var(--line)}
+.ch-me{max-width:78%;font-size:14.5px}
+.ch-att{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.ch-att .tag{background:rgba(255,255,255,.7)}
+.ch-fork{align-self:flex-end;font-size:12.5px;color:var(--sub);display:flex;align-items:center;gap:6px;margin-bottom:-4px}
+.ch-tx{font-size:14.5px;line-height:1.75}
+.ch-tx ul{margin:6px 0;padding-left:20px}
+.ch-tx li{margin:2px 0}
+.ch-cont{margin-left:40px;display:flex;flex-direction:column;gap:10px}
+.m-bot .bd{display:flex;flex-direction:column;gap:8px}
+.m-bot .who{margin-bottom:0}
+.ch-think{border-left:2px solid #DAD6CC;padding:0 0 0 12px}
+.ch-think>button{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--sub);height:26px}
+.ch-think>button:hover{color:var(--ink)}
+.ch-think .chev{transition:transform .2s}
+.ch-think.open .chev{transform:rotate(90deg)}
+.ch-think .tb2{display:none;font-size:14px;color:#55524B;line-height:1.7;padding:2px 0 4px}
+.ch-think.open .tb2{display:block}
+.ch-tools{border:1px solid var(--line);border-radius:12px;background:#FBFAF7}
+.ch-tools .hd{display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;font-size:14px;color:#3C3A35;text-align:left;min-height:38px}
+.ch-tools .hd .bad{color:var(--bad)}
+.ch-tools .hd .chev{color:var(--sub);transition:transform .2s}
+.ch-tools.open .hd .chev{transform:rotate(90deg)}
+.ch-tools .ls{display:none;border-top:1px solid var(--line2);padding:4px}
+.ch-tools.open .ls{display:block}
+.ch-ti{display:flex;align-items:center;gap:8px;width:100%;padding:6px 8px;border-radius:8px;text-align:left;font-size:14px;min-height:34px}
+.ch-ti:hover{background:#F1EFE9}
+.ch-ti .nm{font-family:var(--mono);font-size:12.5px;color:var(--ink);white-space:nowrap}
+.ch-ti .ds{color:var(--sub);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ch-ti .du{color:var(--sub);font-size:12px;font-variant-numeric:tabular-nums}
+.ch-ti .tag{height:20px}
+.st-ok{color:var(--ok)}
+.st-fail{color:var(--bad)}
+.st-wait{color:var(--warnt)}
+.ch-steer{align-self:flex-end;max-width:72%;border:1px dashed #C9C4B8;background:#FAF9F5;border-radius:14px 14px 4px 14px;padding:8px 14px;font-size:14px}
+.ch-steer .lb{font-size:12px;display:flex;align-items:center;gap:5px;margin-bottom:2px}
+.ch-steer .lb.ok{color:var(--ok)}
+.ch-steer .lb.warn{color:var(--warnt)}
+.ch-steer .lb.wait{color:var(--sub)}
+.ch-res{border-radius:14px;padding:12px 14px;border:1px solid}
+.ch-res .t{display:flex;align-items:center;gap:6px;font-weight:600;font-size:14px}
+.ch-res.json{border-color:#D3E2D6;background:#F3F7F3}
+.ch-res.json .t{color:var(--ok)}
+.ch-res.fail{border-color:#EBC5BB;background:#FCF3F0}
+.ch-res.fail .t{color:var(--bad)}
+.ch-res.cancel{border-color:var(--line);background:#F6F5F1}
+.ch-res.cancel .t{color:#4D4A43}
+.ch-res .code{font-size:14px;margin-top:8px;white-space:pre-wrap}
+.ch-res p{margin:4px 0 0;font-size:14px;color:#4A4740}
+.ch-meta{display:flex;align-items:center;gap:4px;font-size:12.5px;color:var(--sub);flex-wrap:wrap}
+.ch-meta .tok{margin-right:6px;font-variant-numeric:tabular-nums}
+.ch-live{display:inline-flex;align-items:center;gap:8px;font-size:14px;color:var(--sub)}
+.ch-rail{position:absolute;right:12px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:4px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:5px}
+.ch-rail button{width:28px;height:26px;border-radius:8px;font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums}
+.ch-rail button:hover{background:#F1EFE9;color:var(--ink)}
+.ch-rail button.on{background:var(--btn);color:#fff}
+.ch-latest{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);height:34px;padding:0 14px;border-radius:17px;background:#fff;border:1px solid var(--line);box-shadow:0 6px 18px rgba(40,35,25,.12);display:flex;align-items:center;gap:6px;font-size:13px}
+.ch-latest:hover{background:#F4F2EC}
+.ch-latest[hidden],.cside[hidden],.ch-rs[hidden]{display:none}
+.ch-flash{animation:chflash 1.6s ease-out}
+@keyframes chflash{0%{background:#FCE9B8}100%{background:transparent}}
+
+/* 提问卡片 */
+.askc{margin-top:0}
+.askc .hd2{display:flex;align-items:center;gap:6px;font-size:13px}
+.askc .hd2.pending{color:var(--warnt)}
+.askc .hd2.ok{color:var(--ok)}
+.askc .hd2.mut{color:var(--sub)}
+.askc .q{display:flex;align-items:center;gap:8px}
+.askc .q .tag{font-weight:400}
+.askc .opt[disabled]{cursor:default;color:#4D4A43}
+.askc .opt.on[disabled]{color:var(--ink)}
+.askc .oth{margin-top:8px;height:34px;font-size:14px}
+.askc.pend{border-color:#E7C78C;box-shadow:0 0 0 3px #FBF3E2}
+.askc .ft{flex-wrap:wrap}
+.askc.mute{background:#F8F7F3}
+
+/* 底部：审批、授权、排队、输入框 */
+.ch-dock{flex:none;padding-top:4px}
+.approval .snap{white-space:pre-wrap;word-break:break-all}
+.approval .row{flex-wrap:wrap}
+.approval .cd{margin-left:auto;font-variant-numeric:tabular-nums}
+.approval .why{display:flex;gap:8px;margin-top:8px}
+.approval.err{background:#FCF3F0;border-color:#EBC5BB}
+.ch-grants{display:flex;align-items:center;gap:8px;margin:0 20px 8px;font-size:13px;color:var(--sub);flex-wrap:wrap}
+.ch-grants .g{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 4px 0 10px;border-radius:13px;background:var(--okbg);color:#2C5C40;font-family:var(--mono);font-size:12px}
+.ch-grants .g button{height:22px;padding:0 8px;border-radius:11px;font-family:var(--sans);font-size:12px;color:#2C5C40}
+.ch-grants .g button:hover{background:#D6E5DA}
+.ch-queue{margin:0 20px 8px;border:1px solid var(--line);border-radius:12px;background:#FBFAF7;padding:6px 8px}
+.ch-queue .qh{font-size:12.5px;color:var(--sub);padding:2px 6px 4px;display:flex;align-items:center;gap:6px}
+.ch-queue .qi{display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:8px;font-size:14px}
+.ch-queue .qi:hover{background:#F1EFE9}
+.ch-queue .qi .x{width:26px;height:26px;border-radius:13px;display:grid;place-items:center;color:var(--sub)}
+.ch-queue .qi .x:hover{background:#E6E3DB;color:var(--ink)}
+.composer{margin:0 20px 16px;position:relative}
+.composer textarea{height:44px;font-size:14.5px}
+.composer .bar{gap:8px}
+.composer .bar>.ibtn,.composer .bar>.ch-ctx{white-space:nowrap;flex:none}
+.ch-ctx{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sub);height:30px;padding:0 6px;border-radius:15px}
+.ch-ctx:hover{background:#F1EFE9}
+.sendbtn[disabled],.ibtn[disabled]{opacity:.4;cursor:not-allowed}
+.ch-stop{width:34px;height:34px;border-radius:50%;background:var(--btn);color:#fff;display:grid;place-items:center}
+.ch-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+.ch-chips .tag{padding-right:3px}
+.ch-chips .tag button{width:18px;height:18px;border-radius:9px;display:grid;place-items:center}
+.ch-chips .tag button:hover{background:#DDD9CF}
+.slash{width:300px;z-index:5}
+.slash div{display:flex;gap:10px;align-items:center;cursor:pointer}
+.slash div.sel{background:#EFEDE7}
+.slash div b{font-family:var(--mono);font-weight:600;width:64px}
+.slash .sh{font-size:12px;color:var(--sub);padding:4px 10px 2px;cursor:default}
+.slash .sh:hover{background:none}
+.ch-attmenu{position:absolute;bottom:46px;left:8px;z-index:5;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.08);padding:6px;width:250px}
+.ch-attmenu button{display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;border-radius:8px;font-size:14px;text-align:left}
+.ch-attmenu button:hover{background:#F4F2EC}
+.ch-attmenu .h{font-size:12px;color:var(--sub);padding:6px 10px 2px}
+
+/* 空状态 */
+.ch-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 40px;text-align:center}
+.ch-empty h2{font-family:var(--serif);font-size:28px;margin:18px 0 6px;line-height:1.3}
+.ch-empty p{color:var(--sub);margin:0;max-width:460px}
+.ch-starters{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:24px;width:min(560px,100%)}
+.ch-starters button{border:1px solid var(--line);background:#FBFAF7;border-radius:14px;padding:12px 14px;text-align:left;font-size:14px;display:flex;align-items:center;gap:8px}
+.ch-starters button:hover{border-color:#BDB8AC;background:#fff}
+.ch-empty a.btn{color:#fff}
+.ch-empty a.btn.ghost{color:var(--ink)}
+.ch-loading{flex:1;display:flex;align-items:center;justify-content:center;gap:10px;color:var(--sub)}
+
+/* 右侧面板 */
+.cside{padding:16px 16px 16px 0;width:400px}
+.ch-rs{width:16px;flex:none;cursor:col-resize;position:relative}
+.ch-rs::after{content:"";position:absolute;left:7px;top:40%;height:20%;width:3px;border-radius:2px;background:#D9D5CB;transition:background .2s}
+.ch-rs:hover::after,.ch-rs.drag::after{background:#8E897D}
+.ch-ph{display:flex;align-items:center;gap:8px;padding:10px 12px 10px 14px;border-bottom:1px solid var(--line2)}
+.ch-ph .xbtn{width:32px;height:32px;margin-left:auto}
+.ch-path{display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--line2);font-size:12.5px;color:var(--sub)}
+.ch-path{white-space:nowrap}
+.ch-path code{overflow:hidden;text-overflow:ellipsis;min-width:0;font-family:var(--mono);color:#3C3A35;background:#F4F2EC;padding:2px 6px;border-radius:6px}
+.ch-ftree{padding:6px 8px;max-height:260px;overflow:auto;border-bottom:1px solid var(--line2);flex:none}
+.ch-ftree .f{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;font-size:14px;width:100%;text-align:left;min-height:32px}
+.ch-ftree .f:hover{background:#F4F2EC}
+.ch-ftree .f.on{background:#EFEDE7;font-weight:500}
+.ch-ftree .f .sz{margin-left:auto;font-size:12px;color:var(--sub)}
+.ch-ftree .f.new .nm::after{content:"新";margin-left:6px;font-size:12px;padding:1px 5px;border-radius:8px;background:#FBE7BD;color:#7A4F0C}
+.ch-prev{flex:1;min-height:0;display:flex;flex-direction:column}
+.ch-prevh{display:flex;align-items:center;gap:6px;padding:8px 10px 8px 16px;border-bottom:1px solid var(--line2)}
+.ch-prevh b{font-size:13px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ch-prevh .ibtn{padding:0 8px}
+.ch-prevb{flex:1;overflow:auto;padding:12px 14px}
+.ch-prevb iframe{width:100%;height:100%;min-height:360px;border:0;background:#fff}
+.ch-prevb .code{font-size:14px;white-space:pre;padding:12px}
+.ch-trunc{margin-top:8px;font-size:12.5px;color:var(--warnt);background:var(--warnbg);border-radius:8px;padding:8px 10px;display:flex;gap:6px;align-items:center}
+.ch-pdf{background:#EDEBE5;border-radius:10px;padding:14px}
+.ch-pdf .pg{background:#fff;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,.08);padding:18px 18px 22px;font-size:14px;line-height:1.7}
+.ch-pdf .pg h5{margin:0 0 8px;font-size:14px;text-align:center;letter-spacing:.1em;color:#8F3423}
+.ch-img{display:flex;justify-content:center;background:#EDEBE5;border-radius:10px;padding:16px}
+.ch-rcpt{width:200px;background:#fff;padding:14px 14px 18px;font-size:12px;line-height:1.6;box-shadow:0 2px 8px rgba(0,0,0,.1);transform:rotate(-1.5deg);font-family:var(--mono)}
+.ch-pempty{padding:40px 22px;text-align:center;color:var(--sub);font-size:14px}
+.ch-pempty .serif{font-size:17px;color:var(--ink);margin:10px 0 4px}
+.ch-tr{flex:1;overflow:auto;padding:10px 12px 16px}
+.ch-trh{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;padding:10px 4px 6px}
+.ch-trh .muted{font-weight:400}
+.ch-tri{border:1px solid var(--line);border-radius:10px;margin-bottom:6px;overflow:hidden;transition:box-shadow .3s}
+.ch-tri>button{display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;text-align:left;font-size:13px;min-height:38px}
+.ch-tri>button:hover{background:#FAF9F6}
+.ch-tri .nm{font-family:var(--mono);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.ch-tri .du{margin-left:auto;color:var(--sub);font-size:12px;white-space:nowrap}
+.ch-tri .det{display:none;padding:2px 12px 12px;font-size:13px;border-top:1px solid var(--line2)}
+.ch-tri.open .det{display:block}
+.ch-tri.sel{border-color:#9C978B;box-shadow:0 0 0 3px #ECE9E1}
+.ch-tri .det .lb{font-size:12px;color:var(--sub);margin:10px 0 4px}
+.ch-tri .det .snap{margin:0;font-size:13px;max-height:160px;overflow:auto;white-space:pre-wrap;word-break:break-all}
+.ch-ti.sel{background:#EFEDE7;box-shadow:inset 3px 0 0 var(--ink)}
+.ch-tri.fail{border-color:#EBC5BB}
+
+/* 弹层内 */
+.ch-agl{display:flex;flex-direction:column;gap:4px;max-height:430px;overflow:auto;margin:12px -6px 0;padding:0 6px}
+.ch-agi{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:12px;text-align:left;width:100%;border:1px solid transparent}
+.ch-agi:hover{background:#F6F5F1;border-color:var(--line)}
+.ch-agi .n{font-weight:600}
+.ch-agi .d{font-size:12.5px;color:var(--sub)}
+.ch-agh{font-size:12px;color:var(--sub);padding:10px 12px 2px}
+
+/* 拖放覆盖层与提示卡 */
+.ch-drop{position:fixed;inset:0;z-index:85;background:rgba(247,246,242,.86);display:none;align-items:center;justify-content:center}
+.ch-drop.on{display:flex}
+.ch-drop .bx{border:2px dashed #9C978B;border-radius:24px;padding:48px 80px;text-align:center;background:#fff}
+.ch-drop .bx .serif{font-size:26px;margin:12px 0 4px}
+.ch-note{position:fixed;top:72px;right:24px;z-index:60;width:360px;background:#fff;border:1px solid #E7C78C;border-radius:16px;box-shadow:0 14px 40px rgba(40,35,25,.16);padding:14px 16px;animation:rise .25s}
+.ch-note .row{align-items:flex-start}
+#ch-proto{position:fixed;left:122px;bottom:14px;z-index:100;height:30px;padding:0 4px 0 12px;border-radius:15px;background:#2A2926;color:#E9E6DE;font-size:12px;display:flex;align-items:center;gap:6px;opacity:.82}
+#ch-proto:hover{opacity:1}
+#ch-proto select{background:#3A3935;color:#fff;border:0;border-radius:11px;height:22px;font-size:12px;padding:0 6px;outline:none}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="assets/owa.js"></script>
+<script>
+"use strict";
+/* 对话（原 / 工作台）：会话列表、对话流、提问、审批、变量、输入框、工作区文件、执行详情 */
+
+/* ---------- 智能体信息（与 owa.js 的 MARKET / MY_AGENTS 一致） ---------- */
+const SONNET = { model: "claude-sonnet-4-5", price: "输入 300 / 输出 1500 积分每百万 token" };
+const HAIKU = { model: "claude-haiku-4-5", price: "输入 80 / 输出 400 积分每百万 token" };
+const AGI = {
+  "expense-reviewer": { n: "报销审核助手", href: "build.html", ...SONNET, d: "读取发票和报销单，按公司制度做初审，超额提醒审批", starters: ["这批 11 月差旅报销能过吗？", "这张发票抬头对吗", "外币发票怎么换算", "餐饮超标准怎么处理"], vars: true },
+  meeting: { n: "会议纪要整理", href: "build.html", ...HAIKU, d: MARKET[0].d, starters: MARKET[0].starters },
+  sql: { n: "SQL 助手", href: "market-detail.html", ...HAIKU, d: MARKET[3].d, starters: MARKET[3].starters },
+  contract: { n: "合同条款比对", href: "market-detail.html", ...SONNET, d: MARKET[5].d, starters: MARKET[5].starters },
+  weekly: { n: "周报生成器", href: "build.html", ...HAIKU, d: MARKET[7].d, starters: MARKET[7].starters },
+  kb: { n: "客服知识问答", href: "market-detail.html", ...HAIKU, d: MARKET[6].d, starters: MARKET[6].starters },
+  review: { n: "代码审查员", href: "market-detail.html", ...SONNET, d: MARKET[2].d, starters: MARKET[2].starters },
+  rival: { n: "竞品周报", href: "market-detail.html", ...SONNET, d: MARKET[1].d, starters: MARKET[1].starters },
+  xhs: { n: "小红书文案", href: "market-detail.html", ...HAIKU, d: MARKET[4].d, starters: MARKET[4].starters },
+  currency: { n: "汇率换算", href: "build.html", ...HAIKU, d: "按开票日查询汇率并换算", starters: ["USD 420 按 10-15 汇率换算"] },
+  default: { n: "通用助手", href: "build.html", ...SONNET, d: "平台内置的通用对话智能体", starters: ["帮我写一封请假邮件", "解释一下这段报错", "把这段话改得更简洁"] },
+};
+/* 会话的版本徽标：编辑者跑草稿；他人跑发布版；会话可锁定版本 */
+const BADGE = {
+  s1: ["草稿", "warn", "你有编辑权限，跑的是草稿（含 4 处未发布修改）；已发布版本是 v3"],
+  s2: ["v5 锁定", "", "这个会话创建时锁定在 v5，智能体之后的发布不影响它"],
+  s3: ["已发布 v4", "ok", "你没有编辑权限，跑的是已发布版本"],
+  s4: ["草稿", "warn", "你有编辑权限，跑的是草稿"],
+  s5: ["已发布 v3", "ok", "分享给你（只读），跑的是已发布版本"],
+  s6: ["v4 锁定", "", "这个会话锁定在 v4"],
+  s7: ["已发布 v6", "ok", "市场智能体，跑的是已发布版本"],
+  s8: ["v3 锁定", "", "这个会话锁定在 v3"],
+};
+/* 新会话弹层里的「可用智能体」 */
+const PICK = [
+  ["我的", "expense-reviewer", "报销审核助手", "草稿，你有编辑权限（已发布 v3，草稿有 4 处修改）"],
+  ["我的", "meeting", "会议纪要整理", "草稿，你有编辑权限（已发布 v5）"],
+  ["我的", "weekly", "周报生成器", "草稿，你有编辑权限（已发布 v4）"],
+  ["分享给我", "contract", "合同条款比对", "已发布 v3，法务部 罗婧分享，只读"],
+  ["分享给我", "currency", "汇率换算", "草稿，财务部 钱晓分享，可编辑"],
+  ["市场", "sql", "SQL 助手", "已发布 v4，约 1 积分/次"],
+  ["市场", "review", "代码审查员", "已发布 v7，约 4 积分/次"],
+  ["市场", "kb", "客服知识问答", "已发布 v6，约 1 积分/次"],
+  ["内置", "default", "通用助手", "已发布，平台内置"],
+];
+
+/* ---------- 演示内容 ---------- */
+const TL = (id, name, ds, st, du, input, output, by) => ({ id, name, ds, st, du, input, output, by });
+function turnsFor(sid) {
+  if (sid === "s1") return [
+    { at: "14:02", user: { text: "这批 11 月差旅报销能过吗？12 张发票都在 invoices 里，超额的单独列出来。", att: [["file", "报销单-2026-11.xlsx"], ["folder", "invoices（12 个文件）"]] },
+      think: { sec: 6, text: "用户给了 12 张发票和一张报销单。先读报销单拿到每笔金额与类别，再用 invoice-ocr 识别抬头、税号、金额、日期。规则：单笔超过 5000 元需要部门负责人审批（制度第 7 条）；抬头必须是「星河数据科技有限公司」（第 12 条）；外币按开票日汇率换算，交给子代理 currency-converter。餐饮标准取决于城市，需要问用户。" },
+      tools: [
+        TL("a1", "Read", "读取 报销单-2026-11.xlsx", "ok", "0.3s", '{ "file_path": "报销单-2026-11.xlsx" }', "12 行：机票 2、酒店 3、高铁 4、餐饮 2、打车 1；合计 21,486.00 元"),
+        TL("a2", "invoice-ocr", "识别 12 张发票", "ok", "4.1s", '{ "dir": "invoices/", "fields": ["title", "tax_id", "amount", "date"] }', "12 张识别成功；1018 抬头为「星河数据」，缺少「科技有限公司」"),
+        TL("a3", "erp-finance.query_budget", "查本部门差旅预算", "fail", "30.0s", '{ "dept": "财务部", "month": "2026-11" }', "请求超时（30s）：erp.example.com 没有响应"),
+        TL("a4", "erp-finance.query_budget", "重试，查本部门差旅预算", "ok", "1.2s", '{ "dept": "财务部", "month": "2026-11" }', '{ "dept": "财务部", "travel_budget": 60000, "travel_remaining": 21000 }'),
+        TL("a5", "currency-converter", "子代理：换算 1 张美元发票", "ok", "2.4s", '{ "amount": 420, "currency": "USD", "date": "2026-10-15" }', "USD 420.00 × 7.1032 = 2,983.34 元"),
+        TL("a6", "WebFetch", "查询 10-15 人民币汇率中间价", "ok", "0.9s", '{ "url": "https://www.chinamoney.com.cn/chinese/bkccpr/", "prompt": "2026-10-15 USD/CNY 中间价" }', "2026-10-15 USD/CNY 中间价 7.1032", "currency-converter"),
+      ],
+      ask: { st: "answered", at: "14:03", qs: [{ q: "10-18 的餐饮发票 680 元、4 人用餐，按哪个城市标准算？", opts: ["一线城市每人 150 元", "其他城市每人 100 元", "按实报销"], pick: [1] }] },
+      text: `12 张发票已初审：<b>9 张通过，2 张需审批，1 张退回</b>。<ul><li>10-15 机票 6,800 元、10-21 酒店 5,400 元，单笔超过 5,000 元，需要部门负责人审批（制度第 7 条）。</li><li>10-18 餐饮 680 元的抬头写成了「星河数据」，缺少公司全称，应退回重开（第 12 条）；按其他城市标准 4 人上限 400 元，也超了 280 元。</li><li>USD 420 的酒店发票按开票日中间价 7.1032 换算为 2,983.34 元，未超标。</li></ul>`,
+      result: { kind: "json", body: '{\n  "verdict": "need_approval",\n  "passed": 9,\n  "need_approval": ["1015", "1021"],\n  "rejected": ["1018"],\n  "reasons": [\n    "1015 金额 6800 元超过单笔 5000 元（第 7 条）",\n    "1021 金额 5400 元超过单笔 5000 元（第 7 条）",\n    "1018 发票抬头缺少公司全称（第 12 条）"\n  ]\n}' },
+      tok: ["18,420", "2,106"] },
+    { at: "14:08", user: { text: "1021 酒店是两晚，每晚 2,700，能不能按每晚算、不走审批？", fork: "从第 1 轮之后分叉重跑" },
+      think: { sec: 3, text: "制度第 7 条的口径是「单笔」，需要确认单笔指单张发票还是单项费用。查一下制度原文。" },
+      tools: [
+        TL("b1", "policy-lookup", "查住宿标准与「单笔」口径", "ok", "0.4s", '{ "query": "单笔 超过 5000 审批 住宿 按晚" }', "命中第 7 条：「单笔」指单张发票金额；第 9 条：住宿按晚执行标准，跨晚不拆分审批"),
+        TL("b2", "Grep", "在制度里找「按晚」", "ok", "0.2s", '{ "pattern": "按晚", "path": "knowledge/差旅报销制度2026.pdf" }', "2 处匹配：第 9 条第 2 款、附录 B"),
+      ],
+      steers: [{ text: "顺便把美元那张的汇率出处也写上", st: "ok" }, { text: "把结果整理成 初审结果.md 放到工作区", st: "deferred" }],
+      text: `不行。制度第 7 条按<b>单张发票金额</b>判断，不按晚拆分：1021 是一张 5,400 元的发票，仍需部门负责人审批。如果酒店能按晚分开开票（每张 2,700 元），就不需要审批，但要在备注里写明入住日期（第 9 条第 2 款）。<br>汇率出处：中国外汇交易中心 2026-10-15 人民币汇率中间价，USD/CNY 7.1032。`,
+      tok: ["21,980", "864"] },
+    { at: "14:10", user: { text: "把结果整理成 初审结果.md 放到工作区" },
+      think: { sec: 0 },
+      tools: [
+        TL("c1", "Write", "写入 初审结果.md", "ok", "0.1s", '{ "file_path": "初审结果.md", "content": "# 11 月差旅报销初审 …（38 行）" }', "已写入 1.6 KB"),
+        TL("c2", "Write", "写入 退回通知-1018.md", "ok", "0.1s", '{ "file_path": "退回通知-1018.md", "content": "…" }', "已写入 0.4 KB"),
+      ],
+      text: `已写好两个文件：<a class="link" data-a="c-open-file" data-f="初审结果.md">初审结果.md</a>（逐张结论与依据）和 <a class="link" data-a="c-open-file" data-f="退回通知-1018.md">退回通知-1018.md</a>（可以直接转给报销人）。`,
+      tok: ["24,310", "1,382"] },
+    { at: "14:12", user: { text: "同步一份到共享盘 finance/2026-11" },
+      think: { sec: 0 },
+      tools: [TL("d1", "erp-finance.upload", "上传到共享盘 finance/2026-11", "fail", "0.6s", '{ "path": "finance/2026-11/初审结果.md" }', "403 Forbidden：当前 ERP_TOKEN 没有共享盘写权限")],
+      result: { kind: "fail", title: "这一轮失败了", body: "erp-finance.upload 返回 403：当前 ERP_TOKEN 没有共享盘写权限。可以在「管理变量」里换一个有写权限的 Token 后重跑这一轮。" },
+      tok: ["24,980", "212"] },
+  ];
+  if (sid === "s4") return [
+    { at: "11-10 16:20", user: { text: "上次那张 USD 发票按哪天汇率？" },
+      ask: { st: "history", qs: [{ q: "你说的是哪一张？", opts: ["1015 机票（USD 420）", "0921 会议费（USD 1,200）"] }] },
+      text: "按开票日 10-15 的人民币汇率中间价 7.1032 换算，结果 2,983.34 元。", tok: ["3,210", "188"] },
+    { at: "11-10 16:24", user: { text: "那欧元的呢？发票是 invoices/eur-0903.pdf" },
+      ask: { st: "skipped", qs: [{ q: "这张欧元发票按哪个日期的汇率？", opts: ["开票日 09-03", "付款日 09-05"] }] },
+      tools: [TL("e1", "currency-converter", "子代理：换算欧元发票", "ok", "2.0s", '{ "amount": 180, "currency": "EUR", "date": "2026-09-03" }', "EUR 180.00 × 7.6420 = 1,375.56 元")],
+      text: "你没有指定，我按制度默认用开票日汇率：EUR 180 × 7.6420 = <b>1,375.56 元</b>。", tok: ["5,880", "246"] },
+    { at: "11-10 17:40", user: { text: "如果付款日和开票日跨月怎么办？" },
+      ask: { st: "invalid", qs: [{ q: "要按哪个月的预算核销？", opts: ["开票月", "付款月"] }] },
+      result: { kind: "cancel", title: "已取消", body: "你在 11-10 17:42 停止了这一轮，提问随之失效。" }, tok: ["6,104", "95"] },
+    { at: "15:31", user: { text: "帮我把这三张外币发票一起换算，出一张汇总表" },
+      think: { sec: 2, text: "三张外币发票：USD 420、USD 1,200、EUR 180。需要先确认汇率日期口径和表格列。" },
+      ask: { st: "pending", left: 252, qs: [
+        { q: "按哪个日期的汇率换算？", opts: ["开票日", "付款日", "报销提交日"], other: true },
+        { q: "汇总表里要带哪些列？", multi: true, opts: ["原币金额", "汇率与出处", "人民币金额", "是否超标"], other: true },
+      ] },
+      live: true },
+  ];
+  const G = {
+    s2: [{ at: "11:05", user: { text: "整理周三项目例会，录音和速记都在附件里", att: [["file", "周三例会.m4a"], ["file", "速记.txt"]] }, think: { sec: 2, text: "先转写录音，再和速记对齐。" }, tools: [TL("f1", "Read", "读取 速记.txt", "ok", "0.1s", '{ "file_path": "速记.txt" }', "2.1 KB"), TL("f2", "audio-transcribe", "转写 周三例会.m4a（42 分钟）", "ok", "38.2s", '{ "file": "周三例会.m4a" }', "转写完成，约 1.1 万字")], text: "纪要已整理：<b>3 项决议、5 条待办</b>。决议：报销系统 11-20 切换新版；外币发票统一按开票日汇率；差旅标准表由财务部 王蕾 本周五前更新。待办负责人与截止日期已写进 <a class=\"link\" data-a=\"c-open-file\" data-f=\"纪要-周三例会.md\">纪要-周三例会.md</a>。", tok: ["12,604", "1,120"] }],
+    s3: [{ at: "昨天 16:02", user: { text: "上月各部门报销总额" }, text: "下面的 SQL 按部门汇总 10 月已审核通过的报销金额：<pre class=\"code\" style=\"margin-top:8px\"><span class=\"k\">SELECT</span> d.name <span class=\"k\">AS</span> 部门, <span class=\"k\">SUM</span>(e.amount) <span class=\"k\">AS</span> 报销总额\n<span class=\"k\">FROM</span> expense e\n<span class=\"k\">JOIN</span> dept d <span class=\"k\">ON</span> d.id = e.dept_id  <span class=\"c\">-- 按报销人所属部门</span>\n<span class=\"k\">WHERE</span> e.status = <span class=\"s\">'approved'</span>\n  <span class=\"k\">AND</span> e.paid_at &gt;= <span class=\"s\">'2026-10-01'</span> <span class=\"k\">AND</span> e.paid_at &lt; <span class=\"s\">'2026-11-01'</span>\n<span class=\"k\">GROUP BY</span> d.name <span class=\"k\">ORDER BY</span> 报销总额 <span class=\"k\">DESC</span>;</pre>", tok: ["1,940", "312"] }],
+    s5: [{ at: "11-07 10:12", user: { text: "比对两版采购合同", att: [["file", "采购合同-v1.docx"], ["file", "采购合同-v2.docx"]] }, tools: [TL("g1", "Read", "读取两版合同", "ok", "0.6s", "{}", "v1 23 条，v2 25 条")], text: "v2 相比 v1 有 <b>4 处对我方不利的修改</b>：付款周期从 30 天延长到 60 天（第 6 条）；违约金上限从合同额 20% 降到 5%（第 14 条）；新增单方解约条款（第 21 条）；验收期从 15 天缩短到 7 天（第 9 条）。", tok: ["9,810", "702"] }],
+    s6: [{ at: "11-07 18:01", user: { text: "生成我第 45 周的周报" }, tools: [TL("h1", "WebFetch", "读取日程", "ok", "0.8s", "{}", "本周 14 个日程")], result: { kind: "cancel", title: "已取消", body: "你在 11-07 18:02 停止了这一轮。已生成的内容没有写入工作区。" }, tok: ["2,210", "96"] }],
+    s7: [{ at: "11-03 09:40", user: { text: "退货运费谁出" }, text: "按《售后手册》第 3.2 条：质量问题退货，运费由我方承担；无理由退货，运费由客户承担。", tok: ["1,102", "140"] }],
+    s8: [{ at: "10-31 17:10", user: { text: "10 月差旅报销初审，共 9 张" }, text: "9 张全部通过，合计 12,640 元。", tok: ["8,420", "402"] }],
+  };
+  return G[sid] || [];
+}
+/* 工作区文件 */
+const MD_RESULT = `# 11 月差旅报销初审
+
+报销人：林舟　部门：财务部　提交：2026-11-11
+
+通过 **9** 张，需审批 **2** 张，退回 **1** 张。
+
+| 发票 | 金额（元） | 结论 | 依据 |
+| --- | --- | --- | --- |
+| 1015 机票 | 6,800 | 需审批 | 第 7 条 |
+| 1021 酒店 | 5,400 | 需审批 | 第 7 条 |
+| 1018 餐饮 | 680 | 退回 | 第 12 条 |
+| 1019 酒店 USD 420 | 2,983.34 | 通过 | 汇率 7.1032 |
+
+## 下一步
+- 1015、1021 提交部门负责人 王蕾 审批
+- 1018 退回，请按公司全称「星河数据科技有限公司」重开`;
+function mdToHtml(md) {
+  const lines = md.split("\n"); let h = "", inT = false, inL = false;
+  const inl = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+  lines.forEach((l) => {
+    if (l.startsWith("|")) {
+      if (/^\|\s*---/.test(l)) return;
+      const cells = l.split("|").slice(1, -1).map((c) => c.trim());
+      if (!inT) { h += "<table><tr>" + cells.map((c) => `<th>${inl(c)}</th>`).join("") + "</tr>"; inT = true; }
+      else h += "<tr>" + cells.map((c) => `<td>${inl(c)}</td>`).join("") + "</tr>";
+      return;
+    }
+    if (inT) { h += "</table>"; inT = false; }
+    if (l.startsWith("- ")) { if (!inL) { h += "<ul>"; inL = true; } h += `<li>${inl(l.slice(2))}</li>`; return; }
+    if (inL) { h += "</ul>"; inL = false; }
+    if (l.startsWith("# ")) h += `<h1>${inl(l.slice(2))}</h1>`;
+    else if (l.startsWith("## ")) h += `<h2>${inl(l.slice(3))}</h2>`;
+    else if (l.trim()) h += `<p>${inl(l)}</p>`;
+  });
+  if (inT) h += "</table>"; if (inL) h += "</ul>";
+  return `<!doctype html><meta charset="utf-8"><style>body{font:14px/1.7 "PingFang SC",system-ui,sans-serif;color:#1B1B1A;margin:4px 6px}h1{font-family:"Noto Serif SC","Songti SC",serif;font-size:21px;margin:0 0 8px}h2{font-size:15px;margin:16px 0 6px}p{margin:6px 0}table{border-collapse:collapse;width:100%;font-size:13px;margin:8px 0}th{text-align:left;color:#6B6860;font-weight:500;border-bottom:1px solid #E6E3DB;padding:6px 4px;white-space:nowrap}td{border-bottom:1px solid #EFECE5;padding:6px 4px}td:nth-child(3){white-space:nowrap}ul{padding-left:20px;margin:6px 0}</style>${h}`;
+}
+const PY = `<span class="c"># 按开票日中间价换算外币发票</span>
+<span class="k">import</span> json
+<span class="k">from</span> datetime <span class="k">import</span> date
+
+RATES = {<span class="s">"USD"</span>: {<span class="s">"2026-10-15"</span>: 7.1032}, <span class="s">"EUR"</span>: {<span class="s">"2026-09-03"</span>: 7.6420}}
+
+<span class="k">def</span> convert(amount, currency, d):
+    rate = RATES[currency][d]
+    <span class="k">return</span> round(amount * rate, 2), rate
+
+<span class="k">if</span> __name__ == <span class="s">"__main__"</span>:
+    cny, rate = convert(420, <span class="s">"USD"</span>, <span class="s">"2026-10-15"</span>)
+    print(json.dumps({<span class="s">"cny"</span>: cny, <span class="s">"rate"</span>: rate}))`;
+const LOG = Array.from({ length: 22 }, (_, i) => `2026-11-11 14:02:${String(3 + i).padStart(2, "0")}  ${["INFO  tool_use invoice-ocr page=" + (i + 1), "INFO  ocr field title ok", "DEBUG ocr confidence=0.9" + (i % 9)][i % 3]}`).join("\n");
+const FILES = {
+  s1: [
+    { p: "报销单-2026-11.xlsx", t: "bin", sz: "48 KB" },
+    { p: "初审结果.md", t: "md", sz: "1.6 KB", fresh: true },
+    { p: "退回通知-1018.md", t: "md", sz: "0.4 KB", fresh: true },
+    { p: "invoices/", t: "dir", sz: "12 个" },
+    { p: "invoices/1015-机票.pdf", t: "pdf", sz: "210 KB", in: 1 },
+    { p: "invoices/1018-餐饮.jpg", t: "img", sz: "1.2 MB", in: 1 },
+    { p: "invoices/1021-酒店.pdf", t: "pdf", sz: "188 KB", in: 1 },
+    { p: "invoices/…另外 9 个文件", t: "more", in: 1 },
+    { p: "scripts/fx_convert.py", t: "code", sz: "0.5 KB" },
+    { p: "logs/run-1102.log", t: "log", sz: "420 KB" },
+  ],
+  s2: [{ p: "周三例会.m4a", t: "bin", sz: "38 MB" }, { p: "速记.txt", t: "code", sz: "2.1 KB" }, { p: "纪要-周三例会.md", t: "md", sz: "3.4 KB" }],
+  s4: [{ p: "invoices/", t: "dir", sz: "3 个" }, { p: "invoices/eur-0903.pdf", t: "pdf", sz: "96 KB", in: 1 }, { p: "外币换算.md", t: "md", sz: "0.6 KB" }],
+  s3: [], s6: [], s7: [], s8: [],
+};
+
+/* ---------- 状态 ---------- */
+const S = {
+  demo: "normal", sessions: [], sid: "s1", turns: {}, q: "", archivedView: false,
+  panel: "files", panelW: 400, file: "初审结果.md", md: "preview", traceSel: null,
+  vars: { filled: true, ERP_TOKEN: "", DEPT: "财务部" },
+  approval: null, approvalErr: false, grants: [{ tool: "erp-finance.query_budget", scope: "读取预算" }],
+  queue: [], draft: "", atts: [], slash: { open: false, i: 0 }, attMenu: false,
+  loading: false, loadErr: false, noAgent: false, badAgent: false, ctx: {},
+  timer: null, askLeft: {},
+};
+const NOW_SID = () => S.sessions.find((s) => s.id === S.sid);
+const curTurns = () => (S.turns[S.sid] = S.turns[S.sid] || turnsFor(S.sid));
+const isRunning = (sid = S.sid) => !!S.sessions.find((s) => s.id === sid)?.run;
+
+function applyDemo(d) {
+  S.demo = d;
+  S.sessions = SESSIONS.map((s) => ({ ...s, run: false }));
+  S.sessions.push({ id: "s8", k: "expense-reviewer", t: "10 月差旅报销初审", at: "10-31", turns: 5, g: "更早", archived: true });
+  S.sessions.push({ id: "s9", k: "expense-reviewer", t: "AI 编辑：加上外币换算规则", at: "昨天", turns: 3, g: "昨天", design: true });
+  S.sessions.find((s) => s.id === "s4").run = true;
+  S.sessions.find((s) => s.id === "s4").wait = "ask";
+  S.turns = {}; S.sid = "s1"; S.archivedView = false; S.q = ""; S.loadErr = false; S.noAgent = false; S.approval = null; S.approvalErr = false;
+  S.queue = []; S.atts = []; S.draft = ""; S.file = "初审结果.md"; S.panel = "files"; S.traceSel = null;
+  S.vars = { filled: true, ERP_TOKEN: "", DEPT: "财务部" };
+  S.grants = [{ tool: "erp-finance.query_budget", scope: "读取预算" }];
+  S.ctx = { s1: [23, "46.2k"], s4: [9, "18.4k"], s2: [6, "13.7k"], s3: [1, "2.3k"], s5: [5, "10.5k"], s6: [1, "2.3k"], s7: [1, "1.2k"], s8: [4, "8.8k"] };
+  $("#ch-note")?.remove();
+  if (d === "running") {
+    const s = NOW_SID(); s.run = true; s.wait = "approval";
+    curTurns().push({ at: "14:20", user: { text: "失败的先不管。把 1015 和 1021 提交到 ERP 审批，审批人王蕾（部门负责人）" },
+      think: { sec: 2, text: "两张需要审批的发票提交到 ERP，erp-finance.submit 在「需审批工具」里，需要先等用户确认。" },
+      tools: [TL("r1", "policy-lookup", "确认审批人规则", "ok", "0.3s", '{ "query": "超额审批 审批人" }', "第 7 条：部门负责人审批；财务部负责人为 王蕾"),
+        TL("r2", "erp-finance.submit", "提交 2 张审批单", "wait", "", '{\n  "invoices": ["1015", "1021"],\n  "approver": "王蕾（部门负责人）",\n  "note": "单笔超过 5000 元，按制度第 7 条送审"\n}', "")],
+      live: true });
+    S.approval = { left: 272, tool: "erp-finance.submit", why: "把 2 张超额发票提交到 ERP 审批", params: '{ "invoices": ["1015", "1021"], "approver": "王蕾（部门负责人）" }', tid: "r2", reason: false };
+    S.queue = [{ text: "提交完把审批单号写进 初审结果.md", n: 0 }];
+    S.panel = "trace"; S.traceSel = "r2";
+    setTimeout(showNote, 400); setTimeout(() => $("#ch-note")?.remove(), 9000);
+  }
+  if (d === "empty") {
+    S.sessions.unshift({ id: "n1", k: "expense-reviewer", t: "新会话", at: "刚刚", turns: 0, g: "今天", fresh: true });
+    S.sid = "n1"; S.turns.n1 = []; S.vars = { filled: false, ERP_TOKEN: "", DEPT: "" }; S.ctx.n1 = [0, "0"];
+  }
+  if (d === "noagent") { S.noAgent = true; S.sessions = []; }
+  if (d === "loaderr") { S.loadErr = true; S.approvalErr = true; }
+  if (d === "badagent") { S.badAgent = true; } else S.badAgent = false;
+  render();
+}
+
+/* ---------- 渲染：外壳 ---------- */
+function render() {
+  OWA.mount({ nav: "chat", body: `<div class="cwrap"><aside class="slist" id="ch-list"></aside><section class="cmain"><div class="ccard" id="ch-main"></div></section><div class="ch-rs" id="ch-rs" title="拖动调整宽度"></div><aside class="cside" id="ch-side"></aside></div><div class="ch-drop" id="ch-drop"><div class="bx">${ic("upload", 36)}<div class="serif">松手添加文件</div><div class="muted">单个文件不超过 10MB，会先上传到这个会话的工作目录</div></div></div>` });
+  if (!$("#ch-proto")) {
+    document.body.insertAdjacentHTML("beforeend", `<label id="ch-proto" title="原型演示用，不属于产品">原型状态<select id="ch-demo">${[["normal", "正常"], ["running", "运行中"], ["empty", "空会话"], ["noagent", "无智能体"], ["loaderr", "读取失败"], ["badagent", "智能体不存在"]].map(([v, n]) => `<option value="${v}">${n}</option>`).join("")}</select></label>`);
+    $("#ch-demo").addEventListener("change", (e) => applyDemo(e.target.value));
+  }
+  $("#ch-demo").value = S.demo;
+  rList(); rMain(); rSide(); bindResize();
+}
+
+/* ---------- 左栏：会话列表 ---------- */
+function rList() {
+  const L = $("#ch-list");
+  const arch = S.sessions.filter((s) => s.archived);
+  const q = S.q.trim();
+  const vis = S.sessions.filter((s) => !!s.archived === S.archivedView && (!q || s.t.includes(q) || AGI[s.k].n.includes(q)));
+  const row = (s) => {
+    const tag = s.wait === "approval" && s.run ? '<span class="tag warn">待你确认</span>' : s.wait === "ask" && s.run ? '<span class="tag warn">等你回答</span>' : "";
+    const open = s.design ? `<a class="ch-row navlink" href="build.html#orch" title="AI 编辑的会话，在构建页，编排的「AI 助手」里打开">` : `<div class="ch-row ${s.id === S.sid ? "on" : ""}" data-a="c-sess" data-id="${s.id}" role="button" tabindex="0">`;
+    return `${open}${av(s.k, 26)}<div class="tt"><div class="t1">${esc(s.t)}</div><div class="t2">${s.run ? '<span class="spin"></span>' : ""}${tag}${s.design ? `<span class="tag dark">${ic("sparkle", 11)}设计器</span>` : ""}<span style="overflow:hidden;text-overflow:ellipsis">${AGI[s.k].n}，${s.at}</span></div></div>
+      ${S.archivedView ? `<button class="btn ghost sm" data-a="c-restore" data-id="${s.id}">恢复</button>` : `<button class="more" data-a="c-more" data-id="${s.id}" aria-label="会话操作">${ic("dots", 16)}</button>`}${s.design ? "</a>" : "</div>"}`;
+  };
+  let body;
+  if (S.noAgent) body = `<div class="ch-lempty">还没有会话</div>`;
+  else if (S.archivedView) body = `<div class="sgrp">已归档（${arch.length}）· 恢复后回到会话列表</div>${vis.map(row).join("") || `<div class="ch-lempty">${q ? `没有匹配「${esc(q)}」的归档会话` : "没有归档的会话"}</div>`}`;
+  else {
+    const gs = ["今天", "昨天", "更早"].map((g) => [g, vis.filter((s) => s.g === g)]).filter(([, a]) => a.length);
+    body = gs.map(([g, a]) => `<div class="sgrp">${g}</div>${a.map(row).join("")}`).join("") || `<div class="ch-lempty">没有匹配「${esc(q)}」的会话</div>`;
+  }
+  L.innerHTML = `<div class="ch-lhead"><div class="ch-lsearch">${ic("search", 16)}<input class="inp" id="ch-q" placeholder="${S.archivedView ? "搜索已归档" : "搜索会话"}" value="${esc(S.q)}" aria-label="搜索会话"></div><button class="btn sm" data-a="c-new">${ic("plus", 14, 2)}新会话</button></div>
+    <div class="ch-lbody">${body}</div>
+    <div class="ch-lfoot"><button class="ibtn" data-a="c-arch-view">${S.archivedView ? ic("back", 15) + "返回会话列表" : ic("archive", 15) + `已归档（${arch.length}）`}</button></div>`;
+  const qi = $("#ch-q");
+  qi.addEventListener("input", () => { S.q = qi.value; rList(); const n = $("#ch-q"); n.focus(); n.setSelectionRange(n.value.length, n.value.length); });
+}
+
+/* ---------- 中栏 ---------- */
+function verBadge(s) {
+  if (s.run) return `<span class="tag warn" title="这一轮还在运行">${'<span class="spin" style="width:11px;height:11px;border-width:1.5px"></span>'}运行中</span>`;
+  const b = s.fresh ? BADGE.s1 : BADGE[s.id] || ["草稿", "warn", ""];
+  return `<span class="tag ${b[1]}" title="${b[2]}">${b[0]}</span>`;
+}
+function rMain() {
+  const M = $("#ch-main");
+  const prevScroll = $("#ch-stream")?.scrollTop;
+  const hadFocus = document.activeElement?.id === "ch-in";
+  if (S.noAgent) {
+    M.innerHTML = `<div class="ch-empty">${av("default", 64)}<h2>还没有可用的智能体</h2><p>先创建一个智能体，或请管理员分享给你。也可以去探索里找一个现成的。</p><div class="row" style="margin-top:22px"><a class="btn navlink" href="studio.html">${ic("plus", 15, 2)}新建智能体</a><a class="btn ghost navlink" href="explore.html">去探索看看</a></div></div>`;
+    return;
+  }
+  if (S.badAgent) {
+    M.innerHTML = `<div class="ch-empty"><span class="chk bad" style="width:56px;height:56px">${ic("warn", 26)}</span><h2>找不到指定的智能体，或你没有访问权限。</h2><p>链接里的智能体 ID 是 <code>expense-reviewr</code>。可能拼错了、已被删除，或作者没有分享给你。</p><div class="row" style="margin-top:22px"><button class="btn" data-a="c-demo" data-v="normal">回到最近会话</button><a class="btn ghost navlink" href="explore.html">去探索找智能体</a></div></div>`;
+    return;
+  }
+  const s = NOW_SID(); const A = AGI[s.k];
+  const panelBtn = (p, n, i) => `<button class="ch-tog ${S.panel === p ? "on" : ""}" data-a="c-panel" data-v="${p}" aria-pressed="${S.panel === p}">${ic(i, 15)}${n}</button>`;
+  const head = `<div class="ch-hd"><a class="avl" href="${A.href}" title="${A.href === "build.html" ? "打开构建页" : "查看智能体详情"}">${av(s.k, 36)}</a>
+    <div style="min-width:0;flex:1"><div class="ti">${esc(s.t)}</div><div class="sub"><a href="${A.href}">${A.n}</a>${verBadge(s)}<span>${A.model}</span><span>${A.price}</span></div></div>
+    <div class="row" style="gap:8px">${panelBtn("files", "工作区文件", "folder")}${panelBtn("trace", "执行详情", "pulse")}</div></div>`;
+  let bars = "";
+  if (A.vars && !S.loadErr) bars += S.vars.filled
+    ? `<div class="ch-bar">${ic("key", 15)}变量已填写：ERP_TOKEN（已隐藏）、DEPT = ${esc(S.vars.DEPT || "未填")}<button class="link" data-a="c-vars">管理变量</button></div>`
+    : `<div class="ch-bar warn">${ic("key", 15)}需要填写 1 个必填变量才能运行此智能体<button class="link" data-a="c-vars">填写变量</button></div>`;
+  if (s.id === "s5") bars += `<div class="ch-bar info">${ic("info", 15)}这个会话的工作目录已在 11-10 03:00 自动清理（超过 3 天未活动）。对话记录还在，文件无法再预览。</div>`;
+  if (s.archived) bars += `<div class="ch-bar">${ic("archive", 15)}这个会话已归档，恢复后才能继续对话<button class="link" data-a="c-restore" data-id="${s.id}">恢复会话</button></div>`;
+
+  let stream;
+  const T = curTurns();
+  if (S.loading) stream = `<div class="ch-loading"><span class="spin"></span>正在读取会话历史…</div>`;
+  else if (S.loadErr) stream = `<div class="ch-empty"><span class="chk bad" style="width:52px;height:52px">${ic("warn", 24)}</span><h2 style="font-size:22px">读取会话历史失败</h2><p>网络中断或服务暂时不可用（GET /api/sessions/s1/events 超时）。会话本身没有丢失。</p><button class="btn" style="margin-top:18px" data-a="c-retry">${ic("refresh", 15)}重试</button></div>`;
+  else if (!T.length) stream = `<div class="ch-empty">${av(s.k, 64)}<h2>和「${A.n}」开始对话</h2><p>${esc(A.d)}</p><div class="ch-starters">${(A.starters || []).slice(0, 4).map((t) => `<button data-a="c-starter" data-t="${esc(t)}">${ic("chat", 15)}${esc(t)}</button>`).join("")}</div></div>`;
+  else stream = `<div class="ch-stream" id="ch-stream"><div class="ch-inner">${T.map((t, i) => rTurn(t, i, s)).join("")}</div></div>
+      ${T.length > 1 ? `<nav class="ch-rail" aria-label="轮次导航">${T.map((t, i) => `<button data-a="c-jump" data-n="${i + 1}" title="跳到第 ${i + 1} 轮">${i + 1}</button>`).join("")}</nav>` : ""}
+      <button class="ch-latest" id="ch-latest" data-a="c-latest" hidden>${ic("down", 15)}回到最新</button>`;
+
+  M.innerHTML = head + bars + `<div class="ch-sw">${stream}</div><div class="ch-dock">${rDock(s)}</div>`;
+  const st = $("#ch-stream");
+  if (st) {
+    st.style.scrollBehavior = "auto";
+    st.scrollTop = prevScroll != null && !S._toBottom ? prevScroll : st.scrollHeight;
+    st.style.scrollBehavior = "";
+    S._toBottom = false;
+    st.addEventListener("scroll", onStreamScroll); onStreamScroll();
+  }
+  bindComposer(hadFocus);
+}
+function onStreamScroll() {
+  const st = $("#ch-stream"); if (!st) return;
+  const far = st.scrollHeight - st.scrollTop - st.clientHeight > 120;
+  const lb = $("#ch-latest"); if (lb) lb.hidden = !far;
+  const turns = $$(".ch-turn", st); let cur = 1;
+  turns.forEach((t) => { if (t.offsetTop - st.scrollTop < st.clientHeight * 0.4) cur = +t.dataset.n; });
+  $$(".ch-rail button").forEach((b) => b.classList.toggle("on", +b.dataset.n === cur));
+}
+
+function rTools(t, sid) {
+  if (!t.tools || !t.tools.length) return "";
+  const fail = t.tools.filter((x) => x.st === "fail").length, run = t.tools.filter((x) => x.st === "wait" || x.st === "run").length;
+  const open = t.toolsOpen ?? (run > 0);
+  const sum = `调用了 ${t.tools.length} 个工具${fail ? `，<span class="bad">${fail} 个失败</span>` : run ? "" : "，全部成功"}${run ? `，<span style="color:var(--warnt)">${run} 个进行中</span>` : ""}`;
+  const icon = (x) => x.st === "ok" ? `<span class="st-ok">${ic("check", 15, 2.2)}</span>` : x.st === "fail" ? `<span class="st-fail" title="失败">${ic("x", 15, 2.2)}</span>` : '<span class="spin" style="width:14px;height:14px"></span>';
+  return `<div class="ch-tools ${open ? "open" : ""}" data-turn-tools><button class="hd" data-a="c-tools">${ic("tool", 15)}<span>${sum}</span><span style="margin-left:auto" class="row small muted">点一项在执行详情里定位${ic("chev", 14)}</span></button>
+    <div class="ls">${t.tools.map((x) => `<button class="ch-ti ${S.traceSel === x.id && S.panel === "trace" ? "sel" : ""}" data-a="c-locate" data-id="${x.id}">${icon(x)}<span class="nm">${x.name}</span><span class="ds">${x.ds}</span>${x.by ? `<span class="tag line">由子代理 ${x.by} 发起</span>` : ""}${x.st === "wait" ? '<span class="tag warn">等你确认</span>' : ""}<span class="du">${x.du}</span></button>`).join("")}</div></div>`;
+}
+function rAsk(a, ti) {
+  const st = a.st;
+  const head = {
+    pending: `<div class="hd2 pending">${ic("clock", 14)}等你回答，剩余 <b class="ask-left" data-t="${ti}">${fmt(a.left)}</b>，超时后由智能体自行判断</div>`,
+    waiting: `<div class="hd2 mut"><span class="spin" style="width:13px;height:13px"></span>等待中，已提交，智能体正在读取你的回答</div>`,
+    answered: `<div class="hd2 ok">${ic("check", 14, 2)}已回答${a.at ? "，" + a.at : ""}</div>`,
+    skipped: `<div class="hd2 mut">${ic("minus", 14)}未回答，你选择了不回答，智能体按默认口径继续</div>`,
+    timeout: `<div class="hd2 mut">${ic("clock", 14)}未回答，超时，智能体自行判断</div>`,
+    invalid: `<div class="hd2 mut">${ic("x", 14)}提问无效，这一轮已经结束，回答不会再被读取</div>`,
+    history: `<div class="hd2 mut">${ic("clock", 14)}历史提问，来自更早的运行，只读</div>`,
+  }[st];
+  const live = st === "pending";
+  const qs = a.qs.map((q, qi) => `<div class="q">${esc(q.q)}${q.multi ? '<span class="tag line">可多选</span>' : ""}</div>
+    <div class="opts">${q.opts.map((o, oi) => `<button class="opt ${(q.pick || []).includes(oi) ? "on" : ""}" ${live ? `data-a="c-pick" data-t="${ti}" data-q="${qi}" data-o="${oi}"` : "disabled"} aria-pressed="${(q.pick || []).includes(oi)}">${esc(o)}</button>`).join("")}
+      ${q.other && live ? `<button class="opt ${q.otherOn ? "on" : ""}" data-a="c-other" data-t="${ti}" data-q="${qi}">其他（自己填写）</button>` : ""}
+      ${q.otherText && !live ? `<button class="opt on" disabled>其他：${esc(q.otherText)}</button>` : ""}</div>
+    ${q.otherOn && live ? `<input class="inp oth" data-other="${ti}-${qi}" placeholder="写下你的答案" value="${esc(q.otherText || "")}">` : ""}`).join("");
+  const done = a.qs.every((q) => (q.pick && q.pick.length) || (q.otherOn && (q.otherText || "").trim()));
+  const foot = live ? `<div class="ft"><button class="btn sm" data-a="c-ans" data-t="${ti}" ${done ? "" : "disabled"}>${done ? "提交回答" : "请先回答每个问题"}</button><button class="ibtn" data-a="c-noans" data-t="${ti}">不回答</button></div>`
+    : st === "invalid" ? `<div class="ft"><button class="btn ghost sm" data-a="c-asnew" data-t="${ti}">${ic("chat", 14)}作为新消息发送</button><span class="small muted">把问题和你的选择当成一条新消息发出去</span></div>` : "";
+  return `<div class="askc ${live ? "pend" : "mute"}" id="ask-${ti}">${head}${qs}${foot}</div>`;
+}
+function rTurn(t, i, s) {
+  const n = i + 1, A = AGI[s.k];
+  const att = t.user?.att?.length ? `<div class="ch-att">${t.user.att.map(([k, f]) => `<span class="tag line">${ic(k, 12)}${esc(f)}</span>`).join("")}</div>` : "";
+  let h = `<div class="ch-turn" id="turn-${n}" data-n="${n}">`;
+  if (t.user) h += `${t.user.fork ? `<div class="ch-fork">${ic("branch", 14)}${t.user.fork}</div>` : ""}<div class="m-me ch-me">${esc(t.user.text)}${att}</div>`;
+  let a = "";
+  if (t.think) {
+    if (t.live && !t.tools?.length && !t.ask) a += `<div class="ch-live"><span class="spin"></span>正在思考…</div>`;
+    else a += `<div class="ch-think ${t.thinkOpen ? "open" : ""}"><button data-a="c-think" data-n="${n}">${ic("sparkle", 14)}${t.think.text ? `思考了 ${t.think.sec || 1} 秒` : "没有可显示的思考内容"}${t.think.text ? `<span class="chev">${ic("chev", 13)}</span>` : ""}</button>${t.think.text ? `<div class="tb2">${esc(t.think.text)}</div>` : ""}</div>`;
+  }
+  a += rTools(t, s.id);
+  let b = "";
+  if (t.ask) b += rAsk(t.ask, `${s.id}:${i}`);
+  if (t.text) b += `<div class="ch-tx">${t.text}</div>`;
+  if (t.result) {
+    const r = t.result;
+    b += r.kind === "json" ? `<div class="ch-res json"><div class="t">${ic("check", 16, 2)}结构化结果<button class="ibtn" style="margin-left:auto" data-a="c-copy" data-t="结构化结果">${ic("copy", 14)}复制 JSON</button></div><pre class="code">${esc(r.body)}</pre></div>`
+      : `<div class="ch-res ${r.kind}"><div class="t">${r.kind === "fail" ? ic("warn", 16) : ic("stop", 15)}${r.title}</div><p>${r.body}</p></div>`;
+  }
+  if (t.live && (t.tools?.length || t.ask)) b += t.tools?.some((x) => x.st === "wait") ? `<div class="ch-live"><span class="spin"></span>等你确认 erp-finance.submit 后继续</div>` : t.ask?.st === "pending" ? "" : `<div class="ch-live"><span class="spin"></span>正在生成…</div>`;
+  if (!t.live && t.tok) b += `<div class="ch-meta"><span class="tok" title="这一轮的输入 / 输出 token">↑ ${t.tok[0]}　↓ ${t.tok[1]} token</span><button class="ibtn" data-a="c-copy" data-t="回答">${ic("copy", 14)}复制</button>${s.archived ? "" : `<button class="ibtn" data-a="c-rerun" data-n="${n}">${ic("refresh", 14)}重跑</button>`}</div>`;
+  const steers = (t.steers || []).map((x) => `<div class="ch-steer"><div class="lb ${x.st === "ok" ? "ok" : x.st === "deferred" ? "warn" : "wait"}">${x.st === "ok" ? ic("check", 13, 2) + "运行中追加，已交给智能体" : x.st === "deferred" ? ic("clock", 13) + "运行中追加，已改为本轮结束后发送" : '<span class="spin" style="width:11px;height:11px"></span>已提交，等待智能体接收'}</div>${esc(x.text)}</div>`).join("");
+  h += `<div class="m-bot">${av(s.k, 30)}<div class="bd"><div class="who">${A.n}${t.at ? "，" + t.at : ""}</div>${a}${steers ? "" : b}</div></div>`;
+  if (steers) h += steers + `<div class="ch-cont">${b}</div>`;
+  return h + "</div>";
+}
+const fmt = (s) => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.max(0, s) % 60).padStart(2, "0")}`;
+
+function rDock(s) {
+  let h = "";
+  if (S.approvalErr) h += `<div class="approval err"><div class="row"><span style="color:var(--bad)">${ic("warn", 18)}</span><b>审批状态读取失败</b><span class="muted small">可能有待你确认的操作没显示出来</span><button class="btn ghost sm" style="margin-left:auto" data-a="c-ap-retry">${ic("refresh", 14)}重试</button></div></div>`;
+  else if (S.approval && s.id === "s1" && isRunning("s1")) {
+    const ap = S.approval;
+    h += `<div class="approval" id="ch-ap"><div class="row"><span style="color:var(--warnt)">${ic("shield", 18)}</span><b>智能体在等你确认 —— ${ap.why}</b><span class="tag ${ap.left < 30 ? "bad" : "warn"} cd" id="ch-ap-cd">${ap.left < 30 ? "即将超时，" : ""}${fmt(ap.left)} 后自动拒绝</span></div>
+      <div class="snap" style="margin:8px 0"><b>${ap.tool}</b> ${esc(ap.params)}</div>
+      <div class="row"><button class="btn sm" data-a="c-ap" data-v="ok">批准</button><button class="btn ghost sm" style="font-size:14px" data-a="c-ap" data-v="always">批准，本会话内 ${ap.tool} 不再询问</button><button class="btn ghost sm" data-a="c-ap" data-v="no">拒绝</button><button class="ibtn" data-a="c-ap-why">拒绝并说明…</button></div>
+      ${ap.reason ? `<div class="why"><input class="inp" id="ch-ap-r" placeholder="告诉智能体为什么拒绝，比如：1021 先等酒店重开发票" style="height:34px"><button class="btn sm" data-a="c-ap" data-v="why">拒绝并发送</button></div>` : ""}</div>`;
+  }
+  if (S.grants.length && s.id === "s1" && !S.loadErr) h += `<div class="ch-grants">${ic("shield", 14)}本会话已授权不再询问：${S.grants.map((g, i) => `<span class="g" title="${g.scope}">${g.tool}<button data-a="c-revoke" data-i="${i}">撤销</button></span>`).join("")}</div>`;
+  if (S.queue.length && s.id === "s1") h += `<div class="ch-queue"><div class="qh">${ic("clock", 13)}排队 ${S.queue.length}，本轮结束后按顺序发送</div>${S.queue.map((q, i) => `<div class="qi"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(q.text)}</span>${q.n ? `<span class="tag line">${ic("clip", 12)}${q.n} 个附件</span>` : ""}<button class="x" data-a="c-unqueue" data-i="${i}" aria-label="取消这条排队消息">${ic("x", 14)}</button></div>`).join("")}</div>`;
+  const run = isRunning();
+  const [pct, tot] = S.ctx[S.sid] || [0, "0"];
+  const dash = Math.max(1.5, (pct / 100) * 50.3);
+  const dis = s.archived || S.loadErr;
+  h += `<div class="composer">
+    ${S.slash.open ? rSlash() : ""}${S.attMenu ? `<div class="ch-attmenu"><div class="h">单个文件不超过 10MB</div><button data-a="c-att" data-v="pick">${ic("image", 15)}添加图片或文件</button><button data-a="c-att" data-v="big">${ic("file", 15)}试一下超过 10MB 的文件</button><div class="h">也可以把文件直接拖进窗口</div></div>` : ""}
+    ${S.atts.length ? `<div class="ch-chips">${S.atts.map((f, i) => `<span class="tag line">${ic(f.img ? "image" : "file", 12)}${esc(f.n)}，${f.sz}<button data-a="c-unatt" data-i="${i}" aria-label="移除附件">${ic("x", 11)}</button></span>`).join("")}</div>` : ""}
+    <textarea id="ch-in" placeholder="${s.archived ? "这个会话已归档，恢复后才能继续对话" : dis ? "会话历史没读到，暂时不能发消息" : run ? "运行中也可以继续补充" : "说点什么，或输入 /"}" ${dis ? "disabled" : ""} aria-label="消息">${esc(S.draft)}</textarea>
+    <div class="bar"><button class="ibtn" data-a="c-attmenu" ${dis ? "disabled" : ""}>${ic("clip", 15)}添加图片或文件</button>
+      <button class="ch-ctx" data-a="c-ctx" title="上下文用量：上限按 200k 计">${`<svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" fill="none" stroke="#E2DFD7" stroke-width="3"/><circle cx="10" cy="10" r="8" fill="none" stroke="${pct > 80 ? "#B4442F" : pct > 60 ? "#B7791F" : "#3F7A57"}" stroke-width="3" stroke-dasharray="${dash} 60" transform="rotate(-90 10 10)"/></svg>`}上下文 ${pct}%，累计 ${tot} token</button>
+      <span class="small muted" style="margin-left:auto;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right">${run ? "回车追加，Shift+回车换行" : "回车发送，Shift+回车换行"}</span>
+      ${run ? `<button class="ch-stop" data-a="c-stop" aria-label="停止" title="停止这一轮">${ic("stop", 14)}</button>` : ""}
+      <button class="sendbtn" data-a="c-send" aria-label="${run ? "追加" : "发送"}" ${dis ? "disabled" : ""}>${ic("up", 16, 2)}</button></div></div>`;
+  return h;
+}
+const SLASH = [["/new", "新建会话", "plus"], ["/search", "搜索会话与页面（⌘K）", "search"], ["/agents", "管理智能体", "grid"], ["/stop", "停止当前运行", "stop"]];
+function slashList() { const q = S.draft.trim().toLowerCase(); return SLASH.filter((c) => c[0].startsWith(q.split(" ")[0])); }
+function rSlash() {
+  const L = slashList();
+  return `<div class="slash" role="listbox"><div class="sh">命令，↑↓ 选择，回车执行，Esc 关闭</div>${L.map((c, i) => `<div class="${i === S.slash.i ? "sel" : ""}" data-a="c-slash" data-c="${c[0]}" role="option">${ic(c[2], 15)}<b>${c[0]}</b><span class="muted">${c[1]}</span></div>`).join("") || '<div class="sh">没有匹配的命令</div>'}</div>`;
+}
+function bindComposer(focus) {
+  const ta = $("#ch-in"); if (!ta) return;
+  ta.addEventListener("input", () => {
+    S.draft = ta.value;
+    const want = /^\/\S*$/.test(ta.value);
+    if (want !== S.slash.open || want) { S.slash.open = want; S.slash.i = Math.min(S.slash.i, Math.max(0, slashList().length - 1)); refreshSlash(); }
+  });
+  ta.addEventListener("keydown", (e) => {
+    if (S.slash.open) {
+      const L = slashList();
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); S.slash.i = (S.slash.i + (e.key === "ArrowDown" ? 1 : -1) + L.length) % L.length; refreshSlash(); return; }
+      if (e.key === "Enter") { e.preventDefault(); if (L[S.slash.i]) runSlash(L[S.slash.i][0]); return; }
+      if (e.key === "Escape") { e.stopPropagation(); S.slash.open = false; refreshSlash(); return; }
+    }
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
+  });
+  if (focus) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+}
+function refreshSlash() { $(".composer .slash")?.remove(); if (S.slash.open) $(".composer").insertAdjacentHTML("afterbegin", rSlash()); }
+function runSlash(c) {
+  S.slash.open = false; S.draft = ""; S.slash.i = 0;
+  if (c === "/new") { rMain(); return newSession(); }
+  if (c === "/search") { rMain(); return palette(true); }
+  if (c === "/agents") { location.href = "studio.html"; return; }
+  if (c === "/stop") { rMain(); return isRunning() ? stopRun() : toast("当前没有在运行的任务", false); }
+}
+
+/* ---------- 右侧面板 ---------- */
+function rSide() {
+  const side = $("#ch-side"), rs = $("#ch-rs");
+  const hide = !S.panel || S.noAgent || S.badAgent;
+  side.hidden = hide; rs.hidden = hide;
+  if (hide) return;
+  side.style.width = S.panelW + "px";
+  const tabs = `<div class="ch-ph"><div class="seg"><button class="${S.panel === "files" ? "on" : ""}" data-a="c-panel-tab" data-v="files">工作区文件</button><button class="${S.panel === "trace" ? "on" : ""}" data-a="c-panel-tab" data-v="trace">执行详情</button></div><button class="xbtn" data-a="c-panel-close" aria-label="关闭面板" title="关闭面板">${ic("x", 16)}</button></div>`;
+  side.innerHTML = `<div class="ccard">${tabs}${S.panel === "files" ? rFiles() : rTrace()}</div>`;
+  if (S.panel === "trace" && S.traceSel) { const el = $(`#tr-${S.traceSel}`); if (el) el.scrollIntoView({ block: "center" }); }
+}
+function rFiles() {
+  const s = NOW_SID();
+  if (S.loadErr) return `<div class="ch-pempty">${ic("warn", 28)}<div class="serif">工作区读取失败</div><p>没能列出 workspaces/8c1f3a20 的文件。</p><button class="btn ghost sm" data-a="c-retry">${ic("refresh", 14)}重试</button></div>`;
+  if (s.fresh || !curTurns().length) return `<div class="ch-path">工作目录<code>尚未创建</code></div><div class="ch-pempty">${ic("folder", 28)}<div class="serif">还没有工作目录</div><p>发出第一条消息后，会为这个会话创建 workspaces/ 下的独立目录，上传的附件和智能体生成的文件都在这里。</p></div>`;
+  if (s.id === "s5") return `<div class="ch-path">工作目录<code>workspaces/3e70b9d1</code></div><div class="ch-pempty">${ic("archive", 28)}<div class="serif">工作区不存在</div><p>目录已在 11-10 03:00 自动清理，或这个会话还没有产生过文件。</p></div>`;
+  const list = FILES[s.id] || [];
+  const path = `<div class="ch-path">工作目录<code>workspaces/${s.id === "s1" ? "8c1f3a20" : s.id === "s4" ? "5b2e90c4" : "a71d06f3"}</code>${isRunning() ? '<span class="tag warn" style="height:20px">运行中，实时刷新</span>' : ""}<button class="ibtn" style="margin-left:auto" data-a="c-refresh" aria-label="刷新" title="刷新">${ic("refresh", 15)}</button></div>`;
+  if (!list.length) return path + `<div class="ch-pempty">${ic("folder", 28)}<div class="serif">空目录</div><p>这个会话还没有生成文件。</p>${s.archived ? "" : `<button class="btn ghost sm" data-a="c-gen">${ic("sparkle", 14)}让智能体生成点东西</button>`}</div>`;
+  const tree = `<div class="ch-ftree" role="tree">${list.map((f) => {
+    const name = f.p.replace(/^[^/]+\/(?=.)/, "");
+    const icn = f.t === "dir" ? "folder" : f.t === "img" ? "image" : f.t === "code" || f.t === "log" ? "terminal" : "file";
+    if (f.t === "more") return `<div class="f muted" style="padding-left:30px;cursor:default">${name}</div>`;
+    return `<button class="f ${S.file === f.p ? "on" : ""} ${f.fresh ? "new" : ""}" data-a="c-file" data-f="${esc(f.p)}" style="padding-left:${f.in ? 30 : 8}px">${ic(icn, 15)}<span class="nm">${esc(f.t === "dir" ? f.p : name)}</span><span class="sz">${f.sz || ""}</span></button>`;
+  }).join("")}</div>`;
+  return path + tree + rPreview(list.find((f) => f.p === S.file));
+}
+function rPreview(f) {
+  if (!f || f.t === "dir") return `<div class="ch-pempty" style="padding-top:28px">${ic("eye", 24)}<p>点左边的文件预览</p></div>`;
+  const name = f.p.split("/").pop();
+  const isMd = f.t === "md";
+  const tools = `${isMd ? `<div class="seg" style="margin-right:4px"><button class="${S.md === "preview" ? "on" : ""}" data-a="c-md" data-v="preview">预览</button><button class="${S.md === "src" ? "on" : ""}" data-a="c-md" data-v="src">源码</button></div>` : ""}
+    ${f.t !== "bin" && f.t !== "img" && f.t !== "pdf" ? `<button class="ibtn" data-a="c-copy" data-t="${esc(name)} 的内容" title="复制内容">${ic("copy", 14)}</button>` : ""}<button class="ibtn" data-a="c-dl" data-f="${esc(name)}" title="下载">${ic("download", 14)}</button><button class="ibtn" data-a="c-file-close" title="关闭预览">${ic("x", 14)}</button>`;
+  let body = "";
+  const md = name === "初审结果.md" ? MD_RESULT : name === "退回通知-1018.md" ? "# 退回通知\n\n发票 1018（餐饮，680 元）抬头为「星河数据」，缺少公司全称。\n\n请按 **星河数据科技有限公司** 重开后重新提交。" : name === "外币换算.md" ? "# 外币换算\n\n| 发票 | 原币 | 汇率 | 人民币 |\n| --- | --- | --- | --- |\n| 1015 | USD 420 | 7.1032 | 2,983.34 |\n| eur-0903 | EUR 180 | 7.6420 | 1,375.56 |" : "# 周三项目例会纪要\n\n## 决议\n- 报销系统 11-20 切换新版\n- 外币发票统一按开票日汇率\n\n## 待办\n- 王蕾：周五前更新差旅标准表\n- 林舟：整理 11 月差旅初审结果";
+  if (isMd) body = S.md === "preview" ? `<iframe sandbox="allow-scripts" title="Markdown 预览" srcdoc="${esc(mdToHtml(md))}"></iframe>` : `<pre class="code">${esc(md)}</pre>`;
+  else if (f.t === "code") body = `<pre class="code">${name.endsWith(".py") ? PY : esc("10:02 王蕾：报销系统 20 号切新版\n10:15 许牧：外币按开票日\n10:31 待办：差旅标准表本周五前")}</pre>`;
+  else if (f.t === "log") body = `<pre class="code">${esc(LOG)}</pre><div class="ch-trunc">${ic("warn", 14)}内容过长，只显示前 200 行（共 3,412 行）。<button class="link" data-a="c-dl" data-f="${esc(name)}">下载完整文件</button></div>`;
+  else if (f.t === "pdf") body = `<div class="ch-pdf"><div class="pg"><h5>增值税电子普通发票</h5><div>购买方：星河数据科技有限公司</div><div>纳税人识别号：91310115MA1K4XXXX8</div><div>项目：${name.includes("机票") ? "国内航空旅客运输服务 上海—成都" : name.includes("酒店") ? "住宿服务 2 晚" : "Hotel accommodation, 1 night"}</div><div>金额：<b>${name.includes("机票") ? "¥6,800.00" : name.includes("酒店") ? "¥5,400.00" : "€180.00"}</b></div><div>开票日期：${name.includes("机票") ? "2026-10-15" : name.includes("酒店") ? "2026-10-21" : "2026-09-03"}</div></div><div class="small muted" style="text-align:center;margin-top:8px">PDF 内嵌预览，第 1 / 1 页</div></div>`;
+  else if (f.t === "img") body = `<div class="ch-img"><div class="ch-rcpt"><div style="text-align:center;font-weight:600">蜀香小馆</div><div>2026-10-18 19:42</div><div>4 人桌，菜品 9 项</div><div style="border-top:1px dashed #999;margin:6px 0"></div><div>合计　　¥680.00</div><div>抬头：星河数据</div></div></div><div class="small muted" style="margin-top:8px">1018-餐饮.jpg，1080×1440，1.2 MB</div>`;
+  else body = `<div class="ch-pempty">${ic("file", 28)}<div class="serif">无法预览这个文件</div><p>${name} 是二进制文件（${f.sz}），下载后用本地程序打开。</p><button class="btn sm" data-a="c-dl" data-f="${esc(name)}">${ic("download", 14)}下载</button></div>`;
+  return `<div class="ch-prev"><div class="ch-prevh"><b title="${esc(f.p)}">${esc(name)}</b>${tools}</div><div class="ch-prevb" ${isMd && S.md === "preview" ? 'style="padding:0"' : ""}>${body}</div></div>`;
+}
+function rTrace() {
+  const s = NOW_SID(); const T = curTurns();
+  if (S.loadErr) return `<div class="ch-pempty">${ic("warn", 28)}<div class="serif">执行详情读取失败</div><button class="btn ghost sm" data-a="c-retry">${ic("refresh", 14)}重试</button></div>`;
+  const all = T.flatMap((t) => t.tools || []);
+  if (!all.length) return `<div class="ch-pempty">${ic("pulse", 28)}<div class="serif">这个会话还没有调用过工具</div><p>智能体调用工具、技能包、MCP 或子代理时，会按轮次列在这里。</p></div>`;
+  const fails = all.filter((x) => x.st === "fail").length;
+  const groups = T.map((t, i) => [i + 1, t.tools || []]).filter(([, a]) => a.length);
+  const icon = (x) => x.st === "ok" ? `<span class="st-ok">${ic("check", 15, 2.2)}</span>` : x.st === "fail" ? `<span class="st-fail">${ic("x", 15, 2.2)}</span>` : '<span class="spin" style="width:14px;height:14px"></span>';
+  return `<div class="ch-path"><span>总计 <b style="color:var(--ink)">${all.length} 次调用，${fails} 失败</b></span>${isRunning() ? '<span class="tag warn" style="height:20px">运行中</span>' : ""}</div>
+    <div class="ch-tr">${groups.map(([n, a]) => `<div class="ch-trh">第 ${n} 轮<span class="muted">· ${a.length} 次，${a.filter((x) => x.st === "fail").length} 失败</span></div>${a.map((x) => `<div class="ch-tri ${x.st === "fail" ? "fail" : ""} ${S.traceSel === x.id ? "sel open" : ""}" id="tr-${x.id}"><button data-a="c-tr" data-id="${x.id}">${icon(x)}<span class="nm">${x.name}</span><span class="muted small" style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${x.ds}</span>${x.by ? `<span class="tag line" style="height:20px">子代理</span>` : ""}<span class="du" style="margin-left:0">${x.st === "wait" ? "等你确认" : x.du}</span></button>
+      <div class="det"><div class="muted" style="margin-top:8px">${x.ds}</div>${x.by ? `<div class="lb">由哪个子代理发起</div><div>${av("currency", 18)} <b>${x.by}</b>（报销审核助手的子代理）</div>` : `<div class="lb">发起者</div><div>${s.k === "expense-reviewer" ? "报销审核助手（主智能体）" : AGI[s.k].n}</div>`}
+        <div class="lb">输入</div><pre class="snap">${esc(x.input)}</pre><div class="lb">输出</div><pre class="snap">${x.st === "wait" ? "等你确认后执行" : x.st === "run" ? "运行中…" : x.output ? esc(x.output) : "（空）"}</pre></div></div>`).join("")}`).join("")}</div>`;
+}
+
+/* ---------- 拖动面板宽度（16%–45%） ---------- */
+function bindResize() {
+  const rs = $("#ch-rs"); if (!rs) return;
+  rs.onmousedown = (e) => {
+    e.preventDefault(); rs.classList.add("drag");
+    const mv = (ev) => { S.panelW = Math.round(Math.min(innerWidth * 0.45, Math.max(innerWidth * 0.16, innerWidth - ev.clientX - 8))); $("#ch-side").style.width = S.panelW + "px"; };
+    const up = () => { rs.classList.remove("drag"); removeEventListener("mousemove", mv); removeEventListener("mouseup", up); };
+    addEventListener("mousemove", mv); addEventListener("mouseup", up);
+  };
+}
+
+/* ---------- 运行模拟 ---------- */
+function tick() {
+  if (S.approval && isRunning("s1")) {
+    S.approval.left--;
+    const cd = $("#ch-ap-cd");
+    if (cd) { cd.textContent = `${S.approval.left < 30 ? "即将超时，" : ""}${fmt(S.approval.left)} 后自动拒绝`; cd.className = `tag ${S.approval.left < 30 ? "bad" : "warn"} cd`; }
+    if (S.approval.left <= 0) decide("timeout");
+  }
+  Object.keys(S.turns).forEach((sid) => (S.turns[sid] || []).forEach((t, i) => {
+    if (t.ask && t.ask.st === "pending") {
+      t.ask.left--;
+      const el = $(`.ask-left[data-t="${sid}:${i}"]`); if (el) el.textContent = fmt(t.ask.left);
+      if (t.ask.left <= 0) { t.ask.st = "timeout"; finishAsk(sid, i, null); }
+    }
+  }));
+}
+function decide(v) {
+  const ap = S.approval; if (!ap) return;
+  const T = S.turns.s1, t = T[T.length - 1];
+  const tool = t.tools.find((x) => x.id === ap.tid);
+  const reason = v === "why" ? ($("#ch-ap-r")?.value.trim() || "未填写原因") : "";
+  S.approval = null; $("#ch-note")?.remove();
+  NOW_SID().wait = null;
+  if (v === "ok" || v === "always") {
+    if (v === "always") S.grants.push({ tool: ap.tool, scope: "提交审批单" });
+    tool.st = "run"; tool.du = "";
+    toast(v === "always" ? `已批准，本会话内 ${ap.tool} 不再询问` : "已批准");
+    rMain(); rSide(); rList();
+    setTimeout(() => {
+      tool.st = "ok"; tool.du = "1.6s"; tool.output = '{ "approval_ids": ["AP-1107", "AP-1108"], "approver": "王蕾" }';
+      t.text = "已提交 2 张审批单：<b>AP-1107</b>（1015 机票 6,800 元）、<b>AP-1108</b>（1021 酒店 5,400 元），审批人王蕾。审批结果会通过 ERP 通知报销人。";
+      t.result = { kind: "json", body: '{\n  "verdict": "need_approval",\n  "submitted": ["AP-1107", "AP-1108"],\n  "approver": "王蕾"\n}' };
+      endTurn(t, ["27,604", "538"]);
+    }, 1600);
+  } else {
+    tool.st = "fail"; tool.du = "0s"; tool.output = v === "timeout" ? "超时未确认，已自动拒绝" : `你拒绝了这次调用${reason ? "：" + reason : ""}`;
+    toast(v === "timeout" ? "确认超时，已自动拒绝" : v === "why" ? "已拒绝，原因已交给智能体" : "已拒绝", false);
+    rMain(); rSide();
+    setTimeout(() => {
+      t.text = v === "why" ? `好的，不提交。你说「${esc(reason)}」，我把 1015 和 1021 标成「待补材料」，等你确认后再送审。` : "好的，没有提交审批单。1015 和 1021 仍是「需审批」状态，需要时再让我提交。";
+      endTurn(t, ["26,880", "214"]);
+    }, 1200);
+  }
+}
+function endTurn(t, tok) {
+  t.live = false; t.tok = tok;
+  const s = S.sessions.find((x) => x.id === "s1"); s.run = false; s.wait = null;
+  S.ctx.s1 = [S.ctx.s1[0] + 2, "51.8k"];
+  rList(); rMain(); rSide();
+  if (S.queue.length) { const q = S.queue.shift(); setTimeout(() => startTurn(q.text, [], true), 600); }
+}
+function startTurn(text, atts, fromQueue, fork) {
+  const s = NOW_SID(); const T = curTurns();
+  const t = { at: "刚刚", user: { text, att: atts.map((f) => ["file", f.n]), fork }, think: { sec: 2 }, live: true, tools: [] };
+  T.push(t); s.run = true; s.turns = T.length;
+  if (s.fresh) { s.t = text.slice(0, 18); s.fresh = false; }
+  S._toBottom = true; rList(); rMain(); rSide();
+  if (fromQueue) toast("排队的消息已发送");
+  setTimeout(() => {
+    const isWrite = /md|写进|整理|文件/.test(text);
+    t.tools.push(TL("x" + Date.now(), isWrite ? "Edit" : "policy-lookup", isWrite ? "更新 初审结果.md" : "查找相关制度条款", "run", "", isWrite ? '{ "file_path": "初审结果.md" }' : `{ "query": "${text.slice(0, 20)}" }`, ""));
+    t.think.text = "按用户的要求继续处理。";
+    S._toBottom = true; rMain(); rSide();
+    setTimeout(() => {
+      t.tools[0].st = "ok"; t.tools[0].du = "0.4s"; t.tools[0].output = isWrite ? "已更新，新增 2 行" : "命中第 7、12 条";
+      t.text = isWrite ? "已把审批单号 AP-1107、AP-1108 写进 <a class=\"link\" data-a=\"c-open-file\" data-f=\"初审结果.md\">初审结果.md</a> 的「下一步」一节。" : s.k === "expense-reviewer" ? "收到。按《差旅报销制度 2026 版》第 7 条和第 12 条处理：单笔超过 5,000 元需要部门负责人审批，发票抬头必须是公司全称「星河数据科技有限公司」。把发票放进对话，我逐张帮你核对。" : `收到，我来处理「${esc(text.slice(0, 24))}」。`;
+      t.live = false; t.tok = ["3,120", "286"]; s.run = false;
+      S.ctx[S.sid] = [Math.min(99, (S.ctx[S.sid]?.[0] || 0) + 3), "54.1k"];
+      S._toBottom = true; rList(); rMain(); rSide();
+      if (S.queue.length && S.sid === "s1") { const q = S.queue.shift(); setTimeout(() => startTurn(q.text, [], true), 600); }
+    }, 1800);
+  }, 900);
+}
+function stopRun() {
+  const s = NOW_SID(); const T = curTurns(); const t = T[T.length - 1];
+  confirmBox({ title: "停止这一轮？", body: `<p class="muted" style="margin:0">智能体会在当前步骤结束后停下，已生成的文件保留在工作区。${S.queue.length ? `排队中的 ${S.queue.length} 条消息不会发送。` : ""}</p>`, ok: "停止", danger: true, onOk: () => {
+    s.run = false; s.wait = null; S.approval = null; S.queue = []; $("#ch-note")?.remove();
+    if (t) { t.live = false; (t.tools || []).forEach((x) => { if (x.st === "wait" || x.st === "run") { x.st = "fail"; x.du = "已取消"; x.output = "运行已取消"; } }); if (t.ask?.st === "pending") t.ask.st = "invalid"; t.result = { kind: "cancel", title: "已取消", body: "你刚刚停止了这一轮。已完成的步骤和工作区文件保留。" }; t.tok = t.tok || ["2,010", "64"]; }
+    toast("已停止"); rList(); rMain(); rSide();
+  } });
+}
+function send() {
+  if (S.slash.open) return;
+  const text = S.draft.trim(); const s = NOW_SID();
+  if (!text && !S.atts.length) return toast("先输入内容或添加附件", false);
+  if (AGI[s.k].vars && !S.vars.filled) { toast("先填写必填变量 ERP_TOKEN", false); return openVars(); }
+  const atts = S.atts; S.draft = ""; S.atts = [];
+  if (isRunning()) {
+    const T = curTurns(), t = T[T.length - 1];
+    if ((S.approval && s.id === "s1") || (t && t.ask && t.ask.st === "pending")) {
+      if (s.id === "s1") { S.queue.push({ text: text || "（附件）", n: atts.length }); toast("智能体在等你确认，这条消息已排队，本轮结束后发送"); }
+      else { toast("智能体在等你回答上面的提问，先回答或选择不回答", false); S.draft = text; }
+      return rMain();
+    }
+    t.steers = t.steers || []; const st = { text, st: "wait" }; t.steers.push(st);
+    S._toBottom = true; rMain();
+    setTimeout(() => { st.st = "ok"; rMain(); toast("已交给智能体"); }, 1100);
+    return;
+  }
+  startTurn(text, atts);
+}
+function finishAsk(sid, i, how) {
+  const t = S.turns[sid][i]; const s = S.sessions.find((x) => x.id === sid);
+  if (t.ask.st === "skipped" || t.ask.st === "timeout") {
+    t.text = "好的，我按制度默认口径继续：按<b>开票日</b>汇率换算，汇总表带原币金额、汇率与出处、人民币金额三列。";
+  } else {
+    const q0 = t.ask.qs[0], q1 = t.ask.qs[1];
+    const d = q0.otherOn ? q0.otherText : q0.opts[q0.pick[0]];
+    const cols = [...(q1.pick || []).map((x) => q1.opts[x]), ...(q1.otherOn && q1.otherText ? [q1.otherText] : [])].join("、");
+    t.text = `汇率口径：<b>${esc(d)}</b>，取人民币汇率中间价换算，汇总表列：${esc(cols)}。已写进 <a class="link" data-a="c-open-file" data-f="外币换算.md">外币换算.md</a>：三张合计 <b>12,885.02 元</b>，其中 0921 会议费 USD 1,200（8,524.12 元）超过单笔 5,000 元，需要审批。`;
+    t.tools = [TL("e9", "currency-converter", "子代理：换算 3 张外币发票", "ok", "2.6s", "{ \"invoices\": 3 }", "合计 12,885.02 元"), TL("e10", "Write", "写入 外币换算.md", "ok", "0.1s", '{ "file_path": "外币换算.md" }', "已写入 0.9 KB")];
+  }
+  t.live = false; t.tok = ["7,402", "520"]; s.run = false; s.wait = null;
+  if (sid === S.sid) { rList(); rMain(); rSide(); } else rList();
+}
+
+/* ---------- 交互 ---------- */
+function showNote() {
+  if (!S.approval || $("#ch-note")) return;
+  document.body.insertAdjacentHTML("beforeend", `<div class="ch-note" id="ch-note" role="alert"><div class="row"><span style="color:var(--warnt);margin-top:2px">${ic("shield", 18)}</span><div style="flex:1"><b>报销审核助手在等你确认</b><div class="muted" style="margin:2px 0 10px">erp-finance.submit，提交 2 张审批单</div><div class="row"><button class="btn sm" data-a="c-ap" data-v="ok">批准</button><button class="btn ghost sm" data-a="c-ap" data-v="no">拒绝</button><button class="ibtn" data-a="c-note-x">稍后</button></div></div></div></div>`);
+}
+function newSession() {
+  if (S.loadErr) return openModal(`<h3>新会话</h3><p class="muted">选择要对话的智能体。</p><div class="ch-pempty">${ic("warn", 26)}<div class="serif">智能体列表没读到</div><p>GET /api/agents 返回 503。</p><button class="btn ghost sm" data-a="c-retry">${ic("refresh", 14)}重试</button></div><div class="mfoot"><button class="btn ghost" data-a="owa-close">取消</button></div>`, 560);
+  const run = S.sessions.find((x) => x.run && !x.archived);
+  let g0 = "";
+  openModal(`<h3>新会话</h3><p class="muted" style="margin:0">选一个智能体开始。你有编辑权限的智能体跑草稿，其他的跑已发布版本。</p>
+    ${run ? `<div class="ch-bar warn" style="margin:12px 0 0">${ic("info", 15)}「${esc(run.t)}」还在运行，新会话不会打断它。</div>` : ""}
+    <div class="ch-agl">${PICK.map(([g, k, n, st]) => { const h = g !== g0 ? `<div class="ch-agh">${g}</div>` : ""; g0 = g; return h + `<button class="ch-agi" data-a="c-new-pick" data-k="${k}">${av(k, 36)}<div style="min-width:0;flex:1"><div class="n">${n}</div><div class="d">${st}</div></div>${ic("chev", 16)}</button>`; }).join("")}</div>
+    <div class="mfoot" style="justify-content:space-between"><a class="link" href="explore.html">去探索找更多智能体</a><button class="btn ghost" data-a="owa-close">取消</button></div>`, 560);
+}
+function openVars() {
+  openModal(`<h3>填写变量</h3><p class="muted" style="margin:0 0 16px">报销审核助手需要这些变量才能运行。值按「你 + 这个智能体」保存，其他人看不到。</p>
+    <div class="fld"><label for="v1">ERP_TOKEN <b>*</b> <span class="tag line" style="margin-left:4px">密钥</span></label><input class="inp" id="v1" type="password" autocomplete="off" placeholder="${S.vars.filled ? "已保存，留空不修改" : "粘贴 ERP 开放平台签发的 Token"}"><span class="small muted">用于调用 erp-finance 查询预算、提交审批单</span><span class="small" id="v-err" style="color:var(--bad)"></span></div>
+    <div class="fld"><label for="v2">DEPT</label><input class="inp" id="v2" value="${esc(S.vars.DEPT)}" placeholder="你的部门，比如：财务部"></div>
+    <label class="row small" style="gap:8px;cursor:pointer"><input type="checkbox" id="v3"> 只用于这个会话（不改动其他会话的值）</label>
+    <div class="mfoot"><button class="btn ghost" data-a="owa-close">取消</button><button class="btn" data-a="c-vars-save">保存</button></div>`, 480);
+}
+function openSession(id) {
+  if (id === S.sid) return;
+  const cur = NOW_SID();
+  if (cur && cur.run) toast(`「${cur.t}」还在运行，切回来可以继续看进度`);
+  S.sid = id; S.loading = true; S.traceSel = null; S.draft = ""; S.atts = []; S.slash.open = false;
+  const list = FILES[id] || []; S.file = list.find((f) => f.t === "md")?.p || list[0]?.p || null;
+  rList(); rMain(); rSide();
+  setTimeout(() => { S.loading = false; S._toBottom = true; rMain(); rSide(); }, 380);
+}
+function sessMenu(btn) {
+  closeMenus();
+  const s = S.sessions.find((x) => x.id === btn.dataset.id);
+  const r = btn.getBoundingClientRect();
+  const m = document.createElement("div"); m.className = "menu";
+  m.style.cssText = `position:fixed;top:${r.bottom + 4}px;left:${r.left - 8}px;min-width:180px`;
+  m.innerHTML = `<button data-a="c-rename" data-id="${s.id}">${ic("edit", 16)}重命名</button><button data-a="c-archive" data-id="${s.id}">${ic("archive", 16)}归档</button><hr><button data-a="c-del" data-id="${s.id}" style="color:var(--bad)">${ic("trash", 16)}删除</button>`;
+  document.body.appendChild(m);
+}
+
+OWA.on("c-sess", (el, e) => { if (e.target.closest(".more,.btn")) return; openSession(el.dataset.id); });
+OWA.on("c-more", (el, e) => { e.preventDefault(); sessMenu(el); });
+OWA.on("c-rename", (el) => {
+  closeMenus(); const s = S.sessions.find((x) => x.id === el.dataset.id);
+  openModal(`<h3>重命名会话</h3><div class="fld" style="margin-top:14px"><label for="rn">会话名</label><input class="inp" id="rn" value="${esc(s.t)}" maxlength="60"></div><div class="mfoot"><button class="btn ghost" data-a="owa-close">取消</button><button class="btn" data-a="c-rename-ok" data-id="${s.id}">保存</button></div>`, 440);
+  setTimeout(() => { const i = $("#rn"); i.focus(); i.select(); }, 30);
+});
+OWA.on("c-rename-ok", (el) => { const v = $("#rn").value.trim(); if (!v) return toast("会话名不能为空", false); S.sessions.find((x) => x.id === el.dataset.id).t = v; closeModal(); toast("已重命名"); rList(); rMain(); });
+OWA.on("c-archive", (el) => {
+  closeMenus(); const s = S.sessions.find((x) => x.id === el.dataset.id);
+  s.archived = true; toast(`已归档「${s.t}」，可在左下角「已归档」里恢复`);
+  if (s.id === S.sid) { const nx = S.sessions.find((x) => !x.archived); if (nx) { S.sid = nx.id; } }
+  rList(); rMain(); rSide();
+});
+OWA.on("c-del", (el) => {
+  closeMenus(); const s = S.sessions.find((x) => x.id === el.dataset.id);
+  confirmBox({ title: "删除这个会话？", danger: true, ok: "删除", body: `<p style="margin:0 0 8px">「${esc(s.t)}」将被永久删除，不能恢复：</p><ul class="muted" style="margin:0;padding-left:20px;line-height:1.8">${s.run ? "<li><b style=\"color:var(--bad)\">正在运行的任务会被停止</b></li>" : "<li>如果有运行中的任务，会先停止</li>"}<li>会话的工作目录和里面的文件会被删除</li><li>计费记录保留，仍可在「积分与套餐」里查到</li></ul>`, onOk: () => {
+    S.sessions = S.sessions.filter((x) => x.id !== s.id); toast("已删除");
+    if (s.id === S.sid) { const nx = S.sessions.find((x) => !x.archived); S.sid = nx ? nx.id : null; if (!nx) { S.noAgent = false; } }
+    if (!S.sid) { applyDemo("empty"); return; }
+    rList(); rMain(); rSide();
+  } });
+});
+OWA.on("c-arch-view", () => { S.archivedView = !S.archivedView; S.q = ""; rList(); });
+OWA.on("c-restore", (el, e) => { e.preventDefault(); const s = S.sessions.find((x) => x.id === el.dataset.id); s.archived = false; toast(`已恢复「${s.t}」`); rList(); if (s.id === S.sid) rMain(); });
+OWA.on("c-new", () => newSession());
+OWA.on("c-new-pick", (el) => {
+  closeModal(); const k = el.dataset.k;
+  if (!AGI[k]) return;
+  const id = "n" + Date.now();
+  const cur = NOW_SID(); if (cur?.run) toast(`「${cur.t}」还在后台运行`);
+  S.sessions.unshift({ id, k, t: "新会话", at: "刚刚", turns: 0, g: "今天", fresh: true });
+  S.turns[id] = []; S.sid = id; S.ctx[id] = [0, "0"]; S.archivedView = false; S.draft = "";
+  rList(); rMain(); rSide();
+});
+OWA.on("c-starter", (el) => { S.draft = el.dataset.t; send(); });
+OWA.on("c-panel", (el) => { const v = el.dataset.v; S.panel = S.panel === v ? null : v; rMain(); rSide(); });
+OWA.on("c-panel-tab", (el) => { S.panel = el.dataset.v; rMain(); rSide(); });
+OWA.on("c-panel-close", () => { S.panel = null; rMain(); rSide(); });
+OWA.on("c-file", (el) => { S.file = el.dataset.f; S.md = "preview"; rSide(); });
+OWA.on("c-file-close", () => { S.file = null; rSide(); });
+OWA.on("c-open-file", (el) => { const f = el.dataset.f; const list = FILES[S.sid] || []; S.file = list.find((x) => x.p.endsWith(f))?.p || f; S.panel = "files"; S.md = "preview"; rMain(); rSide(); });
+OWA.on("c-md", (el) => { S.md = el.dataset.v; rSide(); });
+OWA.on("c-dl", (el) => toast(`开始下载 ${el.dataset.f}`));
+OWA.on("c-copy", (el) => toast(`已复制${el.dataset.t || ""}`));
+OWA.on("c-refresh", () => { toast("已刷新工作区"); rSide(); });
+OWA.on("c-gen", () => { S.draft = "把这次查询结果导出成 CSV 放到工作区"; rMain(); $("#ch-in")?.focus(); });
+OWA.on("c-think", (el) => { const t = curTurns()[+el.dataset.n - 1]; t.thinkOpen = !t.thinkOpen; rMain(); });
+OWA.on("c-tools", (el) => { const box = el.closest(".ch-tools"); box.classList.toggle("open"); const n = +el.closest(".ch-turn").dataset.n; curTurns()[n - 1].toolsOpen = box.classList.contains("open"); });
+function locate(id) { S.traceSel = id; S.panel = "trace"; rMain(); rSide(); const el = $(`#tr-${id}`); if (el) { el.classList.add("ch-flash"); } }
+OWA.on("c-locate", (el) => locate(el.dataset.id));
+OWA.on("c-tr", (el) => { const id = el.dataset.id; S.traceSel = S.traceSel === id ? null : id; rSide(); });
+OWA.on("c-jump", (el) => { const t = $(`#turn-${el.dataset.n}`); const st = $("#ch-stream"); st.scrollTop = t.offsetTop - 16; });
+OWA.on("c-latest", () => { const st = $("#ch-stream"); st.scrollTop = st.scrollHeight; });
+OWA.on("c-rerun", (el) => {
+  const n = +el.dataset.n; const t = curTurns()[n - 1]; const after = curTurns().length - n;
+  openModal(`<h3>重跑第 ${n} 轮</h3><p class="muted" style="margin:0 0 12px">会回到这一轮之前的状态（对话和工作区文件都回退），用下面的内容重新跑。${after ? `之后的 ${after} 轮会从当前视图里移走。` : ""}如果定位不到这一轮之前的状态，会改用干净上下文重跑，并提示你。</p>
+    <div class="fld"><label for="rr">这一轮的消息（可改写）</label><textarea class="ta" id="rr" rows="4">${esc(t.user?.text || "")}</textarea></div>
+    <div class="ch-bar" style="margin:0">${ic("coin", 15)}重跑会重新调用模型并计费，预计约 20 积分</div>
+    <div class="mfoot"><button class="btn ghost" data-a="owa-close">取消</button><button class="btn" data-a="c-rerun-ok" data-n="${n}">${ic("refresh", 15)}重跑</button></div>`, 560);
+});
+OWA.on("c-rerun-ok", (el) => {
+  const n = +el.dataset.n; const v = $("#rr").value.trim(); if (!v) return toast("消息不能为空", false);
+  closeModal(); const T = curTurns(); T.splice(n - 1);
+  S.approval = null; S.queue = [];
+  toast(`已回到第 ${n} 轮之前的状态，正在重跑`);
+  startTurn(v, [], false, n > 1 ? `从第 ${n - 1} 轮之后分叉重跑` : "从会话开头分叉重跑");
+});
+OWA.on("c-pick", (el) => {
+  const [sid, i] = el.dataset.t.split(":"); const q = S.turns[sid][+i].ask.qs[+el.dataset.q]; const o = +el.dataset.o;
+  q.pick = q.pick || [];
+  if (q.multi) q.pick = q.pick.includes(o) ? q.pick.filter((x) => x !== o) : [...q.pick, o];
+  else { q.pick = q.pick.includes(o) ? [] : [o]; q.otherOn = false; }
+  rMain();
+});
+OWA.on("c-other", (el) => {
+  const [sid, i] = el.dataset.t.split(":"); const q = S.turns[sid][+i].ask.qs[+el.dataset.q];
+  q.otherOn = !q.otherOn; if (!q.multi && q.otherOn) q.pick = [];
+  rMain(); setTimeout(() => $(`[data-other="${el.dataset.t}-${el.dataset.q}"]`)?.focus(), 20);
+});
+document.addEventListener("input", (e) => {
+  const k = e.target.dataset?.other; if (!k) return;
+  const [ti, qi] = [k.slice(0, k.lastIndexOf("-")), k.slice(k.lastIndexOf("-") + 1)]; const [sid, i] = ti.split(":");
+  const a = S.turns[sid][+i].ask; a.qs[+qi].otherText = e.target.value;
+  const done = a.qs.every((q) => (q.pick && q.pick.length) || (q.otherOn && (q.otherText || "").trim()));
+  const b = $(`[data-a="c-ans"][data-t="${ti}"]`); if (b) { b.disabled = !done; b.textContent = done ? "提交回答" : "请先回答每个问题"; }
+});
+OWA.on("c-ans", (el) => {
+  const [sid, i] = el.dataset.t.split(":"); const t = S.turns[sid][+i];
+  t.ask.st = "waiting"; rMain();
+  setTimeout(() => { t.ask.st = "answered"; t.ask.at = "刚刚"; toast("回答已交给智能体"); rMain(); setTimeout(() => finishAsk(sid, +i), 1300); }, 900);
+});
+OWA.on("c-noans", (el) => { const [sid, i] = el.dataset.t.split(":"); const t = S.turns[sid][+i]; t.ask.st = "skipped"; rMain(); setTimeout(() => finishAsk(sid, +i), 900); });
+OWA.on("c-asnew", (el) => { const [sid, i] = el.dataset.t.split(":"); const q = S.turns[sid][+i].ask.qs[0]; S.draft = `关于「${q.q}」：按${q.opts[0]}。`; rMain(); $("#ch-in").focus(); toast("已放进输入框，确认后发送"); });
+OWA.on("c-ap", (el) => decide(el.dataset.v));
+OWA.on("c-ap-why", () => { S.approval.reason = !S.approval.reason; rMain(); setTimeout(() => $("#ch-ap-r")?.focus(), 20); });
+OWA.on("c-ap-retry", () => { const b = $('[data-a="c-ap-retry"]'); b.innerHTML = '<span class="spin" style="width:14px;height:14px"></span>读取中'; setTimeout(() => { S.approvalErr = false; toast("审批状态已更新，没有待确认的操作"); rMain(); }, 700); });
+OWA.on("c-note-x", () => $("#ch-note")?.remove());
+OWA.on("c-revoke", (el) => { const g = S.grants[+el.dataset.i]; confirmBox({ title: "撤销这项授权？", body: `<p class="muted" style="margin:0">之后智能体再调用 <code>${g.tool}</code> 时，会重新请你确认。</p>`, ok: "撤销", onOk: () => { S.grants.splice(+el.dataset.i, 1); toast(`已撤销 ${g.tool} 的授权`); rMain(); } }); });
+OWA.on("c-unqueue", (el) => { const q = S.queue.splice(+el.dataset.i, 1)[0]; toast(`已取消排队：${q.text.slice(0, 14)}…`); rMain(); });
+OWA.on("c-vars", () => openVars());
+OWA.on("c-vars-save", () => {
+  const t = $("#v1").value.trim();
+  if (!t && !S.vars.filled) { $("#v-err").textContent = "ERP_TOKEN 是必填的"; return; }
+  S.vars = { filled: true, ERP_TOKEN: t || S.vars.ERP_TOKEN, DEPT: $("#v2").value.trim() };
+  closeModal(); toast($("#v3")?.checked ? "已保存，只用于这个会话" : "变量已保存"); rMain();
+});
+OWA.on("c-send", () => send());
+OWA.on("c-stop", () => stopRun());
+OWA.on("c-slash", (el) => runSlash(el.dataset.c));
+OWA.on("c-attmenu", () => { S.attMenu = !S.attMenu; rMain(); });
+OWA.on("c-att", (el) => {
+  S.attMenu = false;
+  if (el.dataset.v === "big") { toast("差旅录像.mov 有 86MB，超过单个文件 10MB 的上限", false); return rMain(); }
+  S.atts.push({ n: "酒店水单-1021.jpg", sz: "820 KB", img: true }); toast("已添加，发送时会上传到工作目录"); rMain();
+});
+OWA.on("c-unatt", (el) => { S.atts.splice(+el.dataset.i, 1); rMain(); });
+OWA.on("c-ctx", () => { const [p, t] = S.ctx[S.sid] || [0, "0"]; toast(`上下文已用 ${p}%（上限按 200k 计），这个会话累计处理 ${t} token`); });
+OWA.on("c-retry", () => { closeModal(); const b = $('[data-a="c-retry"]'); if (b) b.innerHTML = '<span class="spin" style="width:14px;height:14px"></span>读取中'; setTimeout(() => applyDemo("normal"), 700); });
+OWA.on("c-demo", (el) => applyDemo(el.dataset.v));
+
+/* 拖放附件 */
+let dragN = 0;
+addEventListener("dragenter", (e) => { if (!e.dataTransfer?.types?.includes("Files")) return; dragN++; $("#ch-drop")?.classList.add("on"); });
+addEventListener("dragleave", () => { dragN = Math.max(0, dragN - 1); if (!dragN) $("#ch-drop")?.classList.remove("on"); });
+addEventListener("dragover", (e) => e.preventDefault());
+addEventListener("drop", (e) => {
+  e.preventDefault(); dragN = 0; $("#ch-drop")?.classList.remove("on");
+  const fs = Array.from(e.dataTransfer?.files || []);
+  fs.forEach((f) => { if (f.size > 10 * 1024 * 1024) toast(`${f.name} 超过 10MB，没有添加`, false); else S.atts.push({ n: f.name, sz: f.size > 1048576 ? (f.size / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(f.size / 1024)) + " KB", img: /^image\//.test(f.type) }); });
+  rMain();
+});
+document.addEventListener("click", (e) => { if (S.attMenu && !e.target.closest(".ch-attmenu,[data-a=c-attmenu]")) { S.attMenu = false; $(".ch-attmenu")?.remove(); } });
+
+/* ---------- 启动 ---------- */
+setInterval(tick, 1000);
+(function boot() {
+  const p = new URLSearchParams(location.search);
+  applyDemo(p.get("demo") || (p.get("agent") && !AGI[p.get("agent")] ? "badagent" : "normal"));
+  if (p.get("session") && S.sessions.find((s) => s.id === p.get("session"))) openSession(p.get("session"));
+  if (location.hash === "#new") newSession();
+})();
+</script>
+</body>
+</html>

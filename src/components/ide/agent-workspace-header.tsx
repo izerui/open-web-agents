@@ -1,5 +1,6 @@
 "use client";
 
+import { agentHref } from "@/lib/nav/routes";
 import { useMe } from "@/lib/use-me";
 import { cn } from "@/lib/utils";
 import { Activity, Bot, MessageSquare, Plug, Settings2 } from "lucide-react";
@@ -45,7 +46,7 @@ export function AgentWorkspaceHeader({
       : remembered?.agentId === object.id
         ? remembered.sessionId
         : null;
-  const chatHref = `/?agent=${id}${sessionId ? `&session=${encodeURIComponent(sessionId)}` : ""}`;
+  const chatHref = `/chat?agent=${id}${sessionId ? `&session=${encodeURIComponent(sessionId)}` : ""}`;
   const items = [
     {
       key: "chat",
@@ -53,9 +54,19 @@ export function AgentWorkspaceHeader({
       icon: MessageSquare,
       href: chatHref,
     },
-    { key: "config", label: "配置", icon: Settings2, href: `/agents?id=${id}` },
-    { key: "runs", label: "运行", icon: Activity, href: `/settings/runs?agent=${id}` },
-    { key: "integration", label: "接入", icon: Plug, href: `/settings/keys?agent=${id}` },
+    { key: "config", label: "配置", icon: Settings2, href: agentHref({ id: object.id }) },
+    {
+      key: "runs",
+      label: "运行",
+      icon: Activity,
+      href: agentHref({ id: object.id, stage: "runs" }),
+    },
+    {
+      key: "integration",
+      label: "接入",
+      icon: Plug,
+      href: agentHref({ id: object.id, stage: "access" }),
+    },
   ];
   return (
     <div className="shrink-0 bg-sidebar">

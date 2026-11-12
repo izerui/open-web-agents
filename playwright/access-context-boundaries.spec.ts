@@ -64,7 +64,7 @@ test.describe("运行与接入的对象边界", () => {
     const loaded = page.waitForResponse(
       (response) => new URL(response.url()).pathname === "/api/runs",
     );
-    await page.goto(`/settings/runs?agent=${first}`);
+    await page.goto(`/agents/${first}?stage=runs`);
     expect((await loaded).ok()).toBeTruthy();
     await expect(page.getByRole("heading", { level: 1, name: firstName })).toBeVisible();
     expect(requests.length).toBeGreaterThan(0);
@@ -72,7 +72,7 @@ test.describe("运行与接入的对象边界", () => {
     expect(requests.every((url) => !url.searchParams.has("scope"))).toBeTruthy();
     await expect(page.getByLabel("按智能体筛选")).toHaveCount(0);
 
-    await page.goto("/settings/runs");
+    await page.goto("/developer/runs");
     await expect(page.getByRole("heading", { level: 1, name: "全部运行" })).toBeVisible();
     await expect(page.getByLabel("按智能体筛选")).toBeEnabled();
     const filtered = page.waitForRequest((request) => {
@@ -81,7 +81,7 @@ test.describe("运行与接入的对象边界", () => {
     });
     await page.getByLabel("按智能体筛选").selectOption(second);
     await filtered;
-    await expect(page).toHaveURL(`${BASE}/settings/runs`);
+    await expect(page).toHaveURL(`${BASE}/developer/runs`);
     await expect(page.getByRole("navigation", { name: "当前智能体工作区" })).toHaveCount(0);
     await expect(page.getByLabel("全平台", { exact: true })).toHaveCount(0);
   });
@@ -113,7 +113,7 @@ test.describe("运行与接入的对象边界", () => {
       await expect(page.getByRole("link", { name: "OpenAPI 文档" })).toHaveCount(0);
     }
     await page.getByLabel("选择接入智能体").selectOption(first);
-    await expect(page).toHaveURL(`${BASE}/settings/keys?agent=${first}`);
+    await expect(page).toHaveURL(`${BASE}/developer/keys?agent=${first}`);
     await expect(page.getByRole("heading", { level: 1, name: firstName })).toBeVisible();
     await expect(page.getByLabel("选择接入智能体")).toHaveCount(0);
     await expect(page.getByRole("link", { name: "OpenAPI 文档" })).toHaveAttribute(
@@ -123,7 +123,7 @@ test.describe("运行与接入的对象边界", () => {
   });
 
   test("全局显示账号全部 Key，对象切换与返回保留独立凭证绑定", async ({ page }) => {
-    await page.goto("/settings/keys");
+    await page.goto("/developer/keys");
     await expect(page.getByText("我的 API Key", { exact: true })).toBeVisible();
     await expect(page.getByRole("navigation", { name: "当前智能体工作区" })).toHaveCount(0);
     for (const id of [first, second, "all"]) {
@@ -132,7 +132,7 @@ test.describe("运行与接入的对象边界", () => {
     await expect(page.getByLabel("限定智能体")).toHaveValue("");
     await page.getByLabel("限定智能体").selectOption(second);
     await page.getByLabel("选择接入智能体").selectOption(first);
-    await expect(page).toHaveURL(`${BASE}/settings/keys?agent=${first}`);
+    await expect(page).toHaveURL(`${BASE}/developer/keys?agent=${first}`);
     await expect(page.getByRole("heading", { level: 1, name: firstName })).toBeVisible();
     await expect(page.getByLabel("限定智能体")).toHaveValue(second);
     await expect(page.getByText("可用于此智能体的 API Key", { exact: true })).toBeVisible();
@@ -140,7 +140,7 @@ test.describe("运行与接入的对象边界", () => {
     await expect(page.getByText(`scope-all-${stamp}`)).toBeVisible();
     await expect(page.getByText(`scope-${second}-${stamp}`)).toHaveCount(0);
     await page.getByRole("link", { name: "全部 API Key", exact: true }).click();
-    await expect(page).toHaveURL(`${BASE}/settings/keys`);
+    await expect(page).toHaveURL(`${BASE}/developer/keys`);
     await expect(page.getByText("我的 API Key", { exact: true })).toBeVisible();
     await expect(page.getByLabel("限定智能体")).toHaveValue(second);
     await expect(page.getByText(`scope-${second}-${stamp}`)).toBeVisible();

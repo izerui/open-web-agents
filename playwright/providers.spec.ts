@@ -131,7 +131,7 @@ test.describe("模型提供者管理", () => {
       expect(adminHtml).not.toContain("sk-pw-wrong-key");
 
       // 用户价目页:看得到模型与售价,看不到提供者与上游模型标识
-      await page.goto(`${BASE}/settings/credentials`);
+      await page.goto(`${BASE}/account/prices`);
       await expect(page.getByText(modelName)).toBeVisible();
       const userHtml = await page.content();
       expect(userHtml).not.toContain(providerName);

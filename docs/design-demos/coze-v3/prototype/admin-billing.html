@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>计费 · 平台管理 · Open Web Agents</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/owa.css">
+<style>
+a.btn{text-decoration:none}
+.ab-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}
+.ab-stats .stat .n{font-size:24px}
+.ab-stats .stat .s{font-size:12px;color:var(--sub);margin-top:2px}
+.ab-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.ab-num{text-align:right;font-variant-numeric:tabular-nums}
+table.tb th.ab-num{text-align:right}
+.ab-mono{font-family:var(--mono);font-size:12.5px;color:#4D4A43}
+.ab-acct{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;margin-bottom:16px}
+.ab-box{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px 20px}
+.ab-box h3{margin:0 0 4px;font-size:16px}
+.ab-err{color:var(--bad);font-size:12px;margin-top:4px}
+.ab-err:empty{display:none}
+.ab-sub{display:flex;gap:6px;margin:4px 0 12px}
+.ab-sub button{height:34px;padding:0 14px;border-radius:17px;border:1px solid var(--line);background:#fff;font-size:13px;color:#3C3A35}
+.ab-sub button.on{background:var(--btn);color:#fff;border-color:var(--btn)}
+.ab-steps{display:flex;gap:8px;align-items:center;margin:0 0 16px;font-size:13px;color:var(--sub)}
+.ab-steps b{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:#ECEAE3;color:#4D4A43;font-size:12px;margin-right:6px}
+.ab-steps .on{color:var(--ink);font-weight:600}
+.ab-steps .on b{background:var(--btn);color:#fff}
+.ab-steps .done b{background:var(--ok);color:#fff}
+.ab-prev{max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:12px}
+.ab-drill{display:flex;align-items:center;gap:10px;background:#F4F2EC;border-radius:10px;padding:8px 12px;margin-bottom:10px;font-size:13px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="assets/owa.js"></script>
+<script>
+"use strict";
+/* 平台管理，计费（原 /admin/billing）：概览 / 账户（批量发放、单账号发放、该账号的概览·运行消耗·流水）/ 对账（含待核对） */
+const ACCTS = [
+  { e: "linzhou@xinghe.example", avail: 12480, frozen: 120, month: 1862, limit: 5000 },
+  { e: "tangyue@xinghe.example", avail: 19880, frozen: 120, month: 30120, limit: 50000 },
+  { e: "heqing@xinghe.example", avail: 8600, frozen: 0, month: 21400, limit: 30000 },
+  { e: "xumu@xinghe.example", avail: 0, frozen: 0, month: 48300, limit: null, owe: 36 },
+  { e: "mengqi@xinghe.example", avail: 2120, frozen: 240, month: 52400, limit: 80000 },
+  { e: "chenxi@xinghe.example", avail: 5800, frozen: 0, month: 41200, limit: 60000 },
+  { e: "weiran@xinghe.example", avail: 1000, frozen: 0, month: 0, limit: null, legacy: true },
+  { e: "liuqiang@xinghe.example", avail: 300, frozen: 0, month: 0, limit: 0, off: true },
+  { e: "dengke@xinghe.example", avail: 0, frozen: 0, month: 0, limit: null, off: true },
+  { e: "kongwei@xinghe.example", avail: 0, frozen: 0, month: 0, limit: null, off: true },
+];
+const RANGES = ["本月", "上月", "近 30 天", "近 90 天"];
+const RF = { "本月": 1, "上月": 0.86, "近 30 天": 1.04, "近 90 天": 2.9 };
+const DIMS = {
+  "按账号": [["mengqi@xinghe.example", 2410, 52400, 0, 240], ["xumu@xinghe.example", 2310, 48300, 36, 0], ["chenxi@xinghe.example", 1880, 41200, 0, 0], ["baijing@xinghe.example", 1702, 38100, 0, 0], ["yangfan@xinghe.example", 1650, 36800, 0, 0], ["tangyue@xinghe.example", 1204, 30120, 0, 120], ["heqing@xinghe.example", 866, 21400, 0, 0], ["linzhou@xinghe.example", 214, 1862, 0, 120]],
+  "按来源": [["工作台", 9820, 182400, 12, 360], ["接口调用", 6410, 121300, 24, 120], ["API 会话", 1820, 52100, 0, 0], ["评测", 960, 21600, 0, 0], ["AI 编辑", 410, 8600, 0, 0]],
+  "按智能体": [["客服知识问答", 6412, 64100, 0, 0], ["代码审查员", 2604, 88200, 36, 0], ["SQL 助手", 3110, 31400, 0, 0], ["报销审核助手", 1214, 42600, 0, 120], ["会议纪要整理", 1980, 39600, 0, 0], ["合同条款比对", 290, 23200, 0, 0]],
+  "按 API Key": [["owa_live_…a91c（财务 ERP）", 4120, 70200, 0, 120], ["owa_live_…7f02（客服系统）", 1630, 31800, 24, 0], ["owa_live_…c3d8（数据平台）", 660, 19300, 0, 0], ["不经 Key（站内使用）", 12210, 264700, 12, 360]],
+};
+const RUNS = [
+  ["11-11 14:21", "报销审核助手 v3", "接口调用", "冻结中", 120, 0],
+  ["11-11 14:02", "报销审核助手 v3", "工作台", "已结算", 46, 0],
+  ["11-11 11:05", "会议纪要整理 v5", "工作台", "多扣已退还", 18, 0],
+  ["11-10 17:40", "SQL 助手 v4", "工作台", "已结算", 3, 0],
+  ["11-10 16:12", "报销审核助手 草稿", "评测", "已结算", 36, 0],
+  ["11-09 09:30", "竞品周报（新版） 草稿", "AI 编辑", "待核对", 0, 0],
+  ["11-08 20:14", "代码审查员 v7", "API 会话", "欠额", 52, 8],
+];
+const LEDGER = [
+  ["11-11 14:21", "冻结", -120, 12480, "运行 run_8c1f 开始，冻结 120"],
+  ["11-11 14:03", "结算", -46, 12600, "运行 run_77ab 实际花费 46"],
+  ["11-11 14:01", "释放冻结", 54, 12646, "运行 run_77ab 结束，释放未用的 54"],
+  ["11-11 11:06", "多扣退还", 6, 12592, "运行 run_61d0 用量复核后退还"],
+  ["11-10 09:00", "人工入账", 10000, 12586, "周岚：订单 OD-20261108-0027 线下已收款"],
+];
+const RECON = (() => {
+  const days = ["11-11", "11-10", "11-09", "11-08", "11-07"];
+  const out = [];
+  days.forEach((d, i) => {
+    out.push([d, "Anthropic 官方", 4120 - i * 210, (212.4 - i * 9.7).toFixed(1) + "M", (38.2 - i * 1.9).toFixed(1) + "M", (96.1 - i * 4.4).toFixed(1) + "M", (12.0 - i * 0.6).toFixed(1) + "M", 1420.6 - i * 61, 177580 - i * 7600, 177580 - i * 7600 - (i === 1 ? 36 : 0), i === 2 ? 3 : 0]);
+    out.push([d, "内网代理", 610 - i * 30, (18.6 - i * 0.9).toFixed(1) + "M", (4.1 - i * 0.2).toFixed(1) + "M", "—", "—", 70.2 - i * 3, 9130 - i * 390, 9130 - i * 390, 0]);
+  });
+  return out;
+})();
+const PENDING = [
+  ["11-11 09:12", "xumu@xinghe.example", "代码审查员 v7", "run_5e21", "欠款", "余额不足，欠 36 积分"],
+  ["11-09 09:30", "linzhou@xinghe.example", "竞品周报（新版） 草稿", "run_3a90", "用量未知", "提供者没返回 usage"],
+  ["11-09 08:41", "chenxi@xinghe.example", "汇率换算 v2", "run_3a77", "用量未知", "运行中断，用量缺失"],
+  ["11-08 22:05", "mengqi@xinghe.example", "通义万相 生图", "run_2f10", "无法完整计价", "模型缺少「每张图片」单价"],
+  ["11-08 20:14", "linzhou@xinghe.example", "代码审查员 v7", "run_2e08", "欠款", "欠 8 积分"],
+];
+const S = { tab: "ov", range: "本月", dim: "按账号", acct: ACCTS[0].e, sub: "ov", ledMore: false, from: "2026-11-01", to: "2026-11-11", trunc: false, why: "全部", reconLoading: false, acctLoading: false };
+const n = (x) => Math.round(x).toLocaleString();
+const AC = (e) => ACCTS.find((a) => a.e === e) || { e, avail: 0, frozen: 0, month: 0, limit: null };
+
+OWA.mount({ nav: "admin", body: `<div class="bwrap">${sideNav("admin")}<main class="main" id="ab-main"></main></div>` });
+
+function render() {
+  $("#ab-main").innerHTML = `<div class="ph"><div><h1>计费</h1><p class="muted" style="margin:6px 0 0">全平台积分消耗、账户与人工发放、按提供者对账。1 元 = 100 积分。</p></div></div>
+    <div class="tabs" role="tablist">${[["ov", "概览"], ["acct", "账户"], ["recon", "对账"]].map(([k, t]) => `<button role="tab" aria-selected="${S.tab === k}" class="${S.tab === k ? "on" : ""}" data-a="ab-tab" data-v="${k}">${t}</button>`).join("")}</div>
+    ${S.tab === "ov" ? overview() : S.tab === "acct" ? account() : recon()}`;
+}
+
+/* ---------- 概览 ---------- */
+function overview() {
+  const f = RF[S.range], rows = DIMS[S.dim];
+  const sum = (j) => rows.reduce((s, r) => s + r[j], 0);
+  return `<div class="ab-bar"><div class="seg" aria-label="时间范围">${RANGES.map((r) => `<button data-a="ab-range" data-v="${r}" class="${r === S.range ? "on" : ""}">${r}</button>`).join("")}</div>
+      <span class="muted small" style="margin-left:6px">维度</span><div class="seg" aria-label="统计维度">${Object.keys(DIMS).map((d) => `<button data-a="ab-dim" data-v="${d}" class="${d === S.dim ? "on" : ""}">${d}</button>`).join("")}</div></div>
+    <div class="ab-stats">
+      <div class="stat"><div class="muted small">实际扣除（积分）</div><div class="n">${n(386000 * f)}</div><div class="s">约 ¥ ${n(3860 * f)}</div></div>
+      <div class="stat"><div class="muted small">运行次数</div><div class="n">${n(19420 * f)}</div><div class="s">24 个账号中 21 个启用</div></div>
+      <div class="stat"><div class="muted small">欠额（积分）</div><div class="n" style="color:var(--bad)">${n(36 * f)}</div><div class="s"><a class="link" href="#" data-a="ab-gopend" data-w="欠款">看待核对</a></div></div>
+      <div class="stat"><div class="muted small">冻结中（积分）</div><div class="n">480</div><div class="s">4 个运行进行中</div></div></div>
+    <div class="card" style="overflow:hidden"><table class="tb"><thead><tr><th>${S.dim.replace("按", "")}</th><th class="ab-num">次数</th><th class="ab-num">实际扣除</th><th class="ab-num">欠额</th><th class="ab-num">冻结中</th><th class="ab-num">合计</th>${S.dim === "按账号" ? "<th></th>" : ""}</tr></thead><tbody>
+      ${rows.map((r) => `<tr ${S.dim === "按账号" ? `class="click" data-a="ab-goacct" data-e="${r[0]}" title="查看这个账号的账户"` : ""}><td>${S.dim === "按账号" ? `<span class="link">${r[0]}</span>` : r[0]}</td><td class="ab-num">${n(r[1] * f)}</td><td class="ab-num">${n(r[2] * f)}</td><td class="ab-num" ${r[3] ? 'style="color:var(--bad)"' : ""}>${n(r[3] * f)}</td><td class="ab-num">${n(r[4])}</td><td class="ab-num"><b>${n(r[2] * f + r[3] * f + r[4])}</b></td>${S.dim === "按账号" ? `<td style="text-align:right;color:var(--sub)">${ic("chev", 16)}</td>` : ""}</tr>`).join("")}
+      <tr><td class="muted">合计（前 ${rows.length} 项）</td><td class="ab-num">${n(sum(1) * f)}</td><td class="ab-num">${n(sum(2) * f)}</td><td class="ab-num">${n(sum(3) * f)}</td><td class="ab-num">${n(sum(4))}</td><td class="ab-num"><b>${n((sum(2) + sum(3)) * f + sum(4))}</b></td>${S.dim === "按账号" ? "<td></td>" : ""}</tr></tbody></table></div>
+    ${S.dim === "按账号" ? `<p class="muted small" style="margin-top:10px">点一个账号，跳到「账户」查看它在「${S.range}」的消耗和流水。</p>` : ""}`;
+}
+
+/* ---------- 账户 ---------- */
+function account() {
+  const a = AC(S.acct);
+  return `<div class="ab-bar"><label class="muted small" for="ab-acct">账号</label>
+      <select class="inp" id="ab-acct" style="width:320px">${ACCTS.map((x) => `<option value="${x.e}" ${x.e === S.acct ? "selected" : ""}>${x.e}${x.off ? "（已停用）" : ""}</option>`).join("")}</select>
+      <button class="btn ghost sm" data-a="ab-acct-refresh">${ic("refresh", 14)}刷新</button>
+      <span class="tag line">时间段：${S.range}</span>
+      <button class="btn sm" style="margin-left:auto" data-a="ab-batch">${ic("users", 14)}批量发放积分</button></div>
+    ${a.off ? `<div class="banner warn">${ic("warn", 16)}这个账号已停用。发放的积分会留在账户里，恢复账号后才能使用。</div>` : ""}
+    <div class="ab-acct">
+      <div class="ab-box"><h3>${a.e}</h3><p class="muted small" style="margin:0 0 12px">${a.off ? "已停用" : "启用中"}，<a class="link" href="admin-accounts.html">在账号页修改上限或状态</a></p>
+        <div class="grid2"><div><div class="muted small">可用</div><div class="serif" style="font-size:24px">${n(a.avail)}</div></div><div><div class="muted small">冻结中</div><div class="serif" style="font-size:24px">${n(a.frozen)}</div></div></div></div>
+      <div class="ab-box"><h3>人工发放积分</h3><p class="muted small" style="margin:0 0 10px">给这个账号直接加积分，记入流水「人工入账」。</p>
+        <div class="row" style="align-items:flex-start"><div style="width:140px"><input class="inp" id="ab-g-n" inputmode="numeric" placeholder="积分数量" aria-label="积分数量"></div><input class="inp" id="ab-g-m" placeholder="说明，例如 部门预算 11 月" aria-label="说明"><button class="btn" data-a="ab-grant">发放</button></div>
+        <div class="ab-err" id="ab-g-err"></div></div>
+    </div>
+    <div class="ab-sub" role="tablist">${[["ov", "概览"], ["runs", "运行消耗"], ["led", "流水"]].map(([k, t]) => `<button role="tab" aria-selected="${S.sub === k}" class="${S.sub === k ? "on" : ""}" data-a="ab-sub" data-v="${k}">${t}</button>`).join("")}</div>
+    ${S.acctLoading ? `<div class="card empty-state row" style="justify-content:center"><span class="spin"></span><span class="muted">正在加载…</span></div>` : S.sub === "ov" ? acctOv(a) : S.sub === "runs" ? acctRuns(a) : acctLed(a)}`;
+}
+function acctOv(a) {
+  const lim = a.legacy ? `<span style="color:var(--warnt)">旧上限 $2.00</span>` : a.limit === null ? "不限" : a.limit === 0 ? "禁止消费" : n(a.limit);
+  return `${a.legacy ? `<div class="banner warn">${ic("warn", 16)}旧上限还没按积分重设，设置前这个账号不能发起运行。<a class="link" style="margin-left:auto" href="admin-accounts.html">去重设</a></div>` : ""}
+    <div class="ab-stats"><div class="stat"><div class="muted small">可用</div><div class="n">${n(a.avail)}</div></div><div class="stat"><div class="muted small">冻结中</div><div class="n">${n(a.frozen)}</div></div>
+      <div class="stat"><div class="muted small">本月已用</div><div class="n">${n(a.month)}</div></div><div class="stat"><div class="muted small">月度上限</div><div class="n">${lim}</div>${a.limit ? `<div class="prog" style="width:100%;margin-top:8px"><i style="width:${Math.min(100, (a.month / a.limit) * 100)}%"></i></div>` : ""}</div></div>`;
+}
+function acctRuns(a) {
+  const rows = a.e === "linzhou@xinghe.example" ? RUNS : RUNS.slice(1, 5);
+  const tone = { "冻结中": "warn", "已结算": "ok", "多扣已退还": "ok", "欠额": "bad", "待核对": "warn" };
+  return `<div class="card" style="overflow:hidden"><table class="tb"><thead><tr><th>时间</th><th>智能体</th><th>来源</th><th>状态</th><th class="ab-num">实际扣除</th><th class="ab-num">欠额</th></tr></thead><tbody>
+    ${rows.map((r) => `<tr><td class="muted">${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td><span class="tag ${tone[r[3]]}">${r[3]}</span></td><td class="ab-num">${r[3] === "冻结中" ? `<span class="muted">冻结 ${r[4]}</span>` : n(r[4])}</td><td class="ab-num" ${r[5] ? 'style="color:var(--bad)"' : ""}>${r[5] || "—"}</td></tr>`).join("")}</tbody></table></div>
+    <p class="muted small" style="margin-top:10px">会话是私有的，这里只显示计费信息，不显示对话内容。完整运行记录见 <a class="link" href="admin-ops.html#runs">平台运行</a>。</p>`;
+}
+function acctLed(a) {
+  const rows = S.ledMore ? LEDGER.concat([["11-01 10:00", "人工入账", 5000, 7586, "周岚：月初部门预算"], ["10-30 18:20", "结算", -214, 2586, "运行 run_0a1c 实际花费 214"]]) : LEDGER;
+  return `<div class="card" style="overflow:hidden"><table class="tb"><thead><tr><th>时间</th><th>类型</th><th class="ab-num">积分</th><th class="ab-num">可用余额</th><th>说明</th></tr></thead><tbody>
+    ${rows.map((r) => `<tr><td class="muted">${r[0]}</td><td><span class="tag ${r[1] === "人工入账" ? "ok" : r[1] === "冻结" ? "warn" : ""}">${r[1]}</span></td><td class="ab-num" style="color:${r[2] > 0 ? "var(--ok)" : "var(--ink)"}">${r[2] > 0 ? "+" : ""}${n(r[2])}</td><td class="ab-num">${n(r[3])}</td><td>${esc(r[4])}</td></tr>`).join("")}</tbody></table></div>
+    <div style="text-align:center;margin-top:12px">${S.ledMore ? '<span class="muted small">没有更早的流水了</span>' : '<button class="btn ghost sm" data-a="ab-ledmore">加载更早的</button>'}</div>`;
+}
+
+/* ---------- 对账 ---------- */
+function recon() {
+  const pend = PENDING.filter((p) => S.why === "全部" || p[4] === S.why);
+  const sum = (j) => RECON.reduce((s, r) => s + r[j], 0);
+  return `<div class="ab-bar"><label class="muted small" for="ab-from">起</label><input class="inp" type="date" id="ab-from" value="${S.from}" style="width:170px"><label class="muted small" for="ab-to">止</label><input class="inp" type="date" id="ab-to" value="${S.to}" style="width:170px">
+      <button class="btn ghost sm" data-a="ab-recon-refresh">${ic("refresh", 14)}刷新</button><button class="btn ghost sm" style="margin-left:auto" data-a="ab-csv">${ic("download", 14)}导出 CSV</button></div>
+    ${S.trunc ? `<div class="banner warn">${ic("warn", 16)}这个时间段超过 5 万次运行，只统计了最早的 50,000 次。请缩短时间段后分段导出。</div>` : ""}
+    <div class="card" style="overflow:auto">${S.reconLoading ? `<div class="empty-state row" style="justify-content:center"><span class="spin"></span><span class="muted">正在汇总…</span></div>` : `<table class="tb" style="min-width:1080px"><thead><tr><th>日期</th><th>提供者</th><th class="ab-num">运行数</th><th class="ab-num">输入 tokens</th><th class="ab-num">输出 tokens</th><th class="ab-num">缓存读取</th><th class="ab-num">缓存写入</th><th class="ab-num">成本估算（元）</th><th class="ab-num">应扣（积分）</th><th class="ab-num">实际扣除</th><th class="ab-num">不完整数据</th></tr></thead><tbody>
+      ${RECON.map((r) => `<tr><td class="muted">${r[0]}</td><td>${r[1]}</td><td class="ab-num">${n(r[2])}</td><td class="ab-num">${r[3]}</td><td class="ab-num">${r[4]}</td><td class="ab-num">${r[5]}</td><td class="ab-num">${r[6]}</td><td class="ab-num">${r[7].toFixed(2)}</td><td class="ab-num">${n(r[8])}</td><td class="ab-num" ${r[9] < r[8] ? 'style="color:var(--bad)"' : ""}>${n(r[9])}</td><td class="ab-num">${r[10] ? `<span class="tag warn">${r[10]} 次</span>` : '<span class="muted">—</span>'}</td></tr>`).join("")}
+      <tr><td colspan="2"><b>合计</b></td><td class="ab-num"><b>${n(sum(2))}</b></td><td colspan="4"></td><td class="ab-num"><b>${sum(7).toFixed(2)}</b></td><td class="ab-num"><b>${n(sum(8))}</b></td><td class="ab-num"><b>${n(sum(9))}</b></td><td class="ab-num"><b>${sum(10)} 次</b></td></tr></tbody></table>`}</div>
+    <div class="row" style="margin:26px 0 12px"><h2 class="serif" style="font-size:20px;margin:0">待核对</h2><span class="muted small">所有账号，${PENDING.length} 条</span>
+      <div class="seg" style="margin-left:auto">${["全部", "欠款", "用量未知", "无法完整计价"].map((w) => `<button data-a="ab-why" data-v="${w}" class="${w === S.why ? "on" : ""}">${w}</button>`).join("")}</div></div>
+    <div class="card" style="overflow:hidden">${pend.length ? `<table class="tb"><thead><tr><th>时间</th><th>账号</th><th>智能体</th><th>运行</th><th>原因</th><th>说明</th><th style="text-align:right">处理</th></tr></thead><tbody>
+      ${pend.map((p) => `<tr><td class="muted">${p[0]}</td><td>${p[1]}</td><td>${p[2]}</td><td class="ab-mono">${p[3]}</td><td><span class="tag ${p[4] === "欠款" ? "bad" : "warn"}">${p[4]}</span></td><td class="muted">${p[5]}</td>
+        <td style="text-align:right;white-space:nowrap"><button class="btn ghost sm" disabled title="现有后端只能列出，不能处理">标记已处理</button> <span class="need-backend">需后端</span></td></tr>`).join("")}</tbody></table>`
+      : `<div class="empty-state"><div class="serif">没有「${S.why}」的待核对记录</div></div>`}</div>
+    <p class="muted small" style="margin-top:10px">目前只列出，不提供处理操作；欠款会在账户下次入账时自动抵扣。</p>`;
+}
+
+/* ---------- 批量发放 ---------- */
+let BATCH = null;
+function batchModal() {
+  const b = BATCH;
+  const steps = `<div class="ab-steps">${["填写", "预览", "结果"].map((t, i) => `<span class="${b.step === i ? "on" : b.step > i ? "done" : ""}"><b>${b.step > i ? ic("check", 12, 2.4) : i + 1}</b>${t}</span>`).join(ic("chev", 14))}</div>`;
+  if (b.step === 0) openModal(`<h3>批量发放积分</h3><p class="muted" style="margin:0 0 14px">一次最多 200 个邮箱。先预览，确认后才会发放。</p>${steps}
+    <div class="fld"><label for="bt-e">邮箱（每行一个，或用逗号分隔） <b>*</b></label><textarea class="ta" id="bt-e" rows="6" placeholder="linzhou@xinghe.example">${esc(b.raw)}</textarea><span class="muted small" id="bt-cnt"></span></div>
+    <div class="grid2"><div class="fld"><label for="bt-n">每人积分 <b>*</b></label><input class="inp" id="bt-n" inputmode="numeric" value="${b.amt}"></div><div class="fld"><label for="bt-m">说明 <b>*</b></label><input class="inp" id="bt-m" value="${esc(b.memo)}" placeholder="例如 11 月部门预算"></div></div>
+    <div class="ab-err" id="bt-err"></div>
+    <div class="mfoot"><button class="btn ghost" data-a="owa-close">取消</button><button class="btn" data-a="bt-prev">预览</button></div>`, 620);
+  else if (b.step === 1) {
+    const ok = b.rows.filter((r) => !r.skip);
+    openModal(`<h3>确认发放</h3>${steps}
+      <div class="banner ${ok.length ? "info" : "warn"}" style="font-size:13px">${ic("info", 16)}<span>${ok.length} 人可发放，每人 ${n(b.amt)} 积分，共 <b>${n(ok.length * b.amt)}</b> 积分；${b.rows.length - ok.length} 人跳过。说明：${esc(b.memo)}</span></div>
+      <div class="ab-prev"><table class="tb"><thead><tr><th>邮箱</th><th>结果</th></tr></thead><tbody>${b.rows.map((r) => `<tr><td>${esc(r.e)}</td><td>${r.skip ? `<span class="tag warn">跳过</span> <span class="muted small">${r.skip}</span>` : '<span class="tag ok">可发放</span>'}</td></tr>`).join("")}</tbody></table></div>
+      <p class="muted small" style="margin:10px 0 0">发放记入每个账号的流水「人工入账」，不代表支付渠道已收款。</p>
+      <div class="mfoot"><button class="btn ghost" data-a="bt-back">返回修改</button><button class="btn" data-a="bt-go" ${ok.length ? "" : "disabled"}>确认发放 ${ok.length} 人</button></div>`, 620);
+  } else {
+    const succ = b.rows.filter((r) => r.res === "ok"), fail = b.rows.filter((r) => r.res === "fail");
+    openModal(`<h3>${b.running ? "正在发放…" : fail.length ? "部分发放失败" : "发放完成"}</h3>${steps}
+      ${b.running ? `<div class="row" style="padding:20px 0"><span class="spin"></span><span class="muted">正在逐个入账，请不要关闭…</span></div>` : `
+      <div class="grid2" style="margin-bottom:12px"><div class="stat"><div class="muted small">成功</div><div class="n" style="color:var(--ok)">${succ.length}</div></div><div class="stat"><div class="muted small">失败</div><div class="n" style="color:${fail.length ? "var(--bad)" : "inherit"}">${fail.length}</div></div></div>
+      ${fail.length ? `<div class="lst">${fail.map((r) => `<div class="li"><span class="chk bad">${ic("x", 12, 2.4)}</span>${esc(r.e)}<span class="muted small" style="margin-left:auto">${r.err}</span></div>`).join("")}</div><p class="muted small" style="margin:0">「用原批次重试」只会重新发放失败的账号，同一批次号保证不会重复入账。</p>` : ""}`}
+      <div class="mfoot">${b.running ? "" : fail.length ? `<button class="btn ghost" data-a="owa-close">稍后处理</button><button class="btn" data-a="bt-retry">${ic("refresh", 14)}用原批次重试</button>` : `<button class="btn" data-a="owa-close">完成</button>`}</div>`, 620);
+  }
+  const e = $("#bt-e");
+  if (e) { const cnt = () => { const k = parse(e.value).length; $("#bt-cnt").textContent = `已识别 ${k} 个邮箱，上限 200`; $("#bt-cnt").style.color = k > 200 ? "var(--bad)" : ""; }; e.addEventListener("input", cnt); cnt(); }
+}
+const parse = (s) => s.split(/[\n,，\s]+/).map((x) => x.trim().toLowerCase()).filter(Boolean);
+OWA.on("ab-batch", () => { BATCH = { step: 0, raw: "linzhou@xinghe.example\nwanglei@xinghe.example, chenyifan@xinghe.example\nliuqiang@xinghe.example\nnobody@xinghe.example\nwanglei@xinghe.example\nheqing@xinghe.example", amt: 2000, memo: "11 月部门预算" }; batchModal(); });
+OWA.on("bt-prev", () => {
+  const raw = $("#bt-e").value, list = parse(raw), amt = $("#bt-n").value.trim(), memo = $("#bt-m").value.trim();
+  const err = (m) => ($("#bt-err").textContent = m);
+  if (!list.length) return err("请至少填一个邮箱");
+  if (list.length > 200) return err(`一次最多 200 个，现在有 ${list.length} 个`);
+  if (!/^\d+$/.test(amt) || +amt <= 0) return err("每人积分需要是正整数");
+  if (!memo) return err("请填写说明，会记入每个人的流水");
+  const known = ["linzhou", "wanglei", "chenyifan", "heqing", "tangyue", "xumu", "mengqi", "chenxi", "weiran", "liuqiang", "dengke", "kongwei"].map((u) => u + "@xinghe.example");
+  const offs = ACCTS.filter((a) => a.off).map((a) => a.e), seen = new Set();
+  const rows = list.map((e) => {
+    let skip = "";
+    if (!/^[^@]+@[^@]+\.[^@]+$/.test(e)) skip = "邮箱格式不对";
+    else if (seen.has(e)) skip = "重复";
+    else if (!known.includes(e)) skip = "没有这个账号";
+    else if (offs.includes(e)) skip = "账号已停用";
+    seen.add(e); return { e, skip };
+  });
+  Object.assign(BATCH, { step: 1, raw, amt: +amt, memo, rows }); batchModal();
+});
+OWA.on("bt-back", () => { BATCH.step = 0; batchModal(); });
+function runBatch(only) {
+  BATCH.step = 2; BATCH.running = true; batchModal();
+  setTimeout(() => {
+    BATCH.rows.filter((r) => !r.skip && (!only || r.res === "fail")).forEach((r) => {
+      if (!only && r.e === "chenyifan@xinghe.example") { r.res = "fail"; r.err = "入账超时（数据库锁等待）"; } else { r.res = "ok"; r.err = ""; }
+      const a = ACCTS.find((x) => x.e === r.e); if (a && r.res === "ok") a.avail += BATCH.amt;
+    });
+    BATCH.running = false; batchModal(); render();
+    toast(only ? "重试完成" : "批量发放已执行");
+  }, 1000);
+}
+OWA.on("bt-go", () => runBatch(false));
+OWA.on("bt-retry", () => runBatch(true));
+
+/* ---------- 交互 ---------- */
+OWA.on("ab-tab", (t) => { S.tab = t.dataset.v; render(); });
+OWA.on("ab-range", (t) => { S.range = t.dataset.v; render(); });
+OWA.on("ab-dim", (t) => { S.dim = t.dataset.v; render(); });
+OWA.on("ab-goacct", (t) => { const e = t.dataset.e; if (!ACCTS.some((a) => a.e === e)) ACCTS.push({ e, avail: 6400, frozen: 0, month: 0, limit: null }); S.acct = e; S.tab = "acct"; S.sub = "runs"; render(); toast(`已切到 ${e}，时间段：${S.range}`); });
+OWA.on("ab-gopend", (t, ev) => { ev.preventDefault(); S.tab = "recon"; S.why = t.dataset.w; render(); setTimeout(() => $("#ab-main").scrollTo({ top: 9999, behavior: "smooth" }), 30); });
+OWA.on("ab-sub", (t) => { S.sub = t.dataset.v; render(); });
+OWA.on("ab-ledmore", () => { S.ledMore = true; render(); });
+OWA.on("ab-acct-refresh", () => { S.acctLoading = true; render(); setTimeout(() => { S.acctLoading = false; render(); toast("已刷新"); }, 600); });
+OWA.on("ab-grant", () => {
+  const v = $("#ab-g-n").value.trim().replace(/,/g, ""), m = $("#ab-g-m").value.trim();
+  if (!/^\d+$/.test(v) || +v <= 0) return ($("#ab-g-err").textContent = "积分数量需要是正整数");
+  if (!m) return ($("#ab-g-err").textContent = "请填写说明，会记入对方的流水");
+  const a = AC(S.acct);
+  confirmBox({ title: `给 ${a.e} 发放 ${n(+v)} 积分？`, ok: "确认发放",
+    body: `<p>积分立即入账，记入流水「人工入账」，说明：${esc(m)}。</p><div class="banner warn" style="padding:10px 12px;font-size:13px">${ic("warn", 16)}人工发放不代表支付渠道已收款。如果对应一笔充值，请在「套餐与订单」里确认订单。</div>`,
+    onOk: () => { a.avail += +v; LEDGER.unshift(["11-11 " + new Date().toTimeString().slice(0, 5), "人工入账", +v, a.avail, "周岚：" + m]); render(); toast(`已发放 ${n(+v)} 积分`); } });
+});
+OWA.on("ab-why", (t) => { S.why = t.dataset.v; render(); });
+OWA.on("ab-recon-refresh", () => {
+  const d = (new Date(S.to) - new Date(S.from)) / 864e5;
+  if (isNaN(d) || d < 0) return toast("结束日期要晚于开始日期", false);
+  S.reconLoading = true; render();
+  setTimeout(() => { S.reconLoading = false; S.trunc = d > 60; render(); toast(S.trunc ? "已刷新，结果被截断" : "已刷新"); }, 700);
+});
+OWA.on("ab-csv", () => toast(`已导出 对账_${S.from}_${S.to}.csv`));
+document.addEventListener("change", (e) => {
+  if (e.target.id === "ab-acct") { S.acct = e.target.value; S.ledMore = false; render(); }
+  if (e.target.id === "ab-from") S.from = e.target.value;
+  if (e.target.id === "ab-to") S.to = e.target.value;
+});
+const hh = location.hash.slice(1);
+if (hh.startsWith("acct=")) { S.tab = "acct"; S.acct = decodeURIComponent(hh.slice(5)); if (!ACCTS.some((a) => a.e === S.acct)) ACCTS.push({ e: S.acct, avail: 3200, frozen: 0, month: 0, limit: null }); }
+else if (["acct", "recon"].includes(hh)) S.tab = hh;
+render();
+</script>
+</body>
+</html>

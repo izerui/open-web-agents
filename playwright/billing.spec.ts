@@ -45,7 +45,7 @@ test.describe("积分与计费界面", () => {
       [runId, user.id],
     );
     try {
-      await page.goto(`${BASE}/settings/billing`);
+      await page.goto(`${BASE}/account/billing`);
       await expect(page.getByRole("term").filter({ hasText: /^可用$/ })).toBeVisible();
       // 余额区的标签;消耗汇总表也有"冻结中"一列,不能只按文字找
       await expect(page.getByRole("term").filter({ hasText: /^冻结中$/ })).toBeVisible();
@@ -70,7 +70,7 @@ test.describe("积分与计费界面", () => {
     await register(context, "keylimit");
     const issued = await context.request.post(`${BASE}/api/keys`, { data: { name: "pw-limit" } });
     expect(issued.ok()).toBeTruthy();
-    await page.goto(`${BASE}/settings/keys`);
+    await page.goto(`${BASE}/developer/keys`);
     const limit = page.getByRole("button", { name: /不单独限额/ });
     await expect(limit).toBeVisible();
     await limit.click();
@@ -126,7 +126,7 @@ test.describe("积分与计费界面", () => {
       );
     }
     try {
-      await page.goto(`${BASE}/settings/billing`);
+      await page.goto(`${BASE}/account/billing`);
       await page.getByRole("tab", { name: "运行消耗", exact: true }).click();
       const row = (i: number) =>
         page.getByTestId("run-charge").filter({ hasText: rows[i]?.id ?? "" });

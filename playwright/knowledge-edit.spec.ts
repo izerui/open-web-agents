@@ -54,7 +54,7 @@ test.describe("知识库编辑浏览器验收", () => {
       "二叉树是一种树形数据结构，每个节点最多有两个子节点。",
     );
 
-    await page.goto(`${BASE}/agents?id=${agentId}`);
+    await page.goto(`${BASE}/agents/${agentId}`);
     await page.getByRole("tab", { name: "知识", exact: true }).click();
     const panel = knowledgePanel(page);
     await expect(panel.getByText("二叉树基础")).toBeVisible({ timeout: 15_000 });
@@ -99,7 +99,7 @@ test.describe("知识库编辑浏览器验收", () => {
     const agentId = await createAgent(context, "PW 空正文验收");
     await addDoc(context, agentId, "测试文档", "原始正文内容不为空");
 
-    await page.goto(`${BASE}/agents?id=${agentId}`);
+    await page.goto(`${BASE}/agents/${agentId}`);
     await page.getByRole("tab", { name: "知识", exact: true }).click();
     const panel = knowledgePanel(page);
     await expect(panel.getByText("测试文档")).toBeVisible({ timeout: 15_000 });
@@ -127,7 +127,7 @@ test.describe("知识库编辑浏览器验收", () => {
     const docAId = await addDoc(context, agentId, "文档A", "文档A的原始正文内容");
     const docBId = await addDoc(context, agentId, "文档B", "文档B的原始正文内容");
 
-    await page.goto(`${BASE}/agents?id=${agentId}`);
+    await page.goto(`${BASE}/agents/${agentId}`);
     await page.getByRole("tab", { name: "知识", exact: true }).click();
     const panel = knowledgePanel(page);
     await expect(panel.getByText("文档A")).toBeVisible({ timeout: 15_000 });

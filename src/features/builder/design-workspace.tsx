@@ -23,6 +23,7 @@ import type { Turn } from "@/features/workbench/types";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import type { DesignDraft, DesignResource } from "@/lib/modules/agent/domain/design";
 import type { SnapshotChange } from "@/lib/modules/agent/domain/snapshot-diff";
+import { agentHref } from "@/lib/nav/routes";
 import {
   Check,
   ChevronDown,
@@ -245,7 +246,11 @@ export function DesignWorkspace({ initialSessionId }: { initialSessionId?: strin
 
   function selectSession(next: string) {
     setId(next);
-    window.history.replaceState(null, "", `/agents/design?session=${encodeURIComponent(next)}`);
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}?designer=${encodeURIComponent(next)}`,
+    );
   }
 
   async function create() {
@@ -380,7 +385,7 @@ export function DesignWorkspace({ initialSessionId }: { initialSessionId?: strin
           {view?.targetId && (
             <Link
               className="hidden h-7 items-center rounded-md px-2 text-sm text-brand hover:bg-accent sm:flex"
-              href={`/agents?id=${encodeURIComponent(view.targetId)}`}
+              href={agentHref({ id: view.targetId })}
             >
               配置与发布
             </Link>

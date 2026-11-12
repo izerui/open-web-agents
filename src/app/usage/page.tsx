@@ -1,6 +1,6 @@
-import { redirect } from "next/navigation";
+import { type PageSearchParams, redirectLegacy } from "@/lib/nav/legacy-page";
 
-/** 用量拆成了「我的用量」与「全平台用量」,旧地址落到个人的那个。 */
-export default function Page() {
-  redirect("/settings/usage");
+/** 旧地址(见 src/lib/nav/routes.ts 的 legacyRedirect) */
+export default async function Page({ searchParams }: { searchParams: PageSearchParams }) {
+  return redirectLegacy("/usage", searchParams);
 }

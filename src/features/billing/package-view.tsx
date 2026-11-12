@@ -234,7 +234,7 @@ export function PackageView({ admin = false }: { admin?: boolean }) {
         <p className="text-sm text-muted-foreground">
           固定积分包，积分长期有效。当前订单由管理员人工处理；在线支付与模型自动扣费尚未启用。
         </p>
-        <Link href={admin ? "/admin/billing" : "/settings/billing"} className="text-sm underline">
+        <Link href={admin ? "/admin/billing" : "/account/billing"} className="text-sm underline">
           查看积分账户
         </Link>
       </div>

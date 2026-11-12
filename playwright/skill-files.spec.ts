@@ -65,7 +65,7 @@ test.describe("技能包多文件管理", () => {
       },
     });
 
-    await page.goto(`${BASE}/agents?id=${agentId}`);
+    await page.goto(`${BASE}/agents/${agentId}`);
     await page.getByRole("tab", { name: "能力", exact: true }).click();
     await expect(page.getByLabel("技能名")).toHaveValue("render-anim", { timeout: 10_000 });
 
@@ -102,7 +102,7 @@ test.describe("技能包多文件管理", () => {
     await register(context, "skill-crud");
     const agentId = await createAgent(context, "PW 技能增删");
 
-    await page.goto(`${BASE}/agents?id=${agentId}`);
+    await page.goto(`${BASE}/agents/${agentId}`);
     await page.getByRole("tab", { name: "能力", exact: true }).click();
     await page.waitForTimeout(2000);
 

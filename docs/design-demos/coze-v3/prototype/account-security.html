@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>账号安全 · Open Web Agents</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/owa.css">
+</head>
+<body>
+<div id="app"></div>
+<script src="assets/owa.js"></script>
+<script>
+"use strict";
+/* 账号安全：修改密码（原 /settings/account） */
+OWA.mount({
+  nav: "account",
+  body: `<div class="bwrap">${sideNav("account")}
+    <main class="main">
+      <div class="ph"><div><h1>账号安全</h1><p class="muted" style="margin:6px 0 0">${OWA.me().email}，${OWA.me().role}</p></div></div>
+      <div class="card" style="padding:24px 26px;max-width:520px">
+        <h3 style="margin:0 0 4px;font-size:16px">修改密码</h3>
+        <p class="muted" style="margin:0 0 18px">修改后其他设备上的登录会失效。</p>
+        <div class="fld"><label for="pw0">当前密码</label><input class="inp" id="pw0" type="password" autocomplete="current-password"></div>
+        <div class="fld"><label for="pw1">新密码</label><input class="inp" id="pw1" type="password" autocomplete="new-password" placeholder="至少 8 位"></div>
+        <div class="fld"><label for="pw2">再次输入新密码</label><input class="inp" id="pw2" type="password" autocomplete="new-password"><span class="small" id="pw-err" style="color:var(--bad);min-height:18px"></span></div>
+        <button class="btn" data-a="save-pw">修改密码</button>
+      </div>
+    </main></div>`,
+});
+OWA.on("save-pw", () => {
+  const a = $("#pw1").value, b = $("#pw2").value;
+  if (!$("#pw0").value) return ($("#pw-err").textContent = "请输入当前密码");
+  if (a.length < 8) return ($("#pw-err").textContent = "新密码至少 8 位");
+  if (a !== b) return ($("#pw-err").textContent = "两次输入的密码不一致");
+  $("#pw-err").textContent = "";
+  ["#pw0", "#pw1", "#pw2"].forEach((s) => ($(s).value = ""));
+  toast("密码已修改");
+});
+</script>
+</body>
+</html>

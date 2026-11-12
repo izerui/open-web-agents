@@ -80,9 +80,13 @@ function formatCost(cost?: RunItem["cost"]): string {
  * 曾经接口调用的过程与结果只能凭 taskId 逐个去查,工作台里也看不到;
  * 这里是两个入口统一的观察窗口。
  */
-export function RunsView({ platform = false }: { platform?: boolean } = {}) {
+export function RunsView({
+  platform = false,
+  agentId,
+}: { platform?: boolean; agentId?: string } = {}) {
   const searchParams = useSearchParams();
-  const requestedAgent = searchParams.get("agent");
+  // 构建页的「运行」阶段直接传入智能体;旧的 ?agent= 仍然认
+  const requestedAgent = agentId ?? searchParams.get("agent");
   // Changing objects resets the result list, pagination and detail together.
   return (
     <RunsContent
@@ -238,7 +242,7 @@ function RunsContent({
           <Link href="/agents" className="underline">
             选择智能体
           </Link>
-          <Link href={platform ? "/admin/runs" : "/settings/runs"} className="underline">
+          <Link href={platform ? "/admin/runs" : "/developer/runs"} className="underline">
             {platform ? "查看全部平台运行" : "查看我的全部运行"}
           </Link>
         </div>
@@ -420,7 +424,7 @@ function RunsContent({
                   size="sm"
                   variant="outline"
                   onClick={() =>
-                    window.open(`/?session=${encodeURIComponent(detail.sessionId)}`, "_blank")
+                    window.open(`/chat?session=${encodeURIComponent(detail.sessionId)}`, "_blank")
                   }
                 >
                   <ExternalLink className="size-3.5" />

@@ -18,6 +18,7 @@ import { ReleasePanel } from "@/features/builder/release-panel";
 import { SharePanel } from "@/features/builder/share-panel";
 import type { AgentSummary } from "@/features/workbench/types";
 import { errorText, fetchJson } from "@/lib/fetch-json";
+import { agentHref, agentRoute } from "@/lib/nav/routes";
 import { PERMISSION_MODES, type PermissionMode } from "@/lib/shared";
 import { findPathConflict, isSafeSkillPath } from "@/lib/shared/skill-package";
 import {
@@ -34,7 +35,7 @@ import {
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ModelSelect, modelOf, useModelCatalog } from "./model-select";
@@ -282,9 +283,10 @@ const SECTION_LIST_CLASS =
   "mb-4 h-auto w-full flex-wrap justify-start gap-1.5 rounded-none border-b border-border bg-transparent p-0 pb-4";
 
 export function Builder() {
-  const searchParams = useSearchParams();
-  const requestedId = searchParams.get("id");
-  const creating = !requestedId && searchParams.get("new") === "1";
+  // 路由在地址的路径里:/agents、/agents/new、/agents/<id>(见 src/lib/nav/routes.ts)
+  const route = agentRoute(usePathname());
+  const requestedId = route.kind === "agent" ? route.id : null;
+  const creating = route.kind === "new";
   const [section, setSection] = useState("config");
   const [listLoaded, setListLoaded] = useState(false);
   const handledRouteRef = useRef<string | null>(null);
@@ -468,7 +470,9 @@ export function Builder() {
         return;
       }
       allowNavigationRef.current = true;
-      router.push(`/agents/design?session=${encodeURIComponent(d.sessionId)}`);
+      router.push(
+        `${agentHref(agentId ? { id: agentId } : { isNew: true })}?designer=${encodeURIComponent(d.sessionId)}`,
+      );
     } catch (e) {
       if (seq === editSeqRef.current) toast.error(`无法开始设计:${errorText(e)}`);
     } finally {
@@ -603,10 +607,10 @@ export function Builder() {
   }
 
   function syncAgentUrl(id?: string, isNew = false) {
-    const query = id ? `?id=${encodeURIComponent(id)}` : isNew ? "?new=1" : "";
+    const href = agentHref({ id, isNew });
     handledRouteRef.current = id ? `id:${id}` : isNew ? "new" : "list";
-    if (`${window.location.pathname}${window.location.search}` !== `/agents${query}`) {
-      window.history.pushState(null, "", `/agents${query}`);
+    if (`${window.location.pathname}${window.location.search}` !== href) {
+      window.history.pushState(null, "", href);
     }
   }
 
@@ -761,13 +765,12 @@ export function Builder() {
     const previousRoute = handledRouteRef.current;
     handledRouteRef.current = route;
     if (!confirmDiscard()) {
-      const previous = openedId
-        ? `?id=${encodeURIComponent(openedId)}`
-        : previousRoute === "new"
-          ? "?new=1"
-          : "";
       handledRouteRef.current = previousRoute;
-      window.history.replaceState(null, "", `/agents${previous}`);
+      window.history.replaceState(
+        null,
+        "",
+        agentHref(openedId ? { id: openedId } : { isNew: previousRoute === "new" }),
+      );
       return;
     }
     allowNavigationRef.current = true;
@@ -953,7 +956,7 @@ export function Builder() {
               className="min-h-11"
               size="sm"
               variant="outline"
-              onClick={() => window.open(`/?agent=${encodeURIComponent(openedId)}`, "_blank")}
+              onClick={() => window.open(`/chat?agent=${encodeURIComponent(openedId)}`, "_blank")}
             >
               <Play className="size-3.5" />
               试运行
@@ -1601,7 +1604,7 @@ export function Builder() {
           </div>
           {openedId && (
             <Link
-              href={`/settings/keys?agent=${encodeURIComponent(openedId)}`}
+              href={agentHref({ id: openedId, stage: "access" })}
               className="inline-flex min-h-11 items-center gap-2 rounded-md text-sm text-primary hover:underline"
             >
               <Plug className="size-4" />

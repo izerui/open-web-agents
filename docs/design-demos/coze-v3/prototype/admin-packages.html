@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>套餐与订单 · 平台管理 · Open Web Agents</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/owa.css">
+<style>
+a.btn{text-decoration:none}
+.pk-mono{font-family:var(--mono);font-size:12.5px;color:#4D4A43}
+.pk-sw{position:relative;width:40px;height:24px;border-radius:12px;background:#D6D2C8;flex:none;transition:background .2s}
+.pk-sw::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.15);transition:left .2s}
+.pk-sw.on{background:var(--ok)}
+.pk-sw.on::after{left:19px}
+.pk-swrow{display:inline-flex;align-items:center;gap:10px;cursor:pointer;min-height:36px}
+.pk-err{color:var(--bad);font-size:12px;margin-top:4px}
+.pk-err:empty{display:none}
+.pk-sum{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}
+.pk-sum .stat .n{font-size:24px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="assets/owa.js"></script>
+<script>
+"use strict";
+/* 平台管理，套餐与订单（原 /admin/packages）：套餐目录（版本化）＋ 订单（人工确认发放积分） */
+const PKGS = [
+  { key: "starter", n: "入门包", d: "适合个人试用，约 5,000 次轻量对话", credits: 10000, price: 100, cur: "CNY", on: true, v: 2 },
+  { key: "team", n: "团队包", d: "部门日常使用，含 20% 赠送积分", credits: 120000, price: 1000, cur: "CNY", on: true, v: 3 },
+  { key: "enterprise", n: "企业包", d: "全公司年度用量，按合同开票", credits: 1500000, price: 10000, cur: "CNY", on: false, v: 1 },
+  { key: "overseas", n: "海外入门包", d: "海外子公司用美元结算", credits: 12000, price: 15, cur: "USD", on: true, v: 1 },
+];
+const ORDERS = [
+  { no: "OD-20261111-0042", who: "linzhou@xinghe.example", pkg: "team", v: 3, st: "待人工处理", at: "11-11 14:48" },
+  { no: "OD-20261111-0039", who: "chenxi@xinghe.example", pkg: "starter", v: 2, st: "待人工处理", at: "11-11 10:15" },
+  { no: "OD-20261110-0031", who: "tangyue@xinghe.example", pkg: "team", v: 3, st: "积分已发放", at: "11-10 16:02", memo: "对公转账已到账，凭证 HX-1108" },
+  { no: "OD-20261108-0027", who: "heqing@xinghe.example", pkg: "starter", v: 1, st: "积分已发放", at: "11-08 09:30", memo: "财务部月度预算" },
+  { no: "OD-20261105-0019", who: "songdi@xinghe.example", pkg: "starter", v: 1, st: "已取消", at: "11-05 11:12" },
+  { no: "OD-20261102-0011", who: "mengqi@xinghe.example", pkg: "overseas", v: 1, st: "积分已发放", at: "11-02 20:44", memo: "PayPal 到账" },
+];
+const OLDER = [
+  { no: "OD-20261028-0006", who: "luyao@xinghe.example", pkg: "team", v: 2, st: "积分已发放", at: "10-28 13:20", memo: "对公转账" },
+  { no: "OD-20261021-0003", who: "baijing@xinghe.example", pkg: "starter", v: 1, st: "积分已发放", at: "10-21 15:05", memo: "部门预算" },
+];
+const S = { tab: "pkgs", ost: "全部", more: false, loading: false, sw: true };
+const PK = (k) => PKGS.find((p) => p.key === k);
+const money = (p, c) => (c === "USD" ? "$ " : "¥ ") + p.toLocaleString();
+
+OWA.mount({ nav: "admin", body: `<div class="bwrap">${sideNav("admin")}<main class="main" id="pk-main"></main></div>` });
+
+function render() {
+  const pend = ORDERS.filter((o) => o.st === "待人工处理").length;
+  $("#pk-main").innerHTML = `<div class="ph"><div><h1>套餐与订单</h1><p class="muted" style="margin:6px 0 0">固定积分包，长期有效。在线支付和自动扣费都没有启用，订单由管理员线下收款后人工确认。</p></div></div>
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected="${S.tab === "pkgs"}" class="${S.tab === "pkgs" ? "on" : ""}" data-a="pk-tab" data-v="pkgs">套餐目录</button>
+      <button role="tab" aria-selected="${S.tab === "orders"}" class="${S.tab === "orders" ? "on" : ""}" data-a="pk-tab" data-v="orders">订单${pend ? `<span class="tag warn" style="margin-left:6px">${pend} 待处理</span>` : ""}</button></div>
+    ${S.tab === "pkgs" ? pkgs() : orders()}`;
+}
+
+function pkgs() {
+  return `<div class="row" style="margin-bottom:12px"><span class="muted">每次保存生成新版本；已有订单按下单时的版本结算，不受影响。</span><button class="btn sm" style="margin-left:auto" data-a="pk-edit" data-k="">${ic("plus", 14, 2)}添加套餐</button></div>
+    <div class="card" style="overflow:hidden"><table class="tb"><thead><tr><th>标识</th><th>名称与说明</th><th>积分数量</th><th>价格</th><th>版本</th><th>上架</th><th></th></tr></thead><tbody>
+    ${PKGS.map((p) => `<tr><td class="pk-mono">${p.key}</td><td><div style="font-weight:600">${p.n}</div><div class="muted small">${esc(p.d)}</div></td><td>${p.credits.toLocaleString()}</td><td>${money(p.price, p.cur)} <span class="muted small">${p.cur}</span></td><td>v${p.v}</td>
+      <td>${p.on ? '<span class="tag ok">上架中</span>' : '<span class="tag">未上架</span>'}</td><td style="text-align:right"><button class="btn ghost sm" data-a="pk-edit" data-k="${p.key}">${ic("edit", 14)}编辑</button></td></tr>`).join("")}</tbody></table></div>
+    <p class="muted small" style="margin-top:10px">用户在「账户，积分与套餐」里只能看到上架中的套餐。<a class="link" href="account-billing.html">看用户视角</a></p>`;
+}
+
+function orders() {
+  const all = S.more ? ORDERS.concat(OLDER) : ORDERS;
+  const rows = all.filter((o) => S.ost === "全部" || o.st === S.ost);
+  const tag = (s) => (s === "待人工处理" ? "warn" : s === "积分已发放" ? "ok" : "");
+  return `<div class="pk-sum">
+      <div class="stat"><div class="muted small">待人工处理</div><div class="n">${ORDERS.filter((o) => o.st === "待人工处理").length}</div></div>
+      <div class="stat"><div class="muted small">本月已发放（积分）</div><div class="n">${(ORDERS.filter((o) => o.st === "积分已发放").reduce((s, o) => s + PK(o.pkg).credits, 0)).toLocaleString()}</div></div>
+      <div class="stat"><div class="muted small">本月收款（人民币）</div><div class="n">¥ 1,100</div></div>
+      <div class="stat"><div class="muted small">本月收款（美元）</div><div class="n">$ 15</div></div></div>
+    <div class="row" style="margin-bottom:12px"><div class="seg">${["全部", "待人工处理", "积分已发放", "已取消"].map((x) => `<button data-a="pk-ost" data-v="${x}" class="${x === S.ost ? "on" : ""}">${x}</button>`).join("")}</div>
+      <button class="btn ghost sm" style="margin-left:auto" data-a="pk-refresh">${ic("refresh", 14)}刷新</button></div>
+    <div class="card" style="overflow:hidden">${S.loading ? `<div class="empty-state row" style="justify-content:center"><span class="spin"></span><span class="muted">正在加载订单…</span></div>` : rows.length ? `<table class="tb"><thead><tr><th>订单号</th><th>账号</th><th>套餐</th><th>积分</th><th>金额</th><th>状态</th><th>时间</th><th style="text-align:right">操作</th></tr></thead><tbody>
+      ${rows.map((o) => { const p = PK(o.pkg), i = all.indexOf(o); return `<tr><td class="pk-mono">${o.no}</td><td>${o.who}</td><td>${p.n} <span class="muted small">v${o.v}</span></td><td>${p.credits.toLocaleString()}</td><td>${money(p.price, p.cur)}</td>
+        <td><span class="tag ${tag(o.st)}">${o.st}</span>${o.memo ? `<div class="muted small" style="margin-top:3px">${esc(o.memo)}</div>` : ""}</td><td class="muted">${o.at}</td>
+        <td style="text-align:right;white-space:nowrap">${o.st === "待人工处理" ? `<button class="btn sm" data-a="pk-confirm" data-i="${i}">人工确认</button> <button class="btn ghost sm" data-a="pk-cancel" data-i="${i}">取消</button>` : '<span class="muted small">—</span>'}</td></tr>`; }).join("")}</tbody></table>`
+      : `<div class="empty-state"><div class="serif">没有「${S.ost}」的订单</div><p class="muted" style="margin:0">用户在「积分与套餐」里下单后会出现在这里。</p></div>`}</div>
+    <div style="text-align:center;margin-top:14px">${S.more ? '<span class="muted small">已经是最早的订单了</span>' : '<button class="btn ghost sm" data-a="pk-more">加载更早的订单</button>'}</div>`;
+}
+
+function pkDialog(k) {
+  const p = k ? PK(k) : { key: "", n: "", d: "", credits: "", price: "", cur: "CNY", on: true, v: 0 };
+  S.sw = p.on;
+  openModal(`<h3>${k ? "编辑套餐" : "添加套餐"}</h3><p class="muted" style="margin:0 0 16px">${k ? `当前 v${p.v}，保存后生成 v${p.v + 1}。已有订单按原版本，不受影响。` : "保存后生成 v1。"}</p>
+    <div class="grid2"><div class="fld"><label for="pk-key">标识 <b>*</b></label><input class="inp pk-mono" id="pk-key" value="${esc(p.key)}" placeholder="例如 team" ${k ? "disabled" : ""}>${k ? '<span class="muted small">标识创建后不能改</span>' : '<span class="muted small">小写字母、数字和连字符</span>'}</div>
+      <div class="fld"><label for="pk-n">名称 <b>*</b></label><input class="inp" id="pk-n" value="${esc(p.n)}" placeholder="例如 团队包"></div></div>
+    <div class="fld"><label for="pk-d">说明</label><textarea class="ta" id="pk-d" rows="2" placeholder="用户在选购时看到">${esc(p.d)}</textarea></div>
+    <div class="grid2"><div class="fld"><label for="pk-c">积分数量 <b>*</b></label><input class="inp" id="pk-c" inputmode="numeric" value="${p.credits}"></div>
+      <div class="fld"><label for="pk-p">价格 <b>*</b></label><div class="row" style="gap:8px"><input class="inp" id="pk-p" inputmode="decimal" value="${p.price}"><select class="inp" id="pk-cur" style="width:110px" aria-label="币种"><option ${p.cur === "CNY" ? "selected" : ""}>CNY</option><option ${p.cur === "USD" ? "selected" : ""}>USD</option></select></div></div></div>
+    <span class="pk-swrow" data-a="pk-sw" id="pk-sw" role="switch" aria-checked="${p.on}"><span class="pk-sw ${p.on ? "on" : ""}"></span>上架（用户可以下单）</span>
+    <div class="pk-err" id="pk-err"></div>
+    <div class="mfoot"><button class="btn ghost" data-a="owa-close">取消</button><button class="btn" data-a="pk-save" data-k="${k}">${k ? `保存为 v${p.v + 1}` : "添加套餐"}</button></div>`, 560);
+}
+
+OWA.on("pk-tab", (t) => { S.tab = t.dataset.v; render(); });
+OWA.on("pk-ost", (t) => { S.ost = t.dataset.v; render(); });
+OWA.on("pk-more", () => { S.more = true; render(); });
+OWA.on("pk-refresh", () => { S.loading = true; render(); setTimeout(() => { S.loading = false; render(); toast("已刷新"); }, 600); });
+OWA.on("pk-edit", (t) => pkDialog(t.dataset.k));
+OWA.on("pk-sw", (t) => { S.sw = !S.sw; t.querySelector(".pk-sw").classList.toggle("on", S.sw); t.setAttribute("aria-checked", S.sw); });
+OWA.on("pk-save", (t) => {
+  const k = t.dataset.k, key = $("#pk-key").value.trim(), n = $("#pk-n").value.trim(), c = $("#pk-c").value.trim().replace(/,/g, ""), pr = $("#pk-p").value.trim();
+  const err = (s) => ($("#pk-err").textContent = s);
+  if (!k && !/^[a-z0-9-]+$/.test(key)) return err("标识只能用小写字母、数字和连字符");
+  if (!k && PK(key)) return err("这个标识已经存在");
+  if (!n) return err("请填写名称");
+  if (!/^\d+$/.test(c) || +c <= 0) return err("积分数量需要是正整数");
+  if (!/^\d+(\.\d{1,2})?$/.test(pr) || +pr <= 0) return err("价格需要是正数，最多两位小数");
+  const v = { n, d: $("#pk-d").value.trim(), credits: +c, price: +pr, cur: $("#pk-cur").value, on: S.sw };
+  if (k) { const p = PK(k); Object.assign(p, v, { v: p.v + 1 }); toast(`已保存为 v${p.v}`); }
+  else { PKGS.push({ key, ...v, v: 1 }); toast("已添加套餐 v1"); }
+  closeModal(); render();
+});
+OWA.on("pk-confirm", (t) => {
+  const all = S.more ? ORDERS.concat(OLDER) : ORDERS, o = all[+t.dataset.i], p = PK(o.pkg);
+  openModal(`<h3>人工确认订单</h3><p class="muted" style="margin:0 0 14px">${o.no}</p>
+    <div class="lst"><div class="li"><span class="muted" style="width:70px">账号</span>${o.who}</div><div class="li"><span class="muted" style="width:70px">套餐</span>${p.n} v${o.v}</div><div class="li"><span class="muted" style="width:70px">金额</span>${money(p.price, p.cur)}</div><div class="li"><span class="muted" style="width:70px">发放</span><b>${p.credits.toLocaleString()} 积分</b></div></div>
+    <div class="fld"><label for="pk-memo">确认说明 <b>*</b></label><textarea class="ta" id="pk-memo" rows="2" placeholder="例如：对公转账已到账，凭证号 HX-1111"></textarea><span class="muted small">记入账户流水和平台审计，对方能在流水里看到。</span></div>
+    <div class="banner warn" style="padding:10px 12px;font-size:13px">${ic("warn", 16)}确认后立即给对方发放积分，无法撤回。请先核对线下已收款。</div>
+    <div class="mfoot"><button class="btn ghost" data-a="owa-close">取消</button><button class="btn" data-a="pk-confirm-ok" data-i="${t.dataset.i}">确认并发放积分</button></div>`, 500);
+  setTimeout(() => $("#pk-memo")?.focus(), 30);
+});
+OWA.on("pk-confirm-ok", (t) => {
+  const m = $("#pk-memo").value.trim();
+  if (!m) { $("#pk-memo").style.borderColor = "var(--bad)"; return toast("请填写确认说明", false); }
+  const all = S.more ? ORDERS.concat(OLDER) : ORDERS, o = all[+t.dataset.i];
+  o.st = "积分已发放"; o.memo = m; closeModal(); render(); toast(`已给 ${o.who} 发放 ${PK(o.pkg).credits.toLocaleString()} 积分`);
+});
+OWA.on("pk-cancel", (t) => {
+  const all = S.more ? ORDERS.concat(OLDER) : ORDERS, o = all[+t.dataset.i];
+  confirmBox({ title: "取消这笔订单？", danger: true, ok: "取消订单", body: `<p>${o.no}（${o.who}，${PK(o.pkg).n}）会标为已取消，不发放积分。对方可以重新下单。</p>`, onOk: () => { o.st = "已取消"; render(); toast("订单已取消"); } });
+});
+if (location.hash === "#orders") S.tab = "orders";
+render();
+</script>
+</body>
+</html>

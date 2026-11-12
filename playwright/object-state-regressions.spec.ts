@@ -74,7 +74,7 @@ test.beforeEach(async ({ context }) => {
 
 test("保存 A 的迟到响应不能改写 B 的对象身份或表单", async ({ page }) => {
   const state = await fixture(page);
-  await page.goto("/agents?id=review-a");
+  await page.goto("/agents/review-a");
   await expect(prompt(page)).toHaveValue("审查智能体 A 已保存提示词");
   await prompt(page).fill("A 保存快照");
   state.hold();
@@ -97,7 +97,7 @@ test("保存 A 的迟到响应不能改写 B 的对象身份或表单", async ({
 
 test("保存期间继续编辑同一对象，新内容仍待保存；对象树同步改名", async ({ page }) => {
   const state = await fixture(page);
-  await page.goto("/agents?id=review-a");
+  await page.goto("/agents/review-a");
   await expect(prompt(page)).toHaveValue("审查智能体 A 已保存提示词");
   await page.getByRole("textbox", { name: "名称 *", exact: true }).fill("A 新名称");
   state.hold();
@@ -117,7 +117,7 @@ test("保存期间继续编辑同一对象，新内容仍待保存；对象树�
 
 test("搜索跳转可以取消，离开后迟到的保存不改变页面", async ({ page }) => {
   const state = await fixture(page);
-  await page.goto("/agents?id=review-a");
+  await page.goto("/agents/review-a");
   await expect(prompt(page)).toHaveValue("审查智能体 A 已保存提示词");
   await prompt(page).fill("仍未保存");
   await page.getByRole("button", { name: "搜索页面与会话" }).click();
@@ -179,7 +179,7 @@ test("AI 编辑草稿也能取消搜索跳转", async ({ page }) => {
 
 test("跨对象配置返回对话，不清除默认对象的会话记忆；新会话仍可清除当前记忆", async ({ page }) => {
   await fixture(page);
-  await page.goto("/?session=review-default-session");
+  await page.goto("/chat?session=review-default-session");
   const remembered = (id: string) =>
     page.evaluate((agentId) => {
       const key = Object.keys(sessionStorage).find(
@@ -205,7 +205,7 @@ test("跨对象配置返回对话，不清除默认对象的会话记忆；新�
 test("无效或空对象链接禁止发送，用户显式选择后恢复；有效会话优先", async ({ page }) => {
   await fixture(page);
   for (const id of ["missing-review-agent", ""]) {
-    await page.goto(`/?agent=${id}`);
+    await page.goto(`/chat?agent=${id}`);
     await expect(
       page.locator("output").filter({ hasText: id ? "找不到指定的智能体" : "链接缺少智能体 ID" }),
     ).toContainText(id ? "找不到指定的智能体" : "链接缺少智能体 ID");
@@ -216,7 +216,7 @@ test("无效或空对象链接禁止发送，用户显式选择后恢复；有�
     await expect(page.locator("[data-conversation-shell] textarea")).toBeEnabled();
     await expect(page.getByRole("heading", { level: 1, name: "审查智能体 A" })).toBeVisible();
   }
-  await page.goto("/?agent=missing-review-agent&session=review-a-session");
+  await page.goto("/chat?agent=missing-review-agent&session=review-a-session");
   await expect(page.getByRole("heading", { level: 1, name: "审查智能体 A" })).toBeVisible();
   await expect(page.locator("[data-conversation-shell] textarea")).toBeEnabled();
 });
@@ -231,7 +231,7 @@ test("切换会话后迟到的审批不出现在新会话", async ({ page }) => 
   await page.route("**/api/sessions/review-a-session/approvals", (route) => {
     nextPoll = route;
   });
-  await page.goto("/?session=review-default-session");
+  await page.goto("/chat?session=review-default-session");
   await expect.poll(() => Boolean(pending)).toBe(true);
   await page.getByRole("button", { name: "展开 审查智能体 A 的会话" }).click();
   await page.getByRole("link", { name: "A 历史会话", exact: true }).click();
@@ -272,7 +272,7 @@ test("创建会话期间离开工作台，迟到响应不改写配置 URL 或发
     runPosts.push(route.request().url());
     return route.fulfill({ status: 400, json: { error: "测试禁止模型调用" } });
   });
-  await page.goto("/?agent=review-a");
+  await page.goto("/chat?agent=review-a");
   const input = page.locator("[data-conversation-shell] textarea");
   await expect(input).toBeEnabled();
   await input.fill("仅测试迟到响应");
@@ -292,7 +292,7 @@ test("删除 A 期间切到 B，删除完成不清空 B 编辑器", async ({ pag
   await page.route("**/api/agents/review-a", (route) => {
     pending = route;
   });
-  await page.goto("/agents?id=review-a");
+  await page.goto("/agents/review-a");
   await expect(prompt(page)).toHaveValue("审查智能体 A 已保存提示词");
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "删除", exact: true }).click();
@@ -312,7 +312,7 @@ test("登出失败保留当前页面与账号，不显示成功", async ({ page 
       await route.fulfill({ status: 503, json: { error: "登出服务不可用" } });
     } else await route.continue();
   });
-  await page.goto("/agents?id=review-a");
+  await page.goto("/agents/review-a");
   await expect(prompt(page)).toHaveValue("审查智能体 A 已保存提示词");
   await prompt(page).fill("登出失败也要保留的草稿");
   await page.getByRole("button", { name: `${account.email} 的账号菜单` }).click();
@@ -335,7 +335,7 @@ test("AI 编辑请求完成前换对象，不跳到旧对象的设计会话", as
   await page.route("**/api/agents/design", (route) => {
     pending = route;
   });
-  await page.goto("/agents?id=review-a");
+  await page.goto("/agents/review-a");
   await expect(prompt(page)).toHaveValue("审查智能体 A 已保存提示词");
   await page.getByRole("button", { name: "AI 编辑", exact: true }).click();
   await expect.poll(() => Boolean(pending)).toBe(true);
@@ -355,7 +355,7 @@ test("恢复版本期间换对象，迟到回调不重新打开旧对象", async
   await page.route("**/api/agents/review-a/versions/1/restore", (route) => {
     pending = route;
   });
-  await page.goto("/agents?id=review-a");
+  await page.goto("/agents/review-a");
   await expect(prompt(page)).toHaveValue("审查智能体 A 已保存提示词");
   await page.getByRole("tab", { name: "发布与分享", exact: true }).click();
   page.once("dialog", (dialog) => dialog.accept());
@@ -378,7 +378,7 @@ test("恢复版本等待期间输入的新修改不会被覆盖", async ({ page 
   await page.route("**/api/agents/review-a/versions/1/restore", (route) => {
     pending = route;
   });
-  await page.goto("/agents?id=review-a");
+  await page.goto("/agents/review-a");
   await expect(prompt(page)).toHaveValue("审查智能体 A 已保存提示词");
   await page.getByRole("tab", { name: "发布与分享", exact: true }).click();
   page.once("dialog", (dialog) => dialog.accept());
@@ -420,7 +420,7 @@ test("旧会话追加消息的迟到重发结果不能发送到新会话", async
     runPosts.push(route.request().url());
     return route.fulfill({ status: 400, json: { error: "禁止真实运行" } });
   });
-  await page.goto("/?session=review-default-session");
+  await page.goto("/chat?session=review-default-session");
   const input = page.locator("[data-conversation-shell] textarea");
   await expect(input).toHaveAttribute("placeholder", /运行中/);
   await input.fill("只给旧会话的追加消息");
@@ -459,7 +459,7 @@ test("移动端审批与输入区均可见，切会话时立即清除旧审批",
   await page.route("**/api/sessions/review-a-session/approvals", (route) => {
     nextPoll = route;
   });
-  await page.goto("/?session=review-default-session");
+  await page.goto("/chat?session=review-default-session");
   const approve = page
     .locator("[data-slot=card]")
     .getByRole("button", { name: "批准", exact: true });
@@ -529,7 +529,7 @@ for (const next of ["另一会话", "同会话下一轮", "原运行"] as const)
         body: 'data: {"kind":"status","status":"running"}\n\n',
       }),
     );
-    await page.goto("/?session=review-default-session");
+    await page.goto("/chat?session=review-default-session");
     await expect(page.getByRole("button", { name: "停止运行", exact: true })).toBeVisible();
     await expect.poll(() => Boolean(stream)).toBe(true);
     await page.getByRole("button", { name: "停止运行", exact: true }).click();
@@ -566,7 +566,7 @@ test("准备 AI 编辑时继续输入，跳转前需确认且可以保留新修�
   await page.route("**/api/agents/design", (route) => {
     pending = route;
   });
-  await page.goto("/agents?id=review-a");
+  await page.goto("/agents/review-a");
   await expect(prompt(page)).toHaveValue("审查智能体 A 已保存提示词");
   await page.getByRole("button", { name: "AI 编辑", exact: true }).click();
   await expect.poll(() => Boolean(pending)).toBe(true);
@@ -626,7 +626,7 @@ for (const [status, outcome] of [
         })}\n\n`,
       });
     });
-    await page.goto("/?session=review-default-session");
+    await page.goto("/chat?session=review-default-session");
     const input = page.getByRole("textbox", { name: "消息", exact: true });
     await expect(input).toHaveAttribute("placeholder", /运行中/);
     await expect.poll(() => Boolean(stream)).toBe(true);

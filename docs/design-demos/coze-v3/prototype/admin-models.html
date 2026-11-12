@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>模型与提供者 · 平台管理 · Open Web Agents</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/owa.css">
+<style>
+.am-pico{width:34px;height:34px;border-radius:10px;background:#EFEDE7;display:grid;place-items:center;color:#4D4A43;flex:none}
+.am-mono{font-family:var(--mono);font-size:14px;color:#4D4A43}
+.am-sw{position:relative;width:40px;height:24px;border-radius:12px;background:#D6D2C8;flex:none;transition:background .2s}
+.am-sw::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.15);transition:left .2s}
+.am-sw.on{background:var(--ok)}
+.am-sw.on::after{left:19px}
+.am-swrow{display:flex;align-items:center;gap:10px;cursor:pointer;min-height:36px}
+.am-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;margin-bottom:16px}
+.am-card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px 20px}
+.am-card h3{margin:0 0 4px;font-size:16px}
+.am-kv{display:flex;align-items:center;gap:10px;min-height:38px}
+.am-kv .k{width:72px;flex:none;color:var(--sub);font-size:13px}
+.am-res{display:flex;align-items:center;gap:8px;border-radius:10px;padding:9px 12px;font-size:13px;margin-top:10px}
+.am-res.ok{background:var(--okbg);color:#2C5C40}
+.am-res.bad{background:var(--badbg);color:var(--bad)}
+.am-res.info{background:#F4F2EC;color:#4D4A43}
+.am-tgrp{font-family:var(--serif);font-size:18px;margin:22px 0 10px;display:flex;align-items:center;gap:10px}
+.am-tgrp:first-child{margin-top:4px}
+.am-cost{font-size:13px;line-height:1.5}
+.am-cost span{color:var(--sub)}
+.am-meter{display:grid;grid-template-columns:110px minmax(0,1fr) 150px;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line2)}
+.am-meter:last-child{border-bottom:0}
+.am-meter .sale{font-size:13px;text-align:right}
+.am-meter .sale b{font-size:15px}
+.am-alias{display:grid;grid-template-columns:110px minmax(0,1fr) 250px;gap:16px;align-items:center;padding:14px 4px;border-bottom:1px solid var(--line2)}
+.am-alias:last-child{border-bottom:0}
+.am-err{color:var(--bad);font-size:12px;margin-top:4px}
+.am-err:empty{display:none}
+.am-proto{font-size:12px;color:var(--sub);background:#F4F2EC;border-radius:10px;padding:8px 12px;display:flex;align-items:center;gap:10px;margin-top:14px}
+.am-proto button{text-decoration:underline;text-underline-offset:3px}
+.am-ptabs{display:flex;gap:6px;margin:4px 0 14px;flex-wrap:wrap}
+.am-ptabs button{height:34px;padding:0 14px;border-radius:17px;border:1px solid var(--line);background:#fff;font-size:13px;color:#3C3A35;display:inline-flex;align-items:center;gap:6px}
+.am-ptabs button.on{background:var(--btn);color:#fff;border-color:var(--btn)}
+.am-ptabs button .n{font-size:12px;opacity:.75}
+a.btn{text-decoration:none}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="assets/owa.js"></script>
+<script>
+"use strict";
+/* 平台管理，模型与提供者（合并原 /admin/providers、/admin/providers/[id]、/admin/models）
+   页签：提供者（列表 → 页内二级视图「提供者详情」）/ 模型总览 / 默认路由 */
+const TYPES = {
+  text: { n: "文本", meters: [["输入", "百万 tokens"], ["输出", "百万 tokens"], ["缓存写入", "百万 tokens"], ["缓存读取", "百万 tokens"]] },
+  image: { n: "生图", meters: [["每张图片", "张"]] },
+  video: { n: "生视频", meters: [["每秒视频", "秒"]] },
+  tts: { n: "语音合成", meters: [["合成字符", "千字符"]] },
+  stt: { n: "语音转写", meters: [["转写音频", "分钟"]] },
+};
+const GIFT = 20; // 充值赠送比例：团队包 ¥1,000 得 120,000 积分，即多送 20%
+const PROV = [
+  { id: "anthropic", n: "Anthropic 官方", on: true, key: "sk-ant-api03-…3f9a", ep: { text: { proto: "Anthropic", url: "https://api.anthropic.com" }, image: { proto: "自定义", url: "" }, video: { proto: "自定义", url: "" }, tts: { proto: "自定义", url: "" }, stt: { proto: "自定义", url: "" } } },
+  { id: "proxy", n: "内网代理", on: true, key: "sk-xh-…91c0", ep: { text: { proto: "OpenAI 兼容", url: "http://llm-proxy.xinghe.internal/v1" }, image: { proto: "OpenAI 兼容", url: "http://llm-proxy.xinghe.internal/v1/images" }, video: { proto: "自定义", url: "" }, tts: { proto: "自定义", url: "" }, stt: { proto: "自定义", url: "" } } },
+  { id: "backup", n: "备用通道（海外）", on: false, key: "", ep: { text: { proto: "Anthropic", url: "" }, image: { proto: "自定义", url: "" }, video: { proto: "自定义", url: "" }, tts: { proto: "自定义", url: "" }, stt: { proto: "自定义", url: "" } } },
+];
+const MODELS = [
+  { p: "anthropic", t: "text", n: "Claude Fable 5", id: "claude-fable-5", mk: 25, cost: [12, 60, 15, 1.2], on: true, img: true, v: 2, freeze: "" },
+  { p: "anthropic", t: "text", n: "Claude Opus 4.5", id: "claude-opus-4-5", mk: 25, cost: [4, 20, 5, 0.4], on: true, img: true, v: 4, freeze: "200" },
+  { p: "anthropic", t: "text", n: "Claude Sonnet 4.5", id: "claude-sonnet-4-5", mk: 25, cost: [2.4, 12, 3, 0.24], on: true, img: true, v: 3, freeze: "" },
+  { p: "anthropic", t: "text", n: "Claude Haiku 4.5", id: "claude-haiku-4-5", mk: 25, cost: [0.8, 4, 1, 0.08], on: true, img: true, v: 2, freeze: "" },
+  { p: "anthropic", t: "text", n: "Claude Sonnet 4", id: "claude-sonnet-4", mk: 15, cost: [2.16, 10.8, 2.7, 0.22], on: true, img: true, v: 1, freeze: "" },
+  { p: "anthropic", t: "text", n: "Claude 3 Haiku", id: "claude-3-haiku", mk: 30, cost: [0.25, 1.25, 0, 0], on: false, img: false, v: 5, freeze: "", legacy: true },
+  { p: "proxy", t: "text", n: "DeepSeek V3", id: "deepseek-v3", mk: 30, cost: [2, 8, 0, 0.5], on: true, img: false, v: 2, freeze: "" },
+  { p: "proxy", t: "text", n: "通义千问 Plus", id: "qwen-plus", mk: 30, cost: [0.8, 2, 0, 0], on: true, img: false, v: 1, freeze: "" },
+  { p: "proxy", t: "image", n: "通义万相 2", id: "wanx2.1-t2i", mk: 30, cost: [0.2], on: true, img: false, v: 1, freeze: "" },
+];
+const USES = { "claude-sonnet-4-5": ["报销审核助手", "会议纪要整理", "SQL 助手", "代码审查员"], "claude-opus-4-5": ["合同条款比对", "竞品周报"], "claude-haiku-4-5": ["客服知识问答", "周报生成器"], "claude-fable-5": ["小红书文案"], "deepseek-v3": ["汇率换算"], "claude-sonnet-4": ["竞品周报（新版）"] };
+const ALIASES = ["fable", "opus", "sonnet", "haiku"];
+const ROUTE = { prov: "anthropic", map: { fable: "claude-fable-5", opus: "claude-opus-4-5", sonnet: "claude-sonnet-4-5", haiku: "claude-haiku-4-5" } };
+const ALIAS_AGENTS = { fable: 3, opus: 5, sonnet: 14, haiku: 6 };
+
+const S = { tab: "prov", prov: null, ptype: "text", list: "ok", editKey: false, test: null, testing: false, routeProv: ROUTE.prov, routeMap: { ...ROUTE.map } };
+
+const fmt = (x) => (Math.round(x * 100) / 100).toLocaleString("zh-CN", { maximumFractionDigits: 2 });
+const sale = (c, mk) => c * 100 * (1 + mk / 100);
+const modelsOf = (pid, t) => MODELS.filter((m) => m.p === pid && (!t || m.t === t));
+const PV = (id) => PROV.find((p) => p.id === id);
+const aliasesTo = (mid) => (ROUTE.prov && ALIASES.filter((a) => ROUTE.map[a] === mid));
+const sw = (on, a, extra = "") => `<span class="am-swrow" data-a="${a}" ${extra} role="switch" aria-checked="${on}"><span class="am-sw ${on ? "on" : ""}"></span>${on ? "启用" : "停用"}</span>`;
+
+OWA.mount({ nav: "admin", body: `<div class="bwrap">${sideNav("admin")}<main class="main" id="am-main"></main></div>` });
+
+function render() {
+  location.hash = S.prov ? "provider=" + S.prov : S.tab === "prov" ? "providers" : S.tab;
+  const m = $("#am-main"), st = m.scrollTop;
+  if (S.prov) { m.innerHTML = provDetail(); m.scrollTop = st; return; }
+  m.innerHTML = `<div class="ph"><div><h1>模型与提供者</h1><p class="muted" style="margin:6px 0 0">${PROV.length} 个提供者，${MODELS.filter((x) => x.on).length} 个启用中的模型，智能体用别名（fable / opus / sonnet / haiku）或模型标识调用</p></div></div>
+    <div class="tabs" role="tablist">${[["prov", "提供者"], ["models", "模型总览"], ["routes", "默认路由"]].map(([k, n]) => `<button role="tab" aria-selected="${S.tab === k}" class="${S.tab === k ? "on" : ""}" data-a="am-tab" data-v="${k}">${n}</button>`).join("")}</div>
+    ${S.tab === "prov" ? provList() : S.tab === "models" ? overview() : routes()}`;
+}
+
+/* ---------- 提供者列表 ---------- */
+function provList() {
+  let body;
+  if (S.list === "loading") body = `<div class="empty-state row" style="justify-content:center"><span class="spin"></span><span class="muted">正在加载提供者…</span></div>`;
+  else if (S.list === "error") body = `<div class="empty-state"><div class="serif">提供者列表加载失败</div><p class="muted" style="margin:0 0 14px">服务端返回 HTTP 502。已配置的模型仍按原设置运行。</p><button class="btn sm" data-a="am-refresh">${ic("refresh", 14)}重试</button></div>`;
+  else if (S.list === "empty") body = `<div class="empty-state"><div class="serif">还没有模型提供者</div><p class="muted" style="margin:0 0 14px">添加一个提供者并填好 API Key，智能体才能调用模型。</p><button class="btn sm" data-a="am-add-prov">${ic("plus", 14, 2)}添加提供者</button></div>`;
+  else body = `<table class="tb"><thead><tr><th>名称</th><th>API Key</th><th>文本接入</th><th>模型数</th><th>状态</th><th></th></tr></thead><tbody>
+    ${PROV.map((p) => `<tr class="click" data-a="am-open" data-id="${p.id}"><td><div class="row"><span class="am-pico">${ic("cpu", 17)}</span><div><div style="font-weight:600">${p.n}</div>${ROUTE.prov === p.id ? '<div class="muted small">默认路由使用中</div>' : ""}</div></div></td>
+      <td>${p.key ? '<span class="tag ok">已配置</span>' : '<span class="tag warn">未配置</span>'}</td>
+      <td>${p.ep.text.url ? `<span class="am-mono">${p.ep.text.url}</span><div class="muted small">${p.ep.text.proto}</div>` : '<span class="muted">未填写</span>'}</td>
+      <td>${modelsOf(p.id).length}</td><td>${p.on ? '<span class="tag ok">启用</span>' : '<span class="tag">停用</span>'}</td>
+      <td style="text-align:right;color:var(--sub)">${ic("chev", 16)}</td></tr>`).join("")}</tbody></table>`;
+  return `<div class="row" style="margin-bottom:12px"><span class="muted">点一行进入提供者详情：凭证、按类型的接入地址、模型与价目。</span>
+      <div class="row" style="margin-left:auto"><button class="btn ghost sm" data-a="am-refresh">${ic("refresh", 14)}刷新</button><button class="btn sm" data-a="am-add-prov">${ic("plus", 14, 2)}添加提供者</button></div></div>
+    <div class="card" style="overflow:hidden">${body}</div>
+    <div class="am-proto">${ic("info", 14)}原型演示其他状态：<button data-a="am-list" data-v="empty">空状态</button><button data-a="am-list" data-v="error">加载失败</button><button data-a="am-list" data-v="ok">恢复正常</button></div>`;
+}
+
+/* ---------- 提供者详情（页内二级视图） ---------- */
+function provDetail() {
+  const p = PV(S.prov), ep = p.ep[S.ptype], ms = modelsOf(p.id, S.ptype), T = TYPES[S.ptype];
+  const testable = S.ptype === "text";
+  return `<button class="btn ghost sm" data-a="am-back" style="margin-bottom:16px">${ic("back", 14)}返回列表</button>
+    <div class="ph"><span class="am-pico" style="width:46px;height:46px;border-radius:14px">${ic("cpu", 22)}</span><div><h1>${p.n}</h1><p class="muted" style="margin:6px 0 0">${modelsOf(p.id).length} 个模型，${p.on ? "启用中" : "已停用"}${ROUTE.prov === p.id ? "，默认路由使用中" : ""}</p></div></div>
+    <div class="am-grid">
+      <div class="am-card"><h3>基本信息</h3><p class="muted small" style="margin:0 0 10px">停用后，这个提供者的模型都不能再发起新运行。</p>
+        <div class="am-kv"><span class="k">名称</span><input class="inp" id="am-pname" value="${esc(p.n)}" style="flex:1"><button class="btn ghost sm" data-a="am-pname">保存</button></div>
+        <div class="am-kv"><span class="k">状态</span>${sw(p.on, "am-pon")}</div></div>
+      <div class="am-card"><h3>API Key</h3><p class="muted small" style="margin:0 0 10px">加密保存，保存后不能查看，只能替换。</p>
+        ${S.editKey ? `<div class="row"><input class="inp" id="am-key" type="password" placeholder="粘贴新的 API Key" autocomplete="off"><button class="btn sm" data-a="am-key-save">保存</button><button class="btn ghost sm" data-a="am-key-cancel">取消</button></div><div class="am-err" id="am-key-err"></div>`
+        : `<div class="row"><span class="am-pico">${ic("key", 16)}</span><div style="flex:1;min-width:0">${p.key ? `<div class="am-mono">${p.key}</div><div class="muted small">已配置，替换后立即生效</div>` : `<div style="font-weight:500">未配置</div><div class="small" style="color:var(--warnt)">没有 Key 时，这个提供者的模型都无法调用</div>`}</div><button class="btn ghost sm" data-a="am-key-edit">${p.key ? "替换" : "填写"}</button></div>`}</div>
+    </div>
+    <div class="am-ptabs" role="tablist" aria-label="模型类型">${Object.entries(TYPES).map(([k, t]) => `<button role="tab" aria-selected="${k === S.ptype}" class="${k === S.ptype ? "on" : ""}" data-a="am-ptype" data-v="${k}">${t.n}<span class="n">${modelsOf(p.id, k).length}</span></button>`).join("")}</div>
+    <div class="am-card" style="margin-bottom:16px"><div class="row" style="margin-bottom:12px"><h3 style="margin:0">${T.n}接入地址</h3>${testable ? "" : '<span class="tag">暂未接入运行时</span>'}</div>
+      <div class="row" style="align-items:flex-end;gap:12px">
+        <div class="fld" style="width:180px;margin:0"><label for="am-proto">协议</label><select class="inp" id="am-proto">${["Anthropic", "OpenAI 兼容", "自定义"].map((x) => `<option ${x === ep.proto ? "selected" : ""}>${x}</option>`).join("")}</select></div>
+        <div class="fld" style="flex:1;margin:0"><label for="am-url">地址</label><input class="inp am-mono" id="am-url" value="${esc(ep.url)}" placeholder="https://"></div>
+        <button class="btn" data-a="am-ep-save">保存</button></div>
+      <div class="am-err" id="am-url-err"></div>
+      ${testable ? `<div class="row" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line2);align-items:flex-end;gap:12px">
+          <div class="fld" style="width:280px;margin:0"><label for="am-tmodel">测试用模型标识</label><input class="inp am-mono" id="am-tmodel" value="${ms[0]?.id || ""}" placeholder="例如 claude-haiku-4-5"></div>
+          <button class="btn ghost" data-a="am-test" ${S.testing ? "disabled" : ""}>${S.testing ? '<span class="spin"></span>正在测试' : ic("play", 14) + "测试连接"}</button>
+          <span class="muted small" style="margin-bottom:10px">发一条很短的请求，会产生极少量费用</span></div>
+        ${S.test ? `<div class="am-res ${S.test.ok ? "ok" : "bad"}">${ic(S.test.ok ? "check" : "warn", 16)}<span>${S.test.msg}</span></div>` : ""}`
+      : `<div class="am-res info">${ic("info", 16)}<span>${T.n}类型暂未接入运行时，可以先填地址和模型价目，不提供测试连接。</span></div>`}
+    </div>
+    <div class="am-card" style="padding:0;overflow:hidden">
+      <div class="row" style="padding:16px 20px 12px"><h3 style="margin:0">${T.n}模型</h3><span class="muted">售价 = 成本单价（元）× 100 积分 ×（1 + 加价）；每次保存生成新版本</span><button class="btn sm" style="margin-left:auto" data-a="am-model" data-i="-1">${ic("plus", 14, 2)}添加模型</button></div>
+      ${ms.length ? `<table class="tb"><thead><tr><th>名称 / 标识</th><th>成本单价（元）</th><th>加价</th><th>售价（积分）</th><th>状态</th><th>版本</th><th></th></tr></thead><tbody>
+        ${ms.map((m) => { const i = MODELS.indexOf(m); return `<tr><td><div style="font-weight:600">${m.n}</div><div class="am-mono">${m.id}</div>${m.legacy ? `<div class="small" style="color:var(--warnt);margin-top:2px">旧价目单位非标准</div>` : ""}</td>
+          <td class="am-cost">${T.meters.map((x, j) => `<div><span>${x[0]}</span> ${m.cost[j] ?? 0}<span> / ${x[1]}</span></div>`).join("")}</td>
+          <td>${m.mk}%</td>
+          <td class="am-cost">${T.meters.map((x, j) => `<div><span>${x[0]}</span> <b>${fmt(sale(m.cost[j] ?? 0, m.mk))}</b><span> / ${x[1]}</span></div>`).join("")}</td>
+          <td>${m.on ? '<span class="tag ok">启用</span>' : '<span class="tag">停用</span>'}${aliasesTo(m.id).length ? `<div class="muted small" style="margin-top:4px">别名 ${aliasesTo(m.id).join("、")}</div>` : ""}</td>
+          <td>v${m.v}</td><td style="text-align:right"><button class="btn ghost sm" data-a="am-model" data-i="${i}">${ic("edit", 14)}编辑</button></td></tr>`; }).join("")}</tbody></table>`
+      : `<div class="empty-state" style="padding:36px 24px"><div class="serif">还没有${T.n}模型</div><p class="muted" style="margin:0">点「添加模型」，填模型标识和成本单价。</p></div>`}
+    </div>`;
+}
+
+/* ---------- 模型总览 ---------- */
+function overview() {
+  return `<p class="muted" style="margin:0 0 6px">所有提供者的模型和售价（只读）。改价请点模型名称到对应提供者里编辑。</p>
+    ${Object.entries(TYPES).map(([k, t]) => { const ms = MODELS.filter((m) => m.t === k); return `<div class="am-tgrp">${t.n}<span class="tag">${ms.length} 个</span>${k === "text" ? "" : '<span class="tag line">暂未接入运行时</span>'}</div>
+      ${ms.length ? `<div class="card" style="overflow:hidden"><table class="tb"><thead><tr><th style="width:30%">模型</th><th>提供者</th><th>售价（积分）</th><th>加价</th><th>状态</th></tr></thead><tbody>
+      ${ms.map((m) => `<tr><td><a class="link" style="font-weight:600" href="#provider=${m.p}" data-a="am-goto" data-id="${m.p}" data-t="${m.t}">${m.n}</a><div class="am-mono">${m.id}</div></td><td>${PV(m.p).n}</td>
+        <td class="am-cost">${t.meters.slice(0, 2).map((x, j) => `<div><span>${x[0]}</span> <b>${fmt(sale(m.cost[j] ?? 0, m.mk))}</b><span> / ${x[1]}</span></div>`).join("")}</td>
+        <td>${m.mk}%</td><td>${m.on ? '<span class="tag ok">启用</span>' : '<span class="tag">停用</span>'}</td></tr>`).join("")}</tbody></table></div>`
+      : `<div class="card muted" style="padding:14px 18px">还没有${t.n}模型</div>`}`; }).join("")}`;
+}
+
+/* ---------- 默认路由 ---------- */
+function routes() {
+  const opts = modelsOf(S.routeProv, "text").filter((m) => m.on);
+  const p = PV(S.routeProv);
+  return `<div class="card" style="padding:20px 22px;max-width:860px">
+      <h3 style="margin:0 0 4px;font-size:16px">默认模型路由</h3>
+      <p class="muted" style="margin:0 0 16px">智能体里写别名（如 sonnet）时，按这里的映射调用。四个别名必须用同一个提供者的模型。</p>
+      <div class="fld" style="max-width:320px"><label for="am-rprov">所属提供者</label><select class="inp" id="am-rprov" data-ch="rprov">${PROV.map((x) => `<option value="${x.id}" ${x.id === S.routeProv ? "selected" : ""} ${x.on ? "" : "disabled"}>${x.n}${x.on ? "" : "（已停用）"}</option>`).join("")}</select></div>
+      ${!opts.length ? `<div class="banner warn">${ic("warn", 16)}${p.n}还没有启用的文本模型，先去添加模型。</div>` : ""}
+      <div style="border-top:1px solid var(--line2)">${ALIASES.map((a) => `<div class="am-alias"><div><div style="font-family:var(--mono);font-weight:600">${a}</div><div class="muted small">${ALIAS_AGENTS[a]} 个智能体在用</div></div>
+        <select class="inp" data-alias="${a}" aria-label="${a} 对应的模型">${opts.map((m) => `<option value="${m.id}" ${S.routeMap[a] === m.id ? "selected" : ""}>${m.n}（${m.id}）</option>`).join("")}${opts.some((m) => m.id === S.routeMap[a]) ? "" : '<option value="" selected>请选择模型</option>'}</select>
+        <div class="muted small">${(() => { const m = MODELS.find((x) => x.id === S.routeMap[a] && x.p === S.routeProv); return m ? `输入 ${fmt(sale(m.cost[0], m.mk))}，输出 ${fmt(sale(m.cost[1], m.mk))}<br>积分 / 百万 tokens` : "未选择"; })()}</div></div>`).join("")}</div>
+      <div class="row" style="margin-top:16px;align-items:flex-start"><div class="muted small" style="flex:1">当前生效：${PV(ROUTE.prov).n}<br><span class="am-mono">${ALIASES.map((a) => `${a} → ${ROUTE.map[a]}`).join("　")}</span></div><button class="btn" data-a="am-route-save">保存别名映射</button></div>
+    </div>`;
+}
+
+/* ---------- 弹窗：添加提供者 ---------- */
+OWA.on("am-add-prov", () => {
+  openModal(`<h3>添加提供者</h3><p class="muted" style="margin:0 0 16px">接入地址和 API Key 都可以稍后在详情里填。</p>
+    <div class="fld"><label for="np-n">名称 <b>*</b></label><input class="inp" id="np-n" placeholder="例如 Anthropic 官方"></div>
+    <div class="fld"><label for="np-u">文本接入地址（Anthropic 协议，可稍后填）</label><input class="inp am-mono" id="np-u" placeholder="https://api.anthropic.com"></div>
+    <div class="fld"><label for="np-k">API Key（可稍后填，加密保存）</label><input class="inp" id="np-k" type="password" autocomplete="off"></div>
+    <div class="am-err" id="np-err"></div>
+    <div class="mfoot"><button class="btn ghost" data-a="owa-close">取消</button><button class="btn" data-a="am-add-prov-ok">添加</button></div>`, 500);
+  setTimeout(() => $("#np-n")?.focus(), 30);
+});
+OWA.on("am-add-prov-ok", () => {
+  const n = $("#np-n").value.trim(), u = $("#np-u").value.trim(), k = $("#np-k").value.trim();
+  if (!n) return ($("#np-err").textContent = "请填写名称");
+  if (u && !/^https?:\/\//.test(u)) return ($("#np-err").textContent = "地址需要以 http:// 或 https:// 开头");
+  const id = "p" + Date.now();
+  const e = () => ({ proto: "自定义", url: "" });
+  PROV.push({ id, n, on: true, key: k ? "sk-…" + k.slice(-4) : "", ep: { text: { proto: "Anthropic", url: u }, image: e(), video: e(), tts: e(), stt: e() } });
+  closeModal(); S.list = "ok"; S.prov = id; S.ptype = "text"; S.test = null; render(); toast("已添加提供者「" + esc(n) + "」");
+});
+
+/* ---------- 弹窗：模型 ---------- */
+let MD = null;
+function modelDialog(i) {
+  const isNew = i < 0;
+  const m = isNew ? { p: S.prov, t: S.ptype, n: "", id: "", mk: 25, cost: TYPES[S.ptype].meters.map(() => ""), on: true, img: false, v: 0, freeze: "" } : MODELS[i];
+  MD = { i, on: m.on, img: m.img };
+  const T = TYPES[m.t];
+  openModal(`<h3>${isNew ? "添加模型" : "编辑模型"}</h3><p class="muted" style="margin:0 0 16px">${PV(m.p).n}，${T.n}${isNew ? "" : `，当前 v${m.v}，保存后生成 v${m.v + 1}，进行中的运行按旧版本结算`}</p>
+    ${m.legacy ? `<div class="banner warn" style="padding:10px 12px;font-size:13px">${ic("warn", 16)}旧价目单位非标准（按美元每千 tokens 录入），请按「元 / 百万 tokens」重新填写后保存。</div>` : ""}
+    <div class="grid2"><div class="fld"><label for="md-n">显示名称 <b>*</b></label><input class="inp" id="md-n" value="${esc(m.n)}" placeholder="例如 Claude Sonnet 4.5"></div>
+      <div class="fld"><label for="md-id">模型标识 <b>*</b></label><input class="inp am-mono" id="md-id" value="${esc(m.id)}" placeholder="例如 claude-sonnet-4-5"></div></div>
+    <div class="grid2"><div class="fld"><label for="md-mk">加价比例（%，不超过 1000%）</label><input class="inp" id="md-mk" inputmode="decimal" value="${m.mk}" data-in="md"></div>
+      <div class="fld"><label for="md-fz">单次运行冻结积分</label><input class="inp" id="md-fz" inputmode="numeric" value="${esc(m.freeze)}" placeholder="留空用平台默认（100）"></div></div>
+    <p class="muted small" style="margin:-8px 0 12px">运行开始前先冻结这么多积分，用到八成时自动追加冻结；结束后按实际用量结算，多余的退回。</p>
+    <div class="row" style="gap:24px;margin-bottom:14px"><span class="am-swrow" data-a="md-on" id="md-on" role="switch" aria-checked="${m.on}"><span class="am-sw ${m.on ? "on" : ""}"></span>启用</span>
+      ${m.t === "text" ? `<span class="am-swrow" data-a="md-img" id="md-img" role="switch" aria-checked="${m.img}"><span class="am-sw ${m.img ? "on" : ""}"></span>支持图片输入</span>` : ""}</div>
+    <div id="md-impact"></div>
+    <div class="sub-h">各计量项成本单价（元，最多 8 位小数）<span class="muted small" style="font-weight:400">1 元 = 100 积分，再乘（1 + 加价）</span></div>
+    <div class="card" style="padding:4px 14px">${T.meters.map((x, j) => `<div class="am-meter"><label for="md-c${j}">${x[0]}</label><div class="row" style="gap:6px"><input class="inp" id="md-c${j}" inputmode="decimal" value="${m.cost[j] ?? ""}" data-in="md" placeholder="0"><span class="muted small" style="white-space:nowrap">元 / ${x[1]}</span></div><div class="sale" id="md-s${j}"></div></div>`).join("")}</div>
+    <div id="md-warn"></div><div class="am-err" id="md-err"></div>
+    <div class="mfoot"><button class="btn ghost" data-a="owa-close">取消</button><button class="btn" data-a="md-save">${isNew ? "添加模型" : `保存为 v${m.v + 1}`}</button></div>`, 640);
+  $$("[data-in=md]").forEach((el) => el.addEventListener("input", mdCalc));
+  mdCalc();
+}
+function mdCalc() {
+  if (!MD) return;
+  const t = MD.i < 0 ? S.ptype : MODELS[MD.i].t, T = TYPES[t];
+  const mk = parseFloat($("#md-mk").value) || 0;
+  T.meters.forEach((x, j) => { const c = parseFloat($("#md-c" + j).value) || 0; $("#md-s" + j).innerHTML = `售价 <b>${fmt(sale(c, mk))}</b> 积分`; });
+  const w = [];
+  if (mk > 1000) w.push(["bad", "加价比例不能超过 1000%"]);
+  else if (mk < GIFT) w.push(["warn", `加价 ${mk}% 低于充值赠送比例（${GIFT}%）：用户用赠送积分调用这个模型时，平台会亏本。`]);
+  $("#md-warn").innerHTML = w.map(([k, s]) => `<div class="banner ${k === "bad" ? "warn" : k}" style="margin:12px 0 0;padding:10px 12px;font-size:13px${k === "bad" ? ";background:var(--badbg);color:var(--bad)" : ""}">${ic("warn", 16)}${s}</div>`).join("");
+  const id = MD.i < 0 ? "" : MODELS[MD.i].id;
+  const wasOn = MD.i < 0 ? true : MODELS[MD.i].on;
+  if (!MD.on && wasOn && id) {
+    const ag = USES[id] || [], al = aliasesTo(id);
+    $("#md-impact").innerHTML = `<div class="banner warn" style="padding:10px 12px;font-size:13px;align-items:flex-start">${ic("warn", 16)}<div>停用后影响 <b>${ag.length} 个智能体</b>${ag.length ? `（${ag.join("、")}）` : ""}${al.length ? `，以及别名 <b>${al.join("、")}</b>，请先在「默认路由」改映射` : ""}。它们的新运行会失败。</div></div>`;
+  } else $("#md-impact").innerHTML = "";
+}
+OWA.on("am-model", (t) => modelDialog(+t.dataset.i));
+OWA.on("md-on", (t) => { MD.on = !MD.on; t.querySelector(".am-sw").classList.toggle("on", MD.on); t.setAttribute("aria-checked", MD.on); mdCalc(); });
+OWA.on("md-img", (t) => { MD.img = !MD.img; t.querySelector(".am-sw").classList.toggle("on", MD.img); t.setAttribute("aria-checked", MD.img); });
+OWA.on("md-save", () => {
+  const n = $("#md-n").value.trim(), id = $("#md-id").value.trim(), mk = parseFloat($("#md-mk").value);
+  const t = MD.i < 0 ? S.ptype : MODELS[MD.i].t, T = TYPES[t];
+  const err = (s) => ($("#md-err").textContent = s);
+  if (!n || !id) return err("请填写显示名称和模型标识");
+  if (isNaN(mk) || mk < 0 || mk > 1000) return err("加价比例需要在 0 到 1000 之间");
+  const fz = $("#md-fz").value.trim();
+  if (fz && !/^\d+$/.test(fz)) return err("冻结积分请填正整数，或留空用平台默认");
+  const cost = [];
+  for (let j = 0; j < T.meters.length; j++) {
+    const v = $("#md-c" + j).value.trim() || "0";
+    if (!/^\d+(\.\d{1,8})?$/.test(v)) return err(`「${T.meters[j][0]}」成本单价需要是非负数，最多 8 位小数`);
+    cost.push(+v);
+  }
+  if (MD.i < 0) {
+    if (MODELS.some((m) => m.p === S.prov && m.id === id)) return err("这个提供者下已经有同样标识的模型");
+    MODELS.push({ p: S.prov, t, n, id, mk, cost, on: MD.on, img: MD.img, v: 1, freeze: fz });
+    toast(`已添加 ${esc(n)}（v1）`);
+  } else {
+    const m = MODELS[MD.i];
+    Object.assign(m, { n, id, mk, cost, on: MD.on, img: MD.img, freeze: fz, legacy: false, v: m.v + 1 });
+    toast(`已保存为 v${m.v}，新运行按新价目计费`);
+  }
+  MD = null; closeModal(); render();
+});
+
+/* ---------- 交互 ---------- */
+OWA.on("am-tab", (t) => { S.tab = t.dataset.v; render(); });
+OWA.on("am-list", (t) => { S.list = t.dataset.v; render(); });
+OWA.on("am-refresh", () => { S.list = "loading"; render(); setTimeout(() => { S.list = "ok"; render(); toast("已刷新"); }, 700); });
+OWA.on("am-open", (t) => { S.prov = t.dataset.id; S.ptype = "text"; S.test = null; S.editKey = false; render(); $("#am-main").scrollTop = 0; });
+OWA.on("am-goto", (t, e) => { e.preventDefault(); S.prov = t.dataset.id; S.ptype = t.dataset.t; S.test = null; render(); $("#am-main").scrollTop = 0; });
+OWA.on("am-back", () => { S.prov = null; S.tab = "prov"; render(); });
+OWA.on("am-ptype", (t) => { S.ptype = t.dataset.v; S.test = null; render(); });
+OWA.on("am-pname", () => { const v = $("#am-pname").value.trim(); if (!v) return toast("名称不能为空", false); PV(S.prov).n = v; render(); toast("名称已保存"); });
+OWA.on("am-pon", () => {
+  const p = PV(S.prov);
+  if (!p.on) { p.on = true; render(); return toast("已启用"); }
+  const ms = modelsOf(p.id).map((m) => m.id), ag = new Set(ms.flatMap((id) => USES[id] || []));
+  const al = ROUTE.prov === p.id ? ALIASES : [];
+  const n = ag.size + (al.length ? 14 : 0);
+  confirmBox({ title: `停用「${p.n}」？`, danger: true, ok: "停用",
+    body: `<p>停用后，这个提供者的 ${ms.length} 个模型都不能发起新运行，进行中的运行不受影响。</p>
+      <div class="banner warn" style="padding:10px 12px;font-size:13px;align-items:flex-start">${ic("warn", 16)}<div>影响 <b>${n} 个智能体</b>${al.length ? `，以及别名 <b>${al.join("、")}</b>（默认路由正在用它）` : "，没有别名指向它"}。</div></div>`,
+    onOk: () => { p.on = false; render(); toast("已停用"); } });
+});
+OWA.on("am-key-edit", () => { S.editKey = true; render(); setTimeout(() => $("#am-key")?.focus(), 20); });
+OWA.on("am-key-cancel", () => { S.editKey = false; render(); });
+OWA.on("am-key-save", () => { const v = $("#am-key").value.trim(); if (v.length < 8) return ($("#am-key-err").textContent = "Key 太短了，请粘贴完整的 API Key"); PV(S.prov).key = v.slice(0, 7) + "…" + v.slice(-4); S.editKey = false; render(); toast("API Key 已加密保存"); });
+OWA.on("am-ep-save", () => {
+  const u = $("#am-url").value.trim();
+  if (u && !/^https?:\/\//.test(u)) return ($("#am-url-err").textContent = "地址需要以 http:// 或 https:// 开头");
+  const ep = PV(S.prov).ep[S.ptype]; ep.url = u; ep.proto = $("#am-proto").value; render(); toast(TYPES[S.ptype].n + "接入地址已保存");
+});
+OWA.on("am-test", () => {
+  const p = PV(S.prov), mid = $("#am-tmodel").value.trim();
+  S.testing = true; S.test = null; render(); $("#am-tmodel").value = mid;
+  setTimeout(() => {
+    S.testing = false;
+    if (!p.key) S.test = { ok: false, msg: "HTTP 401：没有配置 API Key，先在上方填写" };
+    else if (!p.ep.text.url) S.test = { ok: false, msg: "还没有填写文本接入地址" };
+    else if (!mid) S.test = { ok: false, msg: "请填写测试用模型标识" };
+    else if (!modelsOf(p.id, "text").some((m) => m.id === mid)) S.test = { ok: false, msg: `HTTP 404：model_not_found，提供者不认识「${esc(mid)}」` };
+    else S.test = { ok: true, msg: `连接成功：${esc(mid)} 在 642 ms 内返回了回复` };
+    render(); $("#am-tmodel").value = mid;
+  }, 1100);
+});
+document.addEventListener("change", (e) => {
+  if (e.target.id === "am-rprov") { S.routeProv = e.target.value; const opts = modelsOf(S.routeProv, "text").filter((m) => m.on); ALIASES.forEach((a, i) => (S.routeMap[a] = (opts.find((m) => m.id.includes(a)) || opts[Math.min(i, opts.length - 1)] || {}).id || "")); render(); }
+  if (e.target.dataset.alias) { S.routeMap[e.target.dataset.alias] = e.target.value; render(); }
+});
+OWA.on("am-route-save", () => {
+  if (ALIASES.some((a) => !S.routeMap[a])) return toast("四个别名都要选一个模型", false);
+  confirmBox({ title: "保存别名映射？", body: `<p>保存后，用别名的智能体在新运行里改用 ${PV(S.routeProv).n} 的模型：</p><div class="lst">${ALIASES.map((a) => `<div class="li"><span style="font-family:var(--mono);width:60px">${a}</span>${ic("chev", 14)}<span class="am-mono">${S.routeMap[a]}</span><span class="muted small" style="margin-left:auto">${ALIAS_AGENTS[a]} 个智能体</span></div>`).join("")}</div>`, ok: "保存",
+    onOk: () => { ROUTE.prov = S.routeProv; ROUTE.map = { ...S.routeMap }; render(); toast("别名映射已保存"); } });
+});
+
+/* 深链：#providers / #models / #routes / #provider=id */
+const h = location.hash.slice(1);
+if (h.startsWith("provider=") && PV(h.split("=")[1])) S.prov = h.split("=")[1];
+else if (["models", "routes"].includes(h)) S.tab = h;
+render();
+</script>
+</body>
+</html>

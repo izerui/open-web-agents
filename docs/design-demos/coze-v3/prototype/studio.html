@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>我的智能体 · 工作室 · Open Web Agents</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/owa.css">
+<style>
+.st-wrap{padding:34px 56px 64px;max-width:1440px}
+.st-head{display:flex;align-items:flex-end;gap:16px;margin-bottom:22px}
+.st-head h1{font-family:var(--serif);font-size:36px;margin:0;line-height:1.2}
+.st-head p{margin:6px 0 0;font-size:15px;color:var(--sub)}
+.st-tools{display:flex;align-items:center;gap:10px;margin-bottom:18px}
+.st-tools .seg b{font-weight:500;color:var(--sub);margin-left:4px}
+.st-search{position:relative;width:280px;margin-left:auto}
+.st-search span{position:absolute;left:12px;top:10px;color:var(--sub)}
+.st-search .inp{padding-left:38px;border-radius:19px}
+.st-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.st-card{background:#fff;border:1px solid var(--line);border-radius:18px;padding:20px 20px 16px;display:flex;flex-direction:column;gap:10px;cursor:pointer;transition:box-shadow .2s,transform .2s;position:relative}
+.st-card:hover{box-shadow:0 10px 30px rgba(60,50,30,.08);transform:translateY(-2px)}
+.st-card .nm{font-family:var(--serif);font-weight:700;font-size:18px;line-height:1.3}
+.st-card .id{font-family:var(--mono);font-size:12px;color:var(--sub)}
+.st-card .ds{color:#4A4740;font-size:14px;min-height:44px}
+.st-badges{display:flex;gap:6px;flex-wrap:wrap}
+.st-foot{display:flex;align-items:center;gap:8px;border-top:1px solid var(--line2);padding-top:12px;margin-top:2px;font-size:13px;color:var(--sub)}
+.st-foot .acts{margin-left:auto;display:flex;gap:6px}
+.st-more{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;color:var(--sub);margin-left:auto;flex:none}
+.st-more:hover{background:#F0EEE8;color:var(--ink)}
+.menu .st-dis{color:#8A867C;cursor:not-allowed;height:auto;min-height:38px;padding:6px 12px;flex-wrap:wrap}
+.menu .st-dis:hover{background:none}
+.menu .st-dis small{width:100%;padding-left:26px;font-size:12px;color:var(--sub)}
+.menu .st-del{color:var(--bad)}
+.st-skel i{display:block;border-radius:8px;background:linear-gradient(90deg,#EFEDE7 0%,#F7F6F2 50%,#EFEDE7 100%);background-size:200% 100%;animation:stsh 1.2s linear infinite}
+@keyframes stsh{from{background-position:200% 0}to{background-position:-200% 0}}
+.st-state{background:#fff;border:1px solid var(--line);border-radius:18px;padding:56px 24px;text-align:center}
+.st-state .serif{font-size:22px;margin-bottom:6px}
+.st-state p{margin:0 0 18px;color:var(--sub);font-size:15px}
+.st-state .row{justify-content:center}
+.st-tbl{background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden}
+/* 新建弹层 */
+.nw-modes{display:grid;grid-template-columns:1.5fr 1fr 1fr 1fr;gap:8px;margin:16px 0 18px}
+.nw-mode{border:1px solid var(--line);border-radius:14px;padding:12px;text-align:left;display:flex;flex-direction:column;gap:4px;background:#fff;min-height:84px}
+.nw-mode:hover{border-color:#BDB8AC}
+.nw-mode.pri{background:#F4F2EC;border-color:#E2DED3}
+.nw-mode.on{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+.nw-mode .t{font-weight:600;display:flex;align-items:center;gap:6px}
+.nw-mode .d{font-size:12px;color:var(--sub);line-height:1.45}
+.nw-mode.off .t{color:#6B6860}
+.nw-pick{display:flex;gap:8px;flex-wrap:wrap}
+.nw-pick button{border-radius:50%;padding:2px;border:2px solid transparent}
+.nw-pick button.on{border-color:var(--ink)}
+.nw-list{border:1px solid var(--line);border-radius:12px;max-height:290px;overflow:auto}
+.nw-it{display:flex;align-items:center;gap:12px;padding:10px 12px;border-bottom:1px solid var(--line2);width:100%;text-align:left}
+.nw-it:last-child{border-bottom:0}
+.nw-it:hover{background:#FAF9F6}
+.nw-it .dot{width:16px;height:16px;border-radius:50%;border:1.5px solid #B5B0A4;flex:none;margin-left:auto}
+.nw-it.on{background:#F6F5F1}
+.nw-it.on .dot{border:5px solid var(--ink)}
+.nw-tpls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.nw-tpl{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;text-align:left;background:#fff}
+.nw-tpl:hover{border-color:#BDB8AC}
+.nw-tpl.on{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+.nw-err{color:var(--bad);font-size:12px;min-height:18px}
+/* 只读抽屉 */
+.ro-note{display:flex;gap:10px;background:#F2F1EC;border-radius:12px;padding:12px 14px;font-size:14px;color:#3C3A35;margin-bottom:14px}
+.st-proto{position:fixed;left:122px;bottom:14px;z-index:100;min-height:30px;display:flex;align-items:center;gap:8px;padding:2px 3px 2px 12px;border-radius:16px;background:#2A2926;color:#E9E6DE;font-size:12px;opacity:.86}
+.st-proto:hover{opacity:1}
+.st-proto>button{height:26px;color:#E9E6DE;padding-right:8px}
+.st-proto .seg[hidden]{display:none}
+.st-proto .seg{padding:2px}.st-proto .seg button{height:24px;padding:0 10px;font-size:12px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="assets/owa.js"></script>
+<script>
+"use strict";
+/* 工作室，我的智能体（原 /agents 列表）＋ 新建弹层（原 /agents?new=1 与 AI 创建入口） */
+const params = new URLSearchParams(location.search);
+const S = { tab: "all", q: "", view: "card", load: "loading", agents: MY_AGENTS.slice(), mode: "ai", cloneSel: "meeting", avatar: "travel" };
+const ST = OWA.st.all();
+
+/* 状态徽标 */
+function badges(a) {
+  const b = [];
+  if (a.id === "expense-reviewer") {
+    b.push(`<span class="tag ok">已发布 v${ST.version}</span>`);
+    if (ST.changes > 0) b.push(`<span class="tag warn" title="草稿有 ${ST.changes} 处未发布的修改">草稿有修改</span>`);
+  } else if (a.own === "builtin") b.push('<span class="tag dark">内置</span><span class="tag ok">已发布</span>');
+  else if (a.own === "shared-read") b.push('<span class="tag line">' + ic("eye", 13) + "只读</span>");
+  else if (a.own === "shared-write") b.push('<span class="tag line">' + ic("edit", 13) + "可编辑</span>");
+  else if (/已发布 v(\d+)/.test(a.st)) b.push(`<span class="tag ok">${a.st}</span>`);
+  else b.push('<span class="tag">未发布</span>');
+  if (a.market) b.push('<span class="tag line">' + ic("store", 13) + "已上架</span>");
+  if (a.contract) b.push('<span class="tag line" title="声明了输出契约，可当接口调用">' + ic("brace", 13) + "接口</span>");
+  return b.join("");
+}
+const tabOf = (a) => (a.own === "mine" ? "mine" : a.own.startsWith("shared") ? "shared" : "builtin");
+function visible() {
+  const q = S.q.trim().toLowerCase();
+  return S.agents.filter((a) => (S.tab === "all" || tabOf(a) === S.tab) && (!q || (a.n + a.id + a.d).toLowerCase().includes(q)));
+}
+const sub = (a) => (a.by ? `${a.by} 分享` : a.own === "builtin" ? "平台内置" : "我建的");
+
+OWA.mount({
+  nav: "studio",
+  body: `<div class="pbody"><div class="st-wrap">
+    <div class="st-head"><div><h1>我的智能体</h1><p id="st-sub">我建的和分享给我的，都在这里。</p></div>
+      <button class="btn" style="margin-left:auto" data-a="st-new">${ic("plus", 16, 2)}新建智能体</button></div>
+    <div class="st-tools" id="st-tools"></div>
+    <div id="st-list"></div>
+  </div></div>
+  <div class="st-proto" title="原型演示用，不属于产品界面"><button data-a="st-proto-t">原型开关：列表状态</button>
+    <div class="seg" id="st-proto" hidden>${[["ok", "正常"], ["loading", "加载中"], ["empty", "新账号（空）"]].map(([v, n]) => `<button data-a="st-proto" data-v="${v}">${n}</button>`).join("")}</div></div>`,
+});
+
+function renderTools() {
+  const n = (t) => (S.load === "ok" ? S.agents.filter((a) => t === "all" || tabOf(a) === t).length : 0);
+  $("#st-tools").innerHTML = `<div class="seg" role="tablist">${[["mine", "我建的"], ["shared", "分享给我的"], ["all", "全部"]].map(([v, t]) => `<button role="tab" aria-selected="${S.tab === v}" data-a="st-tab" data-v="${v}" class="${S.tab === v ? "on" : ""}">${t}<b>${n(v)}</b></button>`).join("")}</div>
+    <div class="st-search"><span>${ic("search", 18)}</span><input class="inp" id="st-q" placeholder="搜索名称、ID 或描述" aria-label="搜索智能体" value="${esc(S.q)}"></div>
+    <div class="seg" aria-label="显示方式"><button data-a="st-view" data-v="card" class="${S.view === "card" ? "on" : ""}" title="卡片" aria-label="卡片">${ic("grid", 16)}</button><button data-a="st-view" data-v="list" class="${S.view === "list" ? "on" : ""}" title="列表" aria-label="列表">${ic("list", 16)}</button></div>`;
+  $("#st-q").addEventListener("input", (e) => { S.q = e.target.value; renderList(); });
+}
+function card(a) {
+  return `<div class="st-card" data-a="st-open" data-id="${a.id}" tabindex="0" role="link" aria-label="打开 ${a.n}">
+    <div class="row" style="align-items:flex-start">${av(a.k, 48)}<div style="min-width:0"><div class="nm">${a.n}</div><div class="id">${a.id}</div></div>
+      <button class="st-more" data-a="st-more" data-id="${a.id}" aria-label="更多操作">${ic("dots", 18)}</button></div>
+    <div class="ds">${a.d}</div>
+    <div class="st-badges">${badges(a)}${a.by ? `<span class="tag line">${sub(a)}</span>` : ""}</div>
+    <div class="st-foot"><span>近 7 天 <b style="color:var(--ink);font-weight:600">${a.runs7.toLocaleString()}</b> 次运行</span><span>更新于 ${a.upd}</span>
+      <span class="acts"><a class="btn ghost sm" style="text-decoration:none" href="chat.html?agent=${a.id}">${ic("chat", 14)}对话</a><button class="btn sm" data-a="st-open" data-id="${a.id}">打开</button></span></div>
+  </div>`;
+}
+function renderList() {
+  const box = $("#st-list");
+  const pv = S.load === "loading" ? "loading" : S.agents.length ? "ok" : "empty";
+  $$("#st-proto button").forEach((b) => b.classList.toggle("on", b.dataset.v === pv));
+  if (S.load === "loading") {
+    box.innerHTML = `<div class="row muted" style="margin-bottom:12px"><span class="spin"></span>正在加载智能体…</div><div class="st-grid">${Array.from({ length: 6 }, () => `<div class="st-card st-skel" style="cursor:default"><div class="row"><i style="width:48px;height:48px;border-radius:50%"></i><div style="flex:1"><i style="height:16px;width:50%"></i><i style="height:12px;width:35%;margin-top:8px"></i></div></div><i style="height:14px"></i><i style="height:14px;width:70%"></i><i style="height:22px;width:55%"></i></div>`).join("")}</div>`;
+    return;
+  }
+  if (!S.agents.length) {
+    box.innerHTML = `<div class="st-state"><div style="display:flex;justify-content:center;margin-bottom:16px">${av("builder", 64)}</div><div class="serif">还没有智能体</div><p>说清规则，智能体设计器帮你配好模型、工具、知识和评测；也可以先去探索里克隆一个现成的。</p>
+      <div class="row"><button class="btn" data-a="st-new">${ic("plus", 16, 2)}新建智能体</button><a class="btn ghost" style="text-decoration:none" href="explore.html">去探索看看</a></div></div>`;
+    return;
+  }
+  const list = visible();
+  if (!list.length) {
+    box.innerHTML = `<div class="st-state"><div class="serif">${S.q ? "没有匹配的智能体" : S.tab === "shared" ? "还没有人分享智能体给你" : "这里还没有智能体"}</div><p>${S.q ? `没有名称、ID 或描述包含「${esc(S.q)}」的智能体。` : "别人把智能体分享给你后，会出现在这里。"}</p><div class="row">${S.q ? '<button class="btn ghost" data-a="st-clear">清除搜索</button>' : ""}<button class="btn" data-a="st-new">${ic("plus", 16, 2)}新建智能体</button></div></div>`;
+    return;
+  }
+  if (S.view === "card") { box.innerHTML = `<div class="st-grid">${list.map(card).join("")}</div>`; return; }
+  box.innerHTML = `<div class="st-tbl"><table class="tb"><thead><tr><th>智能体</th><th>状态</th><th>来源</th><th style="text-align:right">近 7 天运行</th><th>更新时间</th><th></th></tr></thead><tbody>
+    ${list.map((a) => `<tr class="click" data-a="st-open" data-id="${a.id}"><td><div class="row">${av(a.k, 32)}<div><div style="font-weight:600">${a.n}</div><div class="muted small" style="font-family:var(--mono)">${a.id}</div></div></div></td>
+      <td><div class="st-badges">${badges(a)}</div></td><td class="muted">${sub(a)}</td><td style="text-align:right">${a.runs7.toLocaleString()}</td><td class="muted">${a.upd}</td>
+      <td style="text-align:right;white-space:nowrap"><a class="btn ghost sm" style="text-decoration:none" href="chat.html?agent=${a.id}">对话</a> <button class="st-more" style="display:inline-grid;vertical-align:middle" data-a="st-more" data-id="${a.id}" aria-label="更多操作">${ic("dots", 18)}</button></td></tr>`).join("")}
+  </tbody></table></div>`;
+}
+function renderAll() {
+  renderTools(); renderList();
+  $("#st-sub").textContent = S.load === "ok" && S.agents.length ? `共 ${S.agents.length} 个，我建的和分享给我的都在这里。点开就是构建页，改动自动保存。` : "我建的和分享给我的，都在这里。";
+}
+
+/* ---------- 打开 / 只读 ---------- */
+const RO_CFG = `{
+  "id": "contract-diff",
+  "name": "合同条款比对",
+  "description": "比对两版合同的条款差异",
+  "systemPrompt": "# 角色\\n你是法务部的合同审查助手……",
+  "model": "claude-sonnet-4-5",
+  "maxTurns": 12,
+  "allowedTools": ["Read", "Grep"],
+  "skillPackages": ["clause-extract"],
+  "mcpServers": {},
+  "variables": { "LEGAL_KB_TOKEN": "••••••（已脱敏）" },
+  "outputSchema": {
+    "type": "object",
+    "properties": { "diffs": { "type": "array" } }
+  }
+}`;
+function openReadonly(a) {
+  const owner = a.by || "所有者";
+  openDrawer(`<div class="dh">${av(a.k, 36)}<div><div style="font-weight:600;font-size:16px">${a.n}</div><div class="muted small">${a.id}，${owner} 分享</div></div><span class="tag line">${ic("eye", 13)}只读</span><button class="xbtn" style="margin-left:8px" data-a="owa-drawer-close" aria-label="关闭">${ic("x")}</button></div>
+    <div class="db">
+      <div class="ro-note">${ic("lock", 18)}<div>这是只读智能体：${owner} 给了你只读权限。你可以查看配置和知识清单、直接对话使用发布版，不能修改。需要修改请联系所有者，或者克隆一份来改。</div></div>
+      <div class="tabs" role="tablist"><button class="on" data-a="ro-tab" data-v="cfg">配置</button><button data-a="ro-tab" data-v="kb">知识</button></div>
+      <div id="ro-cfg"><p class="muted small" style="margin:0 0 8px">脱敏后的配置 JSON，密钥类变量不显示明文。</p><pre class="code" style="white-space:pre-wrap;word-break:break-word">${esc(RO_CFG)}</pre></div>
+      <div id="ro-kb" hidden><p class="muted small" style="margin:0 0 8px">只读，不能新增或删除资料。</p>
+        <div class="lst">${[["合同审查要点 2026.pdf", "24 页，1.6 万字"], ["采购合同标准模板.docx", "9 页，5,820 字"], ["常见不利条款", "手动添加，1,240 字"]].map(([t, m]) => `<div class="li">${ic("file", 16)}<div><div>${t}</div><div class="muted small">${m}</div></div></div>`).join("")}</div></div>
+    </div>
+    <div style="display:flex;gap:10px;padding:14px 22px;border-top:1px solid var(--line2)"><a class="btn ghost" style="text-decoration:none" href="chat.html?agent=${a.id}">${ic("chat", 16)}对话</a><button class="btn" style="margin-left:auto" data-a="st-clone-ro" data-id="${a.id}">${ic("copy", 16)}克隆一份来改</button></div>`, 560);
+}
+function open(id) {
+  const a = S.agents.find((x) => x.id === id);
+  if (a.own === "shared-read") return openReadonly(a);
+  location.href = "build.html" + (a.id === "expense-reviewer" ? "" : "?agent=" + a.id);
+}
+
+/* ---------- 更多菜单 ---------- */
+function moreMenu(btn) {
+  closeMenus();
+  const a = S.agents.find((x) => x.id === btn.dataset.id);
+  const r = btn.getBoundingClientRect();
+  const m = document.createElement("div");
+  m.className = "menu";
+  const up = r.bottom + 250 > innerHeight;
+  m.style.cssText = `position:fixed;${up ? "bottom:" + (innerHeight - r.top + 6) : "top:" + (r.bottom + 6)}px;left:${Math.min(r.right - 240, innerWidth - 256)}px;width:240px`;
+  const delBlock = a.own === "builtin" ? `<button class="st-dis" disabled>${ic("trash", 16)}删除<small>内置智能体不能删除</small></button>`
+    : a.own.startsWith("shared") ? `<button class="st-dis" disabled>${ic("trash", 16)}删除<small>只有所有者或管理员可以删除</small></button>`
+    : `<button class="st-del" data-a="st-del" data-id="${a.id}">${ic("trash", 16)}删除</button>`;
+  m.innerHTML = `<button data-a="st-copy" data-id="${a.id}">${ic("copy", 16)}复制 ID<span class="muted small" style="margin-left:auto;font-family:var(--mono)">${a.id.length > 14 ? a.id.slice(0, 12) + "…" : a.id}</span></button>
+    <a href="chat.html?agent=${a.id}">${ic("chat", 16)}新建会话</a>
+    ${a.own === "shared-read" ? "" : `<a href="build.html#run">${ic("pulse", 16)}运行记录</a><a href="build.html#acc">${ic("terminal", 16)}接入</a>`}
+    <hr>${delBlock}`;
+  document.body.appendChild(m);
+}
+function del(id) {
+  const a = S.agents.find((x) => x.id === id);
+  closeMenus();
+  confirmBox({
+    title: `删除「${a.n}」？`,
+    danger: true, ok: "删除",
+    body: `<p style="margin:0 0 8px">删除后会立即生效：</p><ul style="margin:0 0 10px;padding-left:18px;line-height:1.8"><li>通过 API 的接口调用会失败</li><li>分享和公开会失效${a.market ? "，市场上也会下架" : ""}</li><li>绑定到它的 API Key 会失效</li></ul><p class="muted" style="margin:0">历史会话、运行记录和计费记录会保留。界面上无法撤销。</p>`,
+    onOk: () => { S.agents = S.agents.filter((x) => x.id !== id); renderAll(); toast(`已删除「${a.n}」`); },
+  });
+}
+
+/* ---------- 新建弹层 ---------- */
+const NW = { desc: params.get("desc") || "", name: "", id: "", d: "", q: "", tpl: "expense" };
+/* 模板库：按场景给一个起点，选中后预填名称与提示词 */
+const TPLS = [
+  { id: "expense", k: "travel", n: "报销初审", cat: "财务", d: "读发票和报销单，按制度初审，超额提醒审批", p: "# 角色\n你是公司财务的报销初审员……\n## 规则\n1. 单笔超过 5000 元需要部门负责人审批" },
+  { id: "support", k: "kb", n: "客服问答", cat: "客服", d: "基于产品手册回答客户问题，答不上来转人工", p: "# 角色\n你是客服，只根据知识库回答……\n## 规则\n1. 不确定时转人工并留下工单" },
+  { id: "weekly", k: "weekly", n: "周报", cat: "办公", d: "汇总本周进展，生成可直接发出的周报", p: "# 角色\n你帮我整理每周工作进展……\n## 输出\n本周完成、下周计划、风险" },
+  { id: "meeting", k: "meeting", n: "会议纪要", cat: "办公", d: "从录音或速记整理决议、待办和负责人", p: "# 角色\n你是会议记录员……\n## 输出\n决议、待办（负责人、截止日期）" },
+  { id: "contract", k: "contract", n: "合同比对", cat: "法务", d: "比对两版合同条款，标出对我方不利的修改", p: "# 角色\n你是法务助理……\n## 规则\n逐条比对付款、违约、保密条款" },
+  { id: "sql", k: "sql", n: "SQL 助手", cat: "研发", d: "用中文描述要查什么，生成可读的 SQL", p: "# 角色\n你是数据分析师……\n## 规则\n只生成只读查询，解释每个连接条件" },
+];
+function newModal(mode) {
+  if (mode) S.mode = mode;
+  const modes = [
+    ["ai", "sparkle", "用智能体设计器创建", "说清规则，设计器帮你配好模型、工具、知识和评测"],
+    ["blank", "plus", "空白创建", "自己填名称和提示词"],
+    ["clone", "store", "从市场克隆", "复制一个上架智能体来改"],
+    ["tpl", "grid", "模板库", "按场景挑一个起点"],
+  ];
+  let body = "";
+  if (S.mode === "ai") body = `<div class="fld"><label for="nw-desc">描述你想要的智能体<b>*</b></label><textarea class="ta" id="nw-desc" rows="5" placeholder="比如：做一个审核报销单的助手，读发票和报销单，超过 5000 元提醒部门负责人审批">${esc(NW.desc)}</textarea>
+      <span class="muted">说清楚它做什么、要遵守哪些规则、交付什么。智能体设计器会追问细节，配好模型、工具、知识和评测用例，生成草稿后进入编排，之后随时能改。</span></div>
+      <div class="opts">${["做一个审核报销单的助手，超过 5000 元提醒我", "每周汇总竞品官网和招聘动态", "把客服工单按紧急程度分类"].map((t) => `<button class="opt" data-a="nw-ex" data-t="${t}">${t}</button>`).join("")}</div>
+      <div class="nw-err" id="nw-err"></div>`;
+  if (S.mode === "blank") body = `<div class="fld"><label for="nw-name">名称<b>*</b></label><input class="inp" id="nw-name" maxlength="40" placeholder="比如：差旅报销初审" value="${esc(NW.name)}"></div>
+      <div class="fld"><label for="nw-id">ID</label><input class="inp" id="nw-id" style="font-family:var(--mono)" placeholder="留空自动生成，例如 agent-7f3a2c" value="${esc(NW.id)}"><span class="small muted">只能用小写字母、数字和短横线，创建后不能改；API 地址里会用到它。</span></div>
+      <div class="fld"><label for="nw-d">描述</label><input class="inp" id="nw-d" maxlength="200" placeholder="一句话说明它做什么" value="${esc(NW.d)}"></div>
+      <div class="fld"><label>头像 ${gap("A12")}</label><div class="nw-pick">${["travel", "currency", "xhs", "sql", "kb", "weekly", "contract"].map((k) => `<button data-a="nw-av" data-k="${k}" class="${S.avatar === k ? "on" : ""}" aria-label="选择头像">${av(k, 36)}</button>`).join("")}</div></div>
+      <div class="nw-err" id="nw-err"></div>`;
+  if (S.mode === "clone") {
+    const q = NW.q.trim();
+    const list = MARKET.filter((m) => !q || (m.n + m.d).includes(q));
+    body = `<div class="st-search" style="width:100%;margin:0 0 10px"><span>${ic("search", 18)}</span><input class="inp" id="nw-q" placeholder="搜索市场智能体" aria-label="搜索市场智能体" value="${esc(NW.q)}"></div>
+      <div class="nw-list">${list.length ? list.map((m) => `<button class="nw-it ${S.cloneSel === m.k ? "on" : ""}" data-a="nw-sel" data-k="${m.k}">${av(m.k, 36)}<div style="min-width:0"><div style="font-weight:600">${m.n} <span class="muted small" style="font-weight:400">v${m.v}</span></div><div class="muted small">${m.by}，${m.cat}，${m.d}</div></div><span class="dot"></span></button>`).join("") : `<div class="empty-state muted" style="padding:32px">没有匹配「${esc(q)}」的上架智能体</div>`}</div>
+      <p class="muted small" style="margin:10px 0 0">克隆的是发布版配置，原作者之后的更新不会同步过来。</p>`;
+  }
+  if (S.mode === "tpl") {
+    const t = TPLS.find((x) => x.id === NW.tpl);
+    body = `<div class="nw-tpls">${TPLS.map((x) => `<button class="nw-tpl ${NW.tpl === x.id ? "on" : ""}" data-a="nw-tpl" data-v="${x.id}">${av(x.k, 32)}<div style="min-width:0"><div style="font-weight:600">${x.n} <span class="muted small" style="font-weight:400">${x.cat}</span></div><div class="muted small">${x.d}</div></div></button>`).join("")}</div>
+      <div class="sub-h" style="margin-top:16px">将预填 ${gap("A14")}</div>
+      <div class="grid2" style="grid-template-columns:200px minmax(0,1fr)"><div class="fld" style="margin:0"><label for="nw-tn">名称</label><input class="inp" id="nw-tn" value="${esc(t.n)}"></div>
+        <div class="fld" style="margin:0"><label>提示词开头</label><pre class="snap" style="margin:0">${esc(t.p.replace(/\\n/g, "\n"))}</pre></div></div>
+      <p class="muted small" style="margin:10px 0 0">模板只是起点：进入编排后可以改提示词、加知识和能力。</p>`;
+  }
+  const okText = { ai: `${ic("sparkle", 16)}用设计器创建`, blank: "创建并进入编排", clone: "克隆并进入编排", tpl: "用模板创建" }[S.mode];
+  openModal(`<div class="row"><h3 style="margin:0">新建智能体</h3><button class="xbtn" data-a="owa-close" aria-label="关闭">${ic("x")}</button></div>
+    <p class="muted" style="margin:4px 0 0">建好就是一份自动保存的草稿，直接进入编排，不用先保存。</p>
+    <div class="nw-modes" role="tablist">${modes.map(([v, i, t, d]) => `<button class="nw-mode ${S.mode === v ? "on" : ""} ${v === "ai" ? "pri" : ""}" role="tab" aria-selected="${S.mode === v}" data-a="nw-mode" data-v="${v}"><span class="t">${ic(i, 16)}${t}</span><span class="d">${d}</span>${v === "tpl" ? gap("A14") : ""}</button>`).join("")}</div>
+    <div id="nw-body">${body}</div>
+    <div class="mfoot"><button class="btn ghost" data-a="owa-close">取消</button><button class="btn" id="nw-ok" data-a="nw-ok">${okText}</button></div>`, 720);
+  const bind = (sel, key) => { const el = $(sel); if (el) el.addEventListener("input", (e) => { NW[key] = e.target.value; if ($("#nw-err")) $("#nw-err").textContent = ""; }); };
+  bind("#nw-desc", "desc"); bind("#nw-name", "name"); bind("#nw-id", "id"); bind("#nw-d", "d");
+  const nq = $("#nw-q"); if (nq) nq.addEventListener("input", (e) => { NW.q = e.target.value; newModal(); const x = $("#nw-q"); x.focus(); x.setSelectionRange(x.value.length, x.value.length); });
+  if (location.hash === "#new") history.replaceState(null, "", location.pathname + location.search);
+}
+async function nwOk(btn) {
+  const err = (t) => ($("#nw-err").textContent = t);
+  let to = "build.html";
+  if (S.mode === "ai") {
+    if (!NW.desc.trim()) return err("先描述一下你想要的智能体");
+    to = "build.html?desc=" + encodeURIComponent(NW.desc.trim()) + "#new-ai";
+  } else if (S.mode === "blank") {
+    if (!NW.name.trim()) return err("名称不能为空");
+    const id = NW.id.trim();
+    if (id && !/^[a-z0-9][a-z0-9-]{1,39}$/.test(id)) return err("ID 只能用小写字母、数字和短横线，2 到 40 位");
+    if (id && MY_AGENTS.some((a) => a.id === id)) return err("ID 已被占用");
+    to = "build.html#new-blank";
+  } else if (S.mode === "clone") {
+    if (!S.cloneSel) return;
+  } else if (S.mode === "tpl") {
+    to = "build.html?tpl=" + NW.tpl + "&name=" + encodeURIComponent(($("#nw-tn")?.value || "").trim()) + "#new-blank";
+  }
+  btn.disabled = true; btn.innerHTML = '<span class="spin" style="border-color:#8A867C;border-top-color:#fff"></span>正在创建草稿…';
+  await later(900);
+  if (S.mode === "clone") toast(`已克隆「${MARKET.find((m) => m.k === S.cloneSel).n}」到我的智能体`);
+  else if (S.mode === "tpl") toast(`已用「${TPLS.find((x) => x.id === NW.tpl).n}」模板创建草稿`);
+  else toast(S.mode === "ai" ? "草稿已创建，智能体设计器接手" : `已创建「${esc(NW.name.trim())}」`);
+  await later(500);
+  location.href = to;
+}
+
+/* ---------- 事件 ---------- */
+OWA.on("st-tab", (t) => { S.tab = t.dataset.v; renderTools(); renderList(); });
+OWA.on("st-view", (t) => { S.view = t.dataset.v; renderTools(); renderList(); });
+OWA.on("st-clear", () => { S.q = ""; renderTools(); renderList(); });
+OWA.on("st-open", (t, e) => { if (e.target.closest("a") || e.target.closest("[data-a=st-more]")) return; open(t.dataset.id); });
+OWA.on("st-more", (t, e) => { e.stopPropagation(); moreMenu(t); });
+OWA.on("st-copy", (t) => { navigator.clipboard?.writeText(t.dataset.id).catch(() => {}); closeMenus(); toast(`已复制 ID：${t.dataset.id}`); });
+OWA.on("st-del", (t) => del(t.dataset.id));
+OWA.on("ro-tab", (t) => { $$(".drawer .tabs button").forEach((b) => b.classList.toggle("on", b === t)); $("#ro-cfg").hidden = t.dataset.v !== "cfg"; $("#ro-kb").hidden = t.dataset.v !== "kb"; });
+OWA.on("st-clone-ro", (t) => {
+  const a = S.agents.find((x) => x.id === t.dataset.id);
+  confirmBox({ title: `克隆「${a.n}」`, ok: "克隆并编辑", body: `<p style="margin:0 0 8px">复制一份到你名下，ID 为 <code>${a.id}-copy</code>。</p><p class="muted" style="margin:0">配置和知识资料一并复制；密钥类变量不会复制，需要你重新填写。原智能体不受影响。</p>`, onOk: async () => { closeDrawer(); toast(`已克隆「${a.n}」`); await later(900); location.href = "build.html"; } });
+});
+OWA.on("st-new", () => newModal());
+OWA.on("nw-mode", (t) => newModal(t.dataset.v));
+OWA.on("nw-tpl", (t) => { NW.tpl = t.dataset.v; newModal(); });
+OWA.on("nw-ex", (t) => { NW.desc = t.dataset.t; $("#nw-desc").value = NW.desc; });
+OWA.on("nw-av", (t) => { S.avatar = t.dataset.k; $$(".nw-pick button").forEach((b) => b.classList.toggle("on", b === t)); });
+OWA.on("nw-sel", (t) => { S.cloneSel = t.dataset.k; $$(".nw-it").forEach((b) => b.classList.toggle("on", b === t)); });
+OWA.on("nw-ok", (t) => nwOk(t));
+OWA.on("st-proto-t", () => { $("#st-proto").hidden = !$("#st-proto").hidden; });
+OWA.on("st-proto", (t) => {
+  const v = t.dataset.v;
+  if (v === "loading") { S.load = "loading"; renderAll(); setTimeout(() => { S.load = "ok"; renderAll(); }, 1200); return; }
+  S.load = "ok"; S.agents = v === "empty" ? [] : MY_AGENTS.slice(); renderAll();
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.classList?.contains("st-card")) open(e.target.dataset.id); });
+addEventListener("hashchange", () => { if (location.hash === "#new") newModal("ai"); });
+
+renderAll();
+setTimeout(() => { S.load = "ok"; renderAll(); }, 450);
+if (location.hash === "#new") newModal(params.get("mode") || "ai");
+</script>
+</body>
+</html>

@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>账号 · 平台管理 · Open Web Agents</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/owa.css">
+<style>
+.aa-face{width:28px;height:28px;border-radius:50%;background:#E6DFD1;display:grid;place-items:center;font-size:12px;font-weight:600;color:#3B362D;flex:none}
+.aa-face.big{width:44px;height:44px;font-size:16px}
+.aa-off td{color:#6B6860}
+.aa-off .aa-face{background:#EEEBE4}
+.aa-search{position:relative;width:300px}
+.aa-search span{position:absolute;left:12px;top:10px;color:var(--sub)}
+.aa-search .inp{padding-left:38px}
+.aa-warn{display:inline-flex;align-items:center;gap:4px;color:var(--warnt);font-size:12px}
+.aa-note{display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--sub);background:#F4F2EC;border-radius:10px;padding:10px 12px;margin-top:8px}
+.aa-err{color:var(--bad);font-size:12px;min-height:18px;margin-top:4px}
+.aa-err:empty{display:none}
+a.btn{text-decoration:none}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="assets/owa.js"></script>
+<script>
+"use strict";
+/* 平台管理，账号（原 /admin/accounts）：筛选、创建账号、表格＋右侧详情抽屉 */
+const ACC = [
+  ["zhoulan", "管理员", "2025-03-02", 6, 12840, ""],
+  ["linzhou", "普通账号", "2025-04-11", 4, 1862, "5000"],
+  ["wanglei", "普通账号", "2025-04-12", 2, 3420, "8000"],
+  ["chenyifan", "普通账号", "2025-05-08", 3, 6210, "10000"],
+  ["xumu", "管理员", "2025-05-20", 9, 48300, ""],
+  ["heqing", "普通账号", "2025-06-01", 5, 21400, "30000"],
+  ["songdi", "普通账号", "2025-06-15", 2, 9870, "10000"],
+  ["luojing", "普通账号", "2025-07-03", 3, 15200, "20000"],
+  ["tangyue", "普通账号", "2025-07-19", 4, 30120, "50000"],
+  ["liuqiang", "普通账号", "2025-08-02", 1, 0, "0"],
+  ["sunmo", "普通账号", "2025-08-21", 0, 860, "3000"],
+  ["gaoyan", "普通账号", "2025-09-05", 2, 12400, "15000"],
+  ["fangyu", "普通账号", "2025-09-18", 1, 2400, "5000"],
+  ["dengke", "普通账号", "2025-10-01", 0, 0, ""],
+  ["jiangning", "普通账号", "2025-10-09", 3, 18800, "20000"],
+  ["huxin", "普通账号", "2025-10-22", 1, 3300, "5000"],
+  ["chenxi", "普通账号", "2025-10-24", 2, 41200, "60000"],
+  ["qianxiao", "普通账号", "2025-10-28", 1, 5120, "10000"],
+  ["weiran", "普通账号", "2025-11-01", 0, 0, "200"],
+  ["yangfan", "普通账号", "2025-11-02", 2, 36800, ""],
+  ["mengqi", "普通账号", "2025-11-03", 1, 52400, "80000"],
+  ["luyao", "普通账号", "2025-11-05", 3, 27350, "30000"],
+  ["baijing", "普通账号", "2025-11-06", 2, 38100, ""],
+  ["kongwei", "普通账号", "2025-11-08", 0, 0, ""],
+].map(([u, r, d, a, c, lim], i) => ({
+  email: u + "@xinghe.example", role: r, date: d, agents: a, cost: c, limit: lim,
+  off: [9, 13, 23].includes(i),
+  legacy: u === "weiran", // 旧上限仍按美元计，未按积分重设
+}));
+const ME = 0;
+const S = { tab: location.hash === "#groups" ? "groups" : "acc", q: "", role: "全部", sel: null, pw: "", loading: false, gsel: null };
+/* 用户组（API 已有 /api/groups、/api/groups/[id]/members）：用于把智能体定向分享给一组人 */
+const GROUPS = [
+  { id: "g1", n: "财务部", created: "2025-06-02", by: "zhoulan", members: ["linzhou", "wanglei", "qianxiao", "chenxi", "weiran", "kongwei"], grants: 3 },
+  { id: "g2", n: "法务部", created: "2025-07-10", by: "zhoulan", members: ["luojing", "fangyu", "dengke"], grants: 1 },
+  { id: "g3", n: "平台组", created: "2025-05-21", by: "xumu", members: ["xumu", "heqing", "sunmo", "gaoyan"], grants: 5 },
+  { id: "g4", n: "市场与品牌", created: "2025-09-12", by: "zhoulan", members: ["chenyifan", "songdi", "tangyue", "luyao", "baijing"], grants: 2 },
+].map((g) => ({ ...g, members: g.members.map((u) => u + "@xinghe.example") }));
+
+OWA.mount({
+  nav: "admin",
+  body: `<div class="bwrap">${sideNav("admin")}<main class="main" id="aa-main"></main></div>`,
+});
+
+function summary() {
+  const on = ACC.filter((a) => !a.off).length;
+  return `${ACC.length} 个账号，${on} 个启用中，本月消耗 38.6 万积分`;
+}
+function limCell(a) {
+  if (a.legacy) return `<span class="aa-warn">${ic("warn", 14)}旧上限 $2.00，需按积分重设</span>`;
+  if (a.limit === "") return '<span class="muted">不限</span>';
+  if (a.limit === "0") return '<span class="tag bad">禁止消费</span>';
+  return (+a.limit).toLocaleString() + " 积分";
+}
+function tabs() {
+  return `<div class="tabs" role="tablist" style="align-items:center"><button role="tab" aria-selected="${S.tab === "acc"}" class="${S.tab === "acc" ? "on" : ""}" data-a="aa-tab" data-v="acc">账号</button><button role="tab" aria-selected="${S.tab === "groups"}" class="${S.tab === "groups" ? "on" : ""}" data-a="aa-tab" data-v="groups">用户组</button><span style="margin-left:8px">${gap("A15")}</span></div>`;
+}
+function render() {
+  if (S.tab === "groups") return renderGroups();
+  const rows = ACC.filter((a) => (!S.q || a.email.includes(S.q.toLowerCase())) && (S.role === "全部" || a.role === S.role));
+  $("#aa-main").innerHTML = `
+    <div class="ph"><div><h1>账号</h1><p class="muted" style="margin:6px 0 0">${summary()}</p></div>
+      <div class="row" style="margin-left:auto"><button class="btn ghost" data-a="aa-refresh">${ic("refresh", 16)}刷新</button><button class="btn" data-a="aa-create">${ic("plus", 16, 2)}创建账号</button></div></div>
+    ${tabs()}
+    <div class="row" style="margin-bottom:14px">
+      <div class="aa-search"><span>${ic("search", 18)}</span><input class="inp" id="aa-q" placeholder="按邮箱搜索" value="${esc(S.q)}" aria-label="按邮箱搜索"></div>
+      <div class="seg" role="tablist" aria-label="按角色筛选">${["全部", "管理员", "普通账号"].map((r) => `<button data-a="aa-role" data-v="${r}" class="${r === S.role ? "on" : ""}">${r}</button>`).join("")}</div>
+      <span class="muted small" style="margin-left:auto">显示 ${rows.length} 个，共 ${ACC.length} 个</span></div>
+    <div class="card" style="overflow:hidden">
+      ${S.loading ? `<div class="empty-state row" style="justify-content:center"><span class="spin"></span><span class="muted">正在加载账号…</span></div>` : `
+      <table class="tb"><thead><tr><th>邮箱</th><th>角色</th><th>注册日期</th><th>智能体</th><th>本月消耗</th><th>月度上限</th><th>状态</th></tr></thead><tbody>
+      ${rows.map((a) => { const i = ACC.indexOf(a); return `<tr class="click ${S.sel === i ? "sel" : ""} ${a.off ? "aa-off" : ""}" data-a="aa-sel" data-i="${i}">
+        <td><div class="row" style="gap:8px"><span class="aa-face">${a.email[0].toUpperCase()}</span>${a.email}${i === ME ? '<span class="tag line">你自己</span>' : ""}${a.off ? '<span class="tag">已停用</span>' : ""}</div></td>
+        <td>${a.role === "管理员" ? '<span class="tag dark">管理员</span>' : "普通账号"}</td>
+        <td class="muted">${a.date}</td><td>${a.agents}</td><td>${a.cost.toLocaleString()} 积分</td><td>${limCell(a)}</td>
+        <td>${a.off ? '<span class="tag">已停用</span>' : '<span class="tag ok">启用</span>'}</td></tr>`; }).join("")}
+      </tbody></table>
+      ${rows.length ? "" : `<div class="empty-state"><div class="serif">没有匹配的账号</div><p class="muted" style="margin:0 0 14px">换个邮箱关键词，或切回「全部」角色。</p><button class="btn ghost sm" data-a="aa-clear">清除筛选</button></div>`}`}
+    </div>`;
+  const q = $("#aa-q");
+  q.addEventListener("input", () => { S.q = q.value.trim(); const p = q.selectionStart; render(); const n = $("#aa-q"); n.focus(); n.setSelectionRange(p, p); });
+  if (S.sel !== null) drawer(); else closeDrawer();
+}
+
+function drawer() {
+  const a = ACC[S.sel], self = S.sel === ME;
+  const had = $("#owa-drawer"), sc = had ? $(".db", had).scrollTop : 0;
+  const selfNote = (t) => (self ? `<p class="muted small" style="margin:8px 0 0">${t}</p>` : "");
+  openDrawer(`<div class="dh"><span class="aa-face big">${a.email[0].toUpperCase()}</span><div style="min-width:0"><div style="font-weight:600;font-size:16px">${a.email}${self ? '　<span class="tag line">你自己</span>' : ""}</div><div class="muted small">${a.role}，注册于 ${a.date}${a.off ? "，已停用" : ""}</div></div><button class="xbtn" data-a="owa-drawer-close" aria-label="关闭详情">${ic("x")}</button></div>
+    <div class="db">
+      <div class="grid2" style="margin-bottom:12px"><div class="stat"><div class="muted small">智能体</div><div class="n">${a.agents}</div></div><div class="stat"><div class="muted small">本月消耗（积分）</div><div class="n">${a.cost.toLocaleString()}</div></div></div>
+      <div class="dsec"><h4>月度上限（积分）</h4>
+        <p class="muted small" style="margin:0 0 8px">留空表示不限；填 0 表示禁止消费；本月消耗超过上限后，新运行会被拒绝。</p>
+        ${a.legacy ? `<div class="banner warn" style="margin:0 0 10px;padding:10px 12px;font-size:13px">${ic("warn", 16)}<span>旧上限按美元设置（$2.00），还没按积分重设。重设前该账号不能发起运行。</span></div>` : ""}
+        <div class="row"><input class="inp" id="aa-lim" inputmode="numeric" value="${a.legacy ? "" : a.limit}" placeholder="不限" aria-label="月度上限"><button class="btn sm" data-a="aa-lim">保存</button></div>
+        <div class="aa-err" id="aa-lim-err"></div></div>
+      <div class="dsec"><h4>角色</h4><div class="row"><span>${a.role}</span><button class="btn ghost sm" style="margin-left:auto" data-a="aa-roleset" ${self ? "disabled" : ""}>${a.role === "管理员" ? "取消管理员" : "设为管理员"}</button></div>${selfNote("不能修改自己的角色，避免平台失去最后一个管理员。")}</div>
+      <div class="dsec"><h4>重置密码</h4><p class="muted small" style="margin:0 0 8px">生成新的一次性密码，旧密码立即失效，本人下次登录时需要改密码。</p>
+        ${S.pw ? `<div class="keybox" style="margin:0 0 8px">${S.pw}<button class="btn ghost sm" style="margin-left:auto" data-a="owa-toast" data-t="已复制一次性密码">${ic("copy", 14)}复制</button></div><p class="small" style="color:var(--warnt);margin:0">只显示这一次，请当面或私信转交给本人。</p>` : `<button class="btn ghost sm" data-a="aa-pw" ${self ? "disabled" : ""}>生成一次性密码</button>`}
+        ${selfNote("你自己的密码请到「账号安全」修改。")}${self ? '<a class="link small" href="account-security.html">去账号安全</a>' : ""}</div>
+      <div class="dsec"><h4>${a.off ? "恢复账号" : "停用账号"}</h4><p class="muted small" style="margin:0 0 8px">${a.off ? "恢复后可以重新登录，但原有 API Key 不会自动启用，需要本人重新签发。" : "停用会立即登出该账号，并停用它名下的全部 API Key；智能体与历史数据保留。"}</p>
+        <button class="btn ${a.off ? "ghost" : "danger"} sm" data-a="aa-off" ${self ? "disabled" : ""}>${a.off ? "恢复账号" : "停用账号"}</button>${selfNote("不能停用你自己。")}</div>
+      <div class="dsec"><h4>相关记录</h4><div class="row" style="flex-wrap:wrap;gap:8px">
+        <a class="btn ghost sm" href="admin-billing.html#acct=${a.email}">${ic("coin", 14)}积分账户</a>
+        <a class="btn ghost sm" href="admin-ops.html#runs">${ic("pulse", 14)}平台运行</a>
+        <a class="btn ghost sm" href="admin-ops.html#audit">${ic("audit", 14)}操作记录</a></div></div>
+      <div class="aa-note">${ic("lock", 16)}<span>会话是私有的，管理员也看不到这个账号的对话内容。</span></div>
+    </div>`, 440);
+  if (had) { $("#owa-drawer").style.animation = "none"; $("#owa-drawer .db").scrollTop = sc; }
+}
+
+OWA.on("aa-role", (t) => { S.role = t.dataset.v; render(); });
+OWA.on("aa-clear", () => { S.q = ""; S.role = "全部"; render(); });
+OWA.on("aa-refresh", () => { S.loading = true; render(); setTimeout(() => { S.loading = false; render(); toast("已刷新"); }, 700); });
+OWA.on("aa-sel", (t) => { S.sel = +t.dataset.i; S.pw = ""; render(); });
+document.addEventListener("click", (e) => { if (e.target.closest('[data-a="owa-drawer-close"]')) { S.sel = null; S.gsel = null; S.pw = ""; setTimeout(render, 0); } });
+OWA.on("aa-lim", () => {
+  const v = $("#aa-lim").value.trim();
+  if (v !== "" && !/^\d+$/.test(v)) { $("#aa-lim-err").textContent = "请填非负整数，或留空表示不限"; return; }
+  const a = ACC[S.sel]; a.limit = v; a.legacy = false;
+  toast(v === "" ? "已设为不限" : v === "0" ? "已设为禁止消费" : `月度上限已设为 ${(+v).toLocaleString()} 积分`); render();
+});
+OWA.on("aa-roleset", () => {
+  const a = ACC[S.sel], toAdmin = a.role !== "管理员";
+  confirmBox({ title: toAdmin ? "设为管理员？" : "取消管理员？", body: `<p>${a.email} ${toAdmin ? "将能进入平台管理，操作所有账号、模型、计费和全部智能体（但仍看不到别人的会话）。" : "将失去平台管理入口，只保留自己名下资源的权限。"}</p>`, ok: toAdmin ? "设为管理员" : "取消管理员", danger: !toAdmin,
+    onOk: () => { a.role = toAdmin ? "管理员" : "普通账号"; toast("角色已更新"); render(); } });
+});
+OWA.on("aa-pw", () => {
+  const a = ACC[S.sel];
+  confirmBox({ title: "重置密码？", body: `<p>${a.email} 的旧密码会立即失效。</p>`, ok: "生成一次性密码", onOk: () => { S.pw = "Xh-" + Math.random().toString(36).slice(2, 8) + "-" + Math.random().toString(36).slice(2, 6); render(); } });
+});
+OWA.on("aa-off", () => {
+  const a = ACC[S.sel];
+  confirmBox({ title: `${a.off ? "恢复" : "停用"} ${a.email}？`, body: a.off ? "<p>恢复后可以重新登录。原有 API Key 保持停用，需要本人重新签发。</p>" : "<p>该账号会被立即登出，名下全部 API Key 同时停用，正在排队的调用会失败。</p>", ok: a.off ? "恢复账号" : "停用账号", danger: !a.off,
+    onOk: () => { a.off = !a.off; toast(a.off ? "已停用，已登出并停用 Key" : "已恢复，提醒本人重签 Key"); render(); } });
+});
+OWA.on("aa-create", () => {
+  openModal(`<h3>创建账号</h3><p class="muted" style="margin:0 0 16px">创建后会生成一次性初始密码，本人首次登录时修改。</p>
+    <div class="fld"><label for="aa-new">邮箱 <b>*</b></label><input class="inp" id="aa-new" type="email" placeholder="name@xinghe.example" autocomplete="off"></div>
+    <div class="fld"><label for="aa-new-role">角色</label><select class="inp" id="aa-new-role"><option>普通账号</option><option>管理员</option></select></div>
+    <div class="aa-err" id="aa-new-err"></div>
+    <div class="mfoot"><button class="btn ghost" data-a="owa-close">取消</button><button class="btn" data-a="aa-create-ok">创建</button></div>`, 460);
+  setTimeout(() => $("#aa-new")?.focus(), 30);
+});
+OWA.on("aa-create-ok", () => {
+  const e = $("#aa-new").value.trim().toLowerCase(), r = $("#aa-new-role").value;
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) return ($("#aa-new-err").textContent = "请输入有效的邮箱");
+  if (ACC.some((a) => a.email === e)) return ($("#aa-new-err").textContent = "这个邮箱已经有账号了");
+  $("#aa-create-ok, [data-a=aa-create-ok]").innerHTML = '<span class="spin" style="border-top-color:#fff"></span>创建中';
+  setTimeout(() => {
+    ACC.push({ email: e, role: r, date: "2026-11-11", agents: 0, cost: 0, limit: "", off: false });
+    openModal(`<h3>账号已创建</h3><p>${esc(e)}（${r}）的一次性初始密码，只显示这一次：</p><div class="keybox">Xh-m4q8z1-p7rk<button class="btn ghost sm" style="margin-left:auto" data-a="owa-toast" data-t="已复制初始密码">${ic("copy", 14)}复制</button></div><p class="small" style="color:var(--warnt);margin:0">关闭后无法再次查看；忘记了只能重置密码。</p><div class="mfoot"><button class="btn" data-a="owa-close">我已转交</button></div>`, 480);
+    render();
+  }, 600);
+});
+/* ---------- 用户组 ---------- */
+function renderGroups() {
+  $("#aa-main").innerHTML = `<div class="ph"><div><h1>账号</h1><p class="muted" style="margin:6px 0 0">${GROUPS.length} 个用户组，所有者可以把智能体定向分享给整个组（只读或可编辑）</p></div>
+      <button class="btn" style="margin-left:auto" data-a="gr-new">${ic("plus", 16, 2)}新建组</button></div>
+    ${tabs()}
+    <div class="card" style="overflow:hidden">${GROUPS.length ? `<table class="tb"><thead><tr><th>名称</th><th>成员数</th><th>用在授权上</th><th>创建者</th><th>创建时间</th><th></th></tr></thead><tbody>
+      ${GROUPS.map((g) => `<tr class="click ${S.gsel === g.id ? "sel" : ""}" data-a="gr-sel" data-id="${g.id}"><td><div class="row"><span class="aa-face" style="border-radius:9px">${ic("users", 15)}</span><b style="font-weight:600">${esc(g.n)}</b></div></td><td>${g.members.length} 人</td><td>${g.grants ? g.grants + " 个智能体" : '<span class="muted">没有</span>'}</td><td class="muted">${g.by}@xinghe.example</td><td class="muted">${g.created}</td><td style="text-align:right;color:var(--sub)">${ic("chev", 16)}</td></tr>`).join("")}</tbody></table>`
+      : `<div class="empty-state"><div class="serif">还没有用户组</div><p class="muted" style="margin:0 0 14px">建一个组，把同部门的人放进去，分享智能体时可以一次授权给整个组。</p><button class="btn sm" data-a="gr-new">新建组</button></div>`}</div>`;
+  if (S.gsel) groupDrawer(); else closeDrawer();
+}
+function groupDrawer() {
+  const g = GROUPS.find((x) => x.id === S.gsel);
+  if (!g) { S.gsel = null; return closeDrawer(); }
+  const had = $("#owa-drawer");
+  openDrawer(`<div class="dh"><span class="aa-face big" style="border-radius:14px">${ic("users", 20)}</span><div><div style="font-weight:600;font-size:16px">${esc(g.n)}</div><div class="muted small">${g.members.length} 位成员，创建于 ${g.created}</div></div><button class="xbtn" data-a="owa-drawer-close" aria-label="关闭详情">${ic("x")}</button></div>
+    <div class="db">
+      <div class="dsec"><h4>添加成员</h4><p class="muted small" style="margin:0 0 8px">按邮箱添加已有账号；加入后立即获得这个组被授予的智能体权限。</p>
+        <div class="row"><input class="inp" id="gr-add" type="email" placeholder="name@xinghe.example" list="gr-emails" autocomplete="off"><button class="btn sm" data-a="gr-add">添加</button></div>
+        <datalist id="gr-emails">${ACC.filter((a) => !g.members.includes(a.email)).map((a) => `<option value="${a.email}">`).join("")}</datalist>
+        <div class="aa-err" id="gr-err"></div></div>
+      <div class="dsec" style="padding:8px 6px"><h4 style="padding:6px 10px 4px">成员（${g.members.length}）</h4>
+        ${g.members.length ? g.members.map((e) => { const a = ACC.find((x) => x.email === e); return `<div class="row" style="padding:8px 10px;border-top:1px solid var(--line2)"><span class="aa-face">${e[0].toUpperCase()}</span><div style="flex:1;min-width:0"><div>${e}</div>${a?.off ? '<div class="muted small">账号已停用</div>' : ""}</div><button class="btn ghost sm" data-a="gr-rm" data-e="${e}">移除</button></div>`; }).join("") : '<p class="muted small" style="padding:4px 10px 8px;margin:0">还没有成员</p>'}</div>
+      <div class="dsec"><h4>授权情况</h4><p class="muted small" style="margin:0">${g.grants ? `这个组用在 ${g.grants} 个智能体的定向分享上。授权由各智能体的所有者在构建页「发布，分享」里管理。` : "还没有智能体分享给这个组。"}</p></div>
+      <div class="dsec"><h4>删除组</h4><p class="muted small" style="margin:0 0 8px">删除后，通过这个组获得的智能体权限一并收回；成员账号本身不受影响。</p><button class="btn danger sm" data-a="gr-del">删除组</button></div>
+    </div>`, 440);
+  if (had) $("#owa-drawer").style.animation = "none";
+}
+OWA.on("aa-tab", (t) => { S.tab = t.dataset.v; S.sel = null; S.gsel = null; S.pw = ""; history.replaceState(null, "", S.tab === "groups" ? "#groups" : location.pathname); render(); });
+OWA.on("gr-sel", (t) => { S.gsel = t.dataset.id; render(); });
+OWA.on("gr-new", () => {
+  openModal(`<h3>新建用户组</h3><p class="muted" style="margin:0 0 16px">建好后在详情里按邮箱添加成员。</p>
+    <div class="fld"><label for="gr-n">组名称 <b>*</b></label><input class="inp" id="gr-n" placeholder="例如 人力资源部"></div><div class="aa-err" id="gr-n-err"></div>
+    <div class="mfoot"><button class="btn ghost" data-a="owa-close">取消</button><button class="btn" data-a="gr-new-ok">创建</button></div>`, 440);
+  setTimeout(() => $("#gr-n")?.focus(), 30);
+});
+OWA.on("gr-new-ok", () => {
+  const n = $("#gr-n").value.trim();
+  if (!n) return ($("#gr-n-err").textContent = "请填写组名称");
+  if (GROUPS.some((g) => g.n === n)) return ($("#gr-n-err").textContent = "已经有同名的组");
+  const id = "g" + Date.now(); GROUPS.push({ id, n, created: "2026-11-11", by: "zhoulan", members: [], grants: 0 });
+  closeModal(); S.gsel = id; render(); toast("已创建「" + esc(n) + "」");
+});
+OWA.on("gr-add", () => {
+  const g = GROUPS.find((x) => x.id === S.gsel), e = $("#gr-add").value.trim().toLowerCase();
+  const err = (m) => ($("#gr-err").textContent = m);
+  if (!e) return err("请输入邮箱");
+  if (!ACC.some((a) => a.email === e)) return err("没有这个邮箱的账号，先在「账号」里创建");
+  if (g.members.includes(e)) return err("已经在组里了");
+  g.members.push(e); render(); toast("已添加 " + e);
+});
+OWA.on("gr-rm", (t) => {
+  const g = GROUPS.find((x) => x.id === S.gsel), e = t.dataset.e;
+  confirmBox({ title: "移出组？", body: `<p>${e} 会失去通过「${esc(g.n)}」获得的智能体权限。</p>`, ok: "移除", danger: true, onOk: () => { g.members = g.members.filter((x) => x !== e); render(); toast("已移除"); } });
+});
+OWA.on("gr-del", () => {
+  const g = GROUPS.find((x) => x.id === S.gsel);
+  confirmBox({ title: `删除「${esc(g.n)}」？`, danger: true, ok: "删除组", body: `<p>${g.members.length} 位成员通过这个组获得的 ${g.grants} 项智能体授权会一并收回，无法撤销。成员账号本身不受影响。</p>`,
+    onOk: () => { GROUPS.splice(GROUPS.indexOf(g), 1); S.gsel = null; render(); toast("组已删除"); } });
+});
+render();
+</script>
+</body>
+</html>

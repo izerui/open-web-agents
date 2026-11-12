@@ -133,7 +133,7 @@ export function UsageView({ scope = "self" }: { scope?: "self" | "all" }) {
         这里是 token 用量,用于了解智能体的使用情况;实际扣费以
         <a
           className="mx-1 underline underline-offset-2"
-          href={scope === "all" ? "/admin/billing" : "/settings/billing"}
+          href={scope === "all" ? "/admin/billing" : "/account/billing"}
         >
           积分页
         </a>

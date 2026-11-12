@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>API Key 与签名密钥 · Open Web Agents</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/owa.css">
+<style>
+.dk-form{display:grid;grid-template-columns:minmax(0,1.5fr) 150px 170px minmax(0,1.2fr) auto;gap:12px;align-items:end}
+.dk-form .fld{margin:0}
+.dk-sech{display:flex;align-items:center;gap:12px;padding:18px 22px 12px}
+.dk-sech h3{margin:0;font-size:16px}
+.dk-key{font-family:var(--mono);font-size:12.5px;color:var(--sub)}
+.dk-nm{font-weight:600}
+.dk-ed{display:flex;flex-direction:column;gap:6px;min-width:200px}
+.dk-ed .row{gap:6px}
+.dk-ed .inp{height:32px;width:110px}
+.dk-bar{height:5px;border-radius:3px;background:#ECEAE3;overflow:hidden;width:120px;margin-top:4px}
+.dk-bar i{display:block;height:100%;background:var(--ok)}
+.dk-bar i.hi{background:var(--warn)}
+.dk-pen{width:28px;height:28px;border-radius:50%;display:inline-grid;place-items:center;color:var(--sub)}
+.dk-pen:hover{background:#EFEDE7;color:var(--ink)}
+.dk-once{border:1px solid #D3E2D6;background:#F3F7F3;border-radius:14px;padding:14px 16px;margin:0 22px 18px}
+.dk-once .keybox{margin:10px 0}
+.dk-once .keybox code{flex:1;word-break:break-all}
+.dk-cols{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);gap:16px;margin-top:16px;align-items:start}
+.dk-agent{display:flex;align-items:center;gap:12px;padding:12px 4px;border-bottom:1px solid var(--line2);text-decoration:none;color:var(--ink)}
+.dk-agent:last-child{border-bottom:0}
+.dk-agent:hover .dk-go{color:var(--ink)}
+.dk-go{margin-left:auto;color:var(--sub);display:flex;align-items:center;gap:4px;font-size:13px}
+.dk-sk{height:14px;border-radius:7px;background:#EFEDE7;animation:dkp 1.2s ease-in-out infinite}
+@keyframes dkp{50%{opacity:.5}}
+.dk-err{font-size:12px;color:var(--bad);min-height:18px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="assets/owa.js"></script>
+<script>
+"use strict";
+/* 开发者，API Key 与签名密钥（原 /settings/keys 的账号级部分；单智能体的调用文档、Webhook 地址与投递记录在构建页，接入） */
+const DEF_RPM = 60, AGENT_RPM = 300;
+const BINDABLE = MY_AGENTS.filter((a) => a.own === "mine" || a.own === "shared-write" || a.own === "builtin");
+const agentName = (id) => (MY_AGENTS.find((a) => a.id === id) || {}).n || id;
+
+let keys = [
+  { id: "k1", name: "报销系统对接（生产）", tail: "7Q2c", agent: "expense-reviewer", exp: { t: "never" }, used: "3 分钟前", rpm: null, cap: 3000, spent: 572 },
+  { id: "k2", name: "会议纪要，飞书机器人", tail: "mT8e", agent: "meeting-notes", exp: { t: "date", v: "2027-02-08 到期" }, used: "昨天 18:22", rpm: 120, cap: null, spent: 268 },
+  { id: "k3", name: "数据组临时测试", tail: "Lp0w", agent: null, exp: { t: "soon", v: "5 小时后过期" }, used: null, rpm: null, cap: 500, spent: 0 },
+  { id: "k4", name: "旧版周报脚本", tail: "c41Z", agent: "weekly-report", exp: { t: "expired" }, used: "10-02 09:14", rpm: 30, cap: 200, spent: 0 },
+];
+let listState = "ok";      // ok | empty | loading | error
+let editing = null;        // { id, f: "rpm" | "cap" }
+let issued = null;         // 一次性明文
+let sec = { mask: "whsec_Qm3v…a91c", prevUntil: null, revealed: null };
+
+const rnd = (n) => Array.from({ length: n }, () => "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"[Math.floor(Math.random() * 57)]).join("");
+
+OWA.mount({
+  nav: "dev",
+  body: `<div class="bwrap">${sideNav("dev")}
+    <main class="main">
+      <div class="ph"><div><h1>API Key 与签名密钥</h1>
+        <p class="muted" style="margin:6px 0 0">账号级的调用凭证。具体智能体的调用代码、在线试调、Webhook 地址和投递记录在它的构建页「接入」阶段。</p></div></div>
+      <div class="banner info">${ic("info", 18)}<div>Key 只能放在你的后端服务里，不要写进网页或 App；明文只在签发时显示一次。平台默认每个 Key 每分钟 <b>${DEF_RPM}</b> 次、每个智能体所有 Key 合计每分钟 <b>${AGENT_RPM}</b> 次，超出返回 <code>429</code>。</div></div>
+
+      <section class="card" id="dk-issue"></section>
+      <section class="card" style="margin-top:16px" id="dk-list"></section>
+      <div class="dk-cols">
+        <section class="card" id="dk-secret"></section>
+        <section class="card" id="dk-docs"></section>
+      </div>
+    </main></div>`,
+});
+
+/* ---------- 签发 ---------- */
+function renderIssue() {
+  $("#dk-issue").innerHTML = `<div class="dk-sech"><h3>签发新 Key</h3><span class="muted small">签发后可随时改限额、轮换或吊销</span></div>
+    <div style="padding:0 22px 20px">
+      <div class="dk-form">
+        <div class="fld"><label for="f-name">用途备注</label><input class="inp" id="f-name" placeholder="例如：报销系统对接（生产）"></div>
+        <div class="fld"><label for="f-rpm">每分钟上限</label><input class="inp" id="f-rpm" type="number" min="1" placeholder="默认 ${DEF_RPM}"></div>
+        <div class="fld"><label for="f-exp">有效期</label><select class="inp" id="f-exp"><option value="never">不过期</option><option value="30">30 天</option><option value="90">90 天</option><option value="365">1 年</option></select></div>
+        <div class="fld"><label for="f-agent">限定智能体</label><select class="inp" id="f-agent"><option value="">不限（可调用我能用的全部智能体）</option>${BINDABLE.map((a) => `<option value="${a.id}">仅 ${esc(a.n)}</option>`).join("")}</select></div>
+        <button class="btn" data-a="issue">${ic("key", 16)}签发 Key</button>
+      </div>
+      <div class="dk-err" id="f-err"></div>
+    </div>
+    ${issued ? `<div class="dk-once rise" id="dk-once">
+      <div class="row" style="gap:8px;color:#2C5C40;font-weight:600">${ic("check", 18, 2)}已签发「${esc(issued.name)}」</div>
+      <div class="muted" style="margin-top:4px">这是唯一一次显示完整 Key。复制后放进你的服务端配置，关掉后只能看到末尾 4 位。</div>
+      <div class="keybox"><code id="dk-plain">${issued.plain}</code><button class="btn sm ghost" data-a="copy-plain">${ic("copy", 15)}复制</button></div>
+      <div class="row"><button class="btn sm" data-a="saved">我已保存</button>${issued.agent ? `<a class="link small" href="build.html#acc">去「${esc(agentName(issued.agent))}」的接入页试调</a>` : ""}</div>
+    </div>` : ""}`;
+}
+OWA.on("issue", () => {
+  const name = $("#f-name").value.trim();
+  const rpmRaw = $("#f-rpm").value.trim();
+  if (!name) return ($("#f-err").textContent = "请填写用途备注，方便以后认出这个 Key");
+  if (rpmRaw && (!/^\d+$/.test(rpmRaw) || +rpmRaw < 1 || +rpmRaw > AGENT_RPM)) return ($("#f-err").textContent = `每分钟上限填 1 到 ${AGENT_RPM} 之间的整数，留空用默认 ${DEF_RPM}`);
+  $("#f-err").textContent = "";
+  const exp = $("#f-exp").value, agent = $("#f-agent").value || null;
+  const expObj = exp === "never" ? { t: "never" } : { t: "date", v: { 30: "2026-12-11", 90: "2027-02-09", 365: "2027-11-11" }[exp] + " 到期" };
+  const tail = rnd(4);
+  const plain = `owa_live_${rnd(28)}${tail}`;
+  keys.unshift({ id: "k" + Date.now(), name, tail, agent, exp: expObj, used: null, rpm: rpmRaw ? +rpmRaw : null, cap: null, spent: 0, fresh: true });
+  issued = { name, plain, agent };
+  OWA.st.set("keyIssued", true);
+  if (listState !== "ok") listState = "ok";
+  renderIssue(); renderList();
+  toast("Key 已签发，请立即复制");
+});
+OWA.on("copy-plain", () => { navigator.clipboard?.writeText(issued.plain).catch(() => {}); toast("已复制到剪贴板"); });
+OWA.on("saved", () => { issued = null; ["#f-name", "#f-rpm"].forEach((s) => ($(s).value = "")); renderIssue(); toast("明文已隐藏，之后只显示末尾 4 位"); });
+
+/* ---------- Key 列表 ---------- */
+function expCell(e) {
+  if (e.t === "never") return `<span class="muted">不过期</span>`;
+  if (e.t === "expired") return `<span class="tag bad">已过期</span>`;
+  if (e.t === "soon") return `<span class="tag warn">${ic("clock", 13)}${e.v}</span>`;
+  if (e.t === "rot") return `<span class="tag warn">${e.v}</span>`;
+  return `<span>${e.v}</span>`;
+}
+function rpmCell(k) {
+  if (editing && editing.id === k.id && editing.f === "rpm") return `<div class="dk-ed">
+      <div class="row"><input class="inp" id="ed-rpm" type="number" min="1" value="${k.rpm ?? DEF_RPM}" aria-label="每分钟上限"><span class="small muted">次/分钟</span></div>
+      <div class="row"><button class="btn sm" data-a="rpm-save" data-id="${k.id}">保存</button><button class="ibtn" data-a="rpm-def" data-id="${k.id}">恢复默认</button><button class="ibtn" data-a="ed-cancel">取消</button></div>
+      <span class="dk-err" id="ed-err"></span></div>`;
+  return `<div class="row" style="gap:4px">${k.rpm ? `<b>${k.rpm}</b><span class="muted small">次/分</span>` : `<span>${DEF_RPM}</span><span class="muted small">次/分，默认</span>`}
+    <button class="dk-pen" data-a="edit" data-f="rpm" data-id="${k.id}" title="修改每分钟上限" aria-label="修改每分钟上限">${ic("edit", 15)}</button></div>`;
+}
+function capCell(k) {
+  if (editing && editing.id === k.id && editing.f === "cap") return `<div class="dk-ed">
+      <div class="row"><input class="inp" id="ed-cap" type="number" min="1" value="${k.cap ?? ""}" placeholder="不限额" aria-label="月度积分上限"><span class="small muted">积分/月</span></div>
+      <div class="row"><button class="btn sm" data-a="cap-save" data-id="${k.id}">保存</button><button class="ibtn" data-a="cap-none" data-id="${k.id}">设为不限额</button><button class="ibtn" data-a="ed-cancel">取消</button></div>
+      <span class="dk-err" id="ed-err"></span></div>`;
+  const pct = k.cap ? Math.min(100, Math.round((k.spent / k.cap) * 100)) : 0;
+  return `<div class="row" style="gap:4px;align-items:flex-start"><div><div><b>${k.spent.toLocaleString()}</b><span class="muted"> / ${k.cap ? k.cap.toLocaleString() : "不限额"}</span></div>
+      ${k.cap ? `<div class="dk-bar" title="本月已用 ${pct}%"><i class="${pct >= 80 ? "hi" : ""}" style="width:${pct}%"></i></div>` : ""}</div>
+    <button class="dk-pen" data-a="edit" data-f="cap" data-id="${k.id}" title="修改月度积分上限" aria-label="修改月度积分上限">${ic("edit", 15)}</button></div>`;
+}
+function renderList() {
+  const head = `<div class="dk-sech"><h3>我的 Key</h3><span class="muted small">${listState === "ok" ? `${keys.length} 个` : ""}</span>
+    <div class="row" style="margin-left:auto;gap:8px"><span class="small muted">原型状态</span><div class="seg" role="tablist">${[["ok", "有数据"], ["empty", "空"], ["loading", "加载中"], ["error", "失败"]].map(([k, n]) => `<button class="${listState === k ? "on" : ""}" data-a="ls" data-k="${k}">${n}</button>`).join("")}</div></div></div>`;
+  let body;
+  if (listState === "loading") {
+    body = `<div style="padding:4px 22px 22px">${[0, 1, 2].map(() => `<div class="row" style="gap:18px;padding:14px 0;border-bottom:1px solid var(--line2)"><div class="dk-sk" style="width:200px"></div><div class="dk-sk" style="width:120px"></div><div class="dk-sk" style="width:90px"></div><div class="dk-sk" style="flex:1"></div></div>`).join("")}
+      <div class="row muted small" style="margin-top:12px"><span class="spin"></span>正在载入 Key…</div></div>`;
+  } else if (listState === "error") {
+    body = `<div class="empty-state"><div class="serif">Key 列表没有载入</div><p class="muted" style="margin:0 0 16px">网络请求失败（HTTP 502）。已签发的 Key 不受影响，仍可正常调用。</p><button class="btn ghost" data-a="retry">${ic("refresh", 16)}重试</button></div>`;
+  } else if (listState === "empty" || !keys.length) {
+    body = `<div class="empty-state"><div class="serif">还没有 Key</div><p class="muted" style="margin:0 0 16px">在上方签发第一个 Key，就能在你的服务里调用智能体。</p><button class="btn ghost" data-a="focus-issue">${ic("plus", 16)}签发 Key</button></div>`;
+  } else {
+    body = `<table class="tb"><thead><tr><th style="padding-left:22px">名称</th><th>限定智能体</th><th>有效期</th><th>最近使用</th><th>每分钟限额</th><th>本月积分 / 月度上限</th><th style="text-align:right;padding-right:22px">操作</th></tr></thead><tbody>
+      ${keys.map((k) => `<tr ${k.fresh ? 'style="background:var(--fresh)"' : ""}>
+        <td style="padding-left:22px"><div class="dk-nm">${esc(k.name)}</div><div class="dk-key">owa_live_••••${k.tail}</div></td>
+        <td>${k.agent ? `<span class="row" style="gap:6px">${av((MY_AGENTS.find((a) => a.id === k.agent) || {}).k, 22)}仅 ${esc(agentName(k.agent))}</span>` : `<span class="muted">不限</span>`}</td>
+        <td>${expCell(k.exp)}</td>
+        <td>${k.used ? k.used : `<span class="muted">从未使用</span>`}</td>
+        <td>${rpmCell(k)}</td>
+        <td>${capCell(k)}</td>
+        <td style="text-align:right;padding-right:22px;white-space:nowrap">${k.exp.t === "expired" ? "" : `<button class="ibtn" data-a="rotate" data-id="${k.id}">${ic("refresh", 15)}轮换</button>`}<button class="ibtn" style="color:var(--bad)" data-a="revoke" data-id="${k.id}">${ic("trash", 15)}吊销</button></td>
+      </tr>`).join("")}</tbody></table>`;
+  }
+  $("#dk-list").innerHTML = head + body;
+}
+const findKey = (el) => keys.find((k) => k.id === el.dataset.id);
+OWA.on("ls", (el) => { listState = el.dataset.k; editing = null; renderList(); });
+OWA.on("retry", () => { listState = "loading"; renderList(); setTimeout(() => { listState = "ok"; renderList(); toast("已重新载入"); }, 1100); });
+OWA.on("focus-issue", () => $("#f-name").focus());
+OWA.on("edit", (el) => { editing = { id: el.dataset.id, f: el.dataset.f }; renderList(); $(el.dataset.f === "rpm" ? "#ed-rpm" : "#ed-cap")?.focus(); });
+OWA.on("ed-cancel", () => { editing = null; renderList(); });
+OWA.on("rpm-save", (el) => {
+  const v = $("#ed-rpm").value.trim();
+  if (!/^\d+$/.test(v) || +v < 1 || +v > AGENT_RPM) return ($("#ed-err").textContent = `填 1 到 ${AGENT_RPM} 之间的整数`);
+  const k = findKey(el); k.rpm = +v === DEF_RPM ? null : +v; editing = null; renderList(); toast(`「${k.name}」每分钟上限改为 ${v} 次`);
+});
+OWA.on("rpm-def", (el) => { const k = findKey(el); k.rpm = null; editing = null; renderList(); toast(`「${k.name}」已恢复默认 ${DEF_RPM} 次/分钟`); });
+OWA.on("cap-save", (el) => {
+  const v = $("#ed-cap").value.trim(); const k = findKey(el);
+  if (!v) { k.cap = null; editing = null; renderList(); return toast(`「${k.name}」本月不限额`); }
+  if (!/^\d+$/.test(v) || +v < 1) return ($("#ed-err").textContent = "填正整数，留空表示不限额");
+  k.cap = +v; editing = null; renderList();
+  toast(+v <= k.spent ? `已保存。本月已用 ${k.spent} 已达上限，这个 Key 本月的新调用会被拒绝` : `「${k.name}」月度上限改为 ${(+v).toLocaleString()} 积分`, +v > k.spent);
+});
+OWA.on("cap-none", (el) => { const k = findKey(el); k.cap = null; editing = null; renderList(); toast(`「${k.name}」本月不限额`); });
+OWA.on("rotate", (el) => {
+  const k = findKey(el);
+  confirmBox({
+    title: "轮换这个 Key？",
+    body: `<p style="margin:0">会立即签发一个新 Key 给「${esc(k.name)}」，新 Key 沿用备注、限定智能体和限额。</p><p class="muted" style="margin:8px 0 0">旧 Key <code>owa_live_••••${k.tail}</code> 在 <b>24 小时后</b>失效，请在这之前把调用方换成新 Key。</p>`,
+    ok: "立即轮换",
+    onOk() {
+      const tail = rnd(4);
+      const plain = `owa_live_${rnd(28)}${tail}`;
+      keys.splice(keys.indexOf(k), 1,
+        { ...k, id: "k" + Date.now(), tail, used: null, fresh: true },
+        { ...k, exp: { t: "rot", v: "轮换后旧 Key，24 小时后失效" }, fresh: false, name: k.name + "（旧）" });
+      issued = { name: k.name, plain, agent: k.agent };
+      renderIssue(); renderList(); $("#dk-once")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      toast("新 Key 已签发，旧 Key 24 小时后失效");
+    },
+  });
+});
+OWA.on("revoke", (el) => {
+  const k = findKey(el);
+  confirmBox({
+    title: "吊销这个 Key？",
+    body: `<p style="margin:0">「${esc(k.name)}」<code>owa_live_••••${k.tail}</code> 会<b>立即失效</b>，正在用它的调用方马上会收到 401，不能撤销。</p>`,
+    ok: "吊销", danger: true,
+    onOk() { keys = keys.filter((x) => x !== k); renderList(); toast("Key 已吊销"); },
+  });
+});
+
+/* ---------- Webhook 签名密钥 ---------- */
+function renderSecret() {
+  $("#dk-secret").innerHTML = `<div class="dk-sech"><h3>Webhook 签名密钥</h3><span class="tag line">账号级，所有智能体共用</span></div>
+    <div style="padding:0 22px 22px">
+      <p style="margin:0 0 10px">你名下所有智能体的结果回调都用这把密钥签名，接收方用同一把密钥验签，确认回调来自平台且没被篡改。</p>
+      <pre class="code"><span class="c"># 每次回调带两个请求头</span>
+X-OWA-Timestamp: <span class="s">1762866000</span>
+X-OWA-Signature: <span class="s">v1=</span>HMAC-SHA256(密钥, <span class="s">"时间戳.请求体"</span>) 的十六进制
+<span class="c"># 重新生成后的过渡期内，旧密钥额外签一份</span>
+X-OWA-Signature-Previous: <span class="s">v1=…</span></pre>
+      <div class="row" style="margin:16px 0 4px;gap:8px"><span class="muted">当前密钥</span>
+        ${sec.mask ? `<code class="dk-key" style="color:var(--ink)">${sec.mask}</code><span class="tag ok">已配置</span>` : `<span class="tag">未配置</span><span class="muted small">回调不带签名，接收方无法验证来源</span>`}</div>
+      ${sec.prevUntil ? `<div class="banner warn" style="margin:10px 0 0">${ic("clock", 18)}<div>旧密钥在 <b>${sec.prevUntil}</b> 前仍会额外签名（X-OWA-Signature-Previous），请在这之前把接收方换成新密钥。</div></div>` : ""}
+      ${sec.revealed ? `<div class="dk-once rise" style="margin:12px 0 0"><div class="row" style="gap:8px;color:#2C5C40;font-weight:600">${ic("check", 18, 2)}新密钥只显示这一次</div>
+        <div class="keybox"><code>${sec.revealed}</code><button class="btn sm ghost" data-a="copy-sec">${ic("copy", 15)}复制</button></div>
+        <button class="btn sm" data-a="sec-hide">我已保存</button></div>` : ""}
+      <div class="fld" style="margin:16px 0 0"><label for="sec-in">自定义密钥（至少 24 个字符；留空可直接生成）</label>
+        <div class="row"><input class="inp" id="sec-in" type="password" autocomplete="new-password" placeholder="粘贴你自己的密钥"><button class="btn ghost" data-a="sec-custom">使用自定义密钥</button></div>
+        <span class="dk-err" id="sec-err"></span></div>
+      <div class="row" style="gap:8px">
+        ${sec.mask ? `<button class="btn" data-a="sec-regen">${ic("refresh", 16)}重新生成</button><button class="btn danger" data-a="sec-clear">清除</button>` : `<button class="btn" data-a="sec-gen">${ic("sparkle", 16)}生成密钥</button>`}
+      </div>
+    </div>`;
+}
+function setSecret(value, rotating) {
+  sec.prevUntil = rotating && sec.mask ? "2026-11-12 21:40" : null;
+  sec.mask = value.slice(0, 10) + "…" + value.slice(-4);
+  sec.revealed = value;
+  renderSecret();
+}
+OWA.on("sec-gen", () => { setSecret(`whsec_${rnd(43)}`, false); toast("签名密钥已生成"); });
+OWA.on("sec-regen", () => confirmBox({
+  title: "重新生成签名密钥？",
+  body: `<p style="margin:0">新密钥立即生效，之后的回调用新密钥签 X-OWA-Signature。</p><p class="muted" style="margin:8px 0 0">过渡期内（到明天 21:40）旧密钥会继续用 X-OWA-Signature-Previous 额外签一份，接收方来得及换密钥，验签不中断。</p>`,
+  ok: "重新生成",
+  onOk() { setSecret(`whsec_${rnd(43)}`, true); toast("已换成新密钥"); },
+}));
+OWA.on("sec-custom", () => {
+  const v = $("#sec-in").value;
+  if (!v.trim()) return ($("#sec-err").textContent = "请输入密钥，或直接点「生成」");
+  if (v.trim().length < 24) return ($("#sec-err").textContent = `至少 24 个字符，现在 ${v.trim().length} 个`);
+  setSecret(v.trim(), true); toast("已改用自定义密钥");
+});
+OWA.on("sec-clear", () => confirmBox({
+  title: "清除签名密钥？",
+  body: `<p style="margin:0">清除后，你名下所有智能体的回调都<b>不再带签名</b>，接收方如果在验签会全部拒收。</p>`,
+  ok: "清除", danger: true,
+  onOk() { sec = { mask: null, prevUntil: null, revealed: null }; renderSecret(); toast("签名密钥已清除"); },
+}));
+OWA.on("copy-sec", () => { navigator.clipboard?.writeText(sec.revealed).catch(() => {}); toast("已复制到剪贴板"); });
+OWA.on("sec-hide", () => { sec.revealed = null; renderSecret(); });
+
+/* ---------- 按智能体查看调用文档 ---------- */
+function renderDocs() {
+  const list = MY_AGENTS.filter((a) => a.own !== "shared-read");
+  const ver = OWA.st.get("version");
+  $("#dk-docs").innerHTML = `<div class="dk-sech"><h3>按智能体查看调用文档</h3></div>
+    <div style="padding:0 22px 12px"><p class="muted" style="margin:0 0 6px">调用代码（curl / Python / Node）、OpenAPI、在线试调和 Webhook 投递记录都在各自的「接入」阶段。</p>
+    ${list.map((a) => {
+      const st = a.id === "expense-reviewer" ? `已发布 v${ver}${OWA.st.get("changes") ? "，草稿有未发布修改（不影响调用方）" : ""}` : /草稿/.test(a.st) && !/v\d/.test(a.st) ? "未发布，调用使用草稿" : a.st;
+      return `<a class="dk-agent" href="build.html#acc">${av(a.k, 34)}<div style="min-width:0"><div style="font-weight:600">${esc(a.n)}</div><div class="small muted">${esc(st)}</div></div><span class="dk-go">接入${ic("chev", 15)}</span></a>`;
+    }).join("")}</div>`;
+}
+
+renderIssue(); renderList(); renderSecret(); renderDocs();
+</script>
+</body>
+</html>

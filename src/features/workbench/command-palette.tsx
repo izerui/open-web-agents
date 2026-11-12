@@ -1,6 +1,6 @@
 "use client";
 
-import { NavigationCommands } from "@/components/ide/nav-palette";
+import { NavigationCommands } from "@/components/shell/nav-commands";
 import {
   CommandDialog,
   CommandEmpty,

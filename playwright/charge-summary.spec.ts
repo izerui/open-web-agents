@@ -225,7 +225,7 @@ test.describe("消耗汇总", () => {
     const web = await seedRun(user.id, agentId, "web", null, 10);
     const invoke = await seedRun(user.id, agentId, "invoke", keyId, 5);
 
-    await page.goto(`${BASE}/settings/billing`);
+    await page.goto(`${BASE}/account/billing`);
     const summary = page.getByRole("region", { name: "消耗汇总", exact: true });
     const rows = summary.getByTestId("charge-summary-row");
     await expect(rows).toHaveCount(2);
@@ -258,7 +258,7 @@ test.describe("消耗汇总", () => {
     await expect(charges).toHaveCount(2);
     await expect(charges.filter({ hasText: web })).toHaveCount(1);
 
-    await page.goto(`${BASE}/settings/usage`);
+    await page.goto(`${BASE}/account/usage`);
     await expect(page.getByRole("heading", { name: "token 用量" })).toBeVisible();
     await expect(page.getByTestId("usage-billing-note")).toContainText("实际扣费以");
     await expect(page.getByText("积分估算")).toHaveCount(0);

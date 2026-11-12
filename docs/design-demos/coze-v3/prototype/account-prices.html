@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>模型价格 · Open Web Agents</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/owa.css">
+<style>
+.mp-top{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;margin-bottom:18px}
+.mp-top .card{padding:18px 22px;display:flex;gap:14px;align-items:flex-start}
+.mp-ic{width:40px;height:40px;border-radius:12px;background:#F1EFEA;display:grid;place-items:center;flex:none}
+.mp-top h3{margin:0 0 2px;font-size:15px}
+.mp-num{font-variant-numeric:tabular-nums;white-space:nowrap}
+table.tb th.mp-r,.mp-r{text-align:right}
+.mp-off td{color:var(--sub)}
+.mp-sw{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--sub);cursor:pointer}
+.mp-sw input{width:16px;height:16px;accent-color:#1C1C1C}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="assets/owa.js"></script>
+<script>
+"use strict";
+/* 账户，模型价格（原 /settings/credentials）：算力由平台统一提供，用户只看价目 */
+const TYPES = [
+  ["text", "文本", "积分 / 百万 tokens", ["输入", "输出", "缓存读", "缓存写"]],
+  ["image", "生图", "积分 / 张", ["标准尺寸", "高清"]],
+  ["video", "生视频", "积分 / 秒", ["720p", "1080p"]],
+  ["tts", "语音合成", "积分 / 千字符", ["标准音色", "精品音色"]],
+  ["stt", "语音转写", "积分 / 分钟", ["转写"]],
+];
+const MODELS = {
+  text: [
+    { n: "Claude Sonnet 4.5", id: "claude-sonnet-4-5", p: [300, 1500, 30, 375], alias: "sonnet", img: true },
+    { n: "Claude Opus 4.1", id: "claude-opus-4-1", p: [1500, 7500, 150, 1875], alias: "opus", img: true },
+    { n: "Claude Haiku 4.5", id: "claude-haiku-4-5", p: [100, 500, 10, 125], alias: "haiku", img: true },
+    { n: "通义千问 Max（内网）", id: "qwen-max", p: [240, 960, null, null], img: false },
+    { n: "DeepSeek V3（内网）", id: "deepseek-v3", p: [200, 800, 20, null], img: false },
+    { n: "Claude 3.5 Sonnet（旧）", id: "claude-3-5-sonnet", p: [300, 1500, 30, 375], off: "已停用" },
+  ],
+  image: [{ n: "GPT Image 1", id: "gpt-image-1", p: [4, 17], off: "暂未接入运行时" }],
+  video: [],
+  tts: [{ n: "CosyVoice 2", id: "cosyvoice-2", p: [2, 6], off: "暂未接入运行时" }],
+  stt: [{ n: "Paraformer v2", id: "paraformer-v2", p: [1.2], off: "暂未接入运行时" }],
+};
+let type = "text", configured = true;
+
+OWA.mount({
+  nav: "account",
+  body: `<div class="bwrap">${sideNav("account")}
+    <main class="main">
+      <div class="ph"><div><h1>模型价格</h1><p class="muted" style="margin:6px 0 0">运行按模型实际用量扣积分。1 元 = 100 积分，价目由管理员维护，调整后对之后的运行生效。</p></div>
+        <label class="mp-sw" style="margin-left:auto"><input type="checkbox" id="sw-cfg" checked>原型：平台已配置</label></div>
+      <div class="mp-top" id="mp-top"></div>
+      <div class="tabs" role="tablist" id="mp-tabs"></div>
+      <section class="card" id="mp-tb"></section>
+    </main></div>`,
+});
+$("#sw-cfg").addEventListener("change", (e) => { configured = e.target.checked; render(); });
+
+function render() {
+  $("#mp-top").innerHTML = `
+    <div class="card"><span class="mp-ic">${ic("cpu", 20)}</span><div><h3>算力来源：平台统一提供</h3><p class="muted" style="margin:0">不需要自己配置模型 Key。所有运行都走平台的模型提供者，按下表价目从积分里扣。</p></div></div>
+    <div class="card"><span class="mp-ic" style="${configured ? "background:var(--okbg);color:var(--ok)" : "background:var(--warnbg);color:var(--warnt)"}">${ic(configured ? "check" : "warn", 20)}</span><div style="flex:1">
+      <h3>平台配置状态：${configured ? '<span style="color:var(--ok)">已配置</span>' : '<span style="color:var(--warnt)">待配置，请联系管理员</span>'}</h3>
+      <p class="muted" style="margin:0 0 8px">${configured ? "文本模型可以正常运行。" : "管理员还没配置模型提供者，现在发起运行会失败。请联系管理员 周岚。"}</p>
+      <div class="row" style="gap:14px"><a class="link small" href="account-usage.html">用量分析</a><a class="link small" href="account-billing.html">积分与套餐</a></div></div></div>`;
+  $("#mp-tabs").innerHTML = TYPES.map(([k, n]) => {
+    const m = MODELS[k], on = m.filter((x) => !x.off).length;
+    return `<button role="tab" class="${type === k ? "on" : ""}" aria-selected="${type === k}" data-a="type" data-k="${k}">${n} <span class="small muted">${m.length ? `${on}/${m.length}` : "0"}</span></button>`;
+  }).join("");
+  const [, tn, unit, cols] = TYPES.find((t) => t[0] === type);
+  const list = MODELS[type];
+  if (!configured) {
+    $("#mp-tb").innerHTML = `<div class="empty-state"><div class="serif">价目暂不可用</div><p class="muted" style="margin:0">平台还没配置模型提供者，配置后这里会显示每个模型的价格。</p></div>`;
+    return;
+  }
+  if (!list.length) {
+    $("#mp-tb").innerHTML = `<div class="empty-state"><div class="serif">还没有${tn}模型</div><p class="muted" style="margin:0">管理员还没有为「${tn}」添加模型。</p></div>`;
+    return;
+  }
+  $("#mp-tb").innerHTML = `<div class="row" style="padding:16px 22px 6px"><b>${tn}</b><span class="muted small">单位：${unit}</span>${type !== "text" ? `<span class="tag warn" style="margin-left:auto">${tn}暂未接入运行时，智能体还不能调用</span>` : ""}</div>
+    <table class="tb"><thead><tr><th style="padding-left:22px">模型</th><th>标识</th>${cols.map((c) => `<th class="mp-r">${c}</th>`).join("")}${type === "text" ? "<th>说明</th>" : ""}<th style="padding-right:22px">状态</th></tr></thead><tbody>
+    ${list.map((m) => `<tr class="${m.off ? "mp-off" : ""}"><td style="padding-left:22px;font-weight:${m.off ? 400 : 600}">${m.n}</td><td style="font-family:var(--mono);font-size:12.5px">${m.id}</td>
+      ${cols.map((_, i) => `<td class="mp-r mp-num">${m.p[i] == null ? '<span class="muted">不支持</span>' : m.p[i].toLocaleString()}</td>`).join("")}
+      ${type === "text" ? `<td class="small">${[m.alias ? `默认「${m.alias}」` : "", m.img ? "支持图片输入" : m.off ? "" : "仅文本"].filter(Boolean).join("，") || '<span class="muted">—</span>'}</td>` : ""}
+      <td style="padding-right:22px">${m.off ? `<span class="tag ${m.off === "已停用" ? "line" : "warn"}">${m.off}</span>` : '<span class="tag ok">可用</span>'}</td></tr>`).join("")}
+    </tbody></table>
+    ${type === "text" ? `<p class="small muted" style="margin:0;padding:12px 22px 16px">例：报销审核助手用 claude-sonnet-4-5，一次读 1 万 tokens、写 1,500 tokens，约 3 + 2.25 = 5.25 积分。运行开始时会按模型先冻结一部分积分，结束后多退少补。</p>` : ""}`;
+}
+OWA.on("type", (el) => { type = el.dataset.k; render(); });
+render();
+</script>
+</body>
+</html>

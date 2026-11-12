@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>平台运行与用量 · 平台管理 · Open Web Agents</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/owa.css">
+<style>
+a.btn{text-decoration:none}
+.op-stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:16px}
+.op-stats .stat .n{font-size:24px}
+.op-stats .stat .s{font-size:12px;color:var(--sub);margin-top:2px}
+.op-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.op-num{text-align:right;font-variant-numeric:tabular-nums}
+table.tb th.op-num{text-align:right}
+.op-mono{font-family:var(--mono);font-size:12.5px;color:#4D4A43}
+.op-two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;margin-bottom:16px}
+.op-h{font-size:15px;font-weight:600;margin:0;padding:14px 16px 6px}
+.op-days{display:flex;align-items:flex-end;gap:6px;height:150px;padding:10px 16px 0}
+.op-days .d{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;height:100%;justify-content:flex-end}
+.op-days .b{width:100%;max-width:34px;background:#CFC9BC;border-radius:6px 6px 2px 2px;position:relative}
+.op-days .b i{position:absolute;left:0;right:0;bottom:0;background:var(--bad);border-radius:0 0 2px 2px;opacity:.75}
+.op-days .l{font-size:12px;color:var(--sub)}
+.op-sel{height:36px;width:auto;min-width:130px}
+.op-in{max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.op-md{font-size:14px;line-height:1.7}
+.op-md h5{font-size:14px;margin:8px 0 4px}
+.op-md ul{margin:4px 0;padding-left:20px}
+.op-kv{display:grid;grid-template-columns:80px minmax(0,1fr);gap:6px 10px;font-size:14px}
+.op-kv .k{color:var(--sub)}
+.op-exp td{background:#FAF9F6}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="assets/owa.js"></script>
+<script>
+"use strict";
+/* 平台管理，平台运行与用量（合并原 /admin/usage、/admin/runs、/admin/audit） */
+const AGENTS = ["客服知识问答", "代码审查员", "SQL 助手", "会议纪要整理", "报销审核助手", "周报生成器", "合同条款比对", "竞品周报"];
+const BYAGENT = [["客服知识问答", 6412, 41, "18.2M", "3.1M"], ["SQL 助手", 3110, 9, "6.1M", "1.2M"], ["代码审查员", 2604, 12, "9.8M", "1.6M"], ["周报生成器", 2210, 6, "4.4M", "0.9M"], ["会议纪要整理", 1980, 15, "7.9M", "1.4M"], ["报销审核助手", 1214, 34, "2.2M", "0.5M"], ["合同条款比对", 290, 3, "1.9M", "0.3M"], ["竞品周报", 210, 4, "1.1M", "0.2M"]];
+const DAYS = [["11-05", 2410, 18], ["11-06", 2620, 21], ["11-07", 2380, 14], ["11-08", 1220, 9], ["11-09", 1080, 12], ["11-10", 2890, 30], ["11-11", 2140, 20]];
+const WF = { "1 天": 0.14, "7 天": 1, "30 天": 4.1, "90 天": 11.6 };
+const ST = { "排队中": "", "运行中": "warn", "成功": "ok", "失败": "bad", "已取消": "" };
+const RUNS = [
+  { id: "run_8c1f", at: "11-11 14:21", who: "linzhou", ag: "报销审核助手", v: "v3", src: "接口调用", st: "运行中", input: "{ invoice_url: \"https://erp…/1015.pdf\", amount: 6800, currency: \"CNY\" }", dur: "38 秒", tok: "12.4k", task: "task_2d71e0" },
+  { id: "run_8b90", at: "11-11 14:20", who: "chenxi", ag: "SQL 助手", v: "v4", src: "API 会话", st: "排队中", input: "查一下 10 月各部门差旅报销总额，按部门排序", dur: "—", tok: "—", task: "task_2d71dc" },
+  { id: "run_8a33", at: "11-11 14:02", who: "heqing", ag: "SQL 助手", v: "v4", src: "工作台", st: "成功", input: "找出 11 月重复提交的发票", dur: "11 秒", tok: "3.2k", task: "task_2d71a2", ans: "找到 **3 组**重复提交的发票：\n- 1015-机票（王蕾，两次提交）\n- 1018-餐饮（陈一帆）\n- 1102-酒店（唐悦）" },
+  { id: "run_8a01", at: "11-11 13:58", who: "xumu", ag: "代码审查员", v: "v7", src: "API 会话", st: "失败", input: "审一下 PR #412 的并发改动", dur: "2 分 04 秒", tok: "41.0k（部分）", task: "task_2d7190", err: "provider_error", errMsg: "上游返回 HTTP 529 overloaded，重试 3 次后放弃" },
+  { id: "run_89c4", at: "11-11 13:40", who: "zhoulan", ag: "周报生成器", v: "v4", src: "工作台", st: "成功", input: "生成我这周的周报", dur: "24 秒", tok: "8.8k", task: "task_2d7155", ans: "**第 45 周周报**\n- 上线模型价目新版本（Sonnet 4.5 v3）\n- 处理 6 笔充值订单\n- 下周：对账导出改为按周", own: true },
+  { id: "run_8971", at: "11-11 11:05", who: "linzhou", ag: "会议纪要整理", v: "v5", src: "工作台", st: "成功", input: "整理周三项目例会", dur: "1 分 12 秒", tok: "18.3k", task: "task_2d70b2", ans: "**决议**：报销审核助手 11-15 前发布 v4。\n**待办**：林舟补齐外币用例；周岚确认上架。" },
+  { id: "run_8920", at: "11-11 10:47", who: "tangyue", ag: "客服知识问答", v: "v6", src: "接口调用", st: "已取消", input: "{ question: \"退货运费谁出\" }", dur: "3 秒", tok: "0.4k", task: "task_2d7088" },
+  { id: "run_88f2", at: "11-11 10:30", who: "linzhou", ag: "报销审核助手", v: "草稿", src: "评测", st: "成功", input: "用例：外币换算（USD 发票 320）", dur: "19 秒", tok: "5.1k", task: "task_2d7061", ans: "{ \"verdict\": \"pass\", \"reasons\": [\"按开票日汇率 7.12 换算为 2,278.40 元\"] }", struct: true },
+  { id: "run_88a0", at: "11-11 09:58", who: "linzhou", ag: "竞品周报（新版）", v: "草稿", src: "AI 编辑", st: "成功", input: "加入招聘动态与价格追踪", dur: "46 秒", tok: "9.7k", task: "task_2d7012", ans: "已修改草稿：新增「招聘动态」数据源，价格追踪改为每周一抓取。" },
+];
+const MORE_RUNS = [
+  { id: "run_8811", at: "11-11 09:12", who: "xumu", ag: "代码审查员", v: "v7", src: "API 会话", st: "失败", input: "审一下 PR #409", dur: "8 秒", tok: "1.2k", task: "task_2d6fe0", err: "insufficient_credits", errMsg: "余额不足，欠 36 积分，运行被终止" },
+  { id: "run_87d2", at: "11-11 08:40", who: "songdi", ag: "小红书文案", v: "v2", src: "工作台", st: "成功", input: "给新上线的耳机写一篇", dur: "16 秒", tok: "4.0k", task: "task_2d6fa3", ans: "三版标题和正文已生成。" },
+];
+const AUDIT_TYPES = { "智能体": ["发布智能体", "回滚版本", "删除智能体", "公开智能体", "分享智能体"], "Key": ["签发 Key", "吊销 Key", "轮换 Key"], "账号": ["创建账号", "停用账号", "恢复账号", "修改角色", "重置密码", "修改月度上限"], "登录": ["登录", "登录失败"], "提供者与模型": ["修改提供者", "停用模型", "修改模型价目", "保存别名映射"], "计费": ["发放积分", "批量发放积分"], "套餐与订单": ["修改套餐", "确认订单", "取消订单"], "市场": ["上架", "下架", "驳回上架申请"], "评测": ["运行评测"], "Webhook": ["重发投递"], "用户组": ["创建用户组", "添加组成员"], "克隆": ["克隆智能体"] };
+const AUDIT = [
+  ["11-11 15:10", "zhoulan", "确认订单", "OD-20261110-0031 tangyue +120,000", "10.2.0.7"],
+  ["11-11 14:52", "linzhou", "发布智能体", "expense-reviewer v3 → v4", "10.2.4.18"],
+  ["11-11 14:40", "zhoulan", "修改模型价目", "claude-sonnet-4-5 v2 → v3", "10.2.0.7"],
+  ["11-11 14:10", "zhoulan", "发放积分", "tangyue +5,000（11 月部门预算）", "10.2.0.7"],
+  ["11-11 13:31", "linzhou", "签发 Key", "owa_live_…a91c，限定 expense-reviewer", "10.2.4.18"],
+  ["11-11 11:03", "xumu", "停用模型", "claude-3-haiku", "10.2.0.9"],
+  ["11-11 10:22", "zhoulan", "上架", "weekly-report v4 → 通用助手", "10.2.0.7"],
+  ["11-11 09:48", "chenxi", "登录失败", "密码错误（第 2 次）", "36.112.8.40"],
+  ["11-11 09:30", "linzhou", "运行评测", "expense-reviewer 草稿，6 个用例 4 通过", "10.2.4.18"],
+  ["11-10 18:02", "zhoulan", "停用账号", "liuqiang@xinghe.example，停用 2 个 Key", "10.2.0.7"],
+  ["11-10 17:15", "luojing", "分享智能体", "contract-diff → linzhou（只读）", "10.2.6.3"],
+  ["11-10 16:40", "linzhou", "重发投递", "hooks.xinghe.example/owa #dlv_0912", "10.2.4.18"],
+];
+const PEOPLE = ["zhoulan", "linzhou", "xumu", "heqing", "chenxi", "tangyue", "luojing", "songdi"];
+const S = { tab: "usage", win: "7 天", queued: 14, running: 6, exp: null, f: { ag: "全部智能体", st: "全部状态", src: "全部来源", who: "全部账号" }, moreRuns: false, sel: null, at: "全部操作", aw: "全部操作者", moreAudit: false, loading: false };
+
+OWA.mount({ nav: "admin", body: `<div class="bwrap">${sideNav("admin")}<main class="main" id="op-main"></main></div>` });
+
+function render() {
+  history.replaceState(null, "", "#" + S.tab);
+  $("#op-main").innerHTML = `<div class="ph"><div><h1>平台运行与用量</h1><p class="muted" style="margin:6px 0 0">全平台的 token 用量、所有账号的运行和操作记录。会话内容是私有的，这里看不到对话。</p></div></div>
+    <div class="tabs" role="tablist">${[["usage", "平台用量"], ["runs", "平台运行"], ["audit", "平台审计"]].map(([k, t]) => `<button role="tab" aria-selected="${S.tab === k}" class="${S.tab === k ? "on" : ""}" data-a="op-tab" data-v="${k}">${t}</button>`).join("")}</div>
+    ${S.loading ? `<div class="card empty-state row" style="justify-content:center"><span class="spin"></span><span class="muted">正在加载…</span></div>` : S.tab === "usage" ? usage() : S.tab === "runs" ? runs() : audit()}`;
+  if (S.tab === "runs" && S.sel) runDrawer(); else closeDrawer();
+}
+
+/* ---------- 平台用量 ---------- */
+function usage() {
+  const f = WF[S.win], tot = BYAGENT.reduce((s, r) => s + r[1], 0), fail = BYAGENT.reduce((s, r) => s + r[2], 0);
+  const mx = Math.max(...DAYS.map((d) => d[1]));
+  return `<div class="op-bar"><div class="seg" aria-label="时间窗">${Object.keys(WF).map((w) => `<button data-a="op-win" data-v="${w}" class="${w === S.win ? "on" : ""}">最近 ${w}</button>`).join("")}</div>
+      <button class="btn ghost sm" data-a="op-refresh">${ic("refresh", 14)}刷新</button>
+      <span class="muted small" style="margin-left:auto">花费按模型价目估算，实际扣费以 <a class="link" href="admin-billing.html">计费</a> 为准</span></div>
+    <div class="op-stats">
+      <div class="stat"><div class="muted small">总花费（估算）</div><div class="n">$ ${(184.3 * f).toFixed(2)}</div><div class="s">约 ${Math.round(13300 * f).toLocaleString()} 积分</div></div>
+      <div class="stat"><div class="muted small">运行次数</div><div class="n">${Math.round(tot * f).toLocaleString()}</div><div class="s">成功率 ${(100 - (fail / tot) * 100).toFixed(1)}%</div></div>
+      <div class="stat"><div class="muted small">输入 tokens</div><div class="n">${(51.6 * f).toFixed(1)}M</div><div class="s">含缓存读取 ${(22.1 * f).toFixed(1)}M</div></div>
+      <div class="stat"><div class="muted small">输出 tokens</div><div class="n">${(9.2 * f).toFixed(1)}M</div><div class="s">&nbsp;</div></div>
+      <div class="stat" ${S.queued > 10 ? 'style="border-color:#EBCB91;background:#FFFBF2"' : ""}><div class="muted small">队列（实时）</div><div class="n">${S.queued} <span class="muted" style="font-size:14px;font-family:var(--sans)">排队</span>，${S.running} <span class="muted" style="font-size:14px;font-family:var(--sans)">在跑</span></div>
+        <div class="s" ${S.queued > 10 ? 'style="color:var(--warnt)"' : ""}>${S.queued > 10 ? "排队超过 10 个，考虑加 worker" : "队列正常"}</div></div></div>
+    <div class="op-two">
+      <div class="card" style="overflow:hidden"><h3 class="op-h">按智能体</h3><table class="tb"><thead><tr><th>智能体</th><th class="op-num">运行</th><th class="op-num">失败</th><th class="op-num">失败率</th></tr></thead><tbody>
+        ${BYAGENT.map((r) => `<tr><td>${r[0]}</td><td class="op-num">${Math.round(r[1] * f).toLocaleString()}</td><td class="op-num" ${r[2] / r[1] > 0.02 ? 'style="color:var(--bad)"' : ""}>${Math.round(r[2] * f)}</td><td class="op-num">${((r[2] / r[1]) * 100).toFixed(1)}%</td></tr>`).join("")}</tbody></table></div>
+      <div class="card" style="overflow:hidden"><h3 class="op-h">按天（UTC）<span class="muted small" style="font-weight:400;margin-left:8px">深色为失败</span></h3>
+        <div class="op-days">${DAYS.map((d) => `<div class="d" title="${d[0]}：${d[1]} 次，失败 ${d[2]}"><span class="small muted">${d[1].toLocaleString()}</span><div class="b" style="height:${(d[1] / mx) * 100}px"><i style="height:${Math.max(2, (d[2] / mx) * 100 * 4)}px"></i></div><span class="l">${d[0]}</span></div>`).join("")}</div>
+        <table class="tb" style="margin-top:8px"><thead><tr><th>日期</th><th class="op-num">运行</th><th class="op-num">失败</th></tr></thead><tbody>${DAYS.slice().reverse().slice(0, 4).map((d) => `<tr><td>${d[0]}</td><td class="op-num">${d[1].toLocaleString()}</td><td class="op-num">${d[2]}</td></tr>`).join("")}</tbody></table></div></div>
+    <div class="card" style="overflow:hidden"><h3 class="op-h">运行明细 <span class="muted small" style="font-weight:400;margin-left:8px">点一行展开每个模型的 tokens</span></h3><table class="tb"><thead><tr><th>时间</th><th>账号</th><th>智能体</th><th class="op-num">输入</th><th class="op-num">输出</th><th class="op-num">花费</th><th></th></tr></thead><tbody>
+      ${RUNS.filter((r) => r.tok !== "—").slice(0, 6).map((r, i) => `<tr class="click" data-a="op-exp" data-i="${i}"><td class="muted">${r.at}</td><td>${r.who}</td><td>${r.ag} <span class="muted small">${r.v}</span></td><td class="op-num">${r.tok}</td><td class="op-num">${(parseFloat(r.tok) * 0.18).toFixed(1)}k</td><td class="op-num">$ ${(parseFloat(r.tok) * 0.0061).toFixed(3)}${r.tok.includes("部分") ? ' <span class="tag warn">部分</span>' : ""}</td><td style="color:var(--sub);text-align:right">${ic(S.exp === i ? "down" : "chev", 15)}</td></tr>
+        ${S.exp === i ? `<tr class="op-exp"><td colspan="7"><table class="tb" style="background:#fff;border:1px solid var(--line2);border-radius:10px"><thead><tr><th>模型</th><th class="op-num">输入</th><th class="op-num">输出</th><th class="op-num">缓存读取</th><th class="op-num">缓存写入</th></tr></thead><tbody>
+          <tr><td class="op-mono">claude-sonnet-4-5</td><td class="op-num">${(parseFloat(r.tok) * 0.62).toFixed(1)}k</td><td class="op-num">${(parseFloat(r.tok) * 0.15).toFixed(1)}k</td><td class="op-num">${(parseFloat(r.tok) * 0.41).toFixed(1)}k</td><td class="op-num">${(parseFloat(r.tok) * 0.08).toFixed(1)}k</td></tr>
+          <tr><td class="op-mono">claude-haiku-4-5（子代理）</td><td class="op-num">${(parseFloat(r.tok) * 0.2).toFixed(1)}k</td><td class="op-num">${(parseFloat(r.tok) * 0.03).toFixed(1)}k</td><td class="op-num">0</td><td class="op-num">0</td></tr></tbody></table></td></tr>` : ""}`).join("")}</tbody></table></div>`;
+}
+
+/* ---------- 平台运行 ---------- */
+function runs() {
+  const all = S.moreRuns ? RUNS.concat(MORE_RUNS) : RUNS;
+  const f = S.f;
+  const rows = all.filter((r) => (f.ag === "全部智能体" || r.ag === f.ag) && (f.st === "全部状态" || r.st === f.st) && (f.src === "全部来源" || r.src === f.src) && (f.who === "全部账号" || r.who === f.who));
+  const sel = (k, opts) => `<select class="inp op-sel" data-f="${k}" aria-label="${opts[0]}">${opts.map((o) => `<option ${o === f[k] ? "selected" : ""}>${o}</option>`).join("")}</select>`;
+  return `<div class="op-bar">${sel("who", ["全部账号", ...PEOPLE])}${sel("ag", ["全部智能体", ...AGENTS, "竞品周报（新版）"])}${sel("st", ["全部状态", ...Object.keys(ST)])}${sel("src", ["全部来源", "工作台", "API 会话", "接口调用", "评测", "AI 编辑"])}
+      <button class="btn ghost sm" data-a="op-refresh">${ic("refresh", 14)}刷新</button><span class="muted small" style="margin-left:auto">${rows.length} 条</span></div>
+    <div class="card" style="overflow:hidden">${rows.length ? `<table class="tb"><thead><tr><th>时间</th><th>账号</th><th>智能体</th><th>来源</th><th>状态</th><th>输入</th><th class="op-num">耗时</th><th class="op-num">花费（tokens）</th></tr></thead><tbody>
+      ${rows.map((r) => `<tr class="click ${S.sel === r.id ? "sel" : ""}" data-a="op-run" data-id="${r.id}"><td class="muted">${r.at}</td><td>${r.who}</td><td>${r.ag} <span class="muted small">${r.v}</span></td><td>${r.src}</td><td><span class="tag ${ST[r.st]}">${r.st === "运行中" ? '<span class="spin" style="width:10px;height:10px;border-width:1.5px"></span>' : ""}${r.st}</span></td><td><div class="op-in">${esc(r.input)}</div></td><td class="op-num">${r.dur}</td><td class="op-num">${r.tok.replace("（部分）", "")}${r.tok.includes("部分") ? ' <span class="tag warn">部分</span>' : ""}</td></tr>`).join("")}</tbody></table>`
+      : `<div class="empty-state"><div class="serif">没有符合条件的运行</div><p class="muted" style="margin:0 0 14px">换一个筛选条件试试。</p><button class="btn ghost sm" data-a="op-clear">清除筛选</button></div>`}</div>
+    <div style="text-align:center;margin-top:12px">${S.moreRuns ? '<span class="muted small">没有更早的运行了</span>' : '<button class="btn ghost sm" data-a="op-more-runs">加载更多</button>'}</div>`;
+}
+function md(s) { return esc(s).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").split("\n").map((l) => (l.startsWith("- ") ? `<li>${l.slice(2)}</li>` : `<div>${l}</div>`)).join("").replace(/(<li>.*<\/li>)/, "<ul>$1</ul>"); }
+function runDrawer() {
+  const r = RUNS.concat(MORE_RUNS).find((x) => x.id === S.sel);
+  const had = $("#owa-drawer");
+  const live = r.st === "运行中" || r.st === "排队中";
+  openDrawer(`<div class="dh"><div style="min-width:0"><div style="font-weight:600;font-size:16px">${r.ag} <span class="muted" style="font-weight:400">${r.v}</span></div><div class="muted small">${r.who}@xinghe.example，${r.src}，${r.at}</div></div><button class="xbtn" data-a="owa-drawer-close" aria-label="关闭详情">${ic("x")}</button></div>
+    <div class="db">
+      <div class="row" style="margin-bottom:12px"><span class="tag ${ST[r.st]}">${r.st}</span><span class="muted small">耗时 ${r.dur}，${r.tok} tokens</span>
+        ${live ? `<button class="btn danger sm" style="margin-left:auto" data-a="op-cancel">${ic("stop", 14)}取消运行</button>` : ""}</div>
+      <div class="dsec"><h4>输入</h4><div class="snap" style="margin:6px 0 0">${esc(r.input)}</div></div>
+      ${r.err ? `<div class="dsec" style="border-color:#EBC5BB"><h4 style="color:var(--bad)">错误 <span class="tag bad" style="margin-left:6px">${r.err}</span></h4><p style="margin:6px 0 0">${esc(r.errMsg)}</p></div>` : ""}
+      ${r.ans ? (r.struct ? `<div class="dsec"><h4>结构化结果</h4><pre class="code" style="margin-top:6px;white-space:pre-wrap">${esc(r.ans)}</pre></div>` : `<div class="dsec"><h4>最终回答</h4><div class="op-md">${md(r.ans)}</div></div>`) : live ? `<div class="dsec"><h4>最终回答</h4><p class="muted" style="margin:6px 0 0">${r.st === "排队中" ? "还在排队，前面有 " + S.queued + " 个运行。" : "运行中，完成后显示。"}</p></div>` : ""}
+      <div class="dsec"><h4>标识</h4><div class="op-kv" style="margin-top:6px"><span class="k">runId</span><span class="op-mono">${r.id}</span><span class="k">taskId</span><span class="op-mono">${r.task}</span></div></div>
+      <div class="dsec"><h4>完整过程</h4>${r.own ? `<p class="muted small" style="margin:4px 0 10px">这是你自己的运行，可以在对话里查看完整过程。</p><a class="btn ghost sm" href="chat.html">${ic("chat", 14)}在对话里查看</a>`
+        : `<p class="muted small" style="margin:4px 0 10px">会话是私有的，管理员也不能查看别人的对话过程。需要排查时，请联系 ${r.who}@xinghe.example 本人分享。</p><button class="btn ghost sm" disabled>${ic("lock", 14)}在对话里查看</button>`}</div>
+    </div>`, 460);
+  if (had) $("#owa-drawer").style.animation = "none";
+}
+
+/* ---------- 平台审计 ---------- */
+function audit() {
+  const typeOf = (op) => Object.keys(AUDIT_TYPES).find((k) => AUDIT_TYPES[k].includes(op));
+  const all = S.moreAudit ? AUDIT.concat([["11-10 15:02", "zhoulan", "创建账号", "kongwei@xinghe.example（普通账号）", "10.2.0.7"], ["11-10 14:20", "heqing", "克隆智能体", "sql-helper → sql-helper-finance", "10.2.3.11"]]) : AUDIT;
+  const rows = all.filter((r) => (S.at === "全部操作" || r[2] === S.at || typeOf(r[2]) === S.at) && (S.aw === "全部操作者" || r[1] === S.aw));
+  return `<div class="op-bar"><select class="inp op-sel" id="op-at" style="min-width:200px" aria-label="操作类型"><option ${S.at === "全部操作" ? "selected" : ""}>全部操作</option>${Object.entries(AUDIT_TYPES).map(([g, ops]) => `<optgroup label="${g}"><option value="${g}" ${S.at === g ? "selected" : ""}>${g}（全部）</option>${ops.map((o) => `<option ${S.at === o ? "selected" : ""}>${o}</option>`).join("")}</optgroup>`).join("")}</select>
+      <select class="inp op-sel" id="op-aw" aria-label="操作者"><option>全部操作者</option>${PEOPLE.map((p) => `<option ${S.aw === p ? "selected" : ""}>${p}</option>`).join("")}</select>
+      <button class="btn ghost sm" data-a="op-refresh">${ic("refresh", 14)}刷新</button><span class="muted small" style="margin-left:auto">约 50 种操作类型，${rows.length} 条</span></div>
+    <div class="card" style="overflow:hidden">${rows.length ? `<table class="tb"><thead><tr><th>时间</th><th>操作者</th><th>操作</th><th>内容</th><th>来源地址</th></tr></thead><tbody>
+      ${rows.map((r) => `<tr><td class="muted" style="white-space:nowrap">${r[0]}</td><td>${r[1]}</td><td><span class="tag ${/停用|删除|吊销|失败|下架/.test(r[2]) ? "bad" : ""}">${r[2]}</span></td><td>${esc(r[3])}</td><td class="op-mono">${r[4]}</td></tr>`).join("")}</tbody></table>`
+      : `<div class="empty-state"><div class="serif">没有符合条件的操作记录</div><button class="btn ghost sm" data-a="op-aclear" style="margin-top:10px">清除筛选</button></div>`}</div>
+    <div style="text-align:center;margin-top:12px">${S.moreAudit ? '<span class="muted small">没有更早的记录了</span>' : '<button class="btn ghost sm" data-a="op-more-audit">加载更多</button>'}</div>`;
+}
+
+OWA.on("op-tab", (t) => { S.tab = t.dataset.v; S.sel = null; render(); });
+OWA.on("op-win", (t) => { S.win = t.dataset.v; render(); });
+OWA.on("op-exp", (t) => { const i = +t.dataset.i; S.exp = S.exp === i ? null : i; render(); });
+OWA.on("op-refresh", () => { S.loading = true; render(); setTimeout(() => { S.loading = false; S.queued = Math.max(3, S.queued - 5); S.running = 8; render(); toast("已刷新"); }, 600); });
+OWA.on("op-run", (t) => { S.sel = t.dataset.id; render(); });
+OWA.on("op-clear", () => { S.f = { ag: "全部智能体", st: "全部状态", src: "全部来源", who: "全部账号" }; render(); });
+OWA.on("op-aclear", () => { S.at = "全部操作"; S.aw = "全部操作者"; render(); });
+OWA.on("op-more-runs", () => { S.moreRuns = true; render(); });
+OWA.on("op-more-audit", () => { S.moreAudit = true; render(); });
+OWA.on("op-cancel", () => {
+  const r = RUNS.concat(MORE_RUNS).find((x) => x.id === S.sel);
+  confirmBox({ title: "取消这次运行？", danger: true, ok: "取消运行", body: `<p>${r.who} 的「${r.ag}」运行会立即停止，已用掉的 tokens 照常计费，冻结的积分剩余部分退回。对方会在运行记录里看到「已取消」。</p>`,
+    onOk: () => { r.st = "已取消"; r.dur = r.dur === "—" ? "0 秒" : r.dur; render(); toast("已取消运行 " + r.id); } });
+});
+document.addEventListener("click", (e) => { if (e.target.closest('[data-a="owa-drawer-close"]')) { S.sel = null; setTimeout(render, 0); } });
+document.addEventListener("change", (e) => {
+  if (e.target.dataset.f) { S.f[e.target.dataset.f] = e.target.value; render(); }
+  if (e.target.id === "op-at") { S.at = e.target.value; render(); }
+  if (e.target.id === "op-aw") { S.aw = e.target.value; render(); }
+});
+const hh = location.hash.slice(1);
+if (["usage", "runs", "audit"].includes(hh)) S.tab = hh;
+render();
+</script>
+</body>
+</html>

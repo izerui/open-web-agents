@@ -17,10 +17,10 @@ export function CredentialsView({ configured }: { configured: boolean }) {
         </div>
       </dl>
       <nav aria-label="费用相关页面" className="flex flex-wrap gap-x-6 gap-y-3 text-sm">
-        <Link className="text-primary underline underline-offset-4" href="/settings/usage">
+        <Link className="text-primary underline underline-offset-4" href="/account/usage">
           用量分析
         </Link>
-        <Link className="text-primary underline underline-offset-4" href="/settings/billing">
+        <Link className="text-primary underline underline-offset-4" href="/account/billing">
           账户与消耗
         </Link>
       </nav>

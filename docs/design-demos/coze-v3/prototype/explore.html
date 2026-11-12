@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>探索 · Open Web Agents</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/owa.css">
+<style>
+.ex-attach{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border-radius:15px;background:#F2F0EA;font-size:13px;color:#3C3A35}
+.ex-attach button{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;color:var(--sub)}
+.ex-attach button:hover{background:#E4E1D9}
+.suggest .hd{font-size:13px;color:var(--sub);padding:6px 12px 2px}
+.ex-designer{display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:12px;background:#F4F2EC;border:1px solid #E2DED3}
+.ex-designer .t{font-family:var(--serif);font-weight:700;font-size:17px}
+.ex-designer .d{font-size:14px;color:#4D4A43;margin-top:2px}
+.ex-tools{display:flex;align-items:center;gap:10px;margin:20px 0 22px;flex-wrap:wrap}
+.ex-search{position:relative;width:260px;margin-left:auto}
+.ex-search span{position:absolute;left:12px;top:10px;color:var(--sub)}
+.ex-search .inp{padding-left:38px;border-radius:19px}
+.ex-ref{width:38px;height:38px;border-radius:50%;border:1px solid var(--line);background:#fff;display:grid;place-items:center;color:#3C3A35}
+.ex-ref:hover{background:#F2F0EA}
+.ex-count{font-size:14px;color:var(--sub)}
+.ex-count b{color:var(--ink);font-weight:600}
+.ex-skel{background:#fff;border:1px solid var(--line);border-radius:18px;padding:20px;display:flex;flex-direction:column;gap:12px}
+.ex-skel i{display:block;border-radius:8px;background:linear-gradient(90deg,#EFEDE7 0%,#F7F6F2 50%,#EFEDE7 100%);background-size:200% 100%;animation:exsh 1.2s linear infinite}
+@keyframes exsh{from{background-position:200% 0}to{background-position:-200% 0}}
+.ex-state{background:#fff;border:1px solid var(--line);border-radius:18px;padding:48px 24px;text-align:center}
+.ex-state .serif{font-size:22px;margin-bottom:6px}
+.ex-state p{margin:0 0 18px;color:var(--sub);font-size:15px}
+.ex-state .row{justify-content:center}
+.wcard .h a{margin-left:8px}
+.ex-proto{position:fixed;left:122px;bottom:14px;z-index:100;min-height:30px;display:flex;align-items:center;gap:8px;padding:2px 3px 2px 12px;border-radius:16px;background:#2A2926;color:#E9E6DE;font-size:12px;opacity:.86}
+.ex-proto:hover{opacity:1}
+.ex-proto>button{height:26px;color:#E9E6DE;padding-right:8px}
+.ex-proto .seg[hidden]{display:none}
+.ex-proto .seg{padding:2px}.ex-proto .seg button{height:24px;padding:0 10px;font-size:12px}
+.mcard .meta .tag.line{color:#4D4A43}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="assets/owa.js"></script>
+<script>
+"use strict";
+/* 探索首页（原 /market）：说一件事 → 智能体设计器做一个或推荐已有智能体；最近会话；市场 */
+
+/* 上架日期（排序「最新」用） */
+const LISTED = { meeting: "10-12", rival: "11-06", review: "09-20", sql: "08-30", xhs: "11-09", contract: "10-25", kb: "07-14", weekly: "10-30" };
+const usesNum = (s) => (/万/.test(s) ? parseFloat(s) * 10000 : parseInt(String(s).replace(/[^\d]/g, ""), 10));
+const KW = {
+  meeting: ["会议", "纪要", "录音", "例会"], rival: ["竞品", "对手"], review: ["代码", "PR", "diff", "审查"], sql: ["SQL", "sql", "查询", "统计", "数据库"],
+  xhs: ["小红书", "文案", "笔记"], contract: ["合同", "条款"], kb: ["客服", "退货", "售后"], weekly: ["周报"],
+};
+const agentName = (k) => (MY_AGENTS.find((a) => a.k === k) || MARKET.find((m) => m.k === k) || { n: "智能体" }).n;
+const agentId = (k) => (MY_AGENTS.find((a) => a.k === k) || MARKET.find((m) => m.k === k) || { id: k }).id;
+
+/* 最近会话的预览内容（与 SESSIONS 对应） */
+const WORK = {
+  s1: { u: "帮我初审这 12 张 11 月差旅发票，超额的单独列出来。", r: "已读完 8 张发票，正在核对第 9 张的抬头。", steps: ["识别 12 张发票字段", "按制度核对前 8 张", "核对第 9 张的抬头"] },
+  s2: { u: "整理周三项目例会的录音，列出决议和待办。", r: "共 4 项决议、7 条待办，已按负责人分组。", file: "项目例会纪要.md", fs: "决议 4，待办 7" },
+  s3: { u: "按部门统计上月报销总额和笔数。", r: "生成了 SQL 并跑出结果：研发部最高，38.2 万元。", file: "部门报销统计.csv", fs: "9 个部门" },
+  s4: { u: "这张 420 美元的酒店发票怎么换算？", r: "按开票日 11-05 的汇率 7.12 换算为 2,990.40 元，未超住宿标准，可以通过。" },
+  s5: { u: "比对 A、B 两版采购合同。", r: "找到 6 处差异，其中 2 处对我方不利（付款周期、违约金）。", file: "条款差异.docx", fs: "差异 6，不利 2" },
+};
+const RECENT = SESSIONS.filter((s) => !s.archived).slice(0, 5);
+
+const S = { cat: "全部", q: "", sort: "hot", work: 0, load: "ok", attach: false, sug: "" };
+
+OWA.mount({
+  nav: "explore",
+  body: `<div class="pbody" id="ex-scroll">
+    <div class="hero">
+      <div class="avrow">${["expense-reviewer", "meeting", "rival", "review", "builder", "xhs", "sql"].map((k) => av(k, 60)).join("")}</div>
+      <h1>想交给它什么事？</h1>
+      <p class="lead">说一件事，市场里的智能体接手；没有合适的，智能体设计器现场给你做一个。</p>
+      <div class="askbox">
+        <textarea id="ex-ask" aria-label="想交给它什么事" placeholder="比如：做一个审核报销单的助手，超过 5000 元提醒我"></textarea>
+        <div class="bar">
+          <span id="ex-att"></span>
+          <button class="ibtn" data-a="ex-attach">${ic("clip", 16)}添加文件</button>
+          <span class="muted small">回车发送，Shift＋回车换行</span>${gap("A1", "意图推荐")}
+          <button class="sendbtn" data-a="ex-send" aria-label="发送">${ic("up", 18, 2)}</button>
+        </div>
+      </div>
+      <div id="ex-sug"></div>
+      <div class="chips">
+        ${["做一个审核报销单的助手，超过 5000 元提醒我", "整理今天的会议纪要", "给新耳机写一篇小红书文案", "比对两份合同的条款差异"].map((t) => `<button class="chip" data-a="ex-chip" data-t="${t}">${t}</button>`).join("")}
+      </div>
+    </div>
+    <div class="band">
+      <div class="row" style="align-items:flex-end"><div><div class="row" style="gap:8px"><h2>你的 AI 同事正在工作</h2>${gap("A2")}</div>
+        <p class="muted" style="margin:0;font-size:16px">最近交给它们的 ${RECENT.length} 件事。点开看过程，或者到对话里接着交代下一项。</p></div>
+        <a class="btn ghost" style="margin-left:auto;text-decoration:none" href="chat.html">${ic("chat", 16)}全部会话</a></div>
+      <div class="working" id="ex-work"></div>
+    </div>
+    <div class="sec2">
+      <h2>招募你的 AI 同事</h2>
+      <p class="muted" style="margin:0;font-size:16px">管理员上架的智能体，点开就能聊，也可以克隆一份改成自己的，或者用 API 接进你的系统。</p>
+      <div class="ex-tools" id="ex-tools"></div>
+      <div id="ex-market"></div>
+    </div>
+  </div>
+  <div class="ex-proto" title="原型演示用，不属于产品界面"><button data-a="ex-proto-t">原型开关：市场状态</button>
+    <div class="seg" id="ex-proto" hidden>${[["ok", "正常"], ["loading", "加载中"], ["error", "加载失败"], ["none", "暂无上架"]].map(([v, n]) => `<button data-a="ex-proto" data-v="${v}" class="${v === "ok" ? "on" : ""}">${n}</button>`).join("")}</div>
+  </div>`,
+});
+
+/* ---------- 最近会话 ---------- */
+function renderWork() {
+  const s = RECENT[S.work], w = WORK[s.id];
+  $("#ex-work").innerHTML = `<div class="wlist"><div class="lab">最近 ${RECENT.length} 个会话</div>
+    ${RECENT.map((x, i) => `<button class="witem ${i === S.work ? "on" : ""}" data-a="ex-work" data-i="${i}">${av(x.k, 36)}<div style="min-width:0"><div class="t">${esc(x.t)}</div>
+      <div class="s ${x.run ? "run" : ""}">${x.run ? '<span class="spin" style="width:11px;height:11px;border-width:1.5px"></span>正在工作' : ic("check", 13, 2.2) + (WORK[x.id].file ? "成果已交付" : "已回复")}<span class="muted" style="margin-left:6px">${agentName(x.k)}，${x.at}</span></div></div></button>`).join("")}
+  </div>
+  <div class="wpane"><div class="wcard">
+    <div class="h">${av(s.k, 26)}<span>${esc(s.t)}</span><span style="margin-left:auto" class="tag ${s.run ? "warn" : "ok"}">${s.run ? "正在工作" : w.file ? "成果已交付" : "已回复"}</span>
+      <a class="btn sm" style="text-decoration:none" href="chat.html?session=${s.id}">在对话里打开</a></div>
+    <div class="b">
+      <div class="ubub">${esc(w.u)}</div>
+      <div class="m-bot" style="margin-top:16px">${av(s.k, 28)}<div class="bd"><div class="who">${agentName(s.k)}</div><div>${esc(w.r)}</div>
+        ${s.run ? `<div class="steps">${w.steps.map((t, i) => i < w.steps.length - 1 ? `<div class="s done">${ic("check", 14, 2)}${t}</div>` : `<div class="s"><span class="spin"></span>${t}</div>`).join("")}</div>
+          <div class="row" style="margin-top:12px"><a class="btn ghost sm" style="text-decoration:none" href="chat.html?session=${s.id}">${ic("eye", 15)}看执行过程</a></div>`
+        : w.file ? `<div class="deliver"><div class="t">${ic("check", 16, 2)}成果已交付${gap("A2", "交付物")}</div><div class="row" style="margin-top:10px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px">${ic("file", 20)}<div><div style="font-weight:500">${w.file}</div><div class="muted small">${w.fs}</div></div><a class="btn ghost sm" style="margin-left:auto;text-decoration:none" href="chat.html?session=${s.id}">在对话里打开</a></div></div>`
+        : `<div class="row" style="margin-top:12px"><a class="btn ghost sm" style="text-decoration:none" href="chat.html?session=${s.id}">${ic("chat", 15)}接着问</a></div>`}
+      </div></div>
+    </div>
+  </div></div>`;
+}
+
+/* ---------- 市场 ---------- */
+function renderTools() {
+  const n = S.load === "ok" ? MARKET.length : 0;
+  $("#ex-tools").innerHTML = `<div class="seg" role="tablist" aria-label="分类">${CATS.map((c) => `<button data-a="ex-cat" data-c="${c}" class="${c === S.cat ? "on" : ""}">${c}</button>`).join("")}</div>
+    <span class="ex-count">已上架 <b>${S.load === "ok" ? n : S.load === "none" ? 0 : "—"}</b> 个</span>
+    <div class="ex-search"><span>${ic("search", 18)}</span><input class="inp" id="ex-q" placeholder="搜索名称或说明" aria-label="搜索名称或说明" value="${esc(S.q)}"></div>
+    <div class="seg" aria-label="排序"><button data-a="ex-sort" data-v="hot" class="${S.sort === "hot" ? "on" : ""}">最常用</button><button data-a="ex-sort" data-v="new" class="${S.sort === "new" ? "on" : ""}">最新</button></div>
+    <button class="ex-ref" data-a="ex-refresh" title="刷新" aria-label="刷新">${ic("refresh", 17)}</button>`;
+  $("#ex-q").addEventListener("input", (e) => { S.q = e.target.value; renderMarket(); });
+}
+function card(m) {
+  return `<div class="mcard" data-a="ex-detail" data-id="${m.id}" role="link" tabindex="0" aria-label="${m.n} 详情">
+    <div class="row">${av(m.k, 48)}<div><div class="nm">${m.n}</div><div class="by">${m.by}${gap("A10")}</div></div></div>
+    <div class="ds">${m.d}</div>
+    <div class="meta"><span class="tag">${m.cat}</span><span class="tag line">v${m.v}</span><span class="tag line">${m.price}</span>${gap("A11")}<span class="tag line">${S.sort === "new" ? LISTED[m.k] + " 上架" : m.uses + "使用"}</span>${S.sort === "new" ? "" : gap("A10")}</div>
+    <div class="acts"><button class="btn sm" data-a="ex-use" data-k="${m.k}">立即使用</button><button class="btn ghost sm" data-a="ex-clone" data-k="${m.k}">克隆</button><button class="btn ghost sm" data-a="ex-api" data-k="${m.k}">API 接入</button></div>
+  </div>`;
+}
+function renderMarket() {
+  const box = $("#ex-market");
+  if (S.load === "loading") {
+    box.innerHTML = `<div class="row muted" style="margin-bottom:12px"><span class="spin"></span>正在加载…</div><div class="mgrid">${Array.from({ length: 8 }, () => `<div class="ex-skel"><div class="row"><i style="width:48px;height:48px;border-radius:50%"></i><div style="flex:1"><i style="height:16px;width:60%"></i><i style="height:12px;width:40%;margin-top:8px"></i></div></div><i style="height:14px"></i><i style="height:14px;width:80%"></i><i style="height:22px;width:70%"></i></div>`).join("")}</div>`;
+    return;
+  }
+  if (S.load === "error") {
+    box.innerHTML = `<div class="ex-state"><div class="serif">市场加载失败</div><p>网络异常或服务暂时不可用（请求超时）。你的会话和智能体不受影响。</p><div class="row"><button class="btn" data-a="ex-retry">${ic("refresh", 16)}重试</button></div></div>`;
+    return;
+  }
+  if (S.load === "none") {
+    box.innerHTML = `<div class="ex-state"><div class="serif">暂无上架智能体</div><p>管理员还没有把智能体上架到市场。你可以先自己做一个。</p><div class="row"><a class="btn" style="text-decoration:none" href="studio.html">前往我的智能体</a><a class="btn ghost" style="text-decoration:none" href="studio.html#new">${ic("plus", 16)}新建智能体</a></div></div>`;
+    return;
+  }
+  const q = S.q.trim();
+  let list = MARKET.filter((m) => (S.cat === "全部" || m.cat === S.cat) && (!q || (m.n + m.d).toLowerCase().includes(q.toLowerCase())));
+  list = list.slice().sort((a, b) => (S.sort === "hot" ? usesNum(b.uses) - usesNum(a.uses) : LISTED[b.k].localeCompare(LISTED[a.k])));
+  box.innerHTML = list.length ? `<div class="mgrid">${list.map(card).join("")}</div>`
+    : `<div class="ex-state"><div class="serif">没有符合条件的智能体</div><p>${q ? `「${esc(q)}」` : ""}${S.cat !== "全部" ? `在「${S.cat}」分类下` : ""}没有找到。换个关键词，或者让智能体设计器做一个。</p>
+      <div class="row"><button class="btn ghost" data-a="ex-clear">清除筛选</button><a class="btn" style="text-decoration:none" href="studio.html?desc=${encodeURIComponent(q ? "做一个" + q + "助手" : "")}#new">${ic("sparkle", 16)}让智能体设计器做一个</a></div></div>`;
+}
+function load(ms = 900) {
+  S.load = "loading"; protoSel("loading"); renderTools(); renderMarket();
+  setTimeout(() => { S.load = "ok"; protoSel("ok"); renderTools(); renderMarket(); }, ms);
+}
+function protoSel(v) { $$("#ex-proto button").forEach((b) => b.classList.toggle("on", b.dataset.v === v)); }
+
+/* ---------- 说一件事 → 推荐 ---------- */
+function send(text) {
+  text = (text || "").trim();
+  if (!text) { toast("先写下想交给它的事", false); $("#ex-ask").focus(); return; }
+  const hits = MARKET.filter((m) => KW[m.k].some((w) => text.includes(w)));
+  const mine = /报销|发票/.test(text) ? MY_AGENTS[0] : null;
+  const desc = encodeURIComponent(text);
+  const agentRow = (a, fromMine) => `<div class="it">${av(a.k, 36)}<div style="min-width:0"><div style="font-weight:600">交给「${a.n}」</div><div class="muted small">${fromMine ? "你建的智能体，" + a.st : a.by + "，" + a.price}，${esc(a.d)}</div></div>
+    <a class="btn ghost sm" style="margin-left:auto;text-decoration:none" href="chat.html?agent=${a.id}&q=${desc}">立即使用</a></div>`;
+  const agents = [mine ? agentRow(mine, true) : "", ...hits.slice(0, 2).map((m) => agentRow(m))].join("");
+  $("#ex-sug").innerHTML = `<div class="suggest rise" role="region" aria-label="推荐">
+    <div class="ex-designer">${av("builder", 48)}<div style="min-width:0"><div class="t">让智能体设计器做一个专门的${gap("A1")}</div><div class="d">说清规则，设计器帮你配好模型、工具、知识和评测。这段描述会直接带进去。</div></div>
+      <a class="btn" style="margin-left:auto;text-decoration:none" href="studio.html?desc=${desc}#new">${ic("sparkle", 16)}用设计器创建</a></div>
+    <div class="hd">${agents ? "或者先交给现成的智能体" : "市场里暂时没有直接对应的智能体"}</div>
+    ${agents}
+  </div>`;
+}
+
+/* ---------- 克隆 ---------- */
+function cloneAgent(m) {
+  confirmBox({
+    title: `克隆「${m.n}」`,
+    body: `<p style="margin:0 0 8px">把发布版 v${m.v} 的配置复制成你名下的新草稿，ID 为 <code>${m.id}-copy</code>。</p><p class="muted" style="margin:0">提示词、能力、契约一并复制；原作者之后的更新不会同步过来。克隆后进入编排，可以直接改。</p>`,
+    ok: "克隆并编辑",
+    onOk: async () => { toast(`已克隆「${m.n}」到我的智能体`); await later(900); location.href = "build.html"; },
+  });
+}
+
+OWA.on("ex-send", () => send($("#ex-ask").value));
+OWA.on("ex-chip", (t) => { $("#ex-ask").value = t.dataset.t; send(t.dataset.t); });
+OWA.on("ex-attach", () => { S.attach = true; $("#ex-att").innerHTML = `<span class="ex-attach">${ic("file", 14)}11月差旅发票.zip<button data-a="ex-unattach" aria-label="移除附件">${ic("x", 12)}</button></span>`; });
+OWA.on("ex-unattach", () => { S.attach = false; $("#ex-att").innerHTML = ""; });
+OWA.on("ex-work", (t) => { S.work = +t.dataset.i; renderWork(); });
+OWA.on("ex-cat", (t) => { S.cat = t.dataset.c; renderTools(); renderMarket(); });
+OWA.on("ex-sort", (t) => { S.sort = t.dataset.v; renderTools(); renderMarket(); });
+OWA.on("ex-refresh", () => load(700));
+OWA.on("ex-retry", () => load(900));
+OWA.on("ex-clear", () => { S.q = ""; S.cat = "全部"; renderTools(); renderMarket(); });
+OWA.on("ex-proto-t", () => { $("#ex-proto").hidden = !$("#ex-proto").hidden; });
+OWA.on("ex-proto", (t) => { S.load = t.dataset.v; protoSel(S.load); renderTools(); renderMarket(); });
+OWA.on("ex-detail", (t, e) => { if (e.target.closest("button,a")) return; location.href = "market-detail.html?id=" + t.dataset.id; });
+OWA.on("ex-use", async (t) => { const m = MARKET.find((x) => x.k === t.dataset.k); toast(`已用「${m.n}」v${m.v} 新建会话`); await later(600); location.href = "chat.html?agent=" + m.id; });
+OWA.on("ex-clone", (t) => cloneAgent(MARKET.find((x) => x.k === t.dataset.k)));
+OWA.on("ex-api", (t) => { const m = MARKET.find((x) => x.k === t.dataset.k); location.href = "build.html?agent=" + m.id + "#acc"; });
+
+$("#ex-ask").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(e.target.value); } });
+document.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.classList?.contains("mcard")) location.href = "market-detail.html?id=" + e.target.dataset.id; });
+renderWork(); renderTools(); renderMarket();
+</script>
+</body>
+</html>

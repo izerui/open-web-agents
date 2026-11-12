@@ -1,0 +1,1614 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Open Web Agents · 方向 2 对话搭建</title>
+<meta name="viewport" content="width=1440">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F7F6F2; --band:#EFEEE8; --card:#FFFFFF; --line:#E6E3DB; --line2:#EFECE5;
+  --ink:#1B1B1A; --sub:#6B6860; --btn:#1C1C1C;
+  --ok:#3F7A57; --okbg:#E8EFE9; --warn:#B7791F; --warnt:#85570F; --warnbg:#FBF1DE;
+  --bad:#B4442F; --badbg:#F8E7E2; --fresh:#FFF6E3;
+  --serif:"Noto Serif SC","Songti SC","STSong",serif;
+  --sans:"PingFang SC",system-ui,-apple-system,"Helvetica Neue",sans-serif;
+  --mono:"SF Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:#E4E2DB;color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer;background:none;border:0;padding:0}
+input,textarea,select{font:inherit;color:var(--ink)}
+svg{flex:none}
+.serif{font-family:var(--serif);font-weight:700;letter-spacing:.01em}
+
+/* 原型切换条（不属于产品） */
+#proto{height:40px;background:#2A2926;color:#E9E6DE;display:flex;align-items:center;gap:4px;padding:0 16px;position:sticky;top:0;z-index:50;font-size:13px}
+#proto .pt-name{color:#BDB8AC;margin-right:14px}
+#proto button{height:28px;padding:0 12px;border-radius:14px;color:#D8D4CA;font-size:13px}
+#proto button.on{background:#F7F6F2;color:#1B1B1A}
+#proto button:hover:not(.on){background:#3A3833}
+
+#board{width:1440px;height:900px;margin:0 auto;position:relative;overflow:hidden;background:var(--bg)}
+.page{position:absolute;inset:0;display:none;flex-direction:column}
+.page.on{display:flex}
+.pbody{flex:1;min-height:0;overflow:auto}
+
+/* 顶部导航 */
+.topnav{height:60px;flex:none;display:flex;align-items:center;padding:0 28px;gap:28px;border-bottom:1px solid var(--line);background:var(--bg)}
+.brand{display:flex;align-items:center;gap:10px;font-weight:600;font-size:15px}
+.navs{display:flex;gap:4px;margin-left:24px}
+.navs button{height:36px;padding:0 14px;border-radius:18px;color:var(--sub);font-size:14px}
+.navs button:hover{color:var(--ink);background:#EFEDE7}
+.navs button.on{color:var(--ink);background:#E9E7E0;font-weight:600}
+.nav-r{margin-left:auto;display:flex;align-items:center;gap:12px}
+.credit{height:34px;display:flex;align-items:center;gap:8px;padding:0 14px;border-radius:17px;background:var(--card);border:1px solid var(--line);font-size:13px}
+.credit b{font-weight:600}
+.me{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--sub)}
+.me .face{width:34px;height:34px;border-radius:50%;background:#D9D1C1;display:grid;place-items:center;color:#3B362D;font-weight:600;font-size:14px}
+
+/* 通用控件 */
+.btn{height:40px;padding:0 18px;border-radius:20px;background:var(--btn);color:#fff;display:inline-flex;align-items:center;justify-content:center;gap:8px;font-size:14px;font-weight:500;white-space:nowrap}
+.btn:hover{background:#000}
+.btn.sm{height:32px;padding:0 14px;font-size:13px;border-radius:16px}
+.btn.ghost{background:var(--card);color:var(--ink);border:1px solid var(--line)}
+.btn.ghost:hover{background:#F2F0EA}
+.btn.ok{background:var(--ok)}
+.btn.danger{background:var(--card);color:var(--bad);border:1px solid #E7C9C0}
+.btn[disabled],.btn.dis{background:#E3E0D8;color:#6B6860;cursor:not-allowed;border-color:transparent}
+.link{color:var(--ink);text-decoration:underline;text-underline-offset:3px;text-decoration-color:#C9C4B8;cursor:pointer}
+.muted{color:var(--sub)}
+.small{font-size:12px}
+.tag{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 8px;border-radius:11px;font-size:12px;background:#EFEDE7;color:#4D4A43;white-space:nowrap}
+.tag.ok{background:var(--okbg);color:var(--ok)}
+.tag.warn{background:var(--warnbg);color:var(--warnt)}
+.tag.bad{background:var(--badbg);color:var(--bad)}
+.tag.dark{background:var(--btn);color:#fff}
+.tag.line{background:transparent;border:1px solid var(--line);color:var(--sub)}
+.inp{height:38px;border:1px solid var(--line);border-radius:10px;padding:0 12px;background:#fff;outline:none;width:100%}
+.inp:focus,.ta:focus{border-color:#9C978B;box-shadow:0 0 0 3px #ECE9E1}
+.ta{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#fff;outline:none;width:100%;resize:vertical;line-height:1.6}
+select.inp{appearance:none;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236B6860' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center;padding-right:32px}
+.fld{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+.fld>label{font-size:13px;color:var(--sub)}
+.fld>label b{color:var(--bad);font-weight:500}
+.row{display:flex;align-items:center;gap:10px}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+.grid2>*{min-width:0}
+.seg{display:inline-flex;background:#ECEAE3;border-radius:20px;padding:3px}
+.seg button{height:30px;padding:0 14px;border-radius:15px;color:var(--sub);font-size:13px}
+.seg button.on{background:#fff;color:var(--ink);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px}
+.code{font-family:var(--mono);font-size:13px;line-height:1.65;background:#1F1E1C;color:#EAE6DC;border-radius:12px;padding:14px 16px;white-space:pre;overflow:auto;margin:0}
+.code .k{color:#E3B778}.code .s{color:#A9CFA4}.code .c{color:#A29D90}
+.chk{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;flex:none}
+.chk.ok{background:var(--ok);color:#fff}
+.chk.wait{border:1.5px solid #C9C4B8}
+.chk.warn{background:var(--warnbg);color:var(--warnt);border:1px solid #EBCB91}
+.chk.bad{background:var(--badbg);color:var(--bad)}
+.spin{width:16px;height:16px;border-radius:50%;border:2px solid #D9D5CB;border-top-color:var(--ink);animation:sp .8s linear infinite;flex:none}
+@keyframes sp{to{transform:rotate(360deg)}}
+@keyframes pop{0%{transform:scale(.4);opacity:0}70%{transform:scale(1.15)}100%{transform:scale(1);opacity:1}}
+@keyframes rise{from{transform:translateY(6px);opacity:0}to{transform:none;opacity:1}}
+@keyframes flash{0%{background:#FCE9B8}100%{background:var(--fresh)}}
+.pop{animation:pop .35s ease-out}
+.rise{animation:rise .3s ease-out}
+
+/* toast & modal */
+#toast{position:absolute;left:50%;bottom:28px;transform:translateX(-50%);z-index:90;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
+#toast .t{background:#1C1C1C;color:#fff;padding:10px 18px;border-radius:22px;font-size:14px;display:flex;align-items:center;gap:8px;animation:rise .25s ease-out}
+#modal{position:absolute;inset:0;z-index:80;background:rgba(27,27,26,.28);display:none;align-items:center;justify-content:center}
+#modal.on{display:flex}
+#modal .box{background:#fff;border-radius:18px;width:520px;max-height:820px;overflow:auto;padding:26px 28px;box-shadow:0 20px 60px rgba(40,35,25,.18);animation:rise .25s}
+#modal h3{margin:0 0 6px;font-family:var(--serif);font-size:22px}
+.mfoot{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
+
+/* ===== 探索 ===== */
+.hero{display:flex;flex-direction:column;align-items:center;padding:44px 0 40px}
+.avrow{display:flex}
+.avrow .av{margin-left:-10px;border-radius:50%;box-shadow:0 0 0 3px var(--bg)}
+.avrow .av:first-child{margin-left:0}
+.hero h1{font-family:var(--serif);font-size:52px;line-height:1.15;margin:22px 0 10px;font-weight:700}
+.hero p.lead{font-size:17px;color:var(--sub);margin:0 0 26px}
+.askbox{width:780px;background:#fff;border:1px solid var(--line);border-radius:22px;padding:16px 16px 12px 20px;box-shadow:0 8px 30px rgba(60,50,30,.05)}
+.askbox textarea{width:100%;border:0;outline:none;resize:none;font-size:17px;line-height:1.6;height:56px;background:transparent}
+.askbox .bar{display:flex;align-items:center;gap:8px}
+.sendbtn{width:40px;height:40px;border-radius:50%;background:var(--btn);color:#fff;display:grid;place-items:center;margin-left:auto}
+.chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:16px;max-width:820px}
+.chip{height:34px;padding:0 14px;border-radius:17px;border:1px solid var(--line);background:#fff;font-size:13px;color:#3C3A35;display:inline-flex;align-items:center;gap:6px}
+.chip:hover{border-color:#BDB8AC}
+.suggest{width:780px;margin-top:12px;background:#fff;border:1px solid var(--line);border-radius:16px;padding:8px}
+.suggest .it{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:12px}
+.suggest .it:hover{background:#F6F5F1}
+.band{background:var(--band);padding:48px 80px}
+.band h2,.sec2 h2{font-family:var(--serif);font-size:36px;margin:0 0 6px}
+.working{display:grid;grid-template-columns:330px 1fr;background:#F4F3EE;border:1px solid var(--line);border-radius:18px;margin-top:24px;min-height:420px}
+.wlist{padding:22px 20px;border-right:1px solid var(--line)}
+.wlist .lab{font-size:13px;color:var(--sub);margin:0 0 10px 10px}
+.witem{display:flex;align-items:center;gap:12px;padding:10px;border-radius:14px;width:100%;text-align:left;margin-bottom:4px}
+.witem:hover{background:#ECEAE3}
+.witem.on{background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.05);border:1px solid var(--line)}
+.witem .t{font-size:14px;font-weight:500}
+.witem .s{font-size:12px;color:var(--ok);display:flex;align-items:center;gap:4px}
+.witem .s.run{color:var(--warnt)}
+.wpane{padding:28px}
+.wcard{background:#fff;border:1px solid var(--line);border-radius:18px;height:100%;display:flex;flex-direction:column}
+.wcard .h{display:flex;align-items:center;gap:10px;padding:14px 20px;border-bottom:1px solid var(--line2);font-weight:500}
+.wcard .b{padding:20px 60px;flex:1}
+.ubub{background:#E9EEE9;border-radius:14px;padding:10px 16px;max-width:440px;margin-left:auto;width:fit-content}
+.deliver{border:1px solid #D3E2D6;background:#F3F7F3;border-radius:14px;padding:14px 16px;margin-top:10px}
+.deliver .t{color:var(--ok);display:flex;align-items:center;gap:6px;font-weight:500}
+.sec2{padding:48px 80px 60px}
+.mfilter{display:flex;align-items:center;gap:8px;margin:20px 0 22px}
+.mgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+.mcard{background:#fff;border:1px solid var(--line);border-radius:18px;padding:20px;display:flex;flex-direction:column;gap:10px;cursor:pointer;transition:box-shadow .2s, transform .2s}
+.mcard:hover{box-shadow:0 10px 30px rgba(60,50,30,.08);transform:translateY(-2px)}
+.mcard .nm{font-family:var(--serif);font-weight:700;font-size:18px;line-height:1.3}
+.mcard .by{font-size:12px;color:var(--sub)}
+.mcard .ds{color:#4A4740;font-size:14px;min-height:44px}
+.mcard .meta{display:flex;gap:6px;flex-wrap:wrap}
+.mcard .acts{display:flex;gap:6px;margin-top:4px}
+
+/* ===== 构建页 ===== */
+.bwrap{flex:1;min-height:0;display:flex}
+.blist{width:232px;flex:none;border-right:1px solid var(--line);padding:16px 14px;display:flex;flex-direction:column;gap:2px;overflow:auto}
+.blist .hd{display:flex;align-items:center;justify-content:space-between;padding:4px 8px 10px;font-size:13px;color:var(--sub)}
+.bl-it{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:14px;text-align:left;width:100%}
+.bl-it:hover{background:#EFEDE7}
+.bl-it.on{background:#fff;border:1px solid var(--line);box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.bl-it .t{font-size:14px;font-weight:500;line-height:1.3}
+.bl-it .s{font-size:12px;color:var(--sub);line-height:1.4}
+.bl-it .s.ok{color:var(--ok)}
+.bmain{flex:1;min-width:0;display:flex;flex-direction:column}
+.bhead{height:64px;flex:none;display:flex;align-items:center;gap:14px;padding:0 22px;border-bottom:1px solid var(--line)}
+.bhead .nm{font-family:var(--serif);font-size:19px;font-weight:700;line-height:1.2}
+.bhead .sv{font-size:12px;color:var(--sub)}
+.stages{display:flex;align-items:center;gap:2px;margin:0 auto;background:#ECEAE3;border-radius:24px;padding:4px}
+.stg{height:40px;padding:0 14px;border-radius:20px;display:flex;align-items:center;gap:8px;font-size:14px;color:var(--sub)}
+.stg:hover{color:var(--ink)}
+.stg.on{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.07)}
+.stg .nm2{font-weight:600}
+.stg .st{font-size:12px;padding:1px 8px;border-radius:10px;background:#E2DFD7;color:#4D4A43}
+.stg .st.ok{background:var(--okbg);color:var(--ok)}
+.stg .st.warn{background:var(--warnbg);color:var(--warnt)}
+.stg .st.bad{background:var(--badbg);color:var(--bad)}
+.bcols{flex:1;min-height:0;display:flex;padding:16px;gap:16px}
+.bchat{width:428px;flex:none;display:flex;flex-direction:column;background:#F2F1EC;border:1px solid var(--line);border-radius:18px;overflow:hidden}
+.bchat .ch{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.msgs{flex:1;overflow:auto;padding:16px 16px 8px;display:flex;flex-direction:column;gap:14px}
+.m-me{align-self:flex-end;background:#E2E9E3;border-radius:14px 14px 4px 14px;padding:9px 14px;max-width:84%}
+.m-bot{display:flex;gap:10px;align-items:flex-start}
+.m-bot .bd{flex:1;min-width:0}
+.m-bot .who{font-size:12px;color:var(--sub);margin-bottom:3px}
+.m-bot .tx{white-space:pre-wrap}
+.askc{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;margin-top:8px}
+.askc .q{font-weight:600;margin:4px 0 8px;font-size:14px}
+.askc .q + .opts{margin-bottom:12px}
+.opts{display:flex;flex-wrap:wrap;gap:6px}
+.opt{min-height:34px;padding:6px 12px;border-radius:10px;border:1px solid var(--line);background:#FBFAF7;font-size:13px;text-align:left}
+.opt:hover{border-color:#BDB8AC}
+.opt.on{border-color:var(--ink);background:#fff;box-shadow:inset 0 0 0 1px var(--ink)}
+.askc .ft{display:flex;align-items:center;gap:8px;margin-top:6px}
+.askc.done{background:#F8F7F3}
+.steps{background:#fff;border:1px solid var(--line);border-radius:14px;padding:10px 14px;margin-top:8px;display:flex;flex-direction:column;gap:6px}
+.steps .s{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--sub)}
+.steps .s.done{color:var(--ink)}
+.diff{background:#fff;border:1px solid var(--line);border-radius:14px;margin-top:8px;overflow:hidden}
+.diff .dh{padding:8px 12px;font-size:12px;color:var(--sub);border-bottom:1px solid var(--line2);background:#FBFAF7}
+.diff .dl{font-family:var(--mono);font-size:12.5px;padding:3px 12px;white-space:pre-wrap;line-height:1.55}
+.diff .add{background:#EDF4EE;color:#245437}
+.diff .del{background:#FAEDEA;color:#8F3423;text-decoration:line-through}
+.diff .df{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--line2)}
+.mact{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.composer{margin:8px 12px 12px;background:#fff;border:1px solid var(--line);border-radius:16px;padding:10px 10px 8px 14px}
+.composer textarea{width:100%;border:0;outline:none;resize:none;height:44px;background:transparent;line-height:1.55}
+.composer .bar{display:flex;align-items:center;gap:6px}
+.composer .sendbtn{width:34px;height:34px}
+.bright{flex:1;min-width:0;background:#fff;border:1px solid var(--line);border-radius:18px;display:flex;flex-direction:column;overflow:hidden}
+.rtop{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--line2)}
+.rscroll{flex:1;overflow:auto;padding:20px 24px 28px}
+.prof{display:flex;gap:16px;align-items:center;padding-bottom:18px;border-bottom:1px solid var(--line2);margin-bottom:6px}
+.prof .nm{font-family:var(--serif);font-size:24px;font-weight:700;line-height:1.25}
+.sec{border-bottom:1px solid var(--line2);border-radius:12px;transition:background .3s}
+.sec.fresh{background:var(--fresh);animation:flash 1.2s ease-out}
+.sec-h{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:13px 12px;min-height:52px}
+.sec-h .ic{width:30px;height:30px;border-radius:9px;background:#F1EFEA;display:grid;place-items:center;color:#4D4A43}
+.sec-t{font-weight:600;width:96px;flex:none}
+.sec-sum{flex:1;min-width:0;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13.5px}
+.sec.empty .sec-sum{color:#6B6860;font-style:normal}
+.sec.empty .ic{background:#fff;border:1px dashed #C9C4B8}
+.sec .chev{transition:transform .2s;color:var(--sub)}
+.sec.open .chev{transform:rotate(90deg)}
+.sec-b{display:none;padding:4px 12px 18px 54px}
+.sec.open .sec-b{display:block}
+.fresh-tag{background:#FBE7BD;color:#7A4F0C;font-size:12px;height:22px;padding:0 8px;border-radius:11px;display:inline-flex;align-items:center}
+.lst{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:10px}
+.lst .li{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line2);font-size:13.5px}
+.lst .li:last-child{border-bottom:0}
+.sub-h{font-size:13px;font-weight:600;margin:14px 0 8px;display:flex;align-items:center;justify-content:space-between}
+.radio{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border-radius:10px;cursor:pointer}
+.radio:hover{background:#F6F5F1}
+.radio .dot{width:16px;height:16px;border-radius:50%;border:1.5px solid #B5B0A4;margin-top:3px;flex:none}
+.radio.on .dot{border:5px solid var(--ink)}
+.hit{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;font-size:13.5px}
+
+/* 试聊 */
+.trial{display:flex;flex-direction:column;flex:1;min-height:0}
+.tmsgs{flex:1;overflow:auto;padding:20px 28px;display:flex;flex-direction:column;gap:16px}
+.toolsum{border:1px solid var(--line);border-radius:12px;padding:8px 12px;font-size:13px;color:var(--sub);display:flex;flex-direction:column;gap:4px;background:#FBFAF7;margin:6px 0}
+.toolsum .r{display:flex;align-items:center;gap:8px}
+.ans{background:#fff}
+.verdict{border:1px solid #EBCB91;background:var(--warnbg);border-radius:12px;padding:10px 14px;margin:8px 0}
+.metaacts{display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap;font-size:12px;color:var(--sub)}
+.ibtn{height:30px;padding:0 10px;border-radius:15px;display:inline-flex;align-items:center;gap:5px;font-size:13px;color:#4D4A43}
+.ibtn:hover{background:#EFEDE7}
+.ibtn.pri{background:var(--btn);color:#fff}
+.ibtn.pri:hover{background:#000}
+.savecase{border:1px solid var(--line);border-radius:14px;padding:14px;margin-top:10px;background:#FBFAF7}
+
+/* 评测 */
+.stage-h{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:16px}
+.stage-h h2{font-family:var(--serif);font-size:26px;margin:0;line-height:1.2}
+.banner{display:flex;align-items:center;gap:12px;border-radius:14px;padding:12px 16px;margin-bottom:16px}
+.banner.ok{background:var(--okbg);color:#2C5C40}
+.banner.warn{background:var(--warnbg);color:var(--warnt)}
+.banner.info{background:#F2F1EC;color:#3C3A35}
+.case{border:1px solid var(--line);border-radius:14px;margin-bottom:8px;overflow:hidden;transition:background .3s}
+.case .ch2{display:flex;align-items:center;gap:12px;padding:12px 14px}
+.case .nm{font-weight:600}
+.case .as{font-size:12.5px;color:var(--sub)}
+.case.pass{border-color:#CFE0D3}
+.case.fail{border-color:#EBC5BB}
+.case .detail{padding:0 14px 14px 44px;font-size:13.5px}
+.snap{background:#F6F5F1;border-radius:10px;padding:10px 12px;font-family:var(--mono);font-size:12.5px;white-space:pre-wrap;margin:8px 0}
+.prog{height:6px;background:#ECEAE3;border-radius:3px;overflow:hidden;width:180px}
+.prog i{display:block;height:100%;background:var(--ok);transition:width .3s}
+table.tb{width:100%;border-collapse:collapse;font-size:13.5px}
+table.tb th{text-align:left;font-weight:500;color:var(--sub);font-size:12.5px;padding:9px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.tb td{padding:11px 12px;border-bottom:1px solid var(--line2);vertical-align:middle}
+table.tb tr.click{cursor:pointer}
+table.tb tr.click:hover td{background:#FAF9F6}
+table.tb tr.sel td{background:#F4F2EC}
+
+/* 上线清单 */
+.launch{max-width:720px}
+.lc{display:flex;gap:16px;padding:16px 4px;border-bottom:1px solid var(--line2);align-items:flex-start}
+.lc .ck{width:28px;height:28px;border-radius:50%;border:1.5px solid #C9C4B8;display:grid;place-items:center;flex:none;transition:all .3s;margin-top:1px}
+.lc.ok .ck{background:var(--ok);border-color:var(--ok);color:#fff}
+.lc.warn .ck{background:var(--warnbg);border-color:#E3BE7C;color:var(--warnt)}
+.lc .t{font-size:16px;font-weight:600}
+.lc.ok .t{color:#2C5C40}
+.lc .d{color:var(--sub);font-size:13.5px;margin-top:2px}
+.lc .rt{margin-left:auto;display:flex;gap:8px;align-items:center}
+.lc .ck svg{animation:pop .35s ease-out}
+.ver{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:12px 4px;border-bottom:1px solid var(--line2);font-size:13.5px}
+.ver .v{font-weight:700;width:36px;font-family:var(--serif);font-size:16px}
+
+/* 接入 */
+.blk{border:1px solid var(--line);border-radius:16px;padding:18px 20px;margin-bottom:16px}
+.blk h3{margin:0 0 4px;font-size:16px}
+.keybox{background:#1F1E1C;color:#F2EFE7;border-radius:12px;padding:14px 16px;font-family:var(--mono);font-size:14px;display:flex;align-items:center;gap:12px;margin:12px 0}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:12px}
+.tabs button{height:38px;padding:0 14px;color:var(--sub);border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs button.on{color:var(--ink);border-color:var(--ink);font-weight:600}
+
+/* 抽屉 */
+.drawer{position:absolute;top:61px;right:0;bottom:0;width:420px;background:#fff;border-left:1px solid var(--line);box-shadow:-20px 0 50px rgba(40,35,25,.08);z-index:20;display:flex;flex-direction:column;animation:slin .25s ease-out}
+@keyframes slin{from{transform:translateX(30px);opacity:0}to{transform:none;opacity:1}}
+.drawer .dh{display:flex;align-items:center;gap:12px;padding:18px 22px;border-bottom:1px solid var(--line2)}
+.drawer .db{flex:1;overflow:auto;padding:18px 22px}
+.drawer .dsec{border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:12px}
+.drawer .dsec h4{margin:0 0 4px;font-size:14px}
+.xbtn{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;margin-left:auto}
+.xbtn:hover{background:#F0EEE8}
+
+/* 侧导航（管理、账户、开发者） */
+.side{width:220px;flex:none;border-right:1px solid var(--line);padding:18px 12px}
+.side .g{font-size:12px;color:var(--sub);padding:6px 12px}
+.side button{display:flex;align-items:center;gap:10px;width:100%;height:40px;padding:0 12px;border-radius:12px;color:#3C3A35;text-align:left}
+.side button:hover{background:#EFEDE7}
+.side button.on{background:#fff;border:1px solid var(--line);font-weight:600;color:var(--ink)}
+.main{flex:1;min-width:0;overflow:auto;padding:28px 34px;position:relative}
+.ph{display:flex;align-items:flex-end;gap:16px;margin-bottom:18px}
+.ph h1{font-family:var(--serif);font-size:30px;margin:0;line-height:1.2}
+.stat{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px 18px}
+.stat .n{font-size:26px;font-weight:600;font-family:var(--serif)}
+
+/* 移动端 */
+.phones{display:flex;gap:44px;justify-content:center;padding:14px 0 0}
+.phone{width:387px;height:824px;border-radius:52px;background:#1C1C1C;padding:6px;flex:none;box-shadow:0 30px 60px rgba(40,35,25,.18)}
+.scr{width:375px;height:812px;border-radius:46px;background:var(--bg);overflow:hidden;position:relative;display:flex;flex-direction:column;font-size:16px}
+.sbar{height:48px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 30px;font-size:15px;font-weight:600}
+.notch{width:110px;height:30px;border-radius:15px;background:#1C1C1C}
+.mh{display:flex;align-items:center;gap:10px;padding:6px 18px 10px;min-height:52px}
+.mh .t{font-weight:600;font-size:17px}
+.mb{flex:1;overflow:auto;padding:0 18px 18px}
+.tbar{height:78px;flex:none;border-top:1px solid var(--line);display:flex;justify-content:space-around;padding-top:8px;background:#fff}
+.tbar button{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:12px;color:var(--sub);min-width:64px;min-height:48px}
+.tbar button.on{color:var(--ink);font-weight:600}
+.mcap{text-align:center;font-size:13px;color:var(--sub);margin-bottom:8px}
+
+/* 对话工作台 */
+.cwrap{flex:1;min-height:0;display:flex}
+.slist{width:268px;flex:none;border-right:1px solid var(--line);display:flex;flex-direction:column}
+.sgrp{font-size:12px;color:var(--sub);padding:12px 12px 4px;display:flex;align-items:center;gap:8px}
+.sit{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:12px;width:100%;text-align:left;font-size:14px}
+.sit:hover{background:#EFEDE7}
+.sit.on{background:#fff;border:1px solid var(--line)}
+.cmain{flex:1;min-width:0;display:flex;flex-direction:column;padding:16px 0 16px 16px}
+.ccard{flex:1;min-height:0;background:#fff;border:1px solid var(--line);border-radius:18px;display:flex;flex-direction:column;overflow:hidden}
+.cside{width:372px;flex:none;padding:16px}
+.cside .ccard{height:100%}
+.approval{border:1px solid #E7C78C;background:#FFF9EC;border-radius:14px;padding:12px 14px;margin:0 20px 10px}
+.ftree .f{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:8px;font-size:13.5px;width:100%;text-align:left}
+.ftree .f:hover{background:#F4F2EC}
+.ftree .f.on{background:#EFEDE7}
+.slash{position:absolute;bottom:100%;left:0;margin-bottom:6px;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.08);padding:6px;width:280px}
+.slash div{padding:8px 10px;border-radius:8px;font-size:13.5px}
+.slash div:hover{background:#F4F2EC}
+</style>
+</head>
+<body>
+<div id="proto">
+  <span class="pt-name">原型页面（不属于产品）</span>
+  <button data-a="go" data-p="market">1 探索与市场</button>
+  <button data-a="go" data-p="build">2 构建页·对话搭建</button>
+  <button data-a="go" data-p="flow">3 主流程演示</button>
+  <button data-a="go" data-p="admin">4 平台管理·账号</button>
+  <button data-a="go" data-p="mobile">5 移动端</button>
+  <button data-a="go" data-p="chat">6 对话工作台</button>
+</div>
+<div id="board">
+  <section class="page" id="pg-market"></section>
+  <section class="page" id="pg-build"></section>
+  <section class="page" id="pg-flow"></section>
+  <section class="page" id="pg-admin"></section>
+  <section class="page" id="pg-mobile"></section>
+  <section class="page" id="pg-chat"></section>
+  <section class="page" id="pg-dev"></section>
+  <section class="page" id="pg-account"></section>
+  <div id="modal"><div class="box"></div></div>
+  <div id="toast"></div>
+</div>
+<script>
+"use strict";
+/* ---------- 基础 ---------- */
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const later = (ms) => new Promise((r) => setTimeout(r, ms));
+const P = {
+  search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
+  up: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  chev: '<path d="M9 6l6 6-6 6"/>',
+  down: '<path d="M6 9l6 6 6-6"/>',
+  back: '<path d="M15 6l-6 6 6 6"/>',
+  copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/>',
+  refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/>',
+  clip: '<path d="M20 11.5l-8.3 8.3a5 5 0 0 1-7-7l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4L15 7.2"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"/>',
+  text: '<path d="M5 6h14M5 11h14M5 16h9"/>',
+  cpu: '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>',
+  tool: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/>',
+  book: '<path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19V5"/>',
+  key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3"/>',
+  brace: '<path d="M8 4c-2 0-3 1-3 3v2c0 1.5-1 3-2 3 1 0 2 1.5 2 3v2c0 2 1 3 3 3M16 4c2 0 3 1 3 3v2c0 1.5 1 3 2 3-1 0-2 1.5-2 3v2c0 2-1 3-3 3"/>',
+  shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/>',
+  hook: '<path d="M8 4v8a4 4 0 0 0 8 0M16 12l2-2M16 12l-2-2"/><circle cx="8" cy="4" r="1.5"/>',
+  play: '<path d="M7 5l12 7-12 7z"/>',
+  file: '<path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5"/>',
+  folder: '<path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/>',
+  warn: '<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17v.5"/>',
+  clock: '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>',
+  upload: '<path d="M12 16V4M7 9l5-5 5 5M4 20h16"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/>',
+  trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+  dots: '<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/>',
+  grid: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
+  chat: '<path d="M4 5h16v11H9l-5 4z"/>',
+  home: '<path d="M4 11l8-7 8 7v9H4z"/>',
+  list: '<path d="M8 6h12M8 12h12M8 18h12M4 6h.5M4 12h.5M4 18h.5"/>',
+  coin: '<circle cx="12" cy="12" r="8"/><path d="M9.5 9.5h4a1.8 1.8 0 0 1 0 3.5h-3a1.8 1.8 0 0 0 0 3.5h4M12 7.5v1.8M12 16.5v-1.8"/>',
+  lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  sparkle: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>',
+};
+const ic = (n, s = 18, w = 1.7) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round">${P[n] || ""}</svg>`;
+
+/* ---------- 智能体身份：色块＋两只眼睛 ---------- */
+const AV = {
+  "expense-reviewer": { c: "#F2B49B", e: "pill" },
+  builder: { c: "#1F1E1C", e: "white" },
+  meeting: { c: "#C8C2E8", e: "round" },
+  rival: { c: "#E7D2AA", e: "side" },
+  review: { c: "#CADBCF", e: "pill" },
+  sql: { c: "#B9D0E8", e: "dot" },
+  xhs: { c: "#F4B3C3", e: "round" },
+  contract: { c: "#E3C59D", e: "dot" },
+  kb: { c: "#C9DDBD", e: "side" },
+  weekly: { c: "#DAD3C4", e: "round" },
+  currency: { c: "#B8DCD6", e: "dot" },
+};
+function av(k, s = 32) {
+  const a = AV[k] || { c: "#DDD7CA", e: "dot" };
+  let eyes = "";
+  if (a.e === "pill") eyes = '<rect x="13.2" y="13.5" width="4.6" height="10" rx="2.3" fill="#1B1B1A"/><rect x="22.2" y="13.5" width="4.6" height="10" rx="2.3" fill="#1B1B1A"/><circle cx="15" cy="16" r="1" fill="#fff"/><circle cx="24" cy="16" r="1" fill="#fff"/>';
+  else if (a.e === "white") eyes = '<rect x="13.2" y="13.5" width="4.4" height="10" rx="2.2" fill="#fff"/><rect x="22.4" y="13.5" width="4.4" height="10" rx="2.2" fill="#fff"/>';
+  else if (a.e === "round") eyes = '<circle cx="15" cy="18" r="4.4" fill="#fff"/><circle cx="25" cy="18" r="4.4" fill="#fff"/><circle cx="16" cy="18.6" r="2.2" fill="#1B1B1A"/><circle cx="26" cy="18.6" r="2.2" fill="#1B1B1A"/>';
+  else if (a.e === "side") eyes = '<ellipse cx="16" cy="19" rx="2" ry="3.4" fill="#1B1B1A"/><ellipse cx="24" cy="19" rx="2" ry="3.4" fill="#1B1B1A"/><circle cx="16.6" cy="17.6" r=".8" fill="#fff"/><circle cx="24.6" cy="17.6" r=".8" fill="#fff"/>';
+  else eyes = '<circle cx="15.5" cy="19" r="2.1" fill="#1B1B1A"/><circle cx="24.5" cy="19" r="2.1" fill="#1B1B1A"/>';
+  return `<svg class="av" width="${s}" height="${s}" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="19.5" fill="${a.c}"/><circle cx="14" cy="11" r="9" fill="#fff" opacity=".16"/><circle cx="20" cy="20" r="19" fill="none" stroke="rgba(0,0,0,.08)"/>${eyes}</svg>`;
+}
+
+/* ---------- 演示数据 ---------- */
+const MARKET = [
+  { k: "meeting", n: "会议纪要整理", cat: "办公运营", by: "星河数据 周岚", v: 5, price: "约 2 积分/次", uses: "1.8 万次", d: "上传录音或速记，十分钟内整理出决议、待办和负责人。", starters: ["整理今天的周会录音", "只列出待办和负责人"] },
+  { k: "rival", n: "竞品周报", cat: "研究分析", by: "市场部 陈一帆", v: 3, price: "约 6 积分/次", uses: "4,210 次", d: "每周抓取 6 家竞品的官网、公众号与招聘动态，汇总成周报。", starters: ["这周竞品有什么新动作", "对比三家的定价变化"] },
+  { k: "review", n: "代码审查员", cat: "开发工具", by: "平台组 许牧", v: 7, price: "约 4 积分/次", uses: "2.6 万次", d: "读 diff 找正确性问题，按严重程度排序，给出可直接应用的修改。", starters: ["审一下这个 PR", "只看并发相关的问题"] },
+  { k: "sql", n: "SQL 助手", cat: "开发工具", by: "数据组 何晴", v: 4, price: "约 1 积分/次", uses: "3.1 万次", d: "用中文描述要查什么，生成可读的 SQL，并解释每个连接条件。", starters: ["上月各部门报销总额", "找出重复提交的发票"] },
+  { k: "xhs", n: "小红书文案", cat: "内容创作", by: "品牌部 宋迪", v: 2, price: "约 2 积分/次", uses: "9,860 次", d: "按产品卖点写三版笔记，附标题、标签和配图建议。", starters: ["给新上线的耳机写一篇", "语气更口语一点"] },
+  { k: "contract", n: "合同条款比对", cat: "办公运营", by: "法务部 罗婧", v: 3, price: "约 8 积分/次", uses: "2,340 次", d: "比对两版合同的条款差异，标出对我方不利的修改。", starters: ["比对这两份采购合同", "只看付款与违约条款"] },
+  { k: "kb", n: "客服知识问答", cat: "通用助手", by: "客服中心 唐悦", v: 6, price: "约 1 积分/次", uses: "6.4 万次", d: "基于产品手册回答客户问题，答不上来时转人工并留下工单。", starters: ["退货运费谁出", "发票怎么开"] },
+  { k: "weekly", n: "周报生成器", cat: "通用助手", by: "星河数据 周岚", v: 4, price: "约 2 积分/次", uses: "2.2 万次", d: "从日程、提交记录和聊天里汇总本周进展，生成可直接发出的周报。", starters: ["生成我这周的周报", "加上下周计划"] },
+];
+const CATS = ["全部", "通用助手", "研究分析", "内容创作", "开发工具", "办公运营"];
+
+/* ---------- toast / modal / 页面切换 ---------- */
+function toast(msg, ok = true) {
+  const t = document.createElement("div");
+  t.className = "t";
+  t.innerHTML = (ok ? ic("check", 16, 2.2) : ic("warn", 16)) + `<span>${msg}</span>`;
+  $("#toast").appendChild(t);
+  setTimeout(() => t.remove(), 2600);
+}
+function openModal(html, w = 520) {
+  const m = $("#modal");
+  m.querySelector(".box").style.width = w + "px";
+  m.querySelector(".box").innerHTML = html;
+  m.classList.add("on");
+}
+function closeModal() { $("#modal").classList.remove("on"); }
+$("#modal").addEventListener("click", (e) => { if (e.target.id === "modal") closeModal(); });
+
+let CUR = "market";
+function go(p) {
+  CUR = p;
+  $$(".page").forEach((x) => x.classList.toggle("on", x.id === "pg-" + p));
+  $$("#proto button").forEach((b) => b.classList.toggle("on", b.dataset.p === p));
+  closeModal();
+  if (p === "mobile") Mobile.onShow();
+}
+
+function topnav(active, admin = false) {
+  const items = [["market", "探索"], ["chat", "对话"], ["studio", "工作室"], ["dev", "开发者"], ["account", "账户"]];
+  if (admin) items.push(["admin", "管理"]);
+  return `<nav class="topnav">
+    <div class="brand"><svg width="28" height="28" viewBox="0 0 28 28"><circle cx="14" cy="14" r="13" fill="#1C1C1C"/><rect x="9" y="9" width="3.4" height="9" rx="1.7" fill="#fff"/><rect x="15.6" y="9" width="3.4" height="9" rx="1.7" fill="#fff"/></svg>Open Web Agents</div>
+    <div class="navs">${items.map(([k, n]) => `<button data-a="nav" data-to="${k}" class="${k === active ? "on" : ""}">${n}</button>`).join("")}</div>
+    <div class="nav-r">
+      <button class="credit" data-a="nav" data-to="account">${ic("coin", 16)}<b>${admin ? "8,200" : "12,480"}</b><span class="muted">积分</span></button>
+      <div class="me"><span>${admin ? "周岚，管理员" : "林舟"}</span><span class="face">${admin ? "岚" : "舟"}</span></div>
+    </div>
+  </nav>`;
+}
+
+/* =================== 1 探索 / 市场 =================== */
+const Market = {
+  cat: "全部", q: "", work: 0, suggest: "",
+  works: [
+    { k: "expense-reviewer", t: "这批 11 月差旅报销能过吗？", s: "成果已交付", u: "帮我初审这 12 张差旅发票，超额的单独列出来。", r: "12 张发票已初审：9 张通过，2 张需部门负责人审批，1 张抬头不全应退回。", file: "初审结果.md", fs: "通过 9，需审批 2，退回 1" },
+    { k: "meeting", t: "把周三的项目会整理一下", s: "成果已交付", u: "整理周三项目例会的录音，列出决议和待办。", r: "共 4 项决议、7 条待办，已按负责人分组。", file: "项目例会纪要.md", fs: "决议 4，待办 7" },
+    { k: "rival", t: "竞品这周有什么新动作", s: "正在工作", u: "汇总这周 6 家竞品的动态。", r: "已读完 4 家，正在读第 5 家的招聘页面。", file: "", fs: "" },
+    { k: "sql", t: "上月各部门报销总额", s: "成果已交付", u: "按部门统计上月报销总额和笔数。", r: "生成了 SQL 并跑出结果：研发部最高，38.2 万元。", file: "部门报销统计.csv", fs: "9 个部门" },
+    { k: "contract", t: "比对两版采购合同", s: "成果已交付", u: "比对 A、B 两版采购合同。", r: "找到 6 处差异，其中 2 处对我方不利（付款周期、违约金）。", file: "条款差异.docx", fs: "差异 6，不利 2" },
+  ],
+  render() {
+    const list = MARKET.filter((m) => (this.cat === "全部" || m.cat === this.cat) && (!this.q || (m.n + m.d).includes(this.q)));
+    const w = this.works[this.work];
+    $("#pg-market").innerHTML = topnav("market") + `<div class="pbody" id="mk-scroll">
+      <div class="hero">
+        <div class="avrow">${["expense-reviewer", "meeting", "rival", "review", "builder", "xhs", "sql"].map((k) => av(k, 60)).join("")}</div>
+        <h1>想交给它什么事？</h1>
+        <p class="lead">说一件事，市场里的智能体接手；没有合适的，搭建助手现场给你做一个。</p>
+        <div class="askbox">
+          <textarea id="mk-ask" placeholder="比如：做一个审核报销单的助手，超过 5000 元提醒我">${esc(this.suggest)}</textarea>
+          <div class="bar">
+            <button class="ibtn">${ic("clip", 16)}添加文件</button>
+            <span class="muted small">回车发送，Shift＋回车换行</span>
+            <button class="sendbtn" data-a="mk-send" aria-label="发送">${ic("up", 18, 2)}</button>
+          </div>
+        </div>
+        <div id="mk-sug"></div>
+        <div class="chips">
+          ${["做一个审核报销单的助手，超过 5000 元提醒我", "整理今天的会议纪要", "给新耳机写一篇小红书文案", "比对两份合同的条款差异"].map((t) => `<button class="chip" data-a="mk-chip" data-t="${t}">${t}</button>`).join("")}
+        </div>
+      </div>
+      <div class="band">
+        <h2>你的 AI 同事正在工作</h2>
+        <p class="muted" style="margin:0;font-size:16px">最近交给它们的 5 件事。点开看过程，或者接着交代下一项。</p>
+        <div class="working">
+          <div class="wlist"><div class="lab">正在工作</div>
+            ${this.works.map((x, i) => `<button class="witem ${i === this.work ? "on" : ""}" data-a="mk-work" data-i="${i}">${av(x.k, 36)}<div><div class="t">${x.t}</div><div class="s ${x.s === "正在工作" ? "run" : ""}">${x.s === "正在工作" ? '<span class="spin" style="width:11px;height:11px;border-width:1.5px"></span>' : ic("check", 13, 2.2)}${x.s}</div></div></button>`).join("")}
+          </div>
+          <div class="wpane"><div class="wcard">
+            <div class="h">${av(w.k, 26)}<span>${w.t}</span><span style="margin-left:auto" class="tag ${w.s === "正在工作" ? "warn" : "ok"}">${w.s}</span></div>
+            <div class="b">
+              <div class="ubub">${w.u}</div>
+              <div class="m-bot" style="margin-top:16px">${av(w.k, 28)}<div class="bd"><div class="who">${(MARKET.find((m) => m.k === w.k) || { n: "报销审核助手" }).n}</div><div>${w.r}</div>
+              ${w.file ? `<div class="deliver"><div class="t">${ic("check", 16, 2)}成果已交付</div><div class="row" style="margin-top:10px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px">${ic("file", 20)}<div><div style="font-weight:500">${w.file}</div><div class="muted small">${w.fs}</div></div><button class="btn ghost sm" style="margin-left:auto" data-a="nav" data-to="chat">在对话里打开</button></div></div>` : `<div class="steps"><div class="s done">${ic("check", 14, 2)}读完 4 家竞品官网</div><div class="s"><span class="spin"></span>正在读第 5 家的招聘页面</div></div>`}
+              </div></div>
+            </div>
+          </div></div>
+        </div>
+      </div>
+      <div class="sec2">
+        <h2>招募你的 AI 同事</h2>
+        <p class="muted" style="margin:0;font-size:16px">平台上架的 ${MARKET.length} 个智能体，点开就能聊，也可以克隆一份改成自己的。</p>
+        <div class="mfilter">
+          <div class="seg">${CATS.map((c) => `<button data-a="mk-cat" data-c="${c}" class="${c === this.cat ? "on" : ""}">${c}</button>`).join("")}</div>
+          <div style="margin-left:auto;position:relative;width:280px"><span style="position:absolute;left:12px;top:10px;color:var(--sub)">${ic("search", 18)}</span><input class="inp" id="mk-q" style="padding-left:38px;border-radius:19px" placeholder="搜索名称或说明" value="${esc(this.q)}"></div>
+        </div>
+        ${list.length ? `<div class="mgrid">${list.map((m) => this.card(m)).join("")}</div>` : `<div class="card" style="padding:40px;text-align:center"><div class="serif" style="font-size:20px">没有符合条件的智能体</div><p class="muted">换个关键词，或者让搭建助手做一个。</p><button class="btn" data-a="mk-chip" data-t="做一个${esc(this.q)}助手">让搭建助手做一个</button></div>`}
+      </div>
+    </div>`;
+  },
+  card(m) {
+    return `<div class="mcard" data-a="mk-detail" data-k="${m.k}">
+      <div class="row">${av(m.k, 48)}<div><div class="nm">${m.n}</div><div class="by">${m.by}</div></div></div>
+      <div class="ds">${m.d}</div>
+      <div class="meta"><span class="tag">${m.cat}</span><span class="tag line">v${m.v}</span><span class="tag line">${m.price}</span><span class="tag line">${m.uses}使用</span></div>
+      <div class="acts"><button class="btn sm" data-a="mk-use" data-k="${m.k}">立即使用</button><button class="btn ghost sm" data-a="mk-clone" data-k="${m.k}">克隆</button><button class="btn ghost sm" data-a="mk-api" data-k="${m.k}">API 接入</button></div>
+    </div>`;
+  },
+  detail(k) {
+    const m = MARKET.find((x) => x.k === k);
+    openModal(`<div class="row" style="gap:16px;margin-bottom:14px">${av(m.k, 72)}<div><h3>${m.n}</h3><div class="muted">${m.by}，已发布 v${m.v}，${m.uses}使用</div></div><button class="xbtn" data-a="close">${ic("x")}</button></div>
+      <p style="font-size:15px">${m.d}</p>
+      <div class="sub-h">试试这样问</div>
+      <div class="opts">${m.starters.map((s) => `<button class="chip" data-a="mk-use" data-k="${m.k}">${s}</button>`).join("")}</div>
+      <div class="grid2" style="margin-top:16px">
+        <div><div class="sub-h">输入契约</div><pre class="code" style="font-size:12.5px">{ "text": "string",
+  "files": ["url"] }</pre></div>
+        <div><div class="sub-h">输出契约</div><pre class="code" style="font-size:12.5px">{ "summary": "string",
+  "items": [] }</pre></div>
+      </div>
+      <div class="row muted small" style="margin-top:12px">${ic("coin", 15)}${m.price}，模型 claude-sonnet-4-5，按实际 token 结算</div>
+      <div class="mfoot"><button class="btn ghost" data-a="mk-api" data-k="${m.k}">API 接入</button><button class="btn ghost" data-a="mk-clone" data-k="${m.k}">克隆到我的智能体</button><button class="btn" data-a="mk-use" data-k="${m.k}">立即使用</button></div>`, 600);
+  },
+  send(text) {
+    text = (text || "").trim();
+    if (!text) { toast("先写下想交给它的事", false); return; }
+    if (/做一个|搭一个|建一个|搭建/.test(text)) { Flow.startFrom(text); return; }
+    this.suggest = text;
+    const pick = MARKET.find((m) => text.includes(m.n.slice(0, 2))) || MARKET[0];
+    $("#mk-sug").innerHTML = `<div class="suggest rise">
+      <div class="it">${av(pick.k, 36)}<div><div style="font-weight:600">交给「${pick.n}」</div><div class="muted small">${pick.d}</div></div><button class="btn sm" style="margin-left:auto" data-a="mk-use" data-k="${pick.k}">立即使用</button></div>
+      <div class="it">${av("builder", 36)}<div><div style="font-weight:600">让搭建助手做一个专门的</div><div class="muted small">对话里说清规则，几分钟得到一个能评测、能发布的智能体</div></div><button class="btn ghost sm" style="margin-left:auto" data-a="mk-build">开始搭建</button></div></div>`;
+  },
+};
+
+/* =================== 2/3 构建页：对话搭建 =================== */
+const SECS = [
+  ["identity", "名称与头像", "user"], ["prompt", "提示词", "text"], ["model", "模型", "cpu"], ["ability", "能力", "tool"],
+  ["knowledge", "知识", "book"], ["vars", "变量与密钥", "key"], ["contract", "输入输出契约", "brace"],
+  ["approval", "审批与权限", "shield"], ["webhook", "Webhook", "hook"],
+];
+const PERMS = [
+  ["询问权限", "每次调用敏感工具前停下来问你"], ["自动接受编辑", "文件编辑自动通过，其余照常询问"], ["规划模式", "只出计划不执行"],
+  ["自动判定", "由模型判断是否需要询问"], ["跳过权限检查", "全部放行，子代理会一并继承"], ["从不询问", "不询问，遇到需审批的直接拒绝"],
+];
+const MODELS = [["claude-sonnet-4-5", "输入 300／输出 1500 积分每百万 token"], ["claude-opus-4-1", "输入 1500／输出 7500 积分每百万 token"], ["claude-haiku-4-5", "输入 100／输出 500 积分每百万 token"], ["qwen-max（内网代理）", "输入 240／输出 960 积分每百万 token"], ["跟随平台默认（sonnet 别名）", "按别名路由"]];
+const PROMPT0 = (head = "星河数据科技有限公司", who = "部门负责人") => `# 角色
+你是公司财务的报销初审员，读取发票和报销单，按公司制度给出初审结论。
+## 规则
+1. 单笔超过 5000 元需要${who}审批
+2. 发票抬头必须是公司全称「${head}」
+3. 外币按开票日汇率换算
+## 输出
+给出 verdict（pass / reject / need_approval）与 reasons，引用制度条款编号。`;
+const IN_SCHEMA = `{
+  "type": "object",
+  "required": ["invoice_url", "amount", "currency"],
+  "properties": {
+    "invoice_url": { "type": "string" },
+    "amount": { "type": "number" },
+    "currency": { "type": "string" }
+  }
+}`;
+const OUT_SCHEMA = `{
+  "type": "object",
+  "properties": {
+    "verdict": { "enum": ["pass", "reject", "need_approval"] },
+    "reasons": { "type": "array", "items": { "type": "string" } }
+  }
+}`;
+function fullData(a = {}) {
+  return {
+    name: "报销审核助手", id: "expense-reviewer", color: "#F2B49B",
+    desc: "读取发票和报销单，按公司制度做初审，超额提醒审批",
+    starters: "这张 6800 元的机票能报吗？\n帮我看看这张发票抬头对不对\n美元发票怎么换算成人民币",
+    prompt: PROMPT0(a.head, a.who), model: "claude-sonnet-4-5", turns: 20, effort: "中",
+    tools: "Read, Grep, WebFetch",
+    skills: [{ n: "invoice-ocr", d: "识别发票字段（抬头、税号、金额、日期）", chars: 2140 }, { n: "policy-lookup", d: "按问题查询报销制度条款", chars: 1380 }],
+    mcp: [{ n: "erp-finance", type: "http", url: "https://erp.example.com/mcp", test: "" }],
+    subs: [{ n: "currency-converter", d: "外币按开票日汇率换算成人民币", m: "同主 agent" }],
+    docs: [{ t: "差旅报销制度 2026 版.pdf", m: "18 页，1.2 万字" }, { t: "发票抬头规范.docx", m: "2 页，2,140 字" }, { t: "常见问题", m: "手动添加，860 字" }],
+    vars: [{ n: "ERP_TOKEN", d: "ERP 接口令牌", req: true, sec: true }, { n: "DEPT", d: "所属部门", req: false, sec: false }],
+    inSchema: IN_SCHEMA, outSchema: OUT_SCHEMA,
+    perm: "询问权限", unattended: "按入口默认（接口调用放行）", apTools: "erp-finance.submit", apCmds: "rm -rf *, curl * | sh",
+    webhook: "https://hooks.xinghe.example/owa",
+  };
+}
+const BASE_CASES = () => [
+  { n: "抬头不全应拒绝", a: "verdict = reject，正文须包含「抬头」", from: "" },
+  { n: "外币换算", a: "amount_cny = 7103.2，正文须包含「开票日汇率」", from: "" },
+  { n: "多张发票合并", a: "verdict = pass，合并 3 张发票", from: "" },
+  { n: "餐饮超标准", a: "verdict = reject，正文须包含「超出餐饮标准」", from: "" },
+  { n: "正常差旅放行", a: "verdict = pass", from: "" },
+];
+const FAIL = {
+  "外币换算": { r: "期望 amount_cny = 7103.2（开票日 10-15 汇率 7.1032），实际 7180.0：用了今日汇率 7.18", s: '{ "verdict": "pass",\n  "amount_cny": 7180.0,\n  "reasons": ["按当前汇率 7.18 换算"] }' },
+  "餐饮超标准": { r: "正文未包含「超出餐饮标准」，且结论为 pass，期望 reject", s: '{ "verdict": "pass",\n  "reasons": ["餐饮发票 680 元，4 人用餐，金额合理"] }' },
+};
+
+function makeBuilder(key, mode) {
+  const B = { key, mode };
+  const root = () => $("#pg-" + key);
+  const S = (B.st = {
+    view: mode === "flow" ? "studio" : "builder",
+    stage: "orch", rtab: "card", busy: false,
+    sec: {}, open: mode === "full" ? { prompt: true } : {},
+    data: mode === "full" ? fullData() : { name: "", id: "", color: "#F2B49B", desc: "", starters: "", prompt: "", model: "claude-sonnet-4-5", turns: 20, effort: "中", tools: "", skills: [], mcp: [], subs: [], docs: [], vars: [], inSchema: "", outSchema: "", perm: "询问权限", unattended: "按入口默认（接口调用放行）", apTools: "", apCmds: "", webhook: "" },
+    chat: [], trial: [], trialDraft: "这张 6800 元的机票能报吗？发票抬头是星河数据科技有限公司", draft: "",
+    cases: mode === "full" ? [{ n: "超额需审批", a: "verdict = need_approval，正文须包含「部门负责人」", from: "试聊" }, ...BASE_CASES()] : [],
+    caseSt: {}, evalState: mode === "full" ? "stale" : "none", evalTarget: "当前草稿", fixed: false, fixMsgShown: false,
+    hist: mode === "full" ? [{ t: "草稿", h: "3e77d0", p: 5, n: 5, at: "11-09 17:42", mk: "配置已变化" }, { t: "v3", h: "8b20f1", p: 5, n: 5, at: "10-28 16:20", mk: "= v3" }] : [],
+    versions: mode === "full" ? [{ v: 3, at: "10-28 16:31", note: "接入 ERP 预算查询，抬头规则改为全称", ev: "5/5" }, { v: 2, at: "10-12 10:05", note: "加入外币换算规则", ev: "4/4" }, { v: 1, at: "09-30 15:12", note: "首个版本", ev: "3/3" }] : [],
+    current: mode === "full" ? 3 : 0, changes: mode === "full" ? 4 : 0, pubDone: false, pubNote: "", reveal: 5,
+    pub: false, grants: [{ who: "财务部（组）", p: "读" }], keyForm: true, plain: "", keys: [], keyIssued: false,
+    codeTab: "curl", tryOut: "", tryRunning: false, tryDone: false, tryVer: "最新发布版",
+    hooks: [{ ok: true, how: "运行 r_8f21c0，第 1 次", at: "11-11 09:12", code: "200" }, { ok: false, how: "运行 r_7d10aa，第 2 次", at: "11-10 18:40", code: "502" }, { ok: true, how: "测试", at: "11-10 18:02", code: "200" }],
+    runSrc: "全部", runSel: null, answers: null, base: true,
+  });
+  SECS.forEach(([k]) => (S.sec[k] = mode === "full" ? "filled" : "empty"));
+  if (mode === "full") {
+    S.sec.prompt = "fresh"; S.sec.contract = "fresh";
+    S.chat = [
+      { who: "me", text: "外币发票要按开票日的汇率算，不要用当天的。" },
+      { who: "bot", text: "好。我在提示词规则 3 写明「按开票日汇率换算」，并把 currency-converter 子代理的说明同步改了。" },
+      { who: "me", text: "输出再加一个 reasons 数组，方便我们系统展示。" },
+      { who: "bot", kind: "ask", st: "done", qs: [{ q: "reasons 里要不要带制度条款编号？", o: ["带上，例如「第 12 条」", "不带"], pick: [0] }] },
+      { who: "bot", text: "已更新输出契约：verdict 之外加了 reasons（字符串数组，每条带条款编号）。右侧「提示词」「输入输出契约」两节刚更新。\n\n草稿和发布版 v3 相比有 4 处修改，评测要对当前草稿重跑一次才能发布。" , acts: [["去评测", "stage", "eval"], ["试聊一条", "trialtab", ""]] },
+    ];
+    S.trial = [];
+  }
+
+  /* ---------- 工具 ---------- */
+  const allFilled = () => SECS.every(([k]) => S.sec[k] !== "empty");
+  const nextV = () => (S.versions.length ? Math.max(...S.versions.map((v) => v.v)) : 0) + 1;
+  const passN = () => S.cases.filter((c) => S.caseSt[c.n] && S.caseSt[c.n].s === "pass").length;
+  const clearFresh = () => SECS.forEach(([k]) => { if (S.sec[k] === "fresh") S.sec[k] = "filled"; });
+  function touch(k, fromChat) {
+    if (S.sec[k] === "empty" && !fromChat) S.sec[k] = "fresh";
+    else S.sec[k] = "fresh";
+    S.changes += 1; S.pubDone = false;
+    if (S.evalState === "passed" || S.evalState === "partial") S.evalState = "stale";
+  }
+
+  /* ---------- 渲染：顶部 ---------- */
+  function stageInfo() {
+    const n = S.cases.length;
+    const ev = S.evalState === "none" ? (n ? [`${n} 个用例未运行`, ""] : ["未运行", ""]) : S.evalState === "running" ? [`运行中 ${Object.values(S.caseSt).filter((x) => x.s !== "run" && x.s !== "wait").length}/${n}`, "warn"] : S.evalState === "passed" ? [`${n}/${n} 通过`, "ok"] : S.evalState === "partial" ? [`${passN()}/${n} 通过`, "bad"] : ["需重跑", "warn"];
+    return {
+      orch: allFilled() ? ["完整", "ok"] : [SECS.filter(([k]) => S.sec[k] !== "empty").length + "/9 节", ""],
+      eval: ev,
+      pub: S.current ? (S.changes ? [`v${S.current}，${S.changes} 处修改`, "warn"] : [`v${S.current} 已发布`, "ok"]) : ["未发布", ""],
+      acc: S.keyIssued ? ["Key 已签发", "ok"] : ["未签 Key", ""],
+      run: [(S.current >= 4 || S.tryDone ? 215 : 214) + " 次", ""],
+    };
+  }
+  function head() {
+    const si = stageInfo();
+    const names = [["orch", "编排"], ["eval", "评测"], ["pub", "发布"], ["acc", "接入"], ["run", "运行"]];
+    return `<header class="bhead">
+      <button class="xbtn" style="margin:0" data-ba="studio" aria-label="返回工作室">${ic("back", 20)}</button>
+      ${av("expense-reviewer", 40)}
+      <div><div class="nm">${esc(S.data.name || "新智能体")}</div><div class="sv">${S.busy ? "搭建助手正在写入草稿…" : "草稿自动保存于 14:32:08"}</div></div>
+      <div class="stages">${names.map(([k, n]) => `<button class="stg ${S.stage === k ? "on" : ""}" data-ba="stage" data-v="${k}"><span class="nm2">${n}</span><span class="st ${si[k][1]}">${si[k][0]}</span></button>`).join("")}</div>
+      <button class="btn" data-ba="stage" data-v="pub">${ic("check", 16, 2)}上线清单</button>
+    </header>`;
+  }
+  function list() {
+    const its = [["expense-reviewer", S.data.name || "新智能体", S.current ? (S.changes ? `v${S.current}，草稿有修改` : `已发布 v${S.current}`) : "草稿", S.changes ? "" : "ok", true],
+      ["meeting", "会议纪要整理", "已发布 v5", "ok"], ["weekly", "周报生成器", "已发布 v4", "ok"], ["rival", "竞品周报", "草稿", ""], ["contract", "合同条款比对", "分享给我，只读", ""]];
+    return `<aside class="blist"><div class="hd"><span>我的智能体</span><button class="ibtn" data-ba="new">${ic("plus", 15)}新建</button></div>
+      ${its.map(([k, n, s, c, on]) => `<button class="bl-it ${on ? "on" : ""}" data-ba="other" data-n="${n}">${av(k, 34)}<div><div class="t">${esc(n)}</div><div class="s ${c}">${s}</div></div></button>`).join("")}
+      <div style="margin-top:auto;padding:12px 8px 0;border-top:1px solid var(--line);font-size:13px" class="muted">本月已用 1,862 积分</div></aside>`;
+  }
+
+  /* ---------- 左：与搭建助手的对话 ---------- */
+  function msg(m, i) {
+    if (m.who === "me") return `<div class="m-me">${esc(m.text)}</div>`;
+    let body = m.text ? `<div class="tx">${m.text}</div>` : "";
+    if (m.kind === "ask") {
+      const done = m.st === "done";
+      body += `<div class="askc ${done ? "done" : ""}">
+        <div class="row small muted">${done ? `${ic("check", 14, 2)}已回答` : `${ic("clock", 14)}待回答，${m.left || "4:52"} 后由搭建助手按推荐项继续`}</div>
+        ${m.qs.map((q, qi) => `<div class="q">${q.q}${q.multi ? '<span class="muted small" style="font-weight:400">（可多选）</span>' : ""}</div><div class="opts">${q.o.map((o, oi) => `<button class="opt ${q.pick.includes(oi) ? "on" : ""}" ${done ? "disabled" : ""} data-ba="pick" data-i="${i}" data-q="${qi}" data-o="${oi}">${o}</button>`).join("")}${!done && q.other !== false ? `<button class="opt" data-ba="other-ans" data-i="${i}" data-q="${qi}">其他（自己填写）</button>` : ""}</div>`).join("")}
+        ${done ? "" : `<div class="ft"><button class="btn sm" data-ba="submit-ask" data-i="${i}" ${m.qs.every((q) => q.pick.length) ? "" : "disabled"}>${m.qs.every((q) => q.pick.length) ? "提交回答" : "请先回答每个问题"}</button><button class="ibtn" data-ba="skip-ask" data-i="${i}">不回答</button></div>`}
+      </div>`;
+    }
+    if (m.kind === "steps") body += `<div class="steps">${m.steps.map((s) => `<div class="s ${s.d ? "done" : ""}">${s.d ? `<span class="chk ok pop" style="width:16px;height:16px">${ic("check", 11, 3)}</span>` : s.on ? '<span class="spin"></span>' : '<span class="chk wait" style="width:16px;height:16px"></span>'}${s.t}</div>`).join("")}</div>`;
+    if (m.kind === "diff") body += `<div class="diff">${m.blocks.map((b) => `<div class="dh">${b.h}</div>${b.l.map((l) => `<div class="dl ${l[0] === "+" ? "add" : "del"}">${esc(l)}</div>`).join("")}`).join("")}
+      <div class="df">${m.applied ? `<span class="tag ok">${ic("check", 13, 2)}已应用到草稿</span>` : `<button class="btn sm" data-ba="apply-fix" data-i="${i}">应用到草稿</button><button class="btn ghost sm" data-ba="reject-fix" data-i="${i}">先不改</button>`}</div></div>`;
+    if (m.acts) body += `<div class="mact">${m.acts.map(([l, a, v], j) => `<button class="btn ${j ? "ghost " : ""}sm" data-ba="${a}" data-v="${v}">${l}</button>`).join("")}</div>`;
+    return `<div class="m-bot ${i === S.chat.length - 1 ? "rise" : ""}">${av("builder", 30)}<div class="bd"><div class="who">搭建助手</div>${body}</div></div>`;
+  }
+  function chatCol() {
+    return `<div class="bchat">
+      <div class="ch">${av("builder", 28)}<div><div style="font-weight:600">搭建助手</div><div class="muted small">说要求，它来改右侧档案；也可以直接手动改</div></div></div>
+      <div class="msgs" id="${key}-msgs">${S.chat.length ? S.chat.map(msg).join("") : `<div class="muted" style="padding:20px 6px">还没开始。说说想让这个智能体做什么。</div>`}${S.busy ? `<div class="m-bot">${av("builder", 30)}<div class="bd"><div class="who">搭建助手</div><div class="row muted"><span class="spin"></span>正在想…</div></div></div>` : ""}</div>
+      <div class="composer"><textarea id="${key}-draft" placeholder="继续交代，比如：餐饮费每人每餐不超过 150 元">${esc(S.draft)}</textarea>
+        <div class="bar"><button class="ibtn">${ic("clip", 15)}附件</button><span class="muted small">改动会自动存进草稿</span><button class="sendbtn" data-ba="send" aria-label="发送">${ic("up", 16, 2)}</button></div></div>
+    </div>`;
+  }
+
+  /* ---------- 右：档案卡 ---------- */
+  function summary(k) {
+    const d = S.data;
+    if (S.sec[k] === "empty") return "还没填，等搭建助手写入，或点开直接手动填";
+    return {
+      identity: `${d.name}，${d.starters.split("\n").filter(Boolean).length} 条开场建议`,
+      prompt: d.prompt.split("\n").filter((l) => /^\d\./.test(l)).map((l) => l.replace(/^\d\.\s*/, "")).join("；"),
+      model: `${d.model}，最大 ${d.turns} 轮，推理强度${d.effort}`,
+      ability: `工具 ${d.tools.split(",").filter((x) => x.trim()).length} 个，技能包 ${d.skills.length} 个，MCP ${d.mcp.length} 个，子代理 ${d.subs.length} 个`,
+      knowledge: `${d.docs.length} 篇文档：${d.docs.map((x) => "《" + x.t.replace(/\.(pdf|docx)$/, "") + "》").join("")}`,
+      vars: d.vars.map((v) => v.n + (v.sec ? "（密钥）" : "")).join("，") || "无",
+      contract: "输入 invoice_url, amount, currency；输出 verdict, reasons",
+      approval: `${d.perm}；需审批 ${d.apTools || "无"}`,
+      webhook: d.webhook || "未配置",
+    }[k];
+  }
+  function secBody(k) {
+    const d = S.data;
+    if (k === "identity") return `<div class="fld"><label>头像</label><div class="row">${["#F2B49B", "#C8C2E8", "#CADBCF", "#E7D2AA", "#B9D0E8", "#F4B3C3"].map((c) => `<button data-ba="color" data-v="${c}" aria-label="换头像颜色" style="width:32px;height:32px;border-radius:50%;background:${c};box-shadow:${d.color === c ? "0 0 0 2px #fff,0 0 0 4px #1C1C1C" : "none"}"></button>`).join("")}</div></div>
+      <div class="grid2"><div class="fld"><label>名称 <b>*</b></label><input class="inp" data-f="name" value="${esc(d.name)}"></div><div class="fld"><label>ID（建好后不能改）</label><input class="inp" value="${esc(d.id || "expense-reviewer")}" disabled style="background:#F6F5F1"></div></div>
+      <div class="fld"><label>描述</label><input class="inp" data-f="desc" value="${esc(d.desc)}"></div>
+      <div class="fld"><label>开场建议（一行一条，最多 4 条）</label><textarea class="ta" rows="3" data-f="starters">${esc(d.starters)}</textarea></div>`;
+    if (k === "prompt") return `<div class="fld"><label>系统提示词 <b>*</b>　可用 {{DEPT}} 引用变量</label><textarea class="ta" rows="10" data-f="prompt" style="font-family:var(--mono);font-size:13px">${esc(d.prompt)}</textarea></div>`;
+    if (k === "model") return `<div class="fld"><label>模型</label><select class="inp" data-f="model">${MODELS.map(([m, p]) => `<option ${m === d.model ? "selected" : ""} value="${m}">${m}　${p}</option>`).join("")}</select></div>
+      <div class="grid2"><div class="fld"><label>最大轮次</label><input class="inp" type="number" data-f="turns" value="${d.turns}"></div>
+      <div class="fld"><label>推理强度</label><div class="seg">${["低", "中", "高"].map((x) => `<button data-ba="effort" data-v="${x}" class="${d.effort === x ? "on" : ""}">${x}</button>`).join("")}</div></div></div>`;
+    if (k === "ability") return `<div class="fld"><label>工具白名单（逗号分隔，留空不限制）</label><input class="inp" data-f="tools" value="${esc(d.tools)}"></div>
+      <div class="sub-h">技能包<button class="ibtn" data-ba="add-skill">${ic("plus", 14)}添加</button></div>
+      ${d.skills.length ? `<div class="lst">${d.skills.map((s, i) => `<div class="li">${ic("file", 16)}<b style="font-weight:600">${s.n}</b><span class="muted">${s.d}</span><span class="muted small" style="margin-left:auto">SKILL.md ${s.chars.toLocaleString()} 字符</span><button class="ibtn" data-ba="del" data-l="skills" data-i="${i}" aria-label="删除">${ic("trash", 15)}</button></div>`).join("")}</div>` : '<p class="muted">未配置技能</p>'}
+      <div class="sub-h">MCP 服务<button class="ibtn" data-ba="add-mcp">${ic("plus", 14)}添加</button></div>
+      ${d.mcp.length ? `<div class="lst">${d.mcp.map((s, i) => `<div class="li" style="flex-wrap:wrap"><b style="font-weight:600">${s.n}</b><span class="tag">${s.type}</span><span class="muted">${s.url}</span><button class="btn ghost sm" style="margin-left:auto" data-ba="mcp-test" data-i="${i}">测试连接</button><button class="ibtn" data-ba="del" data-l="mcp" data-i="${i}" aria-label="删除">${ic("trash", 15)}</button>${s.test ? `<div style="width:100%" class="${s.test === "…" ? "muted" : ""}">${s.test === "…" ? '<span class="row"><span class="spin"></span>正在连接，会带上你保存过的变量值</span>' : `<span class="tag ok">${ic("check", 13, 2)}${s.test}</span>`}</div>` : ""}</div>`).join("")}</div>` : '<p class="muted">未配置 MCP 服务</p>'}
+      <div class="sub-h">子代理<button class="ibtn" data-ba="add-sub">${ic("plus", 14)}添加</button></div>
+      ${d.subs.length ? `<div class="lst">${d.subs.map((s, i) => `<div class="li">${av("currency", 22)}<b style="font-weight:600">${s.n}</b><span class="muted">${s.d}</span><span class="tag" style="margin-left:auto">${s.m}</span><button class="ibtn" data-ba="del" data-l="subs" data-i="${i}" aria-label="删除">${ic("trash", 15)}</button></div>`).join("")}</div>` : '<p class="muted">未配置子代理</p>'}`;
+    if (k === "knowledge") return `<p class="muted" style="margin:0 0 10px">知识按智能体保存，跨会话有效；运行时按问题检索片段注入提示词。已用 ${d.docs.length}/50 篇，1.5 万/50 万字，单篇上限 20MB。</p>
+      <div class="lst">${d.docs.map((x, i) => `<div class="li">${ic("file", 16)}<span style="font-weight:500">${x.t}</span><span class="muted">${x.m}</span><button class="ibtn" style="margin-left:auto" data-ba="del" data-l="docs" data-i="${i}" aria-label="删除">${ic("trash", 15)}</button></div>`).join("")}${S.uploading ? '<div class="li"><span class="spin"></span><span class="muted">差旅补充说明.pdf 正在提取文字…</span></div>' : ""}</div>
+      <div class="row"><button class="btn ghost sm" data-ba="upload">${ic("upload", 15)}上传文件</button><button class="btn ghost sm" data-ba="manual-doc">${ic("plus", 15)}手动添加</button><span class="muted small">PDF、docx、pptx、xlsx、文本，只保存提取出的文字</span></div>
+      <div class="sub-h">检索测试</div>
+      <div class="row"><input class="inp" id="${key}-kq" value="打车费能报吗"><button class="btn sm" data-ba="ksearch">检索</button></div>
+      <div id="${key}-khits"></div>`;
+    if (k === "vars") return `<p class="muted" style="margin:0 0 10px">在提示词里用 {{变量名}} 引用。密钥类变量加密存储，不进提示词。</p>
+      <div class="lst">${d.vars.map((v, i) => `<div class="li"><b style="font-family:var(--mono);font-weight:600;font-size:13px">${v.n}</b><span class="muted">${v.d}</span><span style="margin-left:auto" class="row small"><label class="row" style="gap:4px"><input type="checkbox" ${v.req ? "checked" : ""}>必填</label><label class="row" style="gap:4px"><input type="checkbox" ${v.sec ? "checked" : ""}>密钥</label></span><button class="ibtn" data-ba="del" data-l="vars" data-i="${i}" aria-label="删除">${ic("trash", 15)}</button></div>`).join("") || '<div class="li muted">未定义变量</div>'}</div>
+      <button class="btn ghost sm" data-ba="add-var">${ic("plus", 15)}添加变量</button>`;
+    if (k === "contract") return `<div class="grid2"><div class="fld"><label class="row">输入 inputSchema <span class="tag ok" id="${key}-vin">schema 合法</span></label><textarea class="ta" rows="10" data-f="inSchema" data-json="vin" style="font-family:var(--mono);font-size:12.5px">${esc(d.inSchema)}</textarea></div>
+      <div class="fld"><label class="row">输出 outputSchema <span class="tag ok" id="${key}-vout">schema 合法</span></label><textarea class="ta" rows="10" data-f="outSchema" data-json="vout" style="font-family:var(--mono);font-size:12.5px">${esc(d.outSchema)}</textarea></div></div>
+      <p class="muted small" style="margin:0">填了 inputSchema 后，invoke 入参不符合会返回 400。</p>`;
+    if (k === "approval") return `<div class="sub-h" style="margin-top:0">权限模式</div><div class="grid2" style="gap:2px 12px">${PERMS.map(([p, h]) => `<div class="radio ${d.perm === p ? "on" : ""}" data-ba="perm" data-v="${p}"><span class="dot"></span><div><div style="font-weight:500">${p}</div><div class="muted small">${h}</div></div></div>`).join("")}</div>
+      <div class="grid2" style="margin-top:12px"><div class="fld"><label>无人值守审批（网页里始终等人审批）</label><select class="inp" data-f="unattended">${["按入口默认（接口调用放行）", "一律拒绝", "一律放行"].map((x) => `<option ${x === d.unattended ? "selected" : ""}>${x}</option>`).join("")}</select></div>
+      <div class="fld"><label>需审批的工具（逗号分隔）</label><input class="inp" data-f="apTools" value="${esc(d.apTools)}"></div></div>
+      <div class="fld"><label>需审批的命令模式（逗号分隔）</label><input class="inp" data-f="apCmds" value="${esc(d.apCmds)}"></div>`;
+    if (k === "webhook") return `<div class="fld"><label>回调 URL（仅所有者和管理员可见）</label><input class="inp" data-f="webhook" value="${esc(d.webhook)}" placeholder="https://"></div>
+      <p class="muted small" style="margin:0">运行到终态时推送，用账号级签名密钥签名。投递记录在 <span class="link" data-ba="stage" data-v="acc">接入</span> 里看。</p>`;
+    return "";
+  }
+  function cardView() {
+    const d = S.data;
+    const filled = SECS.filter(([k]) => S.sec[k] !== "empty").length;
+    return `<div class="prof">
+        <div style="width:64px;height:64px">${av("expense-reviewer", 64).replace(/#F2B49B/, d.color)}</div>
+        <div style="flex:1;min-width:0"><div class="nm">${esc(d.name || "还没起名字")}</div><div class="muted">${esc(d.desc || "搭建助手会根据你的描述写好这一页")}</div>
+          <div class="row" style="margin-top:8px;flex-wrap:wrap;gap:6px"><span class="tag line">${d.id || "id 待生成"}</span>${S.current ? `<span class="tag">已发布 v${S.current}</span>` : '<span class="tag">未发布</span>'}${S.changes ? `<span class="tag warn">${S.changes} 处未发布修改</span>` : ""}<span class="tag ${filled === 9 ? "ok" : ""}">${filled}/9 节已填</span></div></div>
+      </div>
+      ${SECS.map(([k, t, i]) => `<div class="sec ${S.sec[k] === "fresh" ? "fresh" : ""} ${S.sec[k] === "empty" ? "empty" : ""} ${S.open[k] ? "open" : ""}" data-sec="${k}">
+        <button class="sec-h" data-ba="sec" data-k="${k}"><span class="ic">${ic(i, 16)}</span><span class="sec-t">${t}</span><span class="sec-sum">${esc(summary(k))}</span>${S.sec[k] === "fresh" ? '<span class="fresh-tag">刚更新</span>' : ""}<span class="chev">${ic("chev", 16)}</span></button>
+        <div class="sec-b">${secBody(k)}</div></div>`).join("")}`;
+  }
+  function trialView() {
+    const msgs = S.trial.map((m, i) => {
+      if (m.who === "me") return `<div class="m-me">${esc(m.text)}</div>`;
+      if (m.pending) return `<div class="m-bot">${av("expense-reviewer", 30)}<div class="bd"><div class="who">报销审核助手（草稿）</div><div class="toolsum">${m.tools.map((t, j) => `<div class="r">${j < m.k ? `<span class="chk ok" style="width:16px;height:16px">${ic("check", 10, 3)}</span>` : '<span class="spin"></span>'}${t[0]}<span style="margin-left:auto">${j < m.k ? t[1] : ""}</span></div>`).join("")}</div></div></div>`;
+      return `<div class="m-bot ${i === S.trial.length - 1 && !m.saving && !m.saved ? "rise" : ""}">${av("expense-reviewer", 30)}<div class="bd"><div class="who">报销审核助手（草稿）</div>
+        <div class="toolsum"><div class="r">${ic("tool", 15)}调用了 ${m.tools.length} 个工具：${m.tools.map((t) => t[0].replace(/^调用 /, "")).join("，")}</div></div>
+        <div class="verdict"><b>初审结论：${m.v}</b><div>${m.text}</div></div>
+        <div class="metaacts"><span>耗时 ${m.time}，输入 ${m.tin} / 输出 ${m.tout} token</span><span style="flex:1"></span>
+          <button class="ibtn" data-ba="t-copy">${ic("copy", 14)}复制</button><button class="ibtn" data-ba="t-regen" data-i="${i}">${ic("refresh", 14)}重新生成</button>
+          ${m.saved ? `<span class="tag ok">${ic("check", 13, 2)}已存为评测用例</span>` : `<button class="ibtn pri" data-ba="t-save" data-i="${i}">${ic("plus", 14, 2)}存为评测用例</button>`}</div>
+        ${m.saving ? `<div class="savecase rise"><div class="grid2"><div class="fld"><label>用例名 <b>*</b></label><input class="inp" id="${key}-cn" value="${m.case}"></div><div class="fld"><label>结构化字段等于</label><input class="inp" value="verdict = ${m.code}"></div></div>
+          <div class="fld"><label>输入 <b>*</b>（自动带上这次的提问）</label><input class="inp" value="${esc(S.trial[i - 1].text)}"></div>
+          <div class="fld"><label>正文须包含（每行一个）</label><input class="inp" value="${m.must}"></div>
+          <div class="row"><button class="btn sm" data-ba="t-save-ok" data-i="${i}">保存用例</button><button class="btn ghost sm" data-ba="t-save-x" data-i="${i}">取消</button><span class="muted small">每个用例运行时会真实调用一次模型</span></div></div>` : ""}
+      </div></div>`;
+    }).join("");
+    const starters = S.data.starters.split("\n").filter(Boolean);
+    return `<div class="trial"><div class="tmsgs" id="${key}-tmsgs">
+      ${S.trial.length ? msgs : `<div style="text-align:center;padding:30px 0 10px">${av("expense-reviewer", 64)}<div class="serif" style="font-size:22px;margin-top:10px">和「${esc(S.data.name || "新智能体")}」试聊</div><p class="muted">用的是当前草稿，不影响发布版。觉得回答对，就把它存成评测用例。</p><div class="chips">${starters.map((s) => `<button class="chip" data-ba="t-starter" data-v="${esc(s)}">${esc(s)}</button>`).join("")}</div></div>`}
+      </div>
+      <div class="composer" style="margin:0 20px 16px"><textarea id="${key}-tdraft" placeholder="用草稿问一句">${esc(S.trialDraft)}</textarea><div class="bar"><button class="ibtn">${ic("clip", 15)}发票图片</button><span class="muted small">草稿，claude-sonnet-4-5</span><button class="sendbtn" data-ba="t-send" aria-label="发送">${ic("up", 16, 2)}</button></div></div></div>`;
+  }
+
+  /* ---------- 右：评测 ---------- */
+  function evalView() {
+    const n = S.cases.length, p = passN();
+    const fails = S.cases.filter((c) => S.caseSt[c.n] && S.caseSt[c.n].s === "fail");
+    let ban = "";
+    if (!n) ban = `<div class="banner info">${ic("warn", 18)}还没有用例。在试聊里点「存为评测用例」，或手动添加。</div>`;
+    else if (S.evalState === "passed") ban = `<div class="banner ok">${ic("check", 18, 2.2)}<div><b>当前草稿 ${n}/${n} 全部通过。</b>可以发布了。</div><button class="btn ok sm" style="margin-left:auto" data-ba="stage" data-v="pub">去上线清单</button></div>`;
+    else if (S.evalState === "partial") ban = `<div class="banner warn">${ic("warn", 18)}<div><b>${p}/${n} 通过，${fails.length} 个未通过。</b>发布要求当前草稿全部通过。</div><button class="btn sm" style="margin-left:auto" data-ba="fix">让搭建助手修复</button></div>`;
+    else if (S.evalState === "stale") ban = `<div class="banner warn">${ic("warn", 18)}<div><b>配置已变化，之前的评测结论作废。</b>对当前草稿重跑一次。</div></div>`;
+    const st = (c) => S.caseSt[c.n] || { s: "idle" };
+    return `<div class="stage-h"><div><h2>评测</h2><div class="muted">每个用例会真实调用一次模型，费用记在你名下。发布要求当前草稿全部通过，且之后没改过配置或用例。</div></div></div>
+      ${ban}
+      <div class="row" style="margin-bottom:12px"><span class="muted" style="white-space:nowrap">目标</span><select class="inp" style="width:200px" data-ba-change="target">${["当前草稿", ...S.versions.map((v) => "v" + v.v + (v.v === S.current ? "（发布版）" : ""))].map((x) => `<option>${x}</option>`).join("")}</select>
+        <div class="prog"><i style="width:${n ? (S.evalState === "running" ? Object.values(S.caseSt).filter((x) => x.s === "pass" || x.s === "fail").length : (S.evalState === "passed" || S.evalState === "partial" ? n : 0)) / n * 100 : 0}%"></i></div>
+        <span style="flex:1"></span><button class="btn ghost sm" data-ba="add-case">${ic("plus", 15)}添加用例</button>
+        <button class="btn sm" data-ba="run-eval" ${!n || S.evalState === "running" ? "disabled" : ""}>${ic("play", 14)}${S.evalState === "none" ? "运行全部 " + n + " 个用例" : "重新运行"}</button></div>
+      ${S.addingCase ? caseForm() : ""}
+      ${S.cases.map((c, i) => { const x = st(c); return `<div class="case ${x.s}">
+        <div class="ch2">${x.s === "pass" ? `<span class="chk ok pop">${ic("check", 12, 3)}</span>` : x.s === "fail" ? `<span class="chk bad pop">${ic("x", 12, 3)}</span>` : x.s === "run" ? '<span class="spin" style="width:18px;height:18px"></span>' : '<span class="chk wait"></span>'}
+          <div style="flex:1;min-width:0"><div class="row" style="gap:8px"><span class="nm">${c.n}</span>${c.from ? `<span class="tag line">来自${c.from}</span>` : ""}</div><div class="as">${c.a}</div></div>
+          <span class="muted small">${x.s === "pass" || x.s === "fail" ? `${x.cost} 积分，${x.time}` : x.s === "run" ? "运行中" : x.s === "wait" ? "排队中" : "未运行"}</span>
+          ${x.s === "fail" ? `<button class="btn sm" data-ba="fix">让搭建助手修复</button>` : `<button class="ibtn" data-ba="edit-case" data-i="${i}">${ic("edit", 14)}编辑</button>`}</div>
+        ${x.s === "fail" ? `<div class="detail"><div style="color:var(--bad)">${FAIL[c.n].r}</div><div class="snap">${esc(FAIL[c.n].s)}</div><span class="muted small">运行 ID r_${(9000 + i * 37).toString(16)}e2</span></div>` : ""}
+      </div>`; }).join("")}
+      <div class="sub-h" style="margin-top:22px">历史评测</div>
+      <table class="tb"><tr><th>目标</th><th>配置哈希</th><th>标记</th><th>结果</th><th>时间</th></tr>
+      ${S.hist.map((h, i) => `<tr><td>${h.t}</td><td style="font-family:var(--mono);font-size:13px">${h.h}</td><td><span class="tag ${h.mk === "= 当前草稿" ? "ok" : h.mk === "配置已变化" ? "warn" : ""}">${h.mk}</span></td><td>${h.p}/${h.n}（${Math.round(h.p / h.n * 100)}%）</td><td class="muted">${h.at}</td></tr>`).join("") || '<tr><td colspan="5" class="muted">还没有评测记录</td></tr>'}</table>`;
+  }
+  function caseForm() {
+    return `<div class="card rise" style="padding:16px;margin-bottom:12px"><div class="grid2"><div class="fld"><label>用例名 <b>*</b></label><input class="inp" id="${key}-ncn" value="差旅住宿超标"></div><div class="fld"><label>结构化字段等于（路径 = 值）</label><input class="inp" value="verdict = reject"></div></div>
+      <div class="fld"><label>输入 <b>*</b></label><textarea class="ta" rows="2">{ "invoice_url": "https://files.xinghe.example/inv/2026-1102.pdf", "amount": 1280, "currency": "CNY" }</textarea></div>
+      <div class="row small" style="margin-bottom:12px;gap:18px"><label class="row" style="gap:6px"><input type="checkbox" checked>输入按 JSON 对象解析</label><label class="row" style="gap:6px"><input type="checkbox" checked>期望运行成功</label></div>
+      <div class="grid2"><div class="fld"><label>正文须包含（每行一个）</label><textarea class="ta" rows="2">住宿标准</textarea></div><div class="fld"><label>正文不得包含（每行一个）</label><textarea class="ta" rows="2"></textarea></div></div>
+      <div class="grid2"><div class="fld"><label>花费上限（美元）</label><input class="inp" value="0.05"></div><div class="fld"><label>耗时上限（秒）</label><input class="inp" value="60"></div></div>
+      <div class="row"><button class="btn sm" data-ba="case-ok">保存用例</button><button class="btn ghost sm" data-ba="case-x">取消</button></div></div>`;
+  }
+
+  /* ---------- 右：发布（上线清单） ---------- */
+  function checks() {
+    const n = S.cases.length, nv = S.pubDone ? S.current : nextV();
+    return [
+      { ok: allFilled(), t: "编排完整", d: allFilled() ? "名称、提示词、模型等 9 节都已填写" : `还有 ${SECS.filter(([k]) => S.sec[k] === "empty").length} 节没填`, go: ["去处理", "stage", "orch"] },
+      { ok: S.evalState === "passed", t: S.evalState === "passed" ? `评测 ${n}/${n} 通过` : "评测全部通过", d: S.evalState === "passed" ? "针对当前草稿，之后没改过配置或用例" : S.evalState === "partial" ? `当前草稿 ${passN()}/${n} 通过，有用例未通过` : S.evalState === "stale" ? "配置变了，需要对当前草稿重跑" : S.evalState === "running" ? "正在运行" : n ? `${n} 个用例还没运行` : "至少需要 1 个用例", go: ["去处理", "stage", "eval"] },
+      { ok: S.changes > 0 || S.pubDone, t: S.pubDone ? "草稿与发布版一致" : "有修改可发布", d: S.pubDone ? `v${S.current} 就是当前草稿` : S.changes ? `草稿与 v${S.current} 有 ${S.changes} 处差异` + (S.current ? "" : "") : S.current ? "没有可发布的修改" : "首次发布", go: S.changes ? ["查看差异", "diff", ""] : null, alt: S.changes ? ["查看差异", "diff", ""] : null },
+      { ok: S.pubDone, t: S.pubDone ? `已发布 v${S.current}` : `发布 v${nv}`, d: S.pubDone ? "调用方与其他使用者从现在起用这一版；进行中的会话不受影响" : S.current ? `发布后调用方用 v${nv}，可用 version 参数锁定旧版` : "未发布时，接口调用和其他人使用都直接跑草稿", pub: true },
+      { ok: S.keyIssued, t: "接入", d: S.keyIssued ? "已签发限定本智能体的 Key" : "签发一个只给本智能体用的 Key，复制代码，试调一次", go: ["去接入", "stage", "acc"] },
+    ];
+  }
+  function pubView() {
+    const cs = checks();
+    const ready = cs[0].ok && cs[1].ok && cs[2].ok && !S.pubDone;
+    const okN = cs.filter((c) => c.ok).length;
+    return `<div class="stage-h"><div><h2>上线清单</h2><div class="muted">${okN}/5 项已就绪。每项不满足时，就地去处理。</div></div><button class="ibtn" data-ba="replay">${ic("refresh", 14)}重新检查</button></div>
+      <div class="launch">${cs.map((c, i) => { const shown = i < S.reveal; const cls = !shown ? "" : c.ok ? "ok" : "warn"; return `<div class="lc ${cls}">
+        <div class="ck">${!shown ? '<span class="spin" style="width:14px;height:14px"></span>' : c.ok ? ic("check", 15, 2.6) : ic("warn", 14, 2)}</div>
+        <div style="flex:1;min-width:0"><div class="t">${c.t}</div><div class="d">${c.d}</div>
+        ${c.pub && !S.pubDone && shown ? `<div class="row" style="margin-top:10px;align-items:flex-start"><textarea class="ta" id="${key}-note" rows="2" maxlength="512" placeholder="版本说明（可选，最多 512 字）" style="flex:1">${esc(S.pubNote || "外币按开票日汇率；新增餐饮标准规则；reasons 带条款编号")}</textarea>
+          <button class="btn" data-ba="publish" ${ready ? "" : "disabled"}>${S.publishing ? '<span class="spin" style="border-top-color:#fff;border-color:#666"></span>发布中' : `发布为 v${nextV()}`}</button></div>${ready ? "" : '<div class="small muted" style="margin-top:6px">前三项都就绪后才能发布</div>'}` : ""}</div>
+        <div class="rt">${shown && !c.ok && c.go ? `<button class="btn sm" data-ba="${c.go[1]}" data-v="${c.go[2]}">${c.go[0]}</button>` : ""}${shown && c.ok && c.alt ? `<button class="btn ghost sm" data-ba="${c.alt[1]}">${c.alt[0]}</button>` : ""}</div></div>`; }).join("")}</div>
+      <div class="sub-h" style="margin-top:26px;font-size:15px">版本</div>
+      <p class="muted small" style="margin:0 0 6px">回滚和设为发布版只需确认，不受评测限制，秒级生效。</p>
+      ${S.versions.map((v) => `<div class="ver"><span class="v">v${v.v}</span>${v.v === S.current ? '<span class="tag ok">发布版</span>' : '<span class="tag line">历史</span>'}<span class="tag line">评测 ${v.ev}</span><span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" class="muted">${v.note}</span><span class="muted small">${v.at}</span>
+        <div class="row" style="width:100%;padding-left:48px;gap:2px;margin-top:-4px"><button class="ibtn" data-ba="snap" data-v="${v.v}">查看快照</button><button class="ibtn" data-ba="diff" data-v="${v.v}">对比草稿</button><button class="ibtn" data-ba="loadv" data-v="${v.v}">载入草稿</button>${v.v !== S.current ? `<button class="ibtn" data-ba="rollback" data-v="${v.v}">${v.v < S.current ? "回滚到此版" : "设为发布版"}</button>` : ""}</div></div>`).join("") || '<p class="muted">还没有版本</p>'}
+      <div class="sub-h" style="margin-top:26px;font-size:15px">分享与上架</div>
+      <div class="lst"><div class="li">${ic("globe", 16)}<div><div style="font-weight:500">公开给所有账号</div><div class="muted small">只读，任何登录账号都能使用发布版。公开不等于上架市场。</div></div><button class="btn ${S.pub ? "ghost" : ""} sm" style="margin-left:auto" data-ba="public">${S.pub ? "取消公开" : "公开"}</button></div>
+        <div class="li">${ic("grid", 16)}<div><div style="font-weight:500">申请上架市场</div><div class="muted small">由管理员审核后上架到探索页</div></div><span class="tag warn" style="margin-left:auto">需后端</span><button class="btn ghost sm" data-ba="apply-market" ${S.current ? "" : "disabled"}>${S.applied ? "已提交申请" : "提交申请"}</button></div></div>
+      <div class="sub-h">定向授权</div>
+      <div class="row" style="margin-bottom:8px"><input class="inp" id="${key}-gm" placeholder="账号邮箱，如 wanglei@xinghe.example"><select class="inp" id="${key}-gp" style="width:110px"><option>读</option><option>读写</option></select><button class="btn sm" data-ba="grant">添加</button></div>
+      <div class="lst">${S.grants.map((g, i) => `<div class="li">${ic("user", 16)}<span>${esc(g.who)}</span><span class="tag">${g.p}</span><button class="ibtn" style="margin-left:auto" data-ba="ungrant" data-i="${i}">撤销</button></div>`).join("")}</div>`;
+  }
+
+  /* ---------- 右：接入 ---------- */
+  const CODE = {
+    curl: `<span class="c"># 发起调用（异步），返回 runId</span>
+curl -X POST https://owa.xinghe.example/api/agents/expense-reviewer/invoke \\
+  -H <span class="s">"Authorization: Bearer $OWA_KEY"</span> \\
+  -H <span class="s">"Content-Type: application/json"</span> \\
+  -d <span class="s">'{"input":{"invoice_url":"https://files.xinghe.example/inv/1015.pdf","amount":6800,"currency":"CNY"},"version":4}'</span>
+
+<span class="c"># 轮询结果</span>
+curl https://owa.xinghe.example/api/agents/expense-reviewer/result?runId=$RUN_ID \\
+  -H <span class="s">"Authorization: Bearer $OWA_KEY"</span>`,
+    Python: `<span class="k">import</span> os, time, requests
+
+BASE = <span class="s">"https://owa.xinghe.example/api/agents/expense-reviewer"</span>
+H = {<span class="s">"Authorization"</span>: <span class="s">f"Bearer {os.environ['OWA_KEY']}"</span>}
+
+run = requests.post(<span class="s">f"{BASE}/invoke"</span>, headers=H, json={
+    <span class="s">"input"</span>: {<span class="s">"invoice_url"</span>: <span class="s">"https://files.xinghe.example/inv/1015.pdf"</span>,
+              <span class="s">"amount"</span>: 6800, <span class="s">"currency"</span>: <span class="s">"CNY"</span>},
+    <span class="s">"version"</span>: 4,
+}).json()
+
+<span class="k">while</span> True:
+    r = requests.get(<span class="s">f"{BASE}/result"</span>, headers=H, params={<span class="s">"runId"</span>: run[<span class="s">"runId"</span>]}).json()
+    <span class="k">if</span> r[<span class="s">"status"</span>] <span class="k">in</span> (<span class="s">"succeeded"</span>, <span class="s">"failed"</span>): <span class="k">break</span>
+    time.sleep(2)
+print(r[<span class="s">"output"</span>])`,
+    Node: `<span class="k">const</span> BASE = <span class="s">"https://owa.xinghe.example/api/agents/expense-reviewer"</span>;
+<span class="k">const</span> H = { Authorization: <span class="s">\`Bearer \${process.env.OWA_KEY}\`</span>, <span class="s">"Content-Type"</span>: <span class="s">"application/json"</span> };
+
+<span class="k">const</span> run = <span class="k">await</span> fetch(<span class="s">\`\${BASE}/invoke\`</span>, {
+  method: <span class="s">"POST"</span>, headers: H,
+  body: JSON.stringify({ input: { invoice_url: <span class="s">"https://files.xinghe.example/inv/1015.pdf"</span>, amount: 6800, currency: <span class="s">"CNY"</span> }, version: 4 }),
+}).then((r) => r.json());
+
+<span class="k">let</span> r;
+<span class="k">do</span> {
+  <span class="k">await</span> <span class="k">new</span> Promise((ok) => setTimeout(ok, 2000));
+  r = <span class="k">await</span> fetch(<span class="s">\`\${BASE}/result?runId=\${run.runId}\`</span>, { headers: H }).then((x) => x.json());
+} <span class="k">while</span> (![<span class="s">"succeeded"</span>, <span class="s">"failed"</span>].includes(r.status));
+console.log(r.output);`,
+  };
+  function accView() {
+    return `<div class="stage-h"><div><h2>接入</h2><div class="muted">从你的系统里调用这个智能体。<span class="tag ${S.current ? "" : "warn"}">${S.current ? "已发布 v" + S.current : "未发布，调用使用草稿"}</span> <span class="tag">结构化入参</span> <span class="tag">结构化结果</span></div></div><button class="ibtn" data-ba="openapi">${ic("file", 15)}OpenAPI 文档</button></div>
+      <div class="blk"><div class="row"><h3>${ic("key", 17)} API Key</h3><span class="muted small" style="margin-left:auto">平台默认每 Key 每分钟 60 次，每智能体合计 300 次，超出返回 429</span></div>
+        ${S.plain ? `<div class="banner warn" style="margin:12px 0 0">${ic("warn", 18)}<b>明文只显示这一次。</b>关掉后只能轮换，不能再查看。</div>
+          <div class="keybox"><span style="flex:1;word-break:break-all">${S.plain}</span><button class="btn ghost sm" data-ba="copy-key">${ic("copy", 14)}复制</button><button class="btn ok sm" data-ba="saved-key">我已保存</button></div>` : ""}
+        ${!S.plain && !S.keys.length ? `<div class="grid2" style="grid-template-columns:1.4fr 1fr 1fr 1.2fr;margin-top:12px"><div class="fld"><label>用途备注</label><input class="inp" id="${key}-kn" value="ERP 报销单初审"></div><div class="fld"><label>每分钟上限</label><input class="inp" value="60"></div>
+          <div class="fld"><label>有效期</label><select class="inp"><option>90 天</option><option>不过期</option><option>30 天</option><option>1 年</option></select></div><div class="fld"><label>限定智能体</label><select class="inp"><option>仅 报销审核助手</option><option>不限</option></select></div></div>
+          <button class="btn" data-ba="issue">${ic("key", 16)}签发 Key</button>` : ""}
+        ${S.keys.length ? `<table class="tb" style="margin-top:10px"><tr><th>名称</th><th>Key</th><th>限定</th><th>过期</th><th>每分钟</th><th>月度积分上限</th><th></th></tr>${S.keys.map((k, i) => `<tr><td>${k.n}</td><td style="font-family:var(--mono);font-size:13px">${k.mask}</td><td>仅 报销审核助手</td><td>${k.exp}</td><td>60</td><td>${k.used} / 5,000</td><td style="white-space:nowrap"><button class="ibtn" data-ba="rotate" data-i="${i}">轮换</button><button class="ibtn" style="color:var(--bad)" data-ba="revoke" data-i="${i}">吊销</button></td></tr>`).join("")}</table>` : ""}
+      </div>
+      <div class="blk"><div class="row" style="margin-bottom:8px"><h3>${ic("brace", 17)} 调用代码</h3><span class="muted small" style="margin-left:auto">示例入参按 inputSchema 生成，已校验通过</span></div>
+        <div class="tabs">${["curl", "Python", "Node"].map((t) => `<button class="${S.codeTab === t ? "on" : ""}" data-ba="code" data-v="${t}">${t}</button>`).join("")}<button class="ibtn" style="margin-left:auto" data-ba="copy-code">${ic("copy", 14)}复制</button></div>
+        <pre class="code" style="max-height:230px">${CODE[S.codeTab]}</pre></div>
+      <div class="blk"><div class="row" style="margin-bottom:10px"><h3>${ic("play", 16)} 在线试调</h3><span class="muted small" style="margin-left:auto">真实调用并计费，记在你名下</span></div>
+        <div class="grid2"><div><div class="row small muted" style="margin-bottom:6px;white-space:nowrap">请求体<select class="inp" style="width:150px;height:32px;margin-left:auto"><option>最新发布版</option><option>草稿</option>${S.versions.map((v) => `<option>v${v.v}</option>`).join("")}</select></div>
+          <textarea class="ta" rows="8" style="font-family:var(--mono);font-size:12.5px">{
+  "input": {
+    "invoice_url": "https://files.xinghe.example/inv/1015.pdf",
+    "amount": 6800,
+    "currency": "CNY"
+  }
+}</textarea><button class="btn sm" style="margin-top:8px" data-ba="try" ${S.tryRunning ? "disabled" : ""}>${S.tryRunning ? "调用中…" : "发送 invoke"}</button></div>
+        <div><div class="small muted" style="margin-bottom:6px;height:32px;display:flex;align-items:center">响应 ${S.tryDone ? '<span class="tag ok" style="margin-left:8px">200，4.1s</span>' : ""}</div><pre class="code" style="height:206px">${S.tryOut || '<span class="c">// 点「发送 invoke」后在这里看返回的 JSON</span>'}</pre></div></div></div>
+      <div class="blk"><div class="row" style="margin-bottom:8px"><h3>${ic("hook", 17)} Webhook</h3><span class="tag ok" style="margin-left:10px">签名密钥已配置 whsec_…9f2c（账号级）</span><button class="btn ghost sm" style="margin-left:auto" data-ba="hook-test">发送测试</button></div>
+        <div class="muted" style="margin-bottom:8px">回调地址 <span style="font-family:var(--mono);font-size:13px;color:var(--ink)">${esc(S.data.webhook || "尚未配置回调地址")}</span>　<span class="link" data-ba="goweb">修改</span>　签名头 X-OWA-Signature、X-OWA-Timestamp</div>
+        <table class="tb"><tr><th>结果</th><th>触发</th><th>响应</th><th>时间</th><th></th></tr>${S.hooks.map((h, i) => `<tr><td>${h.ok ? '<span class="tag ok">成功</span>' : '<span class="tag bad">失败</span>'}</td><td>${h.how}</td><td>HTTP ${h.code}</td><td class="muted">${h.at}</td><td>${h.ok ? "" : `<button class="btn ghost sm" data-ba="redeliver" data-i="${i}">重发</button>`}</td></tr>`).join("")}</table></div>`;
+  }
+
+  /* ---------- 右：运行 ---------- */
+  const RUNS = [
+    ["11-11 14:21", "v3", "接口调用", "运行中", "invoice 1102.pdf，3,200 元", "12s", "—"],
+    ["11-11 14:02", "v3", "接口调用", "成功", "invoice 1031.pdf，6,800 元", "4.1s", "21 积分"],
+    ["11-11 11:40", "草稿", "评测", "成功", "外币换算", "5.2s", "18 积分"],
+    ["11-11 10:15", "v3", "工作台", "成功", "帮我初审这 12 张差旅发票", "48s", "164 积分"],
+    ["11-10 18:40", "v3", "接口调用", "失败", "invoice 0998.pdf，USD 420", "9.8s", "11 积分"],
+    ["11-10 16:03", "v3", "API 会话", "成功", "这张发票抬头对吗", "3.4s", "9 积分"],
+    ["11-10 09:20", "草稿", "AI 编辑", "已取消", "把输出改成 JSON", "2.1s", "部分 4 积分"],
+  ];
+  function runView() {
+    const rows = RUNS.filter((r) => S.runSrc === "全部" || r[2] === S.runSrc);
+    return `<div class="stage-h"><div><h2>运行</h2><div class="muted">本智能体近 7 天的运行，包括工作台、接口调用、评测与 AI 编辑。</div></div></div>
+      <div class="grid2" style="grid-template-columns:repeat(3,1fr);margin-bottom:16px"><div class="stat"><div class="muted small">调用次数</div><div class="n">214</div></div><div class="stat"><div class="muted small">失败率</div><div class="n">2.8%</div></div><div class="stat"><div class="muted small">消耗</div><div class="n">3,412 积分</div></div></div>
+      <div class="row" style="margin-bottom:10px"><div class="seg">${["全部", "工作台", "API 会话", "接口调用", "评测", "AI 编辑"].map((s) => `<button class="${S.runSrc === s ? "on" : ""}" data-ba="runsrc" data-v="${s}">${s}</button>`).join("")}</div></div>
+      <table class="tb"><tr><th>时间</th><th>版本</th><th>来源</th><th>状态</th><th>输入</th><th>耗时</th><th>花费</th></tr>
+      ${rows.map((r) => `<tr class="click" data-ba="run" data-v="${RUNS.indexOf(r)}"><td class="muted">${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td><span class="tag ${r[3] === "成功" ? "ok" : r[3] === "失败" ? "bad" : r[3] === "运行中" ? "warn" : ""}">${r[3]}</span></td><td>${r[4]}</td><td>${r[5]}</td><td>${r[6]}</td></tr>`).join("")}</table>`;
+  }
+  function runDrawer(i) {
+    const r = RUNS[i];
+    const d = document.createElement("div");
+    d.className = "drawer"; d.id = key + "-drawer";
+    d.innerHTML = `<div class="dh"><div><div style="font-weight:600;font-size:16px">运行详情</div><div class="muted small">${r[0]}，${r[2]}，${r[1]}</div></div><button class="xbtn" data-ba="close-drawer">${ic("x")}</button></div>
+      <div class="db"><div class="row" style="margin-bottom:12px"><span class="tag ${r[3] === "成功" ? "ok" : r[3] === "失败" ? "bad" : "warn"}">${r[3]}</span><span class="muted small">taskId t_${(48211 + i * 97).toString(16)}</span>${r[3] === "运行中" ? `<button class="btn danger sm" style="margin-left:auto" data-ba="cancel-run" data-v="${i}">取消运行</button>` : ""}</div>
+      <div class="dsec"><h4>输入</h4><div>${r[4]}</div></div>
+      ${r[3] === "失败" ? `<div class="dsec"><h4>错误</h4><div style="color:var(--bad)">tool_error：erp-finance.query_budget 返回 502</div></div>` : ""}
+      <div class="dsec"><h4>结构化结果</h4><pre class="code" style="font-size:12.5px">${r[3] === "成功" ? '{ "verdict": "need_approval",\n  "reasons": ["金额 6800 元超过 5000 元（第 7 条）"] }' : "（暂无）"}</pre></div>
+      <div class="dsec"><h4>最终回答</h4><div>${r[3] === "成功" ? "这张机票 6,800 元，超过单笔 5,000 元，需要部门负责人审批。抬头与税号正确。" : "（暂无）"}</div></div>
+      <button class="btn ghost" data-a="nav" data-to="chat">在对话里查看完整过程</button></div>`;
+    root().appendChild(d);
+  }
+
+  /* ---------- 渲染入口 ---------- */
+  function right() {
+    if (S.stage === "orch") return `<div class="rtop"><div class="seg"><button class="${S.rtab === "card" ? "on" : ""}" data-ba="rtab" data-v="card">档案</button><button class="${S.rtab === "chat" ? "on" : ""}" data-ba="rtab" data-v="chat">试聊</button></div><span class="muted small">${S.rtab === "card" ? "每一节都能点开直接改，改动自动保存" : "用当前草稿对话"}</span></div>
+      ${S.rtab === "card" ? `<div class="rscroll" id="${key}-rs">${cardView()}</div>` : trialView()}`;
+    return `<div class="rscroll" id="${key}-rs">${{ eval: evalView, pub: pubView, acc: accView, run: runView }[S.stage]()}</div>`;
+  }
+  function studio() {
+    return topnav("studio") + `<div class="pbody"><div style="padding:40px 80px">
+      <div class="row" style="align-items:flex-end;margin-bottom:22px"><div><h1 class="serif" style="font-size:40px;margin:0">工作室</h1><p class="muted" style="margin:6px 0 0;font-size:16px">招一个新同事：说清楚要它做什么，搭建助手边问边搭。</p></div></div>
+      <div class="askbox" style="width:100%">
+        <textarea id="${key}-ask" style="height:64px">做一个审核报销单的助手，超过 5000 元提醒我</textarea>
+        <div class="bar"><button class="ibtn">${ic("clip", 16)}附上制度文件</button><button class="ibtn" data-ba="blank">${ic("plus", 16)}空白创建</button><button class="ibtn" data-ba="tpl">${ic("grid", 16)}从模板或市场克隆</button><button class="btn" style="margin-left:auto" data-ba="start">${ic("sparkle", 16)}开始搭建</button></div>
+      </div>
+      <h2 class="serif" style="font-size:24px;margin:36px 0 14px">我的智能体</h2>
+      <div class="mgrid">
+        ${[["expense-reviewer", "报销审核助手", "已发布 v3，草稿有 4 处修改", "warn", "build"], ["meeting", "会议纪要整理", "已发布 v5，已上架市场", "ok", ""], ["weekly", "周报生成器", "已发布 v4，已上架市场", "ok", ""], ["rival", "竞品周报", "草稿，评测 3/4", "", ""], ["contract", "合同条款比对", "罗婧分享给我，只读", "", ""]].map(([k, n, s, c, to]) => `<div class="mcard" data-ba="${to ? "open-build" : "other"}" data-n="${n}"><div class="row">${av(k, 48)}<div><div class="nm">${n}</div><div class="by"><span class="tag ${c}">${s}</span></div></div></div></div>`).join("")}
+      </div></div></div>`;
+  }
+  B.render = function (part) {
+    const r = root();
+    if (S.view === "studio") { r.innerHTML = studio(); return; }
+    const keepR = $(`#${key}-rs`) ? $(`#${key}-rs`).scrollTop : 0;
+    if (!part || !r.querySelector(".bwrap")) {
+      r.innerHTML = topnav("studio") + `<div class="bwrap"><div id="${key}-list" style="display:contents">${list()}</div><section class="bmain"><div id="${key}-head">${head()}</div><div class="bcols"><div id="${key}-chat" style="display:contents">${chatCol()}</div><section class="bright" id="${key}-right">${right()}</section></div></section></div>`;
+    } else {
+      if (part.includes("h")) { $(`#${key}-head`).innerHTML = head(); $(`#${key}-list`).innerHTML = list(); }
+      if (part.includes("c")) $(`#${key}-chat`).innerHTML = chatCol();
+      if (part.includes("r")) $(`#${key}-right`).innerHTML = right();
+    }
+    const rs = $(`#${key}-rs`); if (rs && B.keepScroll) rs.scrollTop = keepR;
+    B.keepScroll = true;
+    const m = $(`#${key}-msgs`); if (m && (!part || part.includes("c"))) { m.scrollTop = m.scrollHeight; requestAnimationFrame(() => (m.scrollTop = m.scrollHeight)); }
+    const t = $(`#${key}-tmsgs`); if (t) t.scrollTop = t.scrollHeight;
+  };
+  const R = (p = "hcr") => B.render(p);
+  const say = (m) => { S.chat.push(Object.assign({ who: "bot" }, m)); };
+  function setStage(v) {
+    S.stage = v; B.keepScroll = false;
+    const dr = $(`#${key}-drawer`); if (dr) dr.remove();
+    if (v === "pub") { S.reveal = 0; R("hr"); const tick = () => { S.reveal++; R("r"); if (S.reveal < 5) setTimeout(tick, 260); }; setTimeout(tick, 220); }
+    else R("hr");
+  }
+
+  /* ---------- 搭建流程 ---------- */
+  B.start = async function (text, blank) {
+    S.view = "builder"; S.stage = "orch"; S.rtab = "card";
+    if (blank) {
+      S.base = false; S.current = 0; S.versions = [];
+      say({ text: "空白草稿已建好。右侧 9 节都可以直接点开手动填；也可以告诉我要做什么，我来写。" });
+      R(); return;
+    }
+    S.chat.push({ who: "me", text }); S.busy = true; R();
+    await later(900);
+    S.busy = false;
+    say({ text: "收到：做一个报销初审的智能体，读发票和报销单，按制度初审，单笔超过 5000 元提醒审批。开工前确认几件事：", kind: "ask", st: "wait",
+      qs: [
+        { q: "工作室里已有「报销审核助手」v3，这次怎么做？", o: ["在它上面改，沿用用例和接入地址（推荐）", "另起一个新的"], pick: [0], other: false },
+        { q: "发票抬头以哪个为准？", o: ["星河数据科技有限公司", "星河数据（北京）分公司也算"], pick: [] },
+        { q: "超过 5000 元由谁审批？", o: ["部门负责人", "财务总监", "部门负责人和财务总监"], pick: [] },
+        { q: "需要接入哪些系统？", o: ["ERP 财务系统", "汇率换算", "企业网盘里的发票库"], pick: [0, 1], multi: true },
+      ] });
+    R();
+  };
+  async function build(ans) {
+    const base = ans[0] === 0;
+    S.base = base;
+    if (!base) { S.current = 0; S.versions = []; } else { S.current = 3; S.versions = [{ v: 3, at: "10-28 16:31", note: "接入 ERP 预算查询，抬头规则改为全称", ev: "5/5" }, { v: 2, at: "10-12 10:05", note: "加入外币换算规则", ev: "4/4" }, { v: 1, at: "09-30 15:12", note: "首个版本", ev: "3/3" }]; S.hist = [{ t: "v3", h: "8b20f1", p: 5, n: 5, at: "10-28 16:20", mk: "= v3" }]; }
+    const fd = fullData({ head: ans[1] === 1 ? "星河数据科技有限公司（含北京分公司）" : "星河数据科技有限公司", who: ["部门负责人", "财务总监", "部门负责人和财务总监"][ans[2]] || "部门负责人" });
+    const steps = [["identity", "起名字、配头像：报销审核助手"], ["prompt", "写提示词：3 条初审规则"], ["model", "选模型：claude-sonnet-4-5"], ["ability", "接上 invoice-ocr、erp-finance、currency-converter"], ["knowledge", "放入《差旅报销制度 2026 版》等 3 篇资料"], ["vars", "声明 ERP_TOKEN、DEPT 两个变量"], ["contract", "定义输入输出契约"], ["approval", "设置审批：提交 ERP 前先问你"], ["webhook", "配置 Webhook 回调地址"], ["cases", base ? "沿用 v3 的 5 个评测用例" : "按规则生成 5 个评测用例"]];
+    const m = { kind: "steps", text: "开始写入右侧档案卡：", steps: steps.map((s) => ({ t: s[1], d: false, on: false })) };
+    say(m); S.busy = false; clearFresh(); R();
+    for (let i = 0; i < steps.length; i++) {
+      m.steps[i].on = true; R("c");
+      await later(480);
+      const k = steps[i][0];
+      if (k === "cases") S.cases = BASE_CASES();
+      else {
+        if (k === "identity") { ["name", "id", "desc", "starters", "color"].forEach((f) => (S.data[f] = fd[f])); }
+        else if (k === "prompt") S.data.prompt = fd.prompt;
+        else if (k === "model") { ["model", "turns", "effort"].forEach((f) => (S.data[f] = fd[f])); }
+        else if (k === "ability") { ["tools", "skills", "mcp", "subs"].forEach((f) => (S.data[f] = fd[f])); }
+        else if (k === "knowledge") S.data.docs = fd.docs;
+        else if (k === "vars") S.data.vars = fd.vars;
+        else if (k === "contract") { S.data.inSchema = fd.inSchema; S.data.outSchema = fd.outSchema; }
+        else if (k === "approval") { ["perm", "unattended", "apTools", "apCmds"].forEach((f) => (S.data[f] = fd[f])); }
+        else if (k === "webhook") S.data.webhook = fd.webhook;
+        S.sec[k] = "fresh"; S.changes += 1;
+      }
+      m.steps[i].d = true; m.steps[i].on = false;
+      R("hcr");
+      const el = root().querySelector(`[data-sec="${k}"]`); if (el) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+    say({ text: `草稿搭好了：9 节配置都写进了右侧档案卡，每一节都能点开直接改。${base ? "和发布版 v3 相比有 " + S.changes + " 处修改。" : ""}\n下一步，先用草稿试聊一条，回答满意就存成评测用例。`, acts: [["试聊一条", "trialtab", ""], ["看评测用例", "stage", "eval"]] });
+    R();
+  }
+  async function trialSend(text) {
+    if (!text.trim()) return;
+    S.trial.push({ who: "me", text });
+    const usd = /美元|USD/.test(text);
+    const tools = usd ? [["调用 invoice-ocr 识别发票", "0.9s"], ["委托 currency-converter 查开票日汇率", "1.6s"], ["知识库命中 2 段", "0.2s"]] : [["调用 invoice-ocr 识别发票", "0.8s"], ["调用 erp-finance.query_budget", "1.2s"], ["知识库命中 3 段", "0.2s"]];
+    const m = { who: "bot", pending: true, tools, k: 0 };
+    S.trial.push(m); S.trialDraft = ""; R("r");
+    for (let i = 0; i < tools.length; i++) { await later(520); m.k = i + 1; R("r"); }
+    await later(400);
+    Object.assign(m, usd ? { pending: false, v: "通过（pass）", code: "pass", case: "美元发票换算", must: "开票日汇率", text: "USD 420 按开票日 10-15 汇率 7.1032 折合 2,983.34 元，未超过 5,000 元；抬头与税号正确，可以放行。", time: "5.0s", tin: "2,104", tout: "388" }
+      : { pending: false, v: "需要审批（need_approval）", code: "need_approval", case: "超额需审批", must: "部门负责人", text: "机票 6,800 元超过单笔 5,000 元，需要部门负责人审批（《差旅报销制度》第 7 条）。发票抬头「星河数据科技有限公司」与税号均正确，ERP 中本部门本月差旅预算剩余 2.1 万元。", time: "4.2s", tin: "1,830", tout: "412" });
+    R("r");
+  }
+  async function runEval() {
+    closeModal();
+    S.evalState = "running"; S.caseSt = {};
+    S.cases.forEach((c) => (S.caseSt[c.n] = { s: "wait" }));
+    R("hr");
+    for (let i = 0; i < S.cases.length; i++) {
+      const c = S.cases[i];
+      S.caseSt[c.n] = { s: "run" }; R("hr");
+      await later(560);
+      const fail = !S.fixed && FAIL[c.n];
+      S.caseSt[c.n] = { s: fail ? "fail" : "pass", cost: 2 + ((i * 7) % 5), time: (3.1 + ((i * 13) % 30) / 10).toFixed(1) + "s" };
+      R("hr");
+    }
+    const p = passN(), n = S.cases.length;
+    S.evalState = p === n ? "passed" : "partial";
+    S.hist.forEach((h) => { if (h.mk === "= 当前草稿") h.mk = "配置已变化"; });
+    S.hist.unshift({ t: "草稿", h: Math.random().toString(16).slice(2, 8), p, n, at: "11-11 14:" + (40 + S.hist.length), mk: "= 当前草稿" });
+    if (p === n) say({ text: `评测 ${n}/${n} 全部通过。上线清单里前三项都齐了，可以发布。`, acts: [["打开上线清单", "stage", "pub"]] });
+    else say({ text: `评测 ${p}/${n} 通过。「外币换算」用了今日汇率，「餐饮超标准」没识别出超标。要我修吗？`, acts: [["修复这 2 个", "fix", ""]] });
+    R();
+  }
+  async function doFix() {
+    if (S.busy) return;
+    S.chat.push({ who: "me", text: "帮我修复 2 个失败的评测用例" }); S.busy = true; R("c");
+    await later(900);
+    S.busy = false;
+    say({ kind: "steps", text: "", steps: [{ t: "读了 2 个失败用例的输出快照", d: true }, { t: "对照《差旅报销制度 2026 版》第 12 条", d: true }] });
+    say({ kind: "diff", text: "问题出在两处：换算时没把开票日期传给子代理；规则里没有餐饮标准。建议这样改：", blocks: [
+      { h: "提示词，规则 3", l: ["- 3. 外币按开票日汇率换算", "+ 3. 外币按开票日汇率换算：调用 currency-converter 时必须传入开票日期，不得使用当日汇率"] },
+      { h: "提示词，新增规则 4", l: ["+ 4. 餐饮费一线城市每人每餐不超过 150 元，超出的判 reject 并写明「超出餐饮标准」"] },
+      { h: "知识，常驻引用", l: ["+ 《差旅报销制度 2026 版》第 12 条 餐饮标准"] },
+    ] });
+    R("c");
+  }
+  function applyFix(i) {
+    S.chat[i].applied = true; S.fixed = true;
+    S.data.prompt = S.data.prompt.replace("3. 外币按开票日汇率换算", "3. 外币按开票日汇率换算：调用 currency-converter 时必须传入开票日期，不得使用当日汇率\n4. 餐饮费一线城市每人每餐不超过 150 元，超出的判 reject 并写明「超出餐饮标准」");
+    clearFresh(); touch("prompt", true); touch("knowledge", true);
+    S.evalState = "stale";
+    say({ text: "已应用到草稿，「提示词」「知识」两节刚更新。配置变了，之前的评测结论作废，需要对当前草稿重跑。", acts: [["重新运行评测", "run-eval", ""], ["看看改动", "stage", "orch"]] });
+    if (S.stage === "orch") S.rtab = "card";
+    R();
+  }
+  async function publish() {
+    const note = $(`#${key}-note`) ? $(`#${key}-note`).value : "";
+    S.publishing = true; R("r");
+    await later(900);
+    const v = nextV();
+    S.publishing = false; S.versions.unshift({ v, at: "11-11 14:52", note: note || "（无说明）", ev: `${S.cases.length}/${S.cases.length}` });
+    S.current = v; S.changes = 0; S.pubDone = true; clearFresh();
+    S.hist.forEach((h) => { if (h.mk === "= 当前草稿") h.mk = "= v" + v; });
+    toast(`已发布 v${v}，调用方从现在起使用这一版`);
+    say({ text: `v${v} 已发布。接下来签一个只给这个智能体用的 Key，复制代码，就能从你们的 ERP 里调用。`, acts: [["去接入", "stage", "acc"]] });
+    R();
+  }
+
+  /* ---------- 事件 ---------- */
+  const A = {
+    stage: (t) => setStage(t.dataset.v),
+    studio: () => { if (mode === "flow") { S.view = "studio"; R(); } else go("flow"), Flow.st.view = "studio", Flow.render(); },
+    "open-build": () => go("build"),
+    new: () => { go("flow"); Flow.st.view = "studio"; Flow.render(); },
+    other: (t) => toast(`原型只演示「报销审核助手」，「${t.dataset.n}」不展开`, false),
+    start: () => B.start($(`#${key}-ask`).value),
+    blank: () => B.start("", true),
+    tpl: () => openModal(`<h3>从模板或市场克隆</h3><p class="muted">克隆后立即建好草稿并进入编排。</p><div class="tabs"><button class="on">市场</button><button>模板库<span class="tag warn" style="margin-left:6px">需后端</span></button></div>
+      ${MARKET.slice(0, 5).map((m) => `<div class="row" style="padding:8px 0;border-bottom:1px solid var(--line2)">${av(m.k, 36)}<div><div style="font-weight:600">${m.n}</div><div class="muted small">${m.by}，v${m.v}</div></div><button class="btn ghost sm" style="margin-left:auto" data-a="close-toast" data-t="已克隆「${m.n}」到我的智能体">克隆</button></div>`).join("")}
+      <div class="mfoot"><button class="btn ghost" data-a="close">关闭</button></div>`),
+    rtab: (t) => { S.rtab = t.dataset.v; B.keepScroll = false; R("r"); },
+    trialtab: () => { S.stage = "orch"; S.rtab = "chat"; R("hr"); },
+    sec: (t) => { const k = t.dataset.k; S.open[k] = !S.open[k]; t.closest(".sec").classList.toggle("open"); },
+    pick: (t) => {
+      const m = S.chat[+t.dataset.i], q = m.qs[+t.dataset.q], o = +t.dataset.o;
+      if (q.multi) q.pick = q.pick.includes(o) ? q.pick.filter((x) => x !== o) : [...q.pick, o]; else q.pick = [o];
+      R("c");
+    },
+    "other-ans": (t) => {
+      const m = S.chat[+t.dataset.i], q = m.qs[+t.dataset.q];
+      openModal(`<h3>其他（自己填写）</h3><p class="muted">${q.q}</p><input class="inp" id="oa-in" placeholder="写下你的答案"><div class="mfoot"><button class="btn ghost" data-a="close">取消</button><button class="btn" id="oa-ok">确定</button></div>`, 440);
+      $("#oa-ok").onclick = () => { const v = $("#oa-in").value.trim(); if (!v) return; q.o.push(v); q.pick = q.multi ? [...q.pick, q.o.length - 1] : [q.o.length - 1]; closeModal(); R("c"); };
+    },
+    "submit-ask": (t) => { const m = S.chat[+t.dataset.i]; m.st = "done"; S.chat.push({ who: "me", text: m.qs.map((q) => q.pick.map((p) => q.o[p]).join("、")).join("；") }); S.busy = true; R("c"); setTimeout(() => build(m.qs.map((q) => q.pick[0])), 700); },
+    "skip-ask": (t) => { const m = S.chat[+t.dataset.i]; m.qs.forEach((q) => { if (!q.pick.length) q.pick = [0]; }); m.st = "done"; S.chat.push({ who: "me", text: "不回答，按推荐来" }); S.busy = true; R("c"); setTimeout(() => build(m.qs.map((q) => q.pick[0])), 700); },
+    send: () => {
+      const v = ($(`#${key}-draft`).value || "").trim(); if (!v) return;
+      S.draft = "";
+      if (/修复|修一下/.test(v) && S.evalState === "partial") { doFix(); return; }
+      S.chat.push({ who: "me", text: v }); S.busy = true; R("c");
+      setTimeout(() => {
+        S.busy = false; clearFresh();
+        if (S.data.prompt) { const n = S.data.prompt.split("\n").filter((l) => /^\d\./.test(l)).length + 1; S.data.prompt = S.data.prompt.replace("## 输出", `${n}. ${v.replace(/[。.]$/, "")}\n## 输出`); }
+        const wasPassed = S.evalState === "passed"; touch("prompt", true);
+        say({ text: `已把这条要求写进提示词规则，右侧「提示词」一节刚更新。${wasPassed ? "\n配置变了，评测结论作废，发布前要重跑。" : ""}` });
+        if (S.stage === "orch") S.rtab = "card";
+        R();
+      }, 900);
+    },
+    "apply-fix": (t) => applyFix(+t.dataset.i),
+    "reject-fix": (t) => { S.chat[+t.dataset.i].applied = false; say({ text: "好，先不改。需要时在评测里点「让搭建助手修复」。" }); R("c"); },
+    fix: () => doFix(),
+    "run-eval": () => openModal(`<h3>运行评测</h3><p>将对<b>当前草稿</b>运行 ${S.cases.length} 个用例。每个用例真实调用一次模型，预计约 ${S.cases.length * 3} 积分，记在你名下。</p><div class="mfoot"><button class="btn ghost" data-a="close">取消</button><button class="btn" data-ba="go-eval">开始运行</button></div>`, 460),
+    "go-eval": () => { if (S.stage !== "eval") { S.stage = "eval"; } runEval(); },
+    "add-case": () => { S.addingCase = true; R("r"); },
+    "edit-case": () => { S.addingCase = true; R("r"); },
+    "case-x": () => { S.addingCase = false; R("r"); },
+    "case-ok": () => { S.cases.push({ n: $(`#${key}-ncn`).value || "新用例", a: "verdict = reject，正文须包含「住宿标准」", from: "" }); S.addingCase = false; if (S.evalState === "passed" || S.evalState === "partial") S.evalState = "stale"; toast("用例已保存"); R("hr"); },
+    "t-starter": (t) => trialSend(t.dataset.v),
+    "t-send": () => trialSend($(`#${key}-tdraft`).value),
+    "t-copy": () => toast("已复制回答"),
+    "t-regen": () => toast("已用草稿重新生成"),
+    "t-save": (t) => { S.trial[+t.dataset.i].saving = true; R("r"); },
+    "t-save-x": (t) => { S.trial[+t.dataset.i].saving = false; R("r"); },
+    "t-save-ok": (t) => {
+      const m = S.trial[+t.dataset.i]; const n = $(`#${key}-cn`).value || m.case;
+      m.saving = false; m.saved = true;
+      if (!S.cases.find((c) => c.n === n)) S.cases.unshift({ n, a: `verdict = ${m.code}，正文须包含「${m.must}」`, from: "试聊" });
+      if (S.evalState === "passed" || S.evalState === "partial") S.evalState = "stale";
+      toast(`已存为评测用例，共 ${S.cases.length} 个`);
+      say({ text: `试聊这一条已存为用例「${n}」，现在共 ${S.cases.length} 个。去评测跑一遍？`, acts: [["去评测", "stage", "eval"]] });
+      R();
+    },
+    color: (t) => { S.data.color = t.dataset.v; touch("identity"); R("hr"); },
+    effort: (t) => { S.data.effort = t.dataset.v; touch("model"); R("hr"); },
+    perm: (t) => { S.data.perm = t.dataset.v; touch("approval"); R("hr"); },
+    del: (t) => { const l = t.dataset.l; const sec = { skills: "ability", mcp: "ability", subs: "ability", docs: "knowledge", vars: "vars" }[l]; S.data[l].splice(+t.dataset.i, 1); touch(sec); R("hr"); },
+    "add-skill": () => { S.data.skills.push({ n: "receipt-merge", d: "合并同一行程的多张发票", chars: 0 }); touch("ability"); R("hr"); },
+    "add-mcp": () => { S.data.mcp.push({ n: "oa-approval", type: "http", url: "https://oa.example.com/mcp", test: "" }); touch("ability"); R("hr"); },
+    "add-sub": () => { S.data.subs.push({ n: "duplicate-checker", d: "检查发票是否重复报销", m: "claude-haiku-4-5" }); touch("ability"); R("hr"); },
+    "add-var": () => { S.data.vars.push({ n: "APPROVER", d: "默认审批人", req: false, sec: false }); touch("vars"); R("hr"); },
+    "mcp-test": async (t) => { const s = S.data.mcp[+t.dataset.i]; s.test = "…"; R("r"); await later(900); s.test = s.n === "erp-finance" ? "连接成功：erp-finance，MCP 2025-06-18，12 个工具（未调用）" : `连接成功：${s.n}，5 个工具（未调用）`; R("r"); },
+    upload: async () => { S.uploading = true; R("r"); await later(1100); S.uploading = false; S.data.docs.push({ t: "差旅补充说明.pdf", m: "3 页，2,400 字" }); touch("knowledge"); R("hr"); },
+    "manual-doc": () => openModal(`<h3>手动添加知识</h3><div class="fld"><label>标题</label><input class="inp" id="md-t" value="餐饮标准速查"></div><div class="fld"><label>正文</label><textarea class="ta" rows="5">一线城市每人每餐 150 元，其他城市 100 元。</textarea></div><div class="mfoot"><button class="btn ghost" data-a="close">取消</button><button class="btn" data-ba="md-ok">添加文档</button></div>`, 480),
+    "md-ok": () => { S.data.docs.push({ t: $("#md-t").value || "未命名", m: "手动添加，24 字" }); closeModal(); touch("knowledge"); R("hr"); },
+    ksearch: () => {
+      $(`#${key}-khits`).innerHTML = `<div style="margin-top:10px">${[["《差旅报销制度 2026 版》第 9 条", "0.86", "市内交通：出差期间打车费凭行程单与发票报销，单程超过 200 元需注明事由。"], ["《常见问题》", "0.79", "夜间加班 21:00 后打车回家可报，需附加班审批记录。"], ["《差旅报销制度 2026 版》第 10 条", "0.71", "网约车发票抬头须为公司全称，个人抬头不予报销。"]].map((h, i) => `<div class="hit"><div class="row"><b>${i + 1}. ${h[0]}</b><span class="tag ok" style="margin-left:auto">得分 ${h[1]}</span></div><div class="muted" style="margin-top:4px">${h[2]}</div></div>`).join("")}<span class="link small">查看实际注入给模型的文本</span></div>`;
+    },
+    diff: () => openModal(`<h3>草稿与 v${S.current} 的差异</h3><p class="muted">${S.changes} 处修改。长文本给出行级差异。</p>
+      <div class="diff"><div class="dh">修改：提示词</div><div class="dl del">- 3. 外币按当日汇率换算</div><div class="dl add">+ 3. 外币按开票日汇率换算</div>
+      <div class="dh">新增：输出契约 reasons</div><div class="dl add">+ "reasons": { "type": "array", "items": { "type": "string" } }</div>
+      <div class="dh">修改：子代理 currency-converter 说明</div><div class="dl add">+ 外币按开票日汇率换算成人民币</div>
+      <div class="dh">新增：知识《常见问题》</div><div class="dl add">+ 手动添加，860 字</div></div>
+      <div class="mfoot"><button class="btn" data-a="close">好的</button></div>`, 620),
+    snap: (t) => openModal(`<h3>v${t.dataset.v} 快照</h3><p class="muted">只读，完整配置（密钥已脱敏）。</p><pre class="code" style="font-size:12.5px;max-height:420px">${esc(JSON.stringify({ name: S.data.name, model: S.data.model, maxTurns: S.data.turns, tools: S.data.tools.split(", "), skillPackages: S.data.skills.map((s) => s.n), mcpServers: S.data.mcp.map((m) => ({ name: m.n, type: m.type, url: m.url })), variables: S.data.vars.map((v) => ({ name: v.n, secret: v.sec })), approvalRules: { tools: [S.data.apTools] }, webhookUrl: "（已隐藏）" }, null, 2))}</pre><div class="mfoot"><button class="btn" data-a="close">关闭</button></div>`, 600),
+    loadv: (t) => openModal(`<h3>载入 v${t.dataset.v} 到草稿？</h3><p>用 v${t.dataset.v} 覆盖当前草稿。已发布版本不受影响。</p><div class="mfoot"><button class="btn ghost" data-a="close">取消</button><button class="btn" data-a="close-toast" data-t="已载入 v${t.dataset.v} 到草稿">载入草稿</button></div>`, 440),
+    rollback: (t) => { const v = +t.dataset.v; openModal(`<h3>${v < S.current ? "回滚到" : "设为发布版"} v${v}？</h3><p>不受评测限制，秒级生效；进行中的会话不受影响。</p><div class="mfoot"><button class="btn ghost" data-a="close">取消</button><button class="btn" data-ba="rb-ok" data-v="${v}">确认</button></div>`, 440); },
+    "rb-ok": (t) => { S.current = +t.dataset.v; closeModal(); toast(`发布版已切换为 v${S.current}`); R("hr"); },
+    replay: () => setStage("pub"),
+    publish: () => publish(),
+    public: () => { S.pub = !S.pub; toast(S.pub ? "已公开给所有账号（只读）" : "已取消公开"); R("r"); },
+    "apply-market": () => { S.applied = true; toast("已提交上架申请，等管理员审核"); R("r"); },
+    grant: () => { const v = $(`#${key}-gm`).value.trim(); if (!v) { toast("先填账号邮箱", false); return; } S.grants.push({ who: v, p: $(`#${key}-gp`).value }); R("r"); },
+    ungrant: (t) => { S.grants.splice(+t.dataset.i, 1); R("r"); },
+    issue: () => { S.plain = "owa_live_7Kq2mX9vTz4RbN8wLp3HsYc6"; R("r"); },
+    "copy-key": () => toast("Key 已复制"),
+    "saved-key": () => { S.keys.push({ n: ($(`#${key}-kn`) || {}).value || "ERP 报销单初审", mask: "owa_live_7Kq2…Yc6", exp: "90 天后（02-09）", used: 0 }); S.plain = ""; S.keyIssued = true; toast("Key 已签发，明文不再显示"); R("hr"); },
+    rotate: () => openModal(`<h3>轮换 Key？</h3><p>立即签发新 Key，旧 Key 24 小时内仍有效，之后失效。</p><div class="mfoot"><button class="btn ghost" data-a="close">取消</button><button class="btn" data-ba="rot-ok">轮换</button></div>`, 440),
+    "rot-ok": () => { closeModal(); S.plain = "owa_live_Q8nW3eRt5yU1iO7pA2sDf4Gh"; R("r"); },
+    revoke: (t) => openModal(`<h3>吊销这个 Key？</h3><p>确认后立即生效，用它的调用会返回 401。</p><div class="mfoot"><button class="btn ghost" data-a="close">取消</button><button class="btn" style="background:var(--bad)" data-ba="rev-ok" data-i="${t.dataset.i}">吊销</button></div>`, 440),
+    "rev-ok": (t) => { S.keys.splice(+t.dataset.i, 1); closeModal(); toast("已吊销"); R("r"); },
+    code: (t) => { S.codeTab = t.dataset.v; R("r"); },
+    "copy-code": () => toast("代码已复制"),
+    openapi: () => openModal(`<h3>OpenAPI 文档</h3><p class="muted">/api/agents/expense-reviewer/openapi.json</p><div class="lst">${[["POST", "/invoke", "发起调用，返回 runId"], ["GET", "/result", "按 runId 轮询结果"], ["GET", "/sessions/{id}/events", "事件流"], ["GET", "/sessions/{id}/files", "工作区文件列表与下载"]].map((r) => `<div class="li"><span class="tag dark">${r[0]}</span><span style="font-family:var(--mono);font-size:13px">${r[1]}</span><span class="muted">${r[2]}</span></div>`).join("")}</div><div class="mfoot"><button class="btn" data-a="close">关闭</button></div>`, 560),
+    try: async () => {
+      S.tryRunning = true; S.tryOut = esc('{\n  "runId": "r_9c41e7",\n  "status": "running",\n  "version": ' + (S.current || '"draft"') + "\n}"); R("r");
+      await later(1500);
+      S.tryRunning = false; S.tryDone = true;
+      S.tryOut = esc(`{\n  "runId": "r_9c41e7",\n  "status": "succeeded",\n  "version": ${S.current || '"draft"'},\n  "output": {\n    "verdict": "need_approval",\n    "reasons": [\n      "金额 6800 元超过单笔 5000 元（第 7 条）",\n      "抬头与税号正确"\n    ]\n  },\n  "usage": { "input": 1830, "output": 412, "credits": 21 }\n}`);
+      S.hooks.unshift({ ok: true, how: "运行 r_9c41e7，第 1 次", at: "11-11 14:55", code: "200" });
+      R("hr");
+    },
+    "hook-test": () => { S.hooks.unshift({ ok: true, how: "测试", at: "11-11 14:56", code: "200" }); toast("测试事件已投递"); R("r"); },
+    redeliver: (t) => { const h = S.hooks[+t.dataset.i]; h.ok = true; h.code = "200"; h.how = h.how.replace(/第 \d 次/, "第 3 次"); toast("重发成功"); R("r"); },
+    goweb: () => { S.stage = "orch"; S.rtab = "card"; S.open.webhook = true; B.keepScroll = false; R("hr"); setTimeout(() => { const e = root().querySelector('[data-sec="webhook"]'); if (e) e.scrollIntoView({ block: "center" }); }, 30); },
+    runsrc: (t) => { S.runSrc = t.dataset.v; R("r"); },
+    run: (t) => { const d = $(`#${key}-drawer`); if (d) d.remove(); runDrawer(+t.dataset.v); },
+    "close-drawer": () => { const d = $(`#${key}-drawer`); if (d) d.remove(); },
+    "cancel-run": (t) => { RUNS[+t.dataset.v][3] = "已取消"; $(`#${key}-drawer`).remove(); toast("已取消运行"); R("r"); },
+  };
+  B.act = (t, e) => { const f = A[t.dataset.ba]; if (f) f(t, e); };
+  B.input = (e) => {
+    const t = e.target;
+    if (t.id === `${key}-draft`) S.draft = t.value;
+    if (t.id === `${key}-tdraft`) S.trialDraft = t.value;
+    if (t.dataset.f) {
+      S.data[t.dataset.f] = t.type === "number" ? +t.value : t.value;
+      if (t.dataset.json) { let ok = true; try { const j = JSON.parse(t.value || "{}"); ok = j && typeof j === "object" && !Array.isArray(j); } catch (_) { ok = false; } const b = $(`#${key}-${t.dataset.json}`); b.className = "tag " + (ok ? "ok" : "bad"); b.textContent = ok ? "schema 合法" : "JSON 有误：顶层必须是对象"; }
+    }
+  };
+  B.change = (e) => {
+    const t = e.target; if (!t.dataset.f) return;
+    const sec = t.closest("[data-sec]"); if (!sec) return;
+    clearFresh(); touch(sec.dataset.sec);
+    root().querySelectorAll(".sec").forEach((x) => { const k = x.dataset.sec; x.classList.toggle("fresh", S.sec[k] === "fresh"); x.classList.toggle("empty", S.sec[k] === "empty"); const tg = x.querySelector(".fresh-tag"); if (tg && S.sec[k] !== "fresh") tg.remove(); });
+    const h = sec.querySelector(".sec-h"); if (!h.querySelector(".fresh-tag")) h.querySelector(".chev").insertAdjacentHTML("beforebegin", '<span class="fresh-tag">刚更新</span>');
+    h.querySelector(".sec-sum").textContent = summary(sec.dataset.sec);
+    R("h");
+  };
+  B.key = (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+      if (e.target.id === `${key}-draft`) { e.preventDefault(); A.send(); }
+      if (e.target.id === `${key}-tdraft`) { e.preventDefault(); A["t-send"](); }
+    }
+  };
+  return B;
+}
+const Build = makeBuilder("build", "full");
+const Flow = makeBuilder("flow", "flow");
+Flow.startFrom = (text) => { go("flow"); Flow.st.view = "builder"; Flow.st.chat = []; Flow.start(text); };
+
+/* =================== 4 平台管理 =================== */
+const ACC = (() => {
+  const names = [["zhoulan", "管理员", "2025-03-02", 6, 12840, ""], ["linzhou", "普通账号", "2025-04-11", 4, 1862, "5000"], ["wanglei", "普通账号", "2025-04-12", 2, 3420, "8000"], ["chenyifan", "普通账号", "2025-05-08", 3, 6210, "10000"], ["xumu", "管理员", "2025-05-20", 9, 48300, ""], ["heqing", "普通账号", "2025-06-01", 5, 21400, "30000"], ["songdi", "普通账号", "2025-06-15", 2, 9870, "10000"], ["luojing", "普通账号", "2025-07-03", 3, 15200, "20000"], ["tangyue", "普通账号", "2025-07-19", 4, 30120, "50000"], ["liuqiang", "普通账号", "2025-08-02", 1, 0, "0"], ["sunmo", "普通账号", "2025-08-21", 0, 860, "3000"], ["gaoyan", "普通账号", "2025-09-05", 2, 12400, "15000"], ["fangyu", "普通账号", "2025-09-18", 1, 2400, "5000"], ["dengke", "普通账号", "2025-10-01", 0, 0, ""], ["jiangning", "普通账号", "2025-10-09", 3, 18800, "20000"], ["huxin", "普通账号", "2025-10-22", 1, 3300, "5000"]];
+  return names.map(([u, r, d, a, c, lim], i) => ({ email: u + "@xinghe.example", role: r, date: d, agents: a, cost: c, limit: lim, off: i === 9 || i === 13 || i === 10 }));
+})();
+const Admin = {
+  tab: "账号", q: "", role: "全部", sel: null, pw: "",
+  tabs: ["账号", "模型与提供者", "市场上架", "套餐与订单", "计费", "平台用量", "平台运行", "平台审计"],
+  render() {
+    $("#pg-admin").innerHTML = topnav("admin", true) + `<div class="bwrap"><aside class="side"><div class="g">平台管理</div>${this.tabs.map((t) => `<button data-a="ad-tab" data-v="${t}" class="${t === this.tab ? "on" : ""}">${t}</button>`).join("")}</aside><div class="main" id="ad-main">${this.tab === "账号" ? this.accounts() : this.other()}</div></div>`;
+    if (this.sel !== null && this.tab === "账号") this.drawer();
+  },
+  accounts() {
+    const rows = ACC.filter((a) => (!this.q || a.email.includes(this.q)) && (this.role === "全部" || a.role === this.role));
+    return `<div class="ph"><div><h1>账号</h1><div class="muted" style="margin-top:4px">24 个账号，21 个启用中，本月消耗 38.6 万积分</div></div><button class="btn" style="margin-left:auto" data-a="ad-create">${ic("plus", 16, 2)}创建账号</button></div>
+      <div class="row" style="margin-bottom:14px"><div style="position:relative;width:300px"><span style="position:absolute;left:12px;top:10px;color:var(--sub)">${ic("search", 18)}</span><input class="inp" id="ad-q" style="padding-left:38px" placeholder="按邮箱搜索" value="${esc(this.q)}"></div>
+        <div class="seg">${["全部", "管理员", "普通账号"].map((r) => `<button data-a="ad-role" data-v="${r}" class="${r === this.role ? "on" : ""}">${r}</button>`).join("")}</div><span class="muted small" style="margin-left:auto">显示 ${rows.length} 个，共 24 个</span></div>
+      <div class="card" style="overflow:hidden"><table class="tb"><tr><th>邮箱</th><th>角色</th><th>注册日期</th><th>智能体</th><th>本月消耗</th><th>月度上限</th><th>状态</th></tr>
+      ${rows.map((a) => { const i = ACC.indexOf(a); return `<tr class="click ${this.sel === i ? "sel" : ""}" data-a="ad-sel" data-i="${i}"><td><div class="row" style="gap:8px"><span class="face" style="width:28px;height:28px;border-radius:50%;background:#E6DFD1;display:grid;place-items:center;font-size:12px">${a.email[0].toUpperCase()}</span>${a.email}${i === 0 ? '<span class="tag line">你自己</span>' : ""}</div></td><td>${a.role === "管理员" ? '<span class="tag dark">管理员</span>' : "普通账号"}</td><td class="muted">${a.date}</td><td>${a.agents}</td><td>${a.cost.toLocaleString()} 积分</td><td>${a.limit === "" ? '<span class="muted">不限</span>' : a.limit === "0" ? '<span class="tag bad">禁止消费</span>' : (+a.limit).toLocaleString()}</td><td>${a.off ? '<span class="tag">已停用</span>' : '<span class="tag ok">启用</span>'}</td></tr>`; }).join("")}</table></div>`;
+  },
+  drawer() {
+    const a = ACC[this.sel], self = this.sel === 0;
+    const d = document.createElement("div"); d.className = "drawer"; d.id = "ad-drawer";
+    d.innerHTML = `<div class="dh"><span class="face" style="width:44px;height:44px;border-radius:50%;background:#E6DFD1;display:grid;place-items:center;font-weight:600">${a.email[0].toUpperCase()}</span><div><div style="font-weight:600;font-size:16px">${a.email}</div><div class="muted small">${a.role}，注册于 ${a.date}${a.off ? "，已停用" : ""}</div></div><button class="xbtn" data-a="ad-close" aria-label="关闭">${ic("x")}</button></div>
+      <div class="db">
+        <div class="grid2" style="margin-bottom:12px"><div class="stat"><div class="muted small">智能体</div><div class="n">${a.agents}</div></div><div class="stat"><div class="muted small">本月消耗</div><div class="n">${a.cost.toLocaleString()}</div></div></div>
+        <div class="dsec"><h4>月度上限（积分）</h4><p class="muted small" style="margin:0 0 8px">留空表示不限，0 表示禁止消费，超过后新运行被拒。</p><div class="row"><input class="inp" id="ad-lim" value="${a.limit}" placeholder="不限"><button class="btn sm" data-a="ad-lim">保存</button></div></div>
+        <div class="dsec"><h4>角色</h4><div class="row"><span>${a.role}</span><button class="btn ghost sm" style="margin-left:auto" data-a="ad-roleset" ${self ? "disabled" : ""}>${a.role === "管理员" ? "取消管理员" : "设为管理员"}</button></div>${self ? '<p class="muted small" style="margin:6px 0 0">不能修改自己的角色</p>' : ""}</div>
+        <div class="dsec"><h4>重置密码</h4><p class="muted small" style="margin:0 0 8px">生成新的一次性密码，旧密码立即失效。</p>${this.pw ? `<div class="keybox" style="margin:0 0 8px">${this.pw}<button class="btn ghost sm" style="margin-left:auto" data-a="toast" data-t="已复制">复制</button></div><p class="small" style="color:var(--warnt);margin:0">只显示这一次，请转交给本人。</p>` : `<button class="btn ghost sm" data-a="ad-pw">生成一次性密码</button>`}</div>
+        <div class="dsec"><h4>${a.off ? "恢复账号" : "停用账号"}</h4><p class="muted small" style="margin:0 0 8px">${a.off ? "恢复后，原有 Key 需要重新签发。" : "停用会立即登出，并停用该账号的全部 Key。"}</p><button class="btn ${a.off ? "ghost" : "danger"} sm" data-a="ad-off" ${self ? "disabled" : ""}>${a.off ? "恢复" : "停用"}</button>${self ? '<p class="muted small" style="margin:6px 0 0">不能停用自己</p>' : ""}</div>
+        <p class="muted small">会话是私有的，管理员也看不到这个账号的对话内容。</p>
+      </div>`;
+    $("#pg-admin").appendChild(d);
+  },
+  other() {
+    const T = {
+      "模型与提供者": [["名称", "API Key", "文本接入", "模型数", "状态"], [["Anthropic 官方", '<span class="tag ok">已配置</span>', "https://api.anthropic.com", "6", '<span class="tag ok">启用</span>'], ["内网代理（OpenAI 兼容）", '<span class="tag ok">已配置</span>', "http://llm-proxy.xinghe.internal/v1", "3", '<span class="tag ok">启用</span>']], "提供者、默认模型路由（fable / opus / sonnet / haiku 四个别名）"],
+      "市场上架": [["智能体", "作者", "发布版", "类别", "状态"], MARKET.map((m) => [m.n, m.by, "v" + m.v, m.cat, '<span class="tag ok">已上架</span>']).concat([["报销审核助手", "林舟", "v3", "办公运营", '<span class="tag warn">上架申请待审（需后端）</span>']]), "已发布的智能体才能上架"],
+      "套餐与订单": [["套餐", "积分", "价格", "版本", "上架"], [["入门包", "10,000", "¥ 100", "v2", "是"], ["团队包", "120,000", "¥ 1,000", "v3", "是"], ["企业包", "1,500,000", "¥ 10,000", "v1", "否"]], "在线支付未启用，订单由管理员人工确认"],
+      "计费": [["账号", "次数", "实际扣除", "欠额", "冻结中"], [["tangyue@xinghe.example", "1,204", "30,120", "0", "120"], ["heqing@xinghe.example", "866", "21,400", "0", "0"], ["xumu@xinghe.example", "2,310", "48,300", "36", "0"]], "概览、账户与发放、对账与待核对"],
+      "平台用量": [["智能体", "运行", "失败", "输入 tokens", "输出 tokens"], [["客服知识问答", "6,412", "41", "18.2M", "3.1M"], ["报销审核助手", "1,214", "34", "2.2M", "0.5M"], ["代码审查员", "2,604", "12", "9.8M", "1.6M"]], "最近 30 天"],
+      "平台运行": [["时间", "账号", "智能体", "来源", "状态"], [["11-11 14:21", "linzhou", "报销审核助手 v3", "接口调用", '<span class="tag warn">运行中</span>'], ["11-11 14:02", "heqing", "SQL 助手 v4", "工作台", '<span class="tag ok">成功</span>'], ["11-11 13:58", "xumu", "代码审查员 v7", "API 会话", '<span class="tag bad">失败</span>']], "全平台运行"],
+      "平台审计": [["时间", "操作者", "操作", "内容", "来源地址"], [["11-11 14:52", "linzhou", "发布智能体", "expense-reviewer v4", "10.2.4.18"], ["11-11 14:10", "zhoulan", "发放积分", "tangyue +5,000", "10.2.0.7"], ["11-11 11:03", "xumu", "停用模型", "claude-3-haiku", "10.2.0.9"]], "约 50 种操作类型可筛选"],
+    }[this.tab];
+    return `<div class="ph"><div><h1>${this.tab}</h1><div class="muted" style="margin-top:4px">${T[2]}</div></div></div><div class="card" style="overflow:hidden"><table class="tb"><tr>${T[0].map((h) => `<th>${h}</th>`).join("")}</tr>${T[1].map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("")}</table></div>`;
+  },
+};
+
+/* =================== 6 对话工作台 =================== */
+const Chat = {
+  sess: 0, archived: false, panel: "files", file: 2, approved: null, ans: null, pick: [], md: "preview", slash: false, vars: false,
+  sessions: [["expense-reviewer", "报销审核助手", ["11 月差旅报销初审", "这张发票抬头对吗", "美元发票换算"]], ["meeting", "会议纪要整理", ["周三项目例会", "客户访谈录音"]], ["rival", "竞品周报", ["第 45 周竞品动态"]]],
+  files: [["报销单-2026-11.xlsx", "file"], ["invoices/", "folder"], ["初审结果.md", "file"], ["invoices/1015-机票.pdf", "file"], ["invoices/1018-餐饮.pdf", "file"]],
+  render() {
+    const s = this.sessions;
+    $("#pg-chat").innerHTML = topnav("chat") + `<div class="cwrap">
+      <aside class="slist"><div style="padding:14px 12px 6px" class="row"><div style="position:relative;flex:1"><span style="position:absolute;left:10px;top:10px;color:var(--sub)">${ic("search", 16)}</span><input class="inp" style="padding-left:32px;height:36px" placeholder="搜索会话"></div><button class="btn sm" data-a="toast" data-t="已新建会话">${ic("plus", 14, 2)}新会话</button></div>
+        <div style="flex:1;overflow:auto;padding:0 10px">
+        ${this.archived ? `<div class="sgrp">已归档</div>${["10 月差旅报销", "测试抬头规则"].map((t) => `<div class="sit">${av("expense-reviewer", 22)}<span style="flex:1">${t}</span><button class="btn ghost sm" data-a="toast" data-t="已恢复「${t}」">恢复</button></div>`).join("")}` :
+        s.map(([k, n, ss], gi) => `<div class="sgrp">${av(k, 18)}${n}</div>${ss.map((t, i) => `<button class="sit ${gi === 0 && i === this.sess ? "on" : ""}" data-a="ch-sess" data-i="${gi === 0 ? i : -1}">${t}${gi === 0 && i === 0 ? '<span class="tag warn" style="margin-left:auto">待你确认</span>' : ""}</button>`).join("")}`).join("")}</div>
+        <div style="padding:10px 12px;border-top:1px solid var(--line)"><button class="ibtn" data-a="ch-arch">${ic("folder", 15)}${this.archived ? "返回会话列表" : "已归档（2）"}</button></div></aside>
+      <section class="cmain"><div class="ccard">
+        <div class="row" style="padding:12px 20px;border-bottom:1px solid var(--line2)">${av("expense-reviewer", 30)}<div><div style="font-weight:600">${this.sessions[0][2][this.sess]}</div><div class="muted small">报销审核助手，已发布 v3，claude-sonnet-4-5 输入 300／输出 1500 积分每百万 token</div></div>
+          <div class="seg" style="margin-left:auto"><button class="${this.panel === "files" ? "on" : ""}" data-a="ch-panel" data-v="files">工作空间</button><button class="${this.panel === "runs" ? "on" : ""}" data-a="ch-panel" data-v="runs">执行详情</button></div></div>
+        <div class="row" style="margin:10px 20px 0;padding:8px 12px;border-radius:10px;background:#F4F2EC;font-size:13px">${ic("key", 15)}${this.vars ? "变量已填写：ERP_TOKEN，DEPT = 财务部" : "需要填写 1 个必填变量才能运行此智能体"}<button class="link" style="margin-left:auto" data-a="ch-vars">${this.vars ? "管理变量" : "填写变量"}</button></div>
+        <div style="flex:1;overflow:auto;padding:16px 60px;display:flex;flex-direction:column;gap:14px" id="ch-msgs">
+          <div class="m-me">帮我初审这 12 张差旅发票，超额的单独列出来。<div class="row small" style="margin-top:6px;gap:6px"><span class="tag line">${ic("file", 12)}报销单-2026-11.xlsx</span><span class="tag line">${ic("folder", 12)}invoices（12 个文件）</span></div></div>
+          <div class="m-bot">${av("expense-reviewer", 30)}<div class="bd"><div class="who">报销审核助手</div>
+            <div class="toolsum"><div class="r">${ic("tool", 15)}调用了 4 个工具，全部成功<span style="margin-left:auto" class="link" data-a="ch-panel" data-v="runs">查看执行详情</span></div><div class="r">${ic("check", 14, 2)}invoice-ocr 识别 12 张发票</div><div class="r">${ic("check", 14, 2)}erp-finance.query_budget 查本部门预算</div><div class="r">${ic("check", 14, 2)}子代理 currency-converter 换算 1 张美元发票</div></div>
+            <div>12 张发票已初审：<b>9 张通过，2 张需审批，1 张退回</b>。超额两张是 10-15 的机票（6,800 元）和 10-21 的酒店（5,400 元），需要部门负责人审批；10-18 的餐饮发票抬头写成了「星河数据」，缺少公司全称，应退回。</div>
+            <div class="deliver"><div class="t">${ic("check", 16, 2)}结构化结果</div><pre class="code" style="margin-top:8px;font-size:12.5px">{ "verdict": "need_approval", "passed": 9, "approval": 2, "rejected": 1 }</pre></div>
+            <div class="metaacts"><span>↑ 18,420　↓ 2,106 token</span><button class="ibtn" data-a="toast" data-t="已复制">${ic("copy", 14)}复制</button><button class="ibtn" data-a="toast" data-t="已从这一轮重跑">${ic("refresh", 14)}重跑</button></div>
+            ${this.approved === "ok" ? `<div class="toolsum" style="margin-top:10px"><div class="r">${ic("check", 14, 2)}已批准：erp-finance.submit 提交 2 张审批单，单号 AP-1107、AP-1108</div></div>` : this.approved === "no" ? `<div class="toolsum" style="margin-top:10px"><div class="r">${ic("x", 14, 2)}你拒绝了提交审批单，智能体已停止这一步</div></div>` : ""}
+          </div></div>
+          <div class="m-bot">${av("expense-reviewer", 30)}<div class="bd"><div class="who">报销审核助手</div>
+            <div class="askc ${this.ans ? "done" : ""}"><div class="row small muted">${this.ans ? ic("check", 14, 2) + "已回答" : ic("clock", 14) + "待回答，剩余 4:12，超时后由智能体自行判断"}</div>
+              <div class="q">10-18 的餐饮发票 680 元、4 人用餐，按哪个标准算？</div>
+              <div class="opts">${["一线城市每人 150 元", "其他城市每人 100 元", "按实报销"].map((o, i) => `<button class="opt ${this.pick.includes(i) ? "on" : ""}" data-a="ch-pick" data-i="${i}" ${this.ans ? "disabled" : ""}>${o}</button>`).join("")}${this.ans ? "" : '<button class="opt" data-a="toast" data-t="在输入框里写下你的答案">其他（自己填写）</button>'}</div>
+              ${this.ans ? "" : `<div class="ft"><button class="btn sm" data-a="ch-ans" ${this.pick.length ? "" : "disabled"}>${this.pick.length ? "提交回答" : "请先回答每个问题"}</button><button class="ibtn" data-a="ch-noans">不回答</button></div>`}</div>
+            ${this.ans ? `<div style="margin-top:8px">${this.ans}</div>` : ""}</div></div>
+        </div>
+        ${this.approved ? "" : `<div class="approval"><div class="row"><span style="color:var(--warnt)">${ic("shield", 18)}</span><b>智能体在等你确认：把 2 张超额发票提交到 ERP 审批</b><span class="tag warn" style="margin-left:auto">4 分 32 秒后自动拒绝</span></div>
+          <div class="snap" style="margin:8px 0">erp-finance.submit { "invoices": ["1015", "1021"], "approver": "王蕾（部门负责人）" }</div>
+          <div class="row"><button class="btn sm" data-a="ch-ap" data-v="ok">批准</button><button class="btn ghost sm" data-a="ch-ap" data-v="ok">批准，本会话内 erp-finance.submit 不再询问</button><button class="btn ghost sm" data-a="ch-ap" data-v="no">拒绝</button><button class="ibtn" data-a="ch-apwhy">拒绝并说明…</button></div></div>`}
+        <div class="composer" style="margin:0 20px 16px;position:relative">${this.slash ? `<div class="slash">${[["/new", "新建会话"], ["/search", "搜索会话"], ["/agents", "管理智能体"], ["/stop", "停止当前运行"]].map((c) => `<div data-a="toast" data-t="执行 ${c[0]}"><b>${c[0]}</b>　<span class="muted">${c[1]}</span></div>`).join("")}</div>` : ""}
+          <textarea id="ch-in" placeholder="说点什么，或输入 /"></textarea>
+          <div class="bar"><button class="ibtn">${ic("clip", 15)}添加图片或文件</button><span class="row small muted" style="gap:6px"><svg width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="none" stroke="#E2DFD7" stroke-width="3"/><circle cx="10" cy="10" r="8" fill="none" stroke="#3F7A57" stroke-width="3" stroke-dasharray="9 50" transform="rotate(-90 10 10)"/></svg>上下文 18%</span><button class="sendbtn" data-a="toast" data-t="已发送" aria-label="发送">${ic("up", 16, 2)}</button></div></div>
+      </div></section>
+      <aside class="cside"><div class="ccard">${this.panel === "files" ? this.filesPane() : this.runsPane()}</div></aside></div>`;
+  },
+  filesPane() {
+    const f = this.files[this.file];
+    return `<div class="row" style="padding:12px 16px;border-bottom:1px solid var(--line2)"><b>工作空间</b><span class="muted small" style="font-family:var(--mono)">workspaces/8f3a21c0</span><button class="ibtn" style="margin-left:auto" data-a="toast" data-t="已刷新" aria-label="刷新">${ic("refresh", 15)}</button></div>
+      <div class="ftree" style="padding:8px">${this.files.map((x, i) => `<button class="f ${i === this.file ? "on" : ""}" data-a="ch-file" data-i="${i}" style="padding-left:${x[0].startsWith("invoices/") && x[1] === "file" ? 28 : 8}px">${ic(x[1], 16)}${x[0].replace("invoices/", "") || x[0]}</button>`).join("")}</div>
+      <div style="border-top:1px solid var(--line2);flex:1;overflow:auto;padding:12px 16px">
+        <div class="row" style="margin-bottom:8px"><b class="small">${f[0]}</b>${f[0].endsWith(".md") ? `<div class="seg" style="margin-left:auto"><button class="${this.md === "preview" ? "on" : ""}" data-a="ch-md" data-v="preview">预览</button><button class="${this.md === "src" ? "on" : ""}" data-a="ch-md" data-v="src">源码</button></div>` : `<button class="ibtn" style="margin-left:auto" data-a="toast" data-t="已开始下载">下载</button>`}</div>
+        ${f[0].endsWith(".md") ? (this.md === "preview" ? `<div class="serif" style="font-size:18px">11 月差旅报销初审</div><p style="margin:6px 0">通过 9 张，需审批 2 张，退回 1 张。</p><table class="tb"><tr><th>发票</th><th>金额</th><th>结论</th></tr><tr><td>1015 机票</td><td>6,800</td><td><span class="tag warn">需审批</span></td></tr><tr><td>1021 酒店</td><td>5,400</td><td><span class="tag warn">需审批</span></td></tr><tr><td>1018 餐饮</td><td>680</td><td><span class="tag bad">退回</span></td></tr></table>` : `<pre class="snap" style="font-size:13px"># 11 月差旅报销初审\n通过 9 张，需审批 2 张，退回 1 张。\n\n| 发票 | 金额 | 结论 |\n| 1015 机票 | 6,800 | 需审批 |</pre>`) : f[1] === "folder" ? '<p class="muted">12 个文件</p>' : `<div class="muted" style="text-align:center;padding:30px 0">${ic("file", 32)}<p>${f[0].endsWith(".pdf") ? "PDF 内嵌预览" : "表格文件，下载后查看"}</p></div>`}
+      </div>`;
+  },
+  runsPane() {
+    return `<div class="row" style="padding:12px 16px;border-bottom:1px solid var(--line2)"><b>执行详情</b><span class="muted small" style="margin-left:auto">4 次调用，0 失败</span></div>
+      <div style="padding:12px 16px;overflow:auto"><div class="sub-h" style="margin-top:0">第 1 轮，4 次调用</div>
+      ${[["invoice-ocr", "1.8s", "识别 12 张发票的抬头、税号、金额、日期"], ["erp-finance.query_budget", "1.2s", '{ "dept": "财务部", "remaining": 21000 }'], ["currency-converter（子代理）", "2.4s", "USD 420，开票日 10-15，汇率 7.1032"], ["policy-lookup", "0.4s", "命中第 7、12 条"]].map((r) => `<details class="hit"><summary class="row" style="cursor:pointer">${ic("check", 14, 2)}<b style="font-weight:600">${r[0]}</b><span class="muted small" style="margin-left:auto">${r[1]}</span></summary><div class="snap">${esc(r[2])}</div></details>`).join("")}</div>`;
+  },
+};
+
+/* =================== 开发者 / 账户 =================== */
+const Dev = {
+  tab: "API Key",
+  render() {
+    const t = this.tab;
+    $("#pg-dev").innerHTML = topnav("dev") + `<div class="bwrap"><aside class="side"><div class="g">开发者</div>${["API Key", "签名密钥", "运行记录"].map((x) => `<button class="${x === t ? "on" : ""}" data-a="dev-tab" data-v="${x}">${x}</button>`).join("")}</aside><div class="main">
+      <div class="ph"><div><h1>${t}</h1><div class="muted" style="margin-top:4px">${t === "API Key" ? "账号级 Key，可限定某个智能体。单个智能体的签发也可以在它的构建页 · 接入里完成。".replace(" · ", "里的") : t === "签名密钥" ? "所有智能体的 Webhook 共用，签名头 X-OWA-Signature、X-OWA-Timestamp" : "计费在你名下的全部运行"}</div></div></div>
+      ${t === "API Key" ? `<div class="card" style="overflow:hidden"><table class="tb"><tr><th>名称</th><th>限定智能体</th><th>过期</th><th>最近使用</th><th>每分钟</th><th>月度积分上限</th><th></th></tr>
+        ${[["ERP 报销单初审", "仅 报销审核助手", "02-09", "3 分钟前", "60", "1,204 / 5,000"], ["数据看板", "不限", "不过期", "昨天", "120", "不限"], ["旧测试 Key", "仅 SQL 助手", "已过期", "从未使用", "60", "0 / 1,000"]].map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}<td><button class="ibtn" data-a="toast" data-t="已轮换，旧 Key 24 小时内仍有效">轮换</button><button class="ibtn" style="color:var(--bad)" data-a="toast" data-t="已吊销">吊销</button></td></tr>`).join("")}</table></div>` :
+      t === "签名密钥" ? `<div class="card" style="padding:20px;max-width:640px"><div class="row"><b>当前密钥</b><span class="tag ok">whsec_…9f2c</span></div><p class="muted">重新生成后，旧密钥在一段时间内会继续用 Previous 头额外签名。新密钥只在当时显示一次。</p><div class="row"><button class="btn sm" data-a="toast" data-t="已生成新密钥">重新生成</button><button class="btn ghost sm" data-a="toast" data-t="已打开自定义密钥">自定义密钥</button><button class="btn danger sm" data-a="toast" data-t="已清除">清除</button></div></div>` :
+      `<div class="card" style="overflow:hidden"><table class="tb"><tr><th>时间</th><th>智能体</th><th>来源</th><th>状态</th><th>花费</th></tr>${[["11-11 14:21", "报销审核助手 v3", "接口调用", "运行中"], ["11-11 14:02", "报销审核助手 v3", "接口调用", "成功"], ["11-11 10:02", "SQL 助手 v4", "工作台", "成功"], ["11-10 18:40", "报销审核助手 v3", "接口调用", "失败"]].map((r) => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td><span class="tag ${r[3] === "成功" ? "ok" : r[3] === "失败" ? "bad" : "warn"}">${r[3]}</span></td><td>21 积分</td></tr>`).join("")}</table></div>`}</div></div>`;
+  },
+};
+const Account = {
+  tab: "积分概览",
+  render() {
+    const t = this.tab;
+    const tabs = ["积分概览", "充值订单", "账户流水", "运行消耗", "用量分析", "模型价格", "账号安全", "操作日志"];
+    let body = "";
+    if (t === "积分概览") body = `<div class="grid2" style="grid-template-columns:repeat(3,1fr);margin-bottom:18px"><div class="stat"><div class="muted small">可用</div><div class="n">12,480</div></div><div class="stat"><div class="muted small">冻结中</div><div class="n">120</div></div><div class="stat"><div class="muted small">本月已用 / 月度上限</div><div class="n">1,862 / 5,000</div></div></div>
+      <div class="card" style="padding:20px"><div class="row"><b>积分包</b><span class="muted small">固定积分包，长期有效，管理员人工处理</span></div><div class="mgrid" style="grid-template-columns:repeat(3,1fr);margin-top:12px">${[["入门包", "10,000 积分", "¥ 100"], ["团队包", "120,000 积分", "¥ 1,000"], ["企业包", "1,500,000 积分", "¥ 10,000"]].map((p) => `<div class="mcard" style="cursor:default"><div class="nm">${p[0]}</div><div class="muted">${p[1]}</div><div class="row"><b style="font-size:18px">${p[2]}</b><button class="btn sm" style="margin-left:auto" data-a="toast" data-t="订单已创建，等管理员确认（不扣款）">创建订单</button></div></div>`).join("")}</div></div>`;
+    else if (t === "账号安全") body = `<div class="card" style="padding:22px;max-width:460px"><div class="fld"><label>当前密码</label><input class="inp" type="password"></div><div class="fld"><label>新密码（至少 8 位）</label><input class="inp" type="password"></div><div class="fld"><label>再次输入</label><input class="inp" type="password"></div><button class="btn" data-a="toast" data-t="密码已修改">修改密码</button></div>`;
+    else body = `<div class="card" style="overflow:hidden"><table class="tb"><tr><th>时间</th><th>说明</th><th>积分</th><th>状态</th></tr>${[["11-11 14:02", "报销审核助手 v3，接口调用", "-21", "已结算"], ["11-11 10:15", "报销审核助手 v3，工作台", "-164", "已结算"], ["11-11 14:21", "报销审核助手 v3，接口调用", "-120", "冻结中"], ["11-01 09:00", "人工入账：团队包", "+120,000", "积分已发放"]].map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("")}</table></div>`;
+    $("#pg-account").innerHTML = topnav("account") + `<div class="bwrap"><aside class="side"><div class="g">账户</div>${tabs.map((x) => `<button class="${x === t ? "on" : ""}" data-a="acc-tab" data-v="${x}">${x}</button>`).join("")}</aside><div class="main"><div class="ph"><div><h1>${t}</h1><div class="muted" style="margin-top:4px">林舟，linzhou@xinghe.example，普通账号</div></div></div>${body}</div></div>`;
+  },
+};
+
+/* =================== 5 移动端 =================== */
+const Mobile = {
+  m1: null, pick: [], ans: false, reveal: 5, timer: null,
+  onShow() { this.replay(); },
+  replay() { this.reveal = 0; this.render(); clearInterval(this.timer); this.timer = setInterval(() => { this.reveal++; this.render(); if (this.reveal >= 5) clearInterval(this.timer); }, 380); },
+  sbar: () => `<div class="sbar"><span>9:41</span><span class="notch"></span><span class="row" style="gap:5px"><svg width="18" height="12" viewBox="0 0 18 12"><rect x="0" y="8" width="3" height="4" rx="1" fill="#1B1B1A"/><rect x="5" y="5" width="3" height="7" rx="1" fill="#1B1B1A"/><rect x="10" y="2" width="3" height="10" rx="1" fill="#1B1B1A"/><rect x="15" y="0" width="3" height="12" rx="1" fill="#1B1B1A"/></svg><svg width="26" height="12" viewBox="0 0 26 12"><rect x=".5" y=".5" width="22" height="11" rx="3" fill="none" stroke="#1B1B1A"/><rect x="2" y="2" width="16" height="8" rx="1.5" fill="#1B1B1A"/></svg></span></div>`,
+  tbar: (on) => `<div class="tbar">${[["home", "探索"], ["chat", "对话"], ["grid", "工作室"], ["user", "我的"]].map(([i, n]) => `<button class="${n === on ? "on" : ""}">${ic(i, 22)}${n}</button>`).join("")}</div>`,
+  p1() {
+    if (this.m1 !== null) {
+      const m = MARKET[this.m1];
+      return `${this.sbar()}<div class="mh"><button class="xbtn" style="margin:0;width:44px;height:44px" data-a="m-back" aria-label="返回">${ic("back", 22)}</button><span class="t">智能体详情</span></div>
+      <div class="mb"><div style="text-align:center;padding:10px 0 16px">${av(m.k, 84)}<div class="serif" style="font-size:26px;margin-top:10px">${m.n}</div><div class="muted" style="font-size:14px">${m.by}，v${m.v}，${m.uses}使用</div></div>
+        <p style="margin:0 0 14px">${m.d}</p>
+        <div class="muted" style="font-size:14px;margin-bottom:8px">试试这样问</div>
+        ${m.starters.map((s) => `<button class="chip" style="height:44px;font-size:15px;margin:0 6px 8px 0">${s}</button>`).join("")}
+        <div class="row muted" style="font-size:14px;margin:8px 0 18px">${ic("coin", 16)}${m.price}</div>
+        <button class="btn" style="width:100%;height:50px;border-radius:25px;font-size:16px" data-a="toast" data-t="已用发布版新建会话">立即使用</button>
+        <div class="row" style="margin-top:10px"><button class="btn ghost" style="flex:1;height:46px;border-radius:23px;font-size:15px" data-a="toast" data-t="已克隆到我的智能体">克隆</button><button class="btn ghost" style="flex:1;height:46px;border-radius:23px;font-size:15px" data-a="toast" data-t="请在桌面端完成 API 接入">API 接入</button></div>
+      </div>${this.tbar("探索")}`;
+    }
+    return `${this.sbar()}<div class="mb" style="padding-top:6px">
+      <div class="avrow" style="justify-content:center;margin:6px 0 8px">${["meeting", "rival", "review", "xhs", "sql"].map((k) => av(k, 40)).join("")}</div>
+      <div class="serif" style="font-size:28px;text-align:center;line-height:1.25">想交给它什么事？</div>
+      <div class="row" style="background:#fff;border:1px solid var(--line);border-radius:22px;padding:6px 6px 6px 16px;margin:14px 0 16px"><span class="muted" style="flex:1">描述一件事</span><span class="sendbtn" style="width:40px;height:40px">${ic("up", 18, 2)}</span></div>
+      <div class="row" style="gap:6px;overflow:hidden;margin-bottom:12px">${["全部", "办公运营", "开发工具", "内容创作"].map((c, i) => `<span class="chip" style="height:36px;font-size:14px;${i ? "" : "background:#1C1C1C;color:#fff;border-color:#1C1C1C"}">${c}</span>`).join("")}</div>
+      ${MARKET.slice(0, 5).map((m, i) => `<button class="row" style="width:100%;text-align:left;background:#fff;border:1px solid var(--line);border-radius:16px;padding:12px;margin-bottom:8px;min-height:72px" data-a="m-open" data-i="${i}">${av(m.k, 44)}<div style="flex:1;min-width:0"><div style="font-weight:600">${m.n}</div><div class="muted" style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${m.d}</div></div>${ic("chev", 18)}</button>`).join("")}
+    </div>${this.tbar("探索")}`;
+  },
+  p2() {
+    return `${this.sbar()}<div class="mh" style="border-bottom:1px solid var(--line)">${ic("list", 22)}${av("expense-reviewer", 30)}<div><div class="t" style="font-size:16px">11 月差旅报销初审</div><div class="muted" style="font-size:12px">报销审核助手 v3</div></div></div>
+      <div class="mb" style="padding-top:14px;display:flex;flex-direction:column;gap:12px">
+        <div class="m-me" style="font-size:16px">帮我初审这 12 张差旅发票</div>
+        <div><div class="row" style="gap:8px;margin-bottom:6px">${av("expense-reviewer", 26)}<span class="muted" style="font-size:13px">报销审核助手</span></div>
+          <div class="toolsum" style="font-size:14px"><div class="r">${ic("tool", 16)}调用了 3 个工具，全部成功</div><div class="r">${ic("check", 14, 2)}invoice-ocr 识别 12 张</div><div class="r">${ic("check", 14, 2)}erp-finance 查预算</div></div>
+          <div style="font-size:16px">9 张通过，2 张超额需审批，1 张抬头不全应退回。</div></div>
+        <div class="askc ${this.ans ? "done" : ""}" style="margin:0"><div class="muted" style="font-size:13px">${this.ans ? "已回答" : "待回答，剩余 4:12"}</div>
+          <div class="q" style="font-size:16px">餐饮发票 680 元、4 人用餐，按哪个标准？</div>
+          <div style="display:flex;flex-direction:column;gap:6px">${["一线城市每人 150 元", "其他城市每人 100 元", "按实报销"].map((o, i) => `<button class="opt ${this.pick.includes(i) ? "on" : ""}" style="min-height:44px;font-size:15px" data-a="m-pick" data-i="${i}" ${this.ans ? "disabled" : ""}>${o}</button>`).join("")}</div>
+          ${this.ans ? "" : `<button class="btn" style="width:100%;height:46px;margin-top:10px;border-radius:23px;font-size:15px" data-a="m-ans" ${this.pick.length ? "" : "disabled"}>${this.pick.length ? "提交回答" : "请先回答每个问题"}</button>`}</div>
+        ${this.ans ? `<div style="font-size:16px" class="rise">按一线城市标准，4 人上限 600 元，超出 80 元，这张判为退回，理由已写入初审结果。</div>` : ""}
+      </div>
+      <div style="padding:8px 14px 14px;background:var(--bg)"><div class="row" style="background:#fff;border:1px solid var(--line);border-radius:24px;padding:4px 4px 4px 16px;min-height:48px"><span class="muted" style="flex:1">继续交代下一件事…</span><span class="sendbtn" style="width:40px;height:40px">${ic("up", 18, 2)}</span></div></div>`;
+  },
+  p3() {
+    const items = [["编排完整", "9 节已填写"], ["评测 6/6 通过", "针对当前草稿"], ["有修改可发布", "草稿与 v3 有 6 处差异"], ["发布 v4", "版本说明：外币按开票日汇率"], ["接入", "Key 已签发，试调成功"]];
+    return `${this.sbar()}<div class="mh">${ic("back", 22)}${av("expense-reviewer", 30)}<span class="t">上线清单</span></div>
+      <div class="mb"><div class="serif" style="font-size:24px;margin:4px 0 2px">报销审核助手</div><div class="muted" style="font-size:14px;margin-bottom:12px">${Math.min(this.reveal, 5)}/5 项已就绪</div>
+        <div class="prog" style="width:100%;height:8px;border-radius:4px;margin-bottom:10px"><i style="width:${Math.min(this.reveal, 5) * 20}%"></i></div>
+        ${items.map(([t, d], i) => `<div class="lc ${i < this.reveal ? "ok" : ""}" style="padding:14px 0"><div class="ck">${i < this.reveal ? ic("check", 15, 2.6) : i === this.reveal ? '<span class="spin" style="width:14px;height:14px"></span>' : ""}</div><div><div class="t">${t}</div><div class="d" style="font-size:14px">${d}</div></div></div>`).join("")}
+        <div class="row" style="margin-top:14px;gap:8px"><button class="btn ghost" style="flex:1;height:46px;border-radius:23px;font-size:15px" data-a="m-replay">重新检查</button><button class="btn" style="flex:1;height:46px;border-radius:23px;font-size:15px" data-a="toast" data-t="请在桌面端查看接入代码">查看接入</button></div>
+      </div>${this.tbar("工作室")}`;
+  },
+  render() {
+    $("#pg-mobile").innerHTML = `<div class="pbody" style="background:var(--band)"><div class="phones">
+      <div><div class="mcap">市场与智能体详情（点卡片进入详情）</div><div class="phone"><div class="scr">${this.p1()}</div></div></div>
+      <div><div class="mcap">对话：工具调用摘要与提问卡片</div><div class="phone"><div class="scr">${this.p2()}</div></div></div>
+      <div><div class="mcap">构建进度：上线清单逐项变绿</div><div class="phone"><div class="scr">${this.p3()}</div></div></div>
+    </div></div>`;
+  },
+};
+
+/* =================== 全局事件 =================== */
+const builderOf = (t) => { const p = t.closest(".page"); if (p && p.id === "pg-build") return Build; if (p && p.id === "pg-flow") return Flow; return CUR === "flow" ? Flow : Build; };
+const GA = {
+  go: (t) => go(t.dataset.p),
+  nav: (t) => {
+    const to = t.dataset.to;
+    if (to === "studio") { go("flow"); Flow.st.view = "studio"; Flow.render(); return; }
+    if (to === "dev") Dev.render(); if (to === "account") Account.render();
+    go(to);
+  },
+  close: () => closeModal(),
+  toast: (t) => toast(t.dataset.t),
+  "close-toast": (t) => { closeModal(); toast(t.dataset.t); },
+  "mk-send": () => Market.send($("#mk-ask").value),
+  "mk-chip": (t) => { const v = t.dataset.t; $("#mk-ask").value = v; Market.send(v); },
+  "mk-build": () => Flow.startFrom($("#mk-ask").value),
+  "mk-work": (t) => { Market.work = +t.dataset.i; const s = $("#mk-scroll").scrollTop; Market.render(); $("#mk-scroll").scrollTop = s; },
+  "mk-cat": (t) => { Market.cat = t.dataset.c; const s = $("#mk-scroll").scrollTop; Market.render(); $("#mk-scroll").scrollTop = s; },
+  "mk-detail": (t, e) => { if (e.target.closest("button")) return; Market.detail(t.dataset.k); },
+  "mk-use": (t) => { const m = MARKET.find((x) => x.k === t.dataset.k); toast(`已用「${m.n}」v${m.v} 新建会话`); go("chat"); },
+  "mk-clone": (t) => { const m = MARKET.find((x) => x.k === t.dataset.k); closeModal(); toast(`已克隆「${m.n}」到我的智能体`); },
+  "mk-api": (t) => { const m = MARKET.find((x) => x.k === t.dataset.k); closeModal(); toast(`「${m.n}」的调用文档已打开`); Dev.render(); go("dev"); },
+  "ad-tab": (t) => { Admin.tab = t.dataset.v; Admin.sel = null; Admin.render(); },
+  "ad-role": (t) => { Admin.role = t.dataset.v; Admin.render(); },
+  "ad-sel": (t) => { Admin.sel = +t.dataset.i; Admin.pw = ""; Admin.render(); },
+  "ad-close": () => { Admin.sel = null; Admin.render(); },
+  "ad-lim": () => { ACC[Admin.sel].limit = $("#ad-lim").value.trim(); toast("月度上限已保存"); Admin.render(); },
+  "ad-roleset": () => { const a = ACC[Admin.sel]; a.role = a.role === "管理员" ? "普通账号" : "管理员"; toast("角色已更新"); Admin.render(); },
+  "ad-pw": () => { Admin.pw = "Xh-" + Math.random().toString(36).slice(2, 8) + "-" + Math.random().toString(36).slice(2, 6); Admin.render(); },
+  "ad-off": () => { const a = ACC[Admin.sel]; openModal(`<h3>${a.off ? "恢复" : "停用"} ${a.email}？</h3><p>${a.off ? "恢复后，原有 Key 需要重新签发。" : "该账号会立即登出，名下全部 API Key 同时停用。"}</p><div class="mfoot"><button class="btn ghost" data-a="close">取消</button><button class="btn" ${a.off ? "" : 'style="background:var(--bad)"'} data-a="ad-off-ok">${a.off ? "恢复" : "停用"}</button></div>`, 460); },
+  "ad-off-ok": () => { const a = ACC[Admin.sel]; a.off = !a.off; closeModal(); toast(a.off ? "已停用" : "已恢复"); Admin.render(); },
+  "ad-create": () => openModal(`<h3>创建账号</h3><div class="fld"><label>邮箱</label><input class="inp" id="ad-new" value="xiaoyu@xinghe.example"></div><div class="fld"><label>角色</label><select class="inp"><option>普通账号</option><option>管理员</option></select></div><div class="mfoot"><button class="btn ghost" data-a="close">取消</button><button class="btn" data-a="ad-create-ok">创建</button></div>`, 460),
+  "ad-create-ok": () => { const e = $("#ad-new").value; ACC.push({ email: e, role: "普通账号", date: "2026-11-11", agents: 0, cost: 0, limit: "", off: false }); openModal(`<h3>账号已创建</h3><p>${esc(e)} 的一次性初始密码，只显示这一次：</p><div class="keybox">Xh-m4q8z1-p7rk<button class="btn ghost sm" style="margin-left:auto" data-a="toast" data-t="已复制">复制</button></div><div class="mfoot"><button class="btn" data-a="close">我已转交</button></div>`, 460); Admin.render(); },
+  "ch-sess": (t) => { const i = +t.dataset.i; if (i < 0) { toast("原型只展开报销审核助手的会话", false); return; } Chat.sess = i; Chat.render(); },
+  "ch-arch": () => { Chat.archived = !Chat.archived; Chat.render(); },
+  "ch-panel": (t) => { Chat.panel = t.dataset.v; Chat.render(); },
+  "ch-file": (t) => { Chat.file = +t.dataset.i; Chat.render(); },
+  "ch-md": (t) => { Chat.md = t.dataset.v; Chat.render(); },
+  "ch-pick": (t) => { Chat.pick = [+t.dataset.i]; Chat.render(); },
+  "ch-ans": () => { Chat.ans = "收到，按「" + ["一线城市每人 150 元", "其他城市每人 100 元", "按实报销"][Chat.pick[0]] + "」处理：这张 680 元超出 80 元，判为退回并写明「超出餐饮标准」。"; Chat.render(); },
+  "ch-noans": () => { Chat.pick = [0]; Chat.ans = "你选择了不回答。我按一线城市标准处理，判为退回。"; Chat.render(); },
+  "ch-ap": (t) => { Chat.approved = t.dataset.v; toast(t.dataset.v === "ok" ? "已批准" : "已拒绝"); Chat.render(); },
+  "ch-apwhy": () => openModal(`<h3>拒绝并说明</h3><p class="muted">原因会交给智能体。</p><textarea class="ta" rows="3">酒店那张先别提交，我要先和王蕾确认行程。</textarea><div class="mfoot"><button class="btn ghost" data-a="close">取消</button><button class="btn" data-a="ch-apwhy-ok">拒绝并发送</button></div>`, 460),
+  "ch-apwhy-ok": () => { closeModal(); Chat.approved = "no"; Chat.render(); toast("已拒绝，原因已交给智能体"); },
+  "ch-vars": () => openModal(`<h3>变量</h3><p class="muted">按「你＋这个智能体」保存，可关联到会话。</p><div class="fld"><label>ERP_TOKEN <b style="color:var(--bad)">*</b>（密钥）</label><input class="inp" type="password" value="erp-tk-29dk3"></div><div class="fld"><label>DEPT</label><input class="inp" value="财务部"></div><div class="mfoot"><button class="btn ghost" data-a="close">取消</button><button class="btn" data-a="ch-vars-ok">保存</button></div>`, 460),
+  "ch-vars-ok": () => { Chat.vars = true; closeModal(); toast("变量已保存"); Chat.render(); },
+  "dev-tab": (t) => { Dev.tab = t.dataset.v; Dev.render(); },
+  "acc-tab": (t) => { Account.tab = t.dataset.v; Account.render(); },
+  "m-open": (t) => { Mobile.m1 = +t.dataset.i; Mobile.render(); },
+  "m-back": () => { Mobile.m1 = null; Mobile.render(); },
+  "m-pick": (t) => { Mobile.pick = [+t.dataset.i]; Mobile.render(); },
+  "m-ans": () => { Mobile.ans = true; Mobile.render(); },
+  "m-replay": () => Mobile.replay(),
+};
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-ba]");
+  const a = e.target.closest("[data-a]");
+  if (b && (!a || b.contains(a) === false || a.contains(b))) { if (b.disabled) return; builderOf(b).act(b, e); return; }
+  if (a) { if (a.disabled) return; const f = GA[a.dataset.a]; if (f) f(a, e); }
+});
+document.addEventListener("input", (e) => {
+  const p = e.target.closest(".page");
+  if (p && (p.id === "pg-build" || p.id === "pg-flow")) builderOf(e.target).input(e);
+  if (e.target.id === "mk-q") { Market.q = e.target.value; const s = $("#mk-scroll").scrollTop; Market.render(); $("#mk-scroll").scrollTop = s; const q = $("#mk-q"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
+  if (e.target.id === "ad-q") { Admin.q = e.target.value; Admin.render(); const q = $("#ad-q"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
+  if (e.target.id === "ch-in") { const sl = e.target.value.startsWith("/"); if (sl !== Chat.slash) { Chat.slash = sl; const v = e.target.value; Chat.render(); const i = $("#ch-in"); i.value = v; i.focus(); } }
+});
+document.addEventListener("change", (e) => { const p = e.target.closest(".page"); if (p && (p.id === "pg-build" || p.id === "pg-flow")) builderOf(e.target).change(e); });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { closeModal(); }
+  const p = e.target.closest && e.target.closest(".page");
+  if (p && (p.id === "pg-build" || p.id === "pg-flow")) builderOf(e.target).key(e);
+  if (e.target.id === "mk-ask" && e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); Market.send(e.target.value); }
+});
+
+/* =================== 初始化 =================== */
+Market.render(); Build.render(); Flow.render(); Admin.render(); Mobile.render(); Chat.render(); Dev.render(); Account.render();
+const initial = (location.hash || "").replace("#", "");
+go(["market", "build", "flow", "admin", "mobile", "chat"].includes(initial) ? initial : "market");
+</script>
+</body>
+</html>

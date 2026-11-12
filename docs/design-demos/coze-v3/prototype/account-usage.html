@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>用量分析 · Open Web Agents</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/owa.css">
+<style>
+.au-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:16px}
+.au-stats .l{font-size:13px;color:var(--sub)}
+.au-stats .n{margin:4px 0 2px}
+.au-cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:16px;margin-bottom:16px}
+.au-card{padding:20px 22px}
+.au-card h3{margin:0;font-size:16px}
+.au-leg{display:flex;gap:14px;font-size:12px;color:var(--sub)}
+.au-leg i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.au-hb{display:grid;grid-template-columns:128px minmax(0,1fr) 128px;align-items:center;gap:10px;margin-top:12px;font-size:14px}
+.au-hb .nm{display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.au-track{height:14px;border-radius:4px;background:#F1EFEA;display:flex;overflow:hidden}
+.au-track .ok{background:#6F6A60}
+.au-track .bad{background:var(--bad)}
+.au-hb .v{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.au-days{display:flex;align-items:flex-end;gap:3px;height:170px;margin-top:14px;padding-bottom:2px;border-bottom:1px solid var(--line)}
+.au-day{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:flex-end;height:100%;position:relative;cursor:default}
+.au-day i{display:block;border-radius:3px 3px 0 0;background:#6F6A60;min-height:2px}
+.au-day i.f{background:var(--bad);border-radius:0}
+.au-day:hover i{opacity:.8}
+.au-day .tip{display:none;position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:#1C1C1C;color:#fff;font-size:12px;padding:5px 9px;border-radius:8px;white-space:nowrap;z-index:2}
+.au-day:hover .tip{display:block}
+.au-xl{display:flex;justify-content:space-between;font-size:12px;color:var(--sub);margin-top:6px}
+.au-num{font-variant-numeric:tabular-nums;white-space:nowrap}
+table.tb th.au-r,.au-r{text-align:right}
+.au-sub td{background:#FAF9F6;padding:0}
+.au-sub table{width:100%;border-collapse:collapse;font-size:13px}
+.au-sub th{font-weight:500;color:var(--sub);text-align:left;padding:8px 12px;font-size:12px}
+.au-sub td.c{padding:8px 12px;border-top:1px solid var(--line2);background:#FAF9F6}
+.au-exp{transition:transform .2s;color:var(--sub);display:inline-flex}
+tr.open .au-exp{transform:rotate(90deg)}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="assets/owa.js"></script>
+<script>
+"use strict";
+/* 账户，用量分析：本人的 token 用量（原 /settings/usage）。实际扣费以积分页为准 */
+const WIN = {
+  1: { runs: 42, ok: 95.2, usd: 1.12, inT: "612k", outT: "88k", q: [1, 1], k: 0.04 },
+  7: { runs: 286, ok: 94.4, usd: 7.86, inT: "4.21M", outT: "602k", q: [1, 1], k: 0.26 },
+  30: { runs: 1104, ok: 93.8, usd: 28.4, inT: "16.3M", outT: "2.31M", q: [1, 1], k: 1 },
+  90: { runs: 3420, ok: 94.1, usd: 86.1, inT: "49.8M", outT: "7.02M", q: [1, 1], k: 3.1 },
+};
+const BY_AGENT = [["expense-reviewer", "报销审核助手", 520, 41], ["meeting", "会议纪要整理", 214, 6], ["weekly", "周报生成器", 152, 9], ["sql", "SQL 助手", 118, 2], ["rival", "竞品周报（新版）", 58, 7], ["contract", "合同条款比对", 42, 3]];
+const DETAIL = [
+  { t: "11-11 14:20", ag: "报销审核助手", k: "expense-reviewer", st: "ok", usd: 0.072, models: [["claude-sonnet-4-5", "9.8k", "1.4k", "6.2k", "1.1k", 0.061], ["claude-haiku-4-5", "0.8k", "0.1k", "0", "0", 0.011]] },
+  { t: "11-11 14:02", ag: "报销审核助手", k: "expense-reviewer", st: "failed", usd: 0.031, models: [["claude-sonnet-4-5", "5.9k", "0.9k", "4.1k", "0", 0.031]] },
+  { t: "11-11 13:47", ag: "会议纪要整理", k: "meeting", st: "ok", usd: 0.184, models: [["claude-sonnet-4-5", "36.2k", "4.8k", "0", "12.0k", 0.184]] },
+  { t: "11-11 10:41", ag: "报销审核助手", k: "expense-reviewer", st: "ok", usd: 0.119, models: [["claude-opus-4-1", "18.1k", "2.2k", "9.6k", "2.4k", 0.104], ["claude-sonnet-4-5", "3.9k", "0.4k", "0", "0", 0.015]] },
+  { t: "11-10 16:10", ag: "SQL 助手", k: "sql", st: "ok", usd: 0.010, models: [["claude-haiku-4-5", "4.8k", "0.6k", "2.0k", "0", 0.010]] },
+  { t: "11-09 16:40", ag: "竞品周报（新版）", k: "rival", st: "failed", usd: 0.210, models: [["claude-sonnet-4-5", "46.0k", "6.3k", "21.4k", "3.0k", 0.198], ["claude-haiku-4-5", "—", "—", "—", "—", 0.012]], partial: true },
+];
+let win = 30;
+const open = new Set();
+
+OWA.mount({
+  nav: "account",
+  body: `<div class="bwrap">${sideNav("account")}
+    <main class="main">
+      <div class="ph"><div><h1>用量分析</h1><p class="muted" style="margin:6px 0 0">你名下运行的 token 用量与模型成本估算，按 UTC 日期统计。</p></div>
+        <div class="seg" style="margin-left:auto" role="tablist" aria-label="时间窗" id="au-win"></div></div>
+      <div class="banner info">${ic("info", 18)}<div>这里是按模型价目估算的成本（美元），用来看用量趋势；<b>实际扣费以积分页为准</b>，见 <a class="link" href="account-billing.html#cost">积分与套餐，运行消耗</a>。</div></div>
+      <div id="au-body"></div>
+    </main></div>`,
+});
+
+function seeded(i) { const x = Math.sin(i * 12.9898) * 43758.5453; return x - Math.floor(x); }
+function render() {
+  $("#au-win").innerHTML = [1, 7, 30, 90].map((d) => `<button role="tab" class="${win === d ? "on" : ""}" aria-selected="${win === d}" data-a="win" data-d="${d}">最近 ${d} 天</button>`).join("");
+  const w = WIN[win];
+  const agents = BY_AGENT.map(([k, n, r, f]) => [k, n, Math.max(1, Math.round(r * w.k)), Math.round(f * w.k)]);
+  const maxA = Math.max(...agents.map((a) => a[2]));
+  const nDays = win === 1 ? 2 : win;
+  const days = Array.from({ length: nDays }, (_, i) => {
+    const wk = new Date(Date.UTC(2026, 10, 11 - (nDays - 1 - i)));
+    const weekend = [0, 6].includes(wk.getUTCDay());
+    const runs = Math.round((weekend ? 10 : 34) + seeded(i + win) * 22);
+    return { d: `${wk.getUTCMonth() + 1}-${String(wk.getUTCDate()).padStart(2, "0")}`, runs, fail: Math.round(runs * (0.03 + seeded(i * 3) * 0.06)) };
+  });
+  const maxD = Math.max(...days.map((x) => x.runs));
+  $("#au-body").innerHTML = `
+    <div class="au-stats">
+      <div class="stat"><div class="l">总花费（估算）</div><div class="n">$${w.usd.toFixed(2)}</div><div class="small muted">按模型价目估算，不含积分加价</div></div>
+      <div class="stat"><div class="l">运行次数</div><div class="n">${w.runs.toLocaleString()}</div><div class="small muted">成功率 <b style="color:var(--ok)">${w.ok}%</b>，现在排队 ${w.q[0]}、在跑 ${w.q[1]}</div></div>
+      <div class="stat"><div class="l">输入 tokens</div><div class="n">${w.inT}</div><div class="small muted">含缓存读写，明细见下表</div></div>
+      <div class="stat"><div class="l">输出 tokens</div><div class="n">${w.outT}</div><div class="small muted">最近 ${win} 天</div></div>
+    </div>
+    <div class="au-cols">
+      <section class="card au-card"><div class="row"><h3>按智能体</h3><div class="au-leg" style="margin-left:auto"><span><i style="background:#6F6A60"></i>未失败</span><span><i style="background:var(--bad)"></i>失败</span></div></div>
+        ${agents.map(([k, n, r, f]) => `<div class="au-hb"><span class="nm">${av(k, 20)}${n}</span><div class="au-track" title="${n}：${r} 次，失败 ${f} 次" style="width:${(r / maxA) * 100}%"><span class="ok" style="width:${((r - f) / r) * 100}%"></span><span class="bad" style="width:${(f / r) * 100}%"></span></div><span class="v">${r.toLocaleString()} 次${f ? `，<span style="color:var(--bad)">${f} 失败</span>` : ""}</span></div>`).join("")}
+      </section>
+      <section class="card au-card"><div class="row"><h3>按天（UTC）</h3><div class="au-leg" style="margin-left:auto"><span><i style="background:#6F6A60"></i>运行</span><span><i style="background:var(--bad)"></i>其中失败</span></div></div>
+        <div class="au-days" style="gap:${nDays > 40 ? 1 : 3}px" role="img" aria-label="最近 ${win} 天每天运行次数">${days.map((x) => `<div class="au-day"><span class="tip">${x.d}：${x.runs} 次，失败 ${x.fail}</span><i style="height:${((x.runs - x.fail) / maxD) * 100}%"></i><i class="f" style="height:${(x.fail / maxD) * 100}%;order:-1;border-radius:3px 3px 0 0"></i></div>`).join("")}</div>
+        <div class="au-xl"><span>${days[0].d}</span>${nDays > 6 ? `<span>${days[Math.floor(nDays / 2)].d}</span>` : ""}<span>${days[nDays - 1].d}（今天）</span></div>
+      </section>
+    </div>
+    <section class="card"><div class="row" style="padding:18px 22px 10px"><h3 style="margin:0;font-size:16px">运行明细</h3><span class="muted small">点一行展开每个模型的 tokens</span></div>
+      <table class="tb"><thead><tr><th style="padding-left:22px;width:36px"></th><th>时间</th><th>智能体</th><th>状态</th><th class="au-r">模型数</th><th class="au-r" style="padding-right:22px">估算成本</th></tr></thead><tbody>
+      ${DETAIL.map((r, i) => `<tr class="click ${open.has(i) ? "open" : ""}" data-a="exp" data-i="${i}" aria-expanded="${open.has(i)}"><td style="padding-left:22px"><span class="au-exp">${ic("chev", 15)}</span></td><td class="au-num">${r.t}</td><td><span class="row" style="gap:8px">${av(r.k, 22)}${r.ag}</span></td>
+        <td><span class="tag ${r.st === "ok" ? "ok" : "bad"}">${r.st === "ok" ? "成功" : "失败"}</span>${r.partial ? ' <span class="tag warn" title="有模型没回报用量">部分</span>' : ""}</td><td class="au-r">${r.models.length}</td><td class="au-r au-num" style="padding-right:22px">$${r.usd.toFixed(3)}</td></tr>
+        ${open.has(i) ? `<tr class="au-sub"><td colspan="6"><table><thead><tr><th style="padding-left:58px">模型</th><th class="au-r">输入</th><th class="au-r">输出</th><th class="au-r">缓存读</th><th class="au-r">缓存写</th><th class="au-r" style="padding-right:22px">估算成本</th></tr></thead><tbody>
+          ${r.models.map((m) => `<tr><td class="c" style="padding-left:58px;font-family:var(--mono);font-size:12.5px">${m[0]}</td>${m.slice(1, 5).map((v) => `<td class="c au-r au-num">${v}</td>`).join("")}<td class="c au-r au-num" style="padding-right:22px">$${m[5].toFixed(3)}</td></tr>`).join("")}
+          ${r.partial ? `<tr><td class="c small" colspan="6" style="padding-left:58px;color:var(--warnt)">claude-haiku-4-5 这次调用没有回报用量，按已知部分统计。</td></tr>` : ""}
+        </tbody></table></td></tr>` : ""}`).join("")}
+      </tbody></table>
+      <div class="row" style="justify-content:center;padding:14px"><a class="link small" href="dev-runs.html">在运行记录里看全部运行</a></div>
+    </section>`;
+}
+OWA.on("win", (el) => { win = +el.dataset.d; render(); });
+OWA.on("exp", (el) => { const i = +el.dataset.i; open.has(i) ? open.delete(i) : open.add(i); render(); });
+open.add(0);
+render();
+</script>
+</body>
+</html>

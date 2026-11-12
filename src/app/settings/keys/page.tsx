@@ -1,9 +1,6 @@
-import { AccessCenterView } from "@/features/integration/access-center-view";
-import { requireLogin } from "@/lib/server-guard";
+import { type PageSearchParams, redirectLegacy } from "@/lib/nav/legacy-page";
 
-export const dynamic = "force-dynamic";
-
-export default async function Page() {
-  await requireLogin();
-  return <AccessCenterView />;
+/** 旧地址,已迁到 /developer/keys(见 src/lib/nav/routes.ts) */
+export default async function Page({ searchParams }: { searchParams: PageSearchParams }) {
+  return redirectLegacy("/settings/keys", searchParams);
 }

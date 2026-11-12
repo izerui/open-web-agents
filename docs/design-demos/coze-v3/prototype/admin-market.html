@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>市场上架 · 平台管理 · Open Web Agents</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/owa.css">
+<style>
+.mk-search{position:relative;width:280px}
+.mk-search span{position:absolute;left:12px;top:10px;color:var(--sub)}
+.mk-search .inp{padding-left:38px}
+.mk-cat{height:34px;width:132px;font-size:13px}
+.mk-why{font-size:12px;color:var(--sub);margin-top:4px;white-space:nowrap}
+.mk-app{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:20px;padding:18px 20px;border-bottom:1px solid var(--line2)}
+.mk-app:last-child{border-bottom:0}
+.mk-quote{background:#F6F5F1;border-radius:10px;padding:10px 12px;margin-top:10px;font-size:14px;color:#3C3A35}
+.mk-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.mk-tabs{display:flex;align-items:center;gap:10px}
+a.btn{text-decoration:none}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="assets/owa.js"></script>
+<script>
+"use strict";
+/* 平台管理，市场上架（原 /admin/market）＋ 新增「上架申请」队列（需后端） */
+const AG = [
+  ...MARKET.map((m) => ({ k: m.k, id: m.id, n: m.n, owner: m.by, v: m.v, cat: m.cat, listed: true, pub: true, open: true })),
+  { k: "expense-reviewer", id: "expense-reviewer", n: "报销审核助手", owner: "财务部 林舟", v: 3, cat: "", listed: false, pub: true, open: true },
+  { k: "currency", id: "fx-helper", n: "汇率换算", owner: "财务部 钱晓", v: 2, cat: "", listed: false, pub: true, open: false },
+  { k: "default", id: "default", n: "通用助手", owner: "平台内置", v: 1, cat: "通用助手", listed: false, pub: true, open: true },
+  { k: "rival", id: "rival-weekly-draft", n: "竞品周报（新版）", owner: "财务部 林舟", v: 0, cat: "", listed: false, pub: false, open: false },
+  { k: "travel", id: "travel-planner", n: "差旅行程规划", owner: "行政部 高妍", v: 0, cat: "", listed: false, pub: false, open: false },
+];
+const APPS = [
+  { aid: "expense-reviewer", by: "林舟", at: "今天 15:02", cat: "办公运营", note: "财务部已经用了三周，发票抬头和超额审批规则稳定，希望全公司报销前先过一遍。", st: "待审" },
+  { aid: "fx-helper", by: "钱晓", at: "昨天 18:40", cat: "办公运营", note: "外币发票换算，按开票日汇率，给海外出差的同事用。", st: "待审" },
+  { aid: "travel-planner", by: "高妍", at: "11-06", cat: "办公运营", note: "行程规划和酒店比价。", st: "已驳回", why: "还没有发布版本，发布后再申请。" },
+];
+const S = { tab: "list", q: "", st: "全部", cat: "全部" };
+const A = (id) => AG.find((a) => a.id === id);
+
+OWA.mount({ nav: "admin", body: `<div class="bwrap">${sideNav("admin")}<main class="main" id="mk-main"></main></div>` });
+
+function render() {
+  const pend = APPS.filter((x) => x.st === "待审").length;
+  const listed = AG.filter((a) => a.listed).length;
+  $("#mk-main").innerHTML = `<div class="ph"><div><h1>市场上架</h1><p class="muted" style="margin:6px 0 0">${listed} 个已上架，${AG.filter((a) => a.pub && !a.listed).length} 个已发布未上架，公开只是对所有账号只读可见，上架才会出现在探索页</p></div>
+      <a class="btn ghost" style="margin-left:auto" href="explore.html">${ic("external", 15)}查看探索页</a></div>
+    <div class="tabs mk-tabs" role="tablist">
+      <button role="tab" aria-selected="${S.tab === "list"}" class="${S.tab === "list" ? "on" : ""}" data-a="mk-tab" data-v="list">智能体</button>
+      <button role="tab" aria-selected="${S.tab === "apps"}" class="${S.tab === "apps" ? "on" : ""}" data-a="mk-tab" data-v="apps">上架申请${pend ? `<span class="tag warn" style="margin-left:6px">${pend}</span>` : ""}</button>
+      ${gap("A13")}</div>
+    ${S.tab === "list" ? list() : apps()}`;
+  const q = $("#mk-q");
+  if (q) q.addEventListener("input", () => { S.q = q.value.trim(); const p = q.selectionStart; render(); const n = $("#mk-q"); n.focus(); n.setSelectionRange(p, p); });
+}
+
+function list() {
+  const rows = AG.filter((a) => (!S.q || (a.n + a.id + a.owner).includes(S.q)) && (S.st === "全部" || (S.st === "已上架" ? a.listed : !a.listed)) && (S.cat === "全部" || a.cat === S.cat));
+  return `<div class="row" style="margin-bottom:14px">
+      <div class="mk-search"><span>${ic("search", 18)}</span><input class="inp" id="mk-q" placeholder="搜索名称、标识或所有者" value="${esc(S.q)}" aria-label="搜索智能体"></div>
+      <div class="seg">${["全部", "已上架", "未上架"].map((x) => `<button data-a="mk-st" data-v="${x}" class="${x === S.st ? "on" : ""}">${x}</button>`).join("")}</div>
+      <select class="inp" style="width:150px;height:36px" id="mk-fcat" aria-label="按类别筛选">${CATS.map((c) => `<option ${c === S.cat ? "selected" : ""}>${c === "全部" ? "全部类别" : c}</option>`).join("")}</select>
+      <span class="muted small" style="margin-left:auto">显示 ${rows.length} 个</span></div>
+    <div class="card" style="overflow:hidden">${rows.length ? `<table class="tb"><thead><tr><th>智能体</th><th>所有者</th><th>发布版</th><th>公开</th><th>类别</th><th>状态</th><th style="text-align:right">操作</th></tr></thead><tbody>
+      ${rows.map((a) => `<tr>
+        <td><div class="row">${av(a.k, 30)}<div><div style="font-weight:600">${a.n}</div><div class="muted small" style="font-family:var(--mono)">${a.id}</div></div></div></td>
+        <td>${a.owner}</td>
+        <td>${a.pub ? "v" + a.v : '<span class="muted">未发布</span>'}</td>
+        <td>${a.open ? '<span class="tag line">已公开</span>' : '<span class="muted small">仅授权可见</span>'}</td>
+        <td><select class="inp mk-cat" data-cat="${a.id}" aria-label="${a.n} 的类别" ${a.pub ? "" : "disabled"}><option value="">未分类</option>${CATS.slice(1).map((c) => `<option ${c === a.cat ? "selected" : ""}>${c}</option>`).join("")}</select></td>
+        <td>${a.listed ? '<span class="tag ok">已上架</span>' : '<span class="tag">未上架</span>'}</td>
+        <td style="text-align:right">${a.listed ? `<button class="btn danger sm" data-a="mk-off" data-id="${a.id}">下架</button>`
+          : a.pub ? `<button class="btn sm" data-a="mk-on" data-id="${a.id}">上架</button>`
+          : `<button class="btn sm" disabled title="还没有发布版本，所有者发布后才能上架">上架</button><div class="mk-why">未发布，不能上架</div>`}</td></tr>`).join("")}</tbody></table>`
+      : `<div class="empty-state"><div class="serif">没有符合条件的智能体</div><p class="muted" style="margin:0 0 14px">换个关键词，或把状态和类别切回「全部」。</p><button class="btn ghost sm" data-a="mk-clear">清除筛选</button></div>`}</div>`;
+}
+
+function apps() {
+  return `<div class="banner info">${ic("info", 16)}<span>所有者在构建页「发布」阶段提交申请。通过后按所选类别上架到探索页；驳回会把原因通知给所有者。</span></div>
+    <div class="card">${APPS.map((x, i) => { const a = A(x.aid); return `<div class="mk-app">
+      <div><div class="row">${av(a.k, 36)}<div><div style="font-weight:600;font-size:15px">${a.n} <span class="muted" style="font-weight:400">${a.pub ? "v" + a.v : "未发布"}</span></div><div class="muted small">${x.by} 申请于 ${x.at}</div></div></div>
+        <div class="mk-quote">${esc(x.note)}</div>
+        <div class="mk-meta"><span class="tag line">申请类别：${x.cat}</span>${a.open ? '<span class="tag line">已公开</span>' : '<span class="tag line">未公开</span>'}${a.pub ? '<span class="tag ok">评测已通过</span>' : '<span class="tag warn">没有发布版本</span>'}<a class="link small" style="align-self:center;margin-left:4px" href="market-detail.html">预览详情页</a></div></div>
+      <div style="display:flex;flex-direction:column;gap:8px;justify-content:center">
+        ${x.st === "待审" ? `<div class="fld" style="margin:0"><label for="ap-cat${i}">上架到类别</label><select class="inp" id="ap-cat${i}">${CATS.slice(1).map((c) => `<option ${c === x.cat ? "selected" : ""}>${c}</option>`).join("")}</select></div>
+          <div class="row"><button class="btn sm" style="flex:1" data-a="ap-ok" data-i="${i}" ${a.pub ? "" : "disabled"}>${ic("check", 14, 2)}通过并上架</button><button class="btn ghost sm" style="flex:1" data-a="ap-no" data-i="${i}">驳回</button></div>`
+        : x.st === "已通过" ? `<span class="tag ok" style="align-self:flex-start">已通过，已上架到「${x.cat}」</span>`
+        : `<span class="tag bad" style="align-self:flex-start">已驳回</span><div class="muted small">原因：${esc(x.why)}</div>`}
+      </div></div>`; }).join("")}</div>`;
+}
+
+OWA.on("mk-tab", (t) => { S.tab = t.dataset.v; render(); });
+OWA.on("mk-st", (t) => { S.st = t.dataset.v; render(); });
+OWA.on("mk-clear", () => { S.q = ""; S.st = "全部"; S.cat = "全部"; render(); });
+document.addEventListener("change", (e) => {
+  if (e.target.id === "mk-fcat") { S.cat = e.target.value === "全部类别" ? "全部" : e.target.value; render(); }
+  if (e.target.dataset.cat) { const a = A(e.target.dataset.cat); a.cat = e.target.value; toast(`「${a.n}」类别改为${a.cat || "未分类"}`); render(); }
+});
+OWA.on("mk-on", (t) => {
+  const a = A(t.dataset.id);
+  if (!a.cat) return toast("先给「" + a.n + "」选一个类别", false);
+  a.listed = true; render(); toast(`「${a.n}」v${a.v} 已上架到${a.cat}`);
+});
+OWA.on("mk-off", (t) => {
+  const a = A(t.dataset.id);
+  confirmBox({ title: `下架「${a.n}」？`, danger: true, ok: "下架",
+    body: `<p>下架后探索页不再展示，用户也不能再从市场「立即使用」或克隆。</p><p class="muted">已经在用的会话、已签发的 API Key 和所有者自己的使用不受影响；所有者的「公开」设置保持不变。</p>`,
+    onOk: () => { a.listed = false; render(); toast(`「${a.n}」已下架`); } });
+});
+OWA.on("ap-ok", (t) => {
+  const i = +t.dataset.i, x = APPS[i], a = A(x.aid), c = $("#ap-cat" + i).value;
+  confirmBox({ title: `通过并上架「${a.n}」？`, ok: "通过并上架", body: `<p>上架 v${a.v} 到「${c}」。所有者之后发布新版本时，市场自动跟随新的发布版。</p>`,
+    onOk: () => { x.st = "已通过"; x.cat = c; a.cat = c; a.listed = true; render(); toast(`已上架，已通知 ${x.by}`); } });
+});
+OWA.on("ap-no", (t) => {
+  const i = +t.dataset.i, x = APPS[i], a = A(x.aid);
+  openModal(`<h3>驳回「${a.n}」的上架申请</h3><p class="muted" style="margin:0 0 12px">原因会通知给 ${x.by}，对方可以修改后重新申请。</p>
+    <div class="fld"><label for="ap-why">驳回原因 <b>*</b></label><textarea class="ta" id="ap-why" rows="3" placeholder="例如：说明里缺少使用范围，补充后再申请"></textarea></div>
+    <div class="mfoot"><button class="btn ghost" data-a="owa-close">取消</button><button class="btn danger" data-a="ap-no-ok" data-i="${i}">驳回</button></div>`, 480);
+  setTimeout(() => $("#ap-why")?.focus(), 30);
+});
+OWA.on("ap-no-ok", (t) => {
+  const w = $("#ap-why").value.trim();
+  if (!w) { $("#ap-why").style.borderColor = "var(--bad)"; return toast("请填写驳回原因", false); }
+  const x = APPS[+t.dataset.i]; x.st = "已驳回"; x.why = w; closeModal(); render(); toast("已驳回，已通知 " + x.by);
+});
+if (location.hash === "#apps") S.tab = "apps";
+render();
+</script>
+</body>
+</html>

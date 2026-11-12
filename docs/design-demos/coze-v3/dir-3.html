@@ -1,0 +1,1550 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Open Web Agents · 方向 3 上线轨道</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#FFFFFF;--bg2:#FAFAFA;--bg3:#F3F3F3;--line:#EAEAEA;--line2:#DADADA;
+  --fg:#0A0A0A;--fg2:#666666;--fg3:#8A8A8A;
+  --pri:#0B5FFF;--pri-bg:#EEF4FF;--pri-line:#CFE0FF;
+  --ok:#0A7D32;--ok-bg:#ECF7F0;--ok-line:#C8E8D3;
+  --warn:#B25E00;--warn-bg:#FFF6EA;--warn-line:#F3DCB9;
+  --bad:#D62E2E;--bad-bg:#FDEFEF;--bad-line:#F5CDCD;
+  --r:6px;
+  --sans:"Geist","PingFang SC",-apple-system,"Helvetica Neue","Microsoft YaHei",sans-serif;
+  --mono:"Geist Mono",ui-monospace,"SFMono-Regular",Menlo,"PingFang SC",monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#D4D4D4;font-family:var(--sans);color:var(--fg);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-align:inherit}
+input,textarea,select{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}
+ul,ol{list-style:none}
+.ic{flex:none;display:inline-block;vertical-align:middle}
+.n,.mono{font-family:var(--mono);font-feature-settings:"tnum" 1,"zero" 0;letter-spacing:-.01em}
+.muted{color:var(--fg2)}
+.dot{display:inline-block;width:3px;height:3px;border-radius:50%;background:#9A9A9A;vertical-align:middle;margin:0 7px}
+.sp{flex:1}
+.row{display:flex;align-items:center;gap:8px}
+.col{display:flex;flex-direction:column}
+
+/* proto switcher (not product) */
+#proto{height:40px;background:#161616;color:#EDEDED;display:flex;align-items:center;gap:2px;padding:0 14px;font-size:12px;width:1440px;margin:0 auto}
+#proto .pt{color:#9A9A9A;margin-right:12px;font-family:var(--mono)}
+#proto button{height:26px;padding:0 10px;border-radius:4px;color:#CFCFCF;font-size:12px}
+#proto button:hover{background:#2A2A2A;color:#fff}
+#proto button.on{background:#fff;color:#0A0A0A;font-weight:600}
+#proto .hint{margin-left:auto;color:#9A9A9A}
+#board{width:1440px;height:900px;margin:0 auto;background:#fff;position:relative;overflow:hidden}
+
+/* primitives */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 12px;border:1px solid var(--line2);border-radius:var(--r);background:#fff;font-size:14px;font-weight:500;white-space:nowrap;transition:background .12s,border-color .12s,color .12s}
+.btn:hover{background:var(--bg2);border-color:#C9C9C9}
+.btn.pri{background:var(--pri);border-color:var(--pri);color:#fff}
+.btn.pri:hover{background:#0050E6}
+.btn.dark{background:var(--fg);border-color:var(--fg);color:#fff}
+.btn.dark:hover{background:#262626}
+.btn.ghost{border-color:transparent;background:transparent}
+.btn.ghost:hover{background:var(--bg3)}
+.btn.sm{height:28px;padding:0 9px;font-size:13px}
+.btn.xs{height:24px;padding:0 7px;font-size:12px;gap:4px}
+.btn.lg{height:40px;padding:0 16px;font-size:15px}
+.btn.block{width:100%;height:38px}
+.btn.danger{color:var(--bad)}
+.btn.danger:hover{border-color:var(--bad-line);background:var(--bad-bg)}
+.btn[disabled]{opacity:.42;cursor:not-allowed;pointer-events:none}
+.btn .kbd{margin-left:2px}
+.btn.pri .kbd{background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.3);color:#fff}
+.link{color:var(--pri);cursor:pointer;font-weight:500}
+.link:hover{text-decoration:underline}
+.badge{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 7px;border-radius:4px;font-size:12px;font-weight:500;border:1px solid var(--line);background:#fff;color:var(--fg2);white-space:nowrap;line-height:1}
+.badge.ok{color:var(--ok);background:var(--ok-bg);border-color:var(--ok-line)}
+.badge.warn{color:var(--warn);background:var(--warn-bg);border-color:var(--warn-line)}
+.badge.bad{color:var(--bad);background:var(--bad-bg);border-color:var(--bad-line)}
+.badge.pri{color:var(--pri);background:var(--pri-bg);border-color:var(--pri-line)}
+.badge.dark{background:var(--fg);color:#fff;border-color:var(--fg)}
+.kbd{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 5px;border:1px solid var(--line2);border-radius:4px;font-family:var(--mono);font-size:12px;color:var(--fg2);background:#fff;line-height:1}
+.lbl{font-size:12px;color:var(--fg2);font-weight:500}
+.inp{height:34px;border:1px solid var(--line2);border-radius:var(--r);padding:0 10px;background:#fff;width:100%;outline:none;font-size:14px}
+.inp:focus{border-color:var(--pri);box-shadow:0 0 0 3px rgba(11,95,255,.14)}
+textarea.inp{height:auto;padding:9px 10px;line-height:1.65;resize:vertical}
+textarea.inp.mono{font-size:13px}
+select.inp{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:30px}
+.field{display:flex;flex-direction:column;gap:6px}
+.field .help{font-size:12px;color:var(--fg2)}
+.g2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
+.g3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.seg{display:inline-flex;border:1px solid var(--line2);border-radius:var(--r);padding:2px;background:var(--bg2);gap:2px}
+.seg button{height:26px;padding:0 10px;border-radius:4px;font-size:13px;color:var(--fg2);font-weight:500;white-space:nowrap}
+.seg button.on{background:#fff;color:var(--fg);box-shadow:0 0 0 1px var(--line2)}
+.chip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 8px;border:1px solid var(--line2);border-radius:4px;font-family:var(--mono);font-size:12px;background:#fff;white-space:nowrap}
+.chip button{color:var(--fg2);display:inline-flex}
+.chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.tbl{width:100%;border-collapse:collapse}
+.tbl th{font-size:12px;color:var(--fg2);font-weight:500;text-align:left;padding:0 12px;height:34px;border-bottom:1px solid var(--line);white-space:nowrap;background:#fff;position:sticky;top:0;z-index:1}
+.tbl td{padding:0 12px;height:44px;border-bottom:1px solid var(--line);white-space:nowrap}
+.tbl td.wrap{white-space:normal;padding-top:10px;padding-bottom:10px}
+.tbl tr.click{cursor:pointer}
+.tbl tr.click:hover td{background:var(--bg2)}
+.tbl tr.sel td{background:var(--pri-bg)}
+.tbl .r{text-align:right}
+.code{font-family:var(--mono);font-size:13px;line-height:1.7;background:var(--bg2);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;white-space:pre;overflow:auto;color:#1A1A1A}
+.code .k{color:var(--pri)}.code .s{color:var(--ok)}.code .c{color:#6B6B6B}.code .a{color:#9C3FB8}
+.code .add{background:#E6F4EA;display:block;margin:0 -14px;padding:0 14px}
+.code .del{background:#FCEBEB;display:block;margin:0 -14px;padding:0 14px;color:#8A1F1F}
+.card{border:1px solid var(--line);border-radius:var(--r);background:#fff}
+.hr{height:1px;background:var(--line)}
+.spin{animation:spin .9s linear infinite;transform-origin:50% 50%}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.toggle{width:34px;height:20px;border-radius:10px;background:#D0D0D0;position:relative;flex:none;transition:background .15s}
+.toggle::after{content:"";position:absolute;width:16px;height:16px;border-radius:50%;background:#fff;top:2px;left:2px;transition:left .15s;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.toggle.on{background:var(--pri)}
+.toggle.on::after{left:16px}
+.check{width:16px;height:16px;border:1px solid #BDBDBD;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;flex:none;background:#fff}
+.check.on{background:var(--fg);border-color:var(--fg);color:#fff}
+.radio{width:16px;height:16px;border:1px solid #BDBDBD;border-radius:50%;flex:none;position:relative;background:#fff}
+.radio.on{border-color:var(--pri)}
+.radio.on::after{content:"";position:absolute;inset:3px;border-radius:50%;background:var(--pri)}
+.callout{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:var(--r);border:1px solid var(--line);background:var(--bg2)}
+.callout.warn{background:var(--warn-bg);border-color:var(--warn-line)}
+.callout.bad{background:var(--bad-bg);border-color:var(--bad-line)}
+.callout.ok{background:var(--ok-bg);border-color:var(--ok-line)}
+.callout.pri{background:var(--pri-bg);border-color:var(--pri-line)}
+.flash{animation:flash 1.6s ease}
+@keyframes flash{0%,40%{box-shadow:0 0 0 3px rgba(11,95,255,.35);border-radius:6px}100%{box-shadow:0 0 0 0 rgba(11,95,255,0)}}
+.geo{border-radius:6px;flex:none;display:block}
+.av{width:28px;height:28px;border-radius:50%;background:var(--fg);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex:none}
+
+/* global nav */
+.gnav{height:48px;display:flex;align-items:center;padding:0 16px 0 20px;border-bottom:1px solid var(--line);gap:20px;background:#fff;position:relative;z-index:5}
+.brand{display:flex;align-items:center;gap:9px;font-weight:650;font-size:14px;letter-spacing:-.01em;cursor:pointer}
+.gnav nav{display:flex;gap:2px}
+.gnav nav button{height:30px;padding:0 11px;border-radius:var(--r);color:var(--fg2);font-weight:500}
+.gnav nav button:hover{color:var(--fg);background:var(--bg3)}
+.gnav nav button.on{color:var(--fg);background:var(--bg3)}
+.cmdk-btn{display:flex;align-items:center;gap:8px;width:260px;height:32px;border:1px solid var(--line2);border-radius:var(--r);padding:0 6px 0 10px;color:var(--fg2);background:var(--bg2)}
+.cmdk-btn:hover{border-color:#C4C4C4}
+.cmdk-btn .kbd{margin-left:auto}
+.credit{display:flex;align-items:center;gap:6px;height:32px;padding:0 10px;border:1px solid var(--line);border-radius:var(--r)}
+.credit:hover{background:var(--bg2)}
+.page{height:852px;overflow:auto}
+
+/* overlays */
+.ov{position:absolute;inset:0;background:rgba(10,10,10,.28);z-index:50;display:flex;justify-content:center;align-items:flex-start;padding-top:110px;animation:fadeIn .12s}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.pal{width:640px;background:#fff;border-radius:10px;border:1px solid var(--line2);box-shadow:0 24px 60px rgba(0,0,0,.18);overflow:hidden;animation:fadeUp .16s}
+.pal-in{display:flex;align-items:center;gap:10px;height:52px;padding:0 16px;border-bottom:1px solid var(--line)}
+.pal-in input{flex:1;border:0;outline:0;font-size:16px;background:transparent}
+.pal-list{max-height:420px;overflow:auto;padding:6px}
+.pal-g{font-size:12px;color:var(--fg2);padding:10px 10px 4px;font-weight:500}
+.pal-i{display:flex;align-items:center;gap:10px;width:100%;height:38px;padding:0 10px;border-radius:var(--r);font-size:14px}
+.pal-i .r{margin-left:auto;color:var(--fg2);font-size:12px;display:flex;gap:4px;align-items:center}
+.pal-i.on{background:var(--bg3)}
+.pal-i .ii{color:var(--fg2);display:inline-flex}
+.pal-foot{display:flex;gap:14px;align-items:center;height:38px;padding:0 14px;border-top:1px solid var(--line);font-size:12px;color:var(--fg2);background:var(--bg2)}
+.pal-foot span{display:inline-flex;gap:5px;align-items:center}
+.modal{width:480px;background:#fff;border-radius:10px;border:1px solid var(--line2);box-shadow:0 24px 60px rgba(0,0,0,.18);padding:22px;animation:fadeUp .16s;margin-top:80px}
+.modal h3{font-size:17px;font-weight:600;margin-bottom:8px}
+.modal .acts{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
+.toast{position:absolute;left:50%;bottom:28px;transform:translateX(-50%);background:var(--fg);color:#fff;border-radius:8px;padding:0 14px;height:40px;display:flex;align-items:center;gap:10px;z-index:80;font-size:14px;box-shadow:0 10px 30px rgba(0,0,0,.2);animation:fadeUp .18s;white-space:nowrap}
+.toast .ic{color:#5EE38A}
+
+/* status dot tweaks */
+.sd{flex:none;display:inline-block;vertical-align:middle}
+
+/* ---------- market ---------- */
+.mk{display:grid;grid-template-columns:232px 1fr}
+.mk-side{border-right:1px solid var(--line);padding:20px 12px;position:sticky;top:0;height:852px;overflow:auto;background:#fff}
+.side-g{font-size:12px;color:var(--fg2);font-weight:500;padding:12px 10px 6px}
+.side-i{display:flex;align-items:center;gap:10px;width:100%;height:34px;padding:0 10px;border-radius:var(--r);color:#333;font-size:14px}
+.side-i:hover{background:var(--bg3)}
+.side-i.on{background:var(--bg3);color:var(--fg);font-weight:600}
+.side-i .n{margin-left:auto;font-size:12px;color:var(--fg2);font-weight:400}
+.mk-main{padding:28px 36px 60px}
+.mk-head{display:grid;grid-template-columns:1fr 520px;gap:40px;align-items:end;padding-bottom:24px;border-bottom:1px solid var(--line)}
+.mk-head h1{font-size:40px;line-height:1.08;letter-spacing:-.035em;font-weight:700}
+.mk-head p{margin-top:10px;color:var(--fg2);font-size:15px;max-width:520px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);border-radius:var(--r)}
+.stats>div{padding:12px 14px;border-right:1px solid var(--line)}
+.stats>div:last-child{border-right:0}
+.stats .v{font-family:var(--mono);font-size:22px;font-weight:500;letter-spacing:-.03em;line-height:1.2}
+.stats .k{font-size:12px;color:var(--fg2);margin-top:2px}
+.mk-bar{display:flex;align-items:center;gap:10px;padding:18px 0 16px}
+.search{position:relative;width:380px}
+.search .ic{position:absolute;left:10px;top:9px;color:var(--fg2)}
+.search .inp{padding-left:32px}
+.mk-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:1px solid var(--line);border-left:1px solid var(--line)}
+.mk-card{display:flex;flex-direction:column;gap:12px;padding:18px 18px 16px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);background:#fff;text-align:left;min-height:178px;transition:background .12s}
+.mk-card:hover{background:var(--bg2)}
+.mk-card .t{display:flex;gap:12px;align-items:center}
+.mk-card .nm{font-weight:600;font-size:15px}
+.mk-card .by{font-size:12px;color:var(--fg2)}
+.mk-card .d{color:#3D3D3D;font-size:14px;line-height:1.6;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:44px}
+.mk-card .f{display:flex;align-items:center;gap:12px;margin-top:auto;font-size:12px;color:var(--fg2)}
+.mk-card .f .n{color:var(--fg);font-size:12px}
+.mk-card .t .badge{margin-left:auto}
+.drawer{position:absolute;top:0;right:0;bottom:0;width:500px;background:#fff;border-left:1px solid var(--line2);box-shadow:-16px 0 40px rgba(0,0,0,.08);z-index:20;display:flex;flex-direction:column;animation:slideIn .18s}
+@keyframes slideIn{from{transform:translateX(24px);opacity:0}to{transform:none;opacity:1}}
+.drawer-h{display:flex;align-items:center;gap:10px;height:52px;padding:0 16px 0 20px;border-bottom:1px solid var(--line);flex:none}
+.drawer-b{flex:1;overflow:auto;padding:20px}
+.dim{position:absolute;inset:0;background:rgba(10,10,10,.12);z-index:19}
+.dsec{padding:16px 0;border-top:1px solid var(--line)}
+.dsec h4{font-size:12px;color:var(--fg2);font-weight:500;margin-bottom:10px}
+.kv{display:grid;grid-template-columns:120px 1fr;row-gap:8px;font-size:14px}
+.kv dt{color:var(--fg2)}
+.starter{display:flex;align-items:center;gap:10px;width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:var(--r);margin-bottom:6px;font-size:14px;text-align:left}
+.starter:hover{border-color:var(--fg)}
+
+/* ---------- studio ---------- */
+.wrap{max-width:1120px;margin:0 auto;padding:32px 40px 80px}
+.ph{display:flex;align-items:flex-end;gap:16px;margin-bottom:22px}
+.ph h1{font-size:30px;letter-spacing:-.03em;font-weight:700;line-height:1.15}
+.ph p{color:var(--fg2);margin-top:6px}
+.mini-track{display:flex;align-items:center;gap:4px}
+.mini-track i{width:22px;height:4px;border-radius:2px;background:var(--line2);display:block}
+.mini-track i.done{background:var(--ok)}.mini-track i.active{background:var(--pri)}.mini-track i.fail{background:var(--bad)}.mini-track i.warn{background:var(--warn)}
+.np-card{margin-top:14px}
+
+/* ---------- agent workspace ---------- */
+.ahead{height:52px;display:flex;align-items:center;gap:10px;padding:0 16px 0 20px;border-bottom:1px solid var(--line);background:#fff}
+.ahead .crumb{color:var(--fg2);display:flex;align-items:center;gap:6px}
+.ahead .crumb button:hover{color:var(--fg)}
+.ahead .nm{font-weight:650;font-size:15px}
+.saved{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--fg2)}
+.saved i{width:6px;height:6px;border-radius:50%;background:var(--ok)}
+.track{display:flex;height:62px;border-bottom:1px solid var(--line);background:var(--bg2);padding:0 0 0 0}
+.tseg{flex:1;display:flex;flex-direction:column;justify-content:center;gap:3px;padding:0 14px 0 16px;position:relative;min-width:0;text-align:left;border-right:1px solid var(--line)}
+.tseg:hover{background:#F4F4F4}
+.tseg.cur{background:#fff}
+.tseg.cur::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--fg)}
+.tseg .r1{display:flex;align-items:center;gap:8px;min-width:0}
+.tseg .no{font-family:var(--mono);font-size:12px;color:var(--fg2);width:12px}
+.tseg .nm{font-weight:600;font-size:14px}
+.tseg .mt{margin-left:auto;font-family:var(--mono);font-size:13px;font-weight:500}
+.tseg .sub{font-size:12px;color:var(--fg2);padding-left:42px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tseg .sub.bad{color:var(--bad)}.tseg .sub.warn{color:var(--warn)}.tseg .sub.ok{color:var(--ok)}.tseg .sub.pri{color:var(--pri)}
+.tseg .chev{position:absolute;right:-8px;top:22px;width:16px;height:16px;background:var(--bg2);color:#B0B0B0;z-index:2;display:flex;align-items:center;justify-content:center}
+.tseg.cur .chev{background:#fff}
+.tseg.runs{flex:0 0 210px;border-right:0;border-left:1px solid var(--line);margin-left:14px}
+.abody{height:738px;overflow:auto;position:relative;scroll-behavior:auto}
+.alayout{display:grid;grid-template-columns:184px minmax(0,760px) 324px;gap:40px;padding:28px 24px 140px 20px;justify-content:space-between;align-items:start}
+.toc{position:sticky;top:28px}
+.toc .lbl{padding:0 8px 8px}
+.toc button{display:flex;align-items:center;gap:8px;width:100%;height:30px;padding:0 8px;border-radius:4px;color:var(--fg2);font-size:14px}
+.toc button:hover{color:var(--fg);background:var(--bg3)}
+.toc button.on{color:var(--fg);background:var(--bg3);font-weight:500}
+.toc .tn{margin-left:auto;font-family:var(--mono);font-size:12px}
+.doc h1{font-size:28px;letter-spacing:-.025em;font-weight:700;line-height:1.2}
+.doc .lead{color:var(--fg2);margin-top:8px;font-size:14px;line-height:1.65}
+.sec{padding:26px 0 28px;border-top:1px solid var(--line)}
+.sec:first-of-type{border-top:0}
+.sec-h{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+.sec-h h2{font-size:17px;font-weight:600;letter-spacing:-.01em}
+.sec-h .sec-n{font-family:var(--mono);font-size:12px;color:var(--fg2);width:18px}
+.sec-b{display:flex;flex-direction:column;gap:16px}
+.lrow{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.lrow:last-child{border-bottom:0}
+.lrow .tt{font-weight:500}
+.lrow .ds{font-size:12px;color:var(--fg2)}
+.next{position:sticky;top:28px;border:1px solid var(--line);border-radius:var(--r);background:#fff;overflow:hidden}
+.np-tabs{display:flex;border-bottom:1px solid var(--line)}
+.np-tabs button{flex:1;text-align:center;display:inline-flex;align-items:center;justify-content:center;gap:5px;height:40px;font-weight:500;color:var(--fg2);border-bottom:2px solid transparent}
+.np-tabs button.on{color:var(--fg);border-bottom-color:var(--fg)}
+.np-b{padding:16px}
+.np-head{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.np-head b{font-size:15px}
+.np-list li{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--line)}
+.np-list li .sd{margin-top:3px}
+.np-list .t{font-weight:500;font-size:14px;line-height:1.4}
+.np-list .s{font-size:12px;color:var(--fg2);margin-top:2px}
+.np-list li.done .t{color:var(--fg2);text-decoration:line-through;text-decoration-color:#BDBDBD}
+.np-list li .btn{margin-left:auto;flex:none}
+.np-foot{border-top:1px solid var(--line);padding:12px 16px;background:var(--bg2);font-size:12px;color:var(--fg2);line-height:1.6}
+.np-foot .row{gap:6px;color:var(--fg)}
+.fab{position:absolute;right:20px;bottom:20px;height:40px;padding:0 14px;border-radius:20px;background:var(--fg);color:#fff;display:flex;align-items:center;gap:8px;font-weight:500;z-index:25;box-shadow:0 8px 24px rgba(0,0,0,.18)}
+.fab .kbd{background:#2A2A2A;border-color:#444;color:#DDD}
+.trial{position:absolute;right:20px;bottom:20px;width:440px;height:620px;border:1px solid var(--line2);border-radius:10px;background:#fff;box-shadow:0 18px 50px rgba(0,0,0,.16);display:flex;flex-direction:column;z-index:30;animation:fadeUp .18s;overflow:hidden}
+.trial-h{height:48px;display:flex;align-items:center;gap:8px;padding:0 10px 0 14px;border-bottom:1px solid var(--line);flex:none}
+.trial-b{flex:1;overflow:auto;padding:14px 14px 8px;display:flex;flex-direction:column;gap:12px;background:var(--bg2)}
+.msg-u{align-self:flex-end;max-width:84%;background:var(--fg);color:#fff;padding:9px 12px;border-radius:10px 10px 2px 10px;line-height:1.6}
+.msg-a{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px;line-height:1.65}
+.toolsum{display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r);background:#fff;font-size:13px;color:#333}
+.toolsum{white-space:nowrap}.toolsum .mono{font-size:12px;color:var(--fg2);overflow:hidden;text-overflow:ellipsis;min-width:0}
+.toolrows{border:1px solid var(--line);border-top:0;border-radius:0 0 6px 6px;background:#fff;margin-top:-13px;padding:4px 0}
+.toolrows div{display:flex;align-items:center;gap:8px;padding:5px 10px;font-size:13px}
+.toolrows .mono{font-size:12px}
+.msg-meta{display:flex;flex-wrap:wrap;row-gap:6px;align-items:center;gap:4px;white-space:nowrap;margin-top:10px;padding-top:8px;border-top:1px solid var(--line);font-size:12px;color:var(--fg2)}
+.trial-in{border-top:1px solid var(--line);padding:10px;flex:none;background:#fff}
+.trial-in .box{display:flex;align-items:flex-end;gap:8px;border:1px solid var(--line2);border-radius:8px;padding:6px 6px 6px 10px}
+.trial-in textarea{flex:1;border:0;outline:0;resize:none;height:40px;line-height:1.5;font-size:14px}
+.sendb{width:32px;height:32px;border-radius:6px;background:var(--fg);color:#fff;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.savecase{border:1px solid var(--pri-line);background:var(--pri-bg);border-radius:var(--r);padding:12px;display:flex;flex-direction:column;gap:10px}
+
+/* eval */
+.runbar{display:flex;align-items:center;gap:12px;padding:14px 16px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg2);margin-top:20px}
+.bign{display:grid;grid-template-columns:repeat(4,1fr);margin-top:16px;border:1px solid var(--line);border-radius:var(--r)}
+.bign>div{padding:14px 16px;border-right:1px solid var(--line)}
+.bign>div:last-child{border-right:0}
+.bign .v{font-family:var(--mono);font-size:26px;font-weight:500;letter-spacing:-.04em;line-height:1.15}
+.bign .k{font-size:12px;color:var(--fg2);margin-top:2px}
+.cases{border:1px solid var(--line);border-radius:var(--r);margin-top:16px;overflow:hidden}
+.case{border-bottom:1px solid var(--line)}
+.case:last-child{border-bottom:0}
+.case-r{display:grid;grid-template-columns:20px 1fr 64px 64px 92px 20px;align-items:center;gap:12px;padding:0 14px;height:52px;width:100%;text-align:left}
+.case-r:hover{background:var(--bg2)}
+.case-r .as{font-family:var(--mono);font-size:12px;color:var(--fg2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.case-r .nm{font-weight:500}
+.case-r .num{font-family:var(--mono);font-size:13px;text-align:right}
+.case-x{padding:2px 14px 16px 46px;display:flex;flex-direction:column;gap:12px;animation:fadeUp .15s}
+.case.run .case-r{background:linear-gradient(90deg,var(--pri-bg),#fff)}
+.fix{border:1px solid var(--line2);border-radius:var(--r);padding:14px;margin-top:16px;background:#fff}
+.h3{font-size:15px;font-weight:600}
+.subh{display:flex;align-items:center;gap:10px;margin:32px 0 12px}
+.subh h2{font-size:17px;font-weight:600}
+
+/* publish */
+.ready li{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.ready li:last-child{border-bottom:0}
+.ready .t{font-weight:500}
+.ready .s{font-size:12px;color:var(--fg2)}
+.ready li .btn{margin-left:auto}
+.vrow td{height:52px}
+.verdot{width:8px;height:8px;border-radius:50%;background:var(--ok);display:inline-block}
+
+/* admin */
+.adm{display:grid;grid-template-columns:220px 1fr;height:852px}
+.adm-side{border-right:1px solid var(--line);padding:18px 12px;background:#fff}
+.adm-main{overflow:auto}
+.adm-top{padding:24px 32px 0}
+.adm-top h1{font-size:26px;font-weight:700;letter-spacing:-.025em}
+.toolbar{display:flex;align-items:center;gap:10px;padding:16px 32px}
+.adm-tbl{padding:0 32px 40px}
+.adm-tbl .tbl td{height:46px}
+.self{font-size:12px;color:var(--pri);margin-left:6px}
+.tabs{display:flex;gap:18px;border-bottom:1px solid var(--line);margin-top:14px}
+.tabs button{height:38px;color:var(--fg2);font-weight:500;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs button.on{color:var(--fg);border-bottom-color:var(--fg)}
+
+/* chat */
+.chat{display:grid;grid-template-columns:268px 1fr 360px;height:852px}
+.cl{border-right:1px solid var(--line);display:flex;flex-direction:column;background:var(--bg2);min-height:0;height:852px}
+.cl-h{padding:12px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--line)}
+.cl-b{flex:1;overflow:auto;padding:6px 8px 16px}
+.cl-g{display:flex;align-items:center;gap:8px;padding:12px 8px 4px;font-size:12px;color:var(--fg2);font-weight:500}
+.cl-i{display:flex;align-items:center;gap:8px;width:100%;padding:0 8px;height:34px;border-radius:var(--r);font-size:14px;color:#2A2A2A}
+.cl-i:hover{background:#EFEFEF}
+.cl-i.on{background:#fff;box-shadow:0 0 0 1px var(--line2);font-weight:500;color:var(--fg)}
+.cl-i .tm{margin-left:auto;font-size:12px;color:var(--fg2);font-family:var(--mono)}
+.cv{display:flex;flex-direction:column;min-width:0;min-height:0;height:852px}
+.cv-h{height:52px;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--line);flex:none}
+.cv-b{flex:1;min-height:0;overflow:auto;padding:24px 0 20px}
+.cv-in{max-width:720px;margin:0 auto;padding:0 24px;display:flex;flex-direction:column;gap:16px}
+.cv-f{flex:none;padding:0 24px 16px}
+.cv-f .inner{max-width:672px;margin:0 auto;display:flex;flex-direction:column;gap:8px}
+.approval{border:1px solid var(--warn-line);background:var(--warn-bg);border-radius:8px;padding:12px 14px}
+.composer{border:1px solid var(--line2);border-radius:10px;padding:10px 10px 8px 14px;background:#fff}
+.composer textarea{width:100%;border:0;outline:0;resize:none;height:44px;font-size:14px;line-height:1.6}
+.qcard{border:1px solid var(--pri-line);border-radius:8px;background:#fff;overflow:hidden}
+.qcard .qh{background:var(--pri-bg);padding:10px 14px;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--pri);font-weight:500}
+.qopt{display:flex;align-items:center;gap:10px;width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:var(--r);margin-bottom:6px;text-align:left}
+.qopt.on{border-color:var(--pri);background:var(--pri-bg)}
+.rp{border-left:1px solid var(--line);display:flex;flex-direction:column;min-width:0;min-height:0;height:852px}
+.ftree button{display:flex;align-items:center;gap:8px;width:100%;height:32px;padding:0 10px;border-radius:4px;font-size:14px}
+.ftree button:hover{background:var(--bg3)}
+.ftree button.on{background:var(--pri-bg);color:var(--pri)}
+
+/* mobile */
+.mob{height:900px;background:#EFEFEF;display:flex;justify-content:center;align-items:flex-start;gap:44px;padding-top:44px}
+.phone{width:375px;height:812px;background:#fff;border-radius:40px;box-shadow:0 0 0 9px #0A0A0A,0 30px 60px rgba(0,0,0,.25);overflow:hidden;position:relative;display:flex;flex-direction:column;font-size:16px}
+.phone .stb{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 26px 0 30px;font-family:var(--mono);font-size:14px;font-weight:600;flex:none}
+.phone .notch{position:absolute;top:8px;left:50%;transform:translateX(-50%);width:110px;height:30px;background:#0A0A0A;border-radius:16px}
+.phone .ph-h{height:52px;display:flex;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid var(--line);flex:none}
+.phone .ph-b{flex:1;overflow:auto}
+.phone .tabbar{height:78px;border-top:1px solid var(--line);display:flex;padding:6px 8px 26px;flex:none;background:#fff}
+.phone .tabbar button{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:12px;color:var(--fg2)}
+.phone .tabbar button.on{color:var(--fg);font-weight:600}
+.phone .ib{width:44px;height:44px;display:inline-flex;align-items:center;justify-content:center;border-radius:8px}
+.phone .ib:hover{background:var(--bg3)}
+.mlab{position:absolute;top:12px;font-size:12px;color:#555;font-family:var(--mono)}
+</style>
+</head>
+<body>
+<div id="proto"></div>
+<div id="board"></div>
+<script>
+"use strict";
+/* ============ helpers ============ */
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt=n=>Number(n).toLocaleString('en-US');
+const D='<i class="dot"></i>';
+const pad=n=>String(n).padStart(2,'0');
+const now=()=>{const d=new Date();return pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds())};
+const IC={
+search:'<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',
+plus:'<path d="M12 5v14M5 12h14"/>',
+check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+x:'<path d="M6 6l12 12M18 6L6 18"/>',
+chev:'<path d="M9 6l6 6-6 6"/>',
+chevd:'<path d="M6 9l6 6 6-6"/>',
+chevl:'<path d="M15 6l-6 6 6 6"/>',
+copy:'<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M5.5 15.5V6.5a1 1 0 011-1h9"/>',
+play:'<path d="M8 5.5v13l10.5-6.5z"/>',
+refresh:'<path d="M19 8.5A7.5 7.5 0 1019.8 14"/><path d="M19.5 3.5V8.5H14.5"/>',
+key:'<circle cx="8" cy="15" r="3.5"/><path d="M10.5 12.5L19 4M16 7l2.5 2.5M13.5 9.5l2 2"/>',
+doc:'<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/>',
+folder:'<path d="M3.5 7a1.5 1.5 0 011.5-1.5h4l2 2h8A1.5 1.5 0 0120.5 9v8.5A1.5 1.5 0 0119 19H5a1.5 1.5 0 01-1.5-1.5z"/>',
+chat:'<path d="M5 5h14v10H10l-4 3.5V15H5z"/>',
+bolt:'<path d="M13 3L5 13.5h6L10 21l8-10.5h-6z"/>',
+lock:'<rect x="5" y="11" width="14" height="9" rx="1.5"/><path d="M8 11V8a4 4 0 018 0v3"/>',
+globe:'<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.6 2.5 14.4 0 17M12 3.5c-2.5 2.6-2.5 14.4 0 17"/>',
+link:'<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/>',
+term:'<rect x="3.5" y="5" width="17" height="14" rx="1.5"/><path d="M7.5 10l2.5 2-2.5 2M12.5 15h4"/>',
+alert:'<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17v.5"/>',
+clock:'<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+up:'<path d="M12 19V5M6 11l6-6 6 6"/>',
+grid:'<rect x="4" y="4" width="7" height="7"/><rect x="13" y="4" width="7" height="7"/><rect x="4" y="13" width="7" height="7"/><rect x="13" y="13" width="7" height="7"/>',
+list:'<path d="M9 6h11M9 12h11M9 18h11M4.5 6h.5M4.5 12h.5M4.5 18h.5"/>',
+user:'<circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c1-3.5 3.8-5.5 7-5.5s6 2 7 5.5"/>',
+users:'<circle cx="9" cy="9" r="3.2"/><path d="M3.5 19c.8-3 3-4.6 5.5-4.6s4.7 1.6 5.5 4.6"/><path d="M15.5 6.2a3 3 0 010 5.6M17 14.6c1.8.5 3 1.9 3.5 4.4"/>',
+spark:'<path d="M12 3.5l1.8 5.2 5.2 1.8-5.2 1.8L12 17.5l-1.8-5.2L5 10.5l5.2-1.8z"/><path d="M18.5 16v4M16.5 18h4"/>',
+ext:'<path d="M14 4h6v6M20 4l-9 9M18 14v5.5H4.5V6H10"/>',
+trash:'<path d="M5 7h14M10 7V4.5h4V7M7 7l1 13h8l1-13"/>',
+upload:'<path d="M12 15V4M7 9l5-5 5 5M4.5 15v4.5h15V15"/>',
+dots:'<circle cx="6" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18" cy="12" r="1.2"/>',
+shield:'<path d="M12 3.5l7 2.8v5.4c0 4.3-3 7.6-7 8.8-4-1.2-7-4.5-7-8.8V6.3z"/>',
+branch:'<circle cx="7" cy="6" r="2"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="9" r="2"/><path d="M7 8v8M17 11c0 3-4 3-8.5 5.5"/>',
+db:'<ellipse cx="12" cy="6" rx="7" ry="2.5"/><path d="M5 6v12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5V6M5 12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5"/>',
+plug:'<path d="M9 3.5v4M15 3.5v4M6.5 7.5h11V11a5.5 5.5 0 01-11 0zM12 16.5v4"/>',
+cpu:'<rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/><path d="M9.5 3.5v3M14.5 3.5v3M9.5 17.5v3M14.5 17.5v3M3.5 9.5h3M3.5 14.5h3M17.5 9.5h3M17.5 14.5h3"/>',
+send:'<path d="M12 19V5M6 11l6-6 6 6"/>',
+eye:'<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>',
+home:'<path d="M4 11l8-6.5 8 6.5V20h-5v-5.5H9V20H4z"/>',
+wallet:'<rect x="3.5" y="6" width="17" height="13" rx="1.5"/><path d="M3.5 9.5h17M15.5 14h2"/>',
+cmd:'<path d="M9 6.5A2.5 2.5 0 106.5 9H9zm0 0v11m0-11h6m-6 11A2.5 2.5 0 116.5 15H9zm6-11A2.5 2.5 0 1117.5 9H15zm0 0v11m0 0a2.5 2.5 0 102.5-2.5H15z"/>',
+attach:'<path d="M20 11.5l-7.8 7.8a5 5 0 01-7.1-7.1l8.2-8.2a3.3 3.3 0 014.7 4.7l-8.2 8.2a1.7 1.7 0 01-2.4-2.4l7.6-7.6"/>',
+gauge:'<path d="M4.5 16a8 8 0 1115 0"/><path d="M12 16l3.5-5"/>',
+book:'<path d="M5 4.5h10.5a3 3 0 013 3V20H8a3 3 0 01-3-3z"/><path d="M5 17a3 3 0 013-3h10.5"/>',
+store:'<path d="M4 9l1.5-4.5h13L20 9M4 9v11h16V9M4 9h16M9.5 20v-5h5v5"/>',
+};
+function ic(n,s=16,w=1.7){return `<svg class="ic" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]||''}</svg>`}
+/* Linear-style status dot */
+function sd(k,s=14){
+  const C={todo:'#A6A6A6',active:'#0B5FFF',done:'#0A7D32',fail:'#D62E2E',warn:'#B25E00',run:'#0B5FFF',blocked:'#B25E00',queue:'#A6A6A6'};
+  const c=C[k]||C.todo;
+  let inner='';
+  if(k==='done') inner=`<circle cx="8" cy="8" r="7" fill="${c}"/><path d="M4.9 8.2l2.1 2.1 4.1-4.3" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`;
+  else if(k==='fail') inner=`<circle cx="8" cy="8" r="7" fill="${c}"/><path d="M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/>`;
+  else if(k==='warn'||k==='blocked') inner=`<circle cx="8" cy="8" r="6.3" fill="none" stroke="${c}" stroke-width="1.5"/><path d="M8 4.8v3.8" stroke="${c}" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="11" r=".95" fill="${c}"/>`;
+  else if(k==='active') inner=`<circle cx="8" cy="8" r="6.3" fill="none" stroke="${c}" stroke-width="1.5"/><path d="M8 3.6a4.4 4.4 0 010 8.8z" fill="${c}"/>`;
+  else if(k==='run') return `<svg class="sd spin" width="${s}" height="${s}" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.3" fill="none" stroke="#D5E3FF" stroke-width="1.6"/><path d="M8 1.7a6.3 6.3 0 016.3 6.3" fill="none" stroke="${c}" stroke-width="1.6" stroke-linecap="round"/></svg>`;
+  else if(k==='queue') inner=`<circle cx="8" cy="8" r="6.3" fill="none" stroke="${c}" stroke-width="1.5" stroke-dasharray="2.2 2.2"/>`;
+  else inner=`<circle cx="8" cy="8" r="6.3" fill="none" stroke="${c}" stroke-width="1.5"/>`;
+  return `<svg class="sd" width="${s}" height="${s}" viewBox="0 0 16 16">${inner}</svg>`;
+}
+function ring(frac,s=16,col='#0B5FFF'){
+  const r=6.2,C=2*Math.PI*r;
+  return `<svg class="sd" width="${s}" height="${s}" viewBox="0 0 16 16"><circle cx="8" cy="8" r="${r}" fill="none" stroke="#E2E2E2" stroke-width="2"/><circle cx="8" cy="8" r="${r}" fill="none" stroke="${col}" stroke-width="2" stroke-dasharray="${(C*frac).toFixed(2)} ${C.toFixed(2)}" transform="rotate(-90 8 8)" stroke-linecap="round"/></svg>`;
+}
+/* geometric avatar: black/white blocks + one accent dot, deterministic per seed */
+function geo(seed,size=40){
+  let r=(seed*7919+17)%233280;const rnd=()=>{r=(r*9301+49297)%233280;return r/233280};
+  const dark=seed%3===0;const bg=dark?'#0A0A0A':'#FFFFFF',fg=dark?'#FFFFFF':'#0A0A0A';
+  let sh='';
+  for(let i=0;i<4;i++){
+    const x=(i%2)*20,y=Math.floor(i/2)*20,t=Math.floor(rnd()*5),rot=Math.floor(rnd()*4)*90;
+    let el='';
+    if(t===0) el=`<rect x="0" y="0" width="20" height="20" fill="${fg}"/>`;
+    else if(t===1) el=`<path d="M0 0H20A20 20 0 0 1 0 20Z" fill="${fg}"/>`;
+    else if(t===2) el=`<path d="M0 20L20 20L0 0Z" fill="${fg}"/>`;
+    else if(t===3) el=`<circle cx="10" cy="10" r="7" fill="${fg}"/>`;
+    else el=`<rect x="0" y="8" width="20" height="4" fill="${fg}"/>`;
+    sh+=`<g transform="translate(${x} ${y}) rotate(${rot} 10 10)">${el}</g>`;
+  }
+  const cx=8+Math.floor(rnd()*3)*12,cy=8+Math.floor(rnd()*3)*12;
+  return `<svg class="geo" width="${size}" height="${size}" viewBox="0 0 40 40" style="border:1px solid ${dark?'#0A0A0A':'#E2E2E2'}"><rect width="40" height="40" fill="${bg}"/>${sh}<circle cx="${cx}" cy="${cy}" r="5" fill="#0B5FFF" stroke="${bg}" stroke-width="2"/></svg>`;
+}
+const LOGO=`<svg width="22" height="22" viewBox="0 0 22 22"><rect width="22" height="22" rx="5" fill="#0A0A0A"/><path d="M5 16V6h4.5a3.5 3.5 0 010 7H5" fill="none" stroke="#fff" stroke-width="2"/><circle cx="16" cy="15.5" r="2.4" fill="#0B5FFF"/></svg>`;
+
+/* ============ data ============ */
+const AG=[
+ {id:'expense-reviewer',n:'报销审核助手',c:'办公运营',a:'林舟',v:3,p:3,u:1284,seed:4,d:'读取发票和报销单，按公司制度做初审，超额提醒审批',m:'claude-sonnet-4-5',api:true,up:'10-28',st:['这张 6,800 元的住宿发票能直接报吗？','外币发票按哪天的汇率换算？','帮我核对这三张打车票']},
+ {id:'meeting-notes',n:'会议纪要整理',c:'办公运营',a:'周岚',v:5,p:2,u:8412,seed:11,d:'把录音转写或速记整理成纪要：结论、待办、负责人和截止时间',m:'claude-haiku-4-5',api:true,up:'11-06',st:['把这段速记整理成纪要','只列出待办和负责人']},
+ {id:'competitor-weekly',n:'竞品周报',c:'研究分析',a:'陈默',v:2,p:6,u:1906,seed:5,d:'每周汇总指定竞品的官网、公众号和应用商店更新，输出对比周报',m:'claude-sonnet-4-5',api:true,up:'11-02',st:['生成第 45 周竞品周报','对比两家的定价变化']},
+ {id:'code-reviewer',n:'代码审查员',c:'开发工具',a:'许清',v:7,p:4,u:5230,seed:8,d:'按团队规范审查合并请求，指出缺陷、风险和可读性问题，并给出修改建议',m:'claude-opus-4-1',api:true,up:'11-08',st:['审查这个合并请求','这段代码有并发问题吗？']},
+ {id:'sql-helper',n:'SQL 助手',c:'开发工具',a:'许清',v:4,p:2,u:6018,seed:14,d:'用自然语言描述需求，生成并解释 MySQL / PostgreSQL 查询，标出慢查询风险',m:'claude-sonnet-4-5',api:true,up:'10-30',st:['统计上月每个部门的报销总额','这条查询为什么慢？']},
+ {id:'xhs-copy',n:'小红书文案',c:'内容创作',a:'苏遥',v:3,p:1,u:12604,seed:2,d:'根据产品卖点写小红书笔记：标题、正文和话题标签，三种语气可选',m:'claude-haiku-4-5',api:false,up:'11-05',st:['给新款保温杯写三篇笔记']},
+ {id:'contract-diff',n:'合同条款比对',c:'研究分析',a:'何川',v:2,p:5,u:932,seed:17,d:'比对两版合同的条款差异，标出责任、付款、违约金等关键变化',m:'claude-sonnet-4-5',api:true,up:'10-21',st:['比对这两版采购合同']},
+ {id:'kb-qa',n:'客服知识问答',c:'通用助手',a:'周岚',v:6,p:1,u:21377,seed:6,d:'基于产品手册和历史工单回答客户问题，答不了时转人工并附上摘要',m:'claude-haiku-4-5',api:true,up:'11-09',st:['退款多久到账？','怎么修改发票抬头？']},
+ {id:'weekly-report',n:'周报生成器',c:'通用助手',a:'林舟',v:1,p:2,u:3145,seed:9,d:'把本周的提交记录、会议纪要和待办整理成结构化周报',m:'claude-haiku-4-5',api:false,up:'09-17',st:['根据本周提交生成周报']},
+];
+const CATS=['全部','通用助手','研究分析','内容创作','开发工具','办公运营'];
+const PROMPT0=`# 角色
+你是公司财务的报销初审员，负责在报销单进入人工审批前做第一轮检查。
+
+## 规则
+1. 单笔超过 5000 元需要部门负责人审批
+2. 发票抬头必须是公司全称「星河数据科技有限公司」
+3. 外币按开票日汇率换算
+
+## 输出
+按输出契约返回 verdict 与 reasons，reasons 用中文短句，部门为 {{DEPT}}。`;
+const PROMPT_FIX=`
+4. 外币金额先交给子代理 currency-converter 换算为人民币，再套用规则 1
+5. 同一报销单的多张发票按合计金额判断是否超额`;
+const CASES0=[
+ {n:'抬头不全应拒绝',as:'verdict = "reject"，正文包含「抬头」',t:3.2,c:5},
+ {n:'外币换算',as:'verdict = "need_approval"，正文包含「汇率」',t:5.6,c:8,fail:true,
+  out:'{\n  "verdict": "pass",\n  "reasons": ["金额 820 未超过 5000 元"]\n}',
+  why:'结构化字段 verdict 期望 "need_approval"，实际为 "pass"。把 820 美元当成 820 元，没有按开票日汇率（7.20）换算为 5,904 元。',inp:'{ "invoice_url": "https://files.xinghe.example/inv/usd-820.pdf", "amount": 820, "currency": "USD" }'},
+ {n:'多张发票合并',as:'verdict = "need_approval"，reasons 至少 1 条',t:6.1,c:9,fail:true,
+  out:'{\n  "verdict": "pass",\n  "reasons": ["3 张发票单张均未超过 5000 元"]\n}',
+  why:'期望按合计 7,350 元判断为需审批，实际逐张判断后放行。',inp:'{ "invoice_url": "https://files.xinghe.example/inv/bundle-3.zip", "amount": 7350, "currency": "CNY" }'},
+ {n:'餐饮超标准',as:'verdict = "reject"，正文包含「餐饮标准」',t:3.8,c:6},
+ {n:'正常差旅放行',as:'verdict = "pass"，正文不含「审批」',t:2.9,c:4},
+];
+const CASE_TRIAL={n:'超额需审批',as:'verdict = "need_approval"，正文包含「部门负责人」',t:4.1,c:6,src:'来自试聊'};
+const SECS=[['basic','基本信息'],['prompt','提示词'],['model','模型'],['tools','工具与技能包'],['mcp','MCP'],['sub','子代理'],['kb','知识'],['vars','变量与密钥'],['contract','输入输出契约'],['perm','审批与权限'],['hook','Webhook']];
+
+function freshAgent(){return{
+  savedAt:'14:32:08', todo:{varToken:false,hook:false}, hookTest:0,
+  cases:CASES0.map(c=>Object.assign({},c,{st:null})), exp:{},
+  evalState:'none', fixApplied:false, hash:'3f9a21c', target:'draft', addCase:false,
+  history:[{tgt:'v3',hash:'c71e0b2',p:5,n:5,t:'10-28 16:40',mark:'= v3'},{tgt:'草稿',hash:'a90d3f4',p:3,n:5,t:'10-27 11:02',mark:'配置已变化'}],
+  versions:[{v:3,cur:true,t:'10-28 16:52',note:'增加外币提醒；知识库换成 2026 版制度',ev:'5/5 通过',by:'林舟'},{v:2,t:'10-14 10:20',note:'接入 erp-finance MCP',ev:'4/4 通过',by:'林舟'},{v:1,t:'10-12 18:05',note:'首个版本',ev:'3/3 通过',by:'林舟'}],
+  published:3, changes:4, pubNote:'修复外币换算与多张发票合并的判断；新增「超额需审批」评测用例', cmp:null,
+  isPublic:false, listing:0, grants:[{who:'hechuan@xinghe.example',perm:'只读'}],
+  keyStage:0, keyNote:'报销系统生产环境', keyExp:'90 天', keyRpm:60, keyPlain:'', codeTab:'curl', copied:false, tryState:0, tryVer:'v4', openapi:false,
+  deliv:[{t:'11-11 09:14:22',tr:'运行 run_7c2e·第 1 次',code:200,ms:112,ok:true},{t:'11-10 18:02:51',tr:'运行 run_5a90·第 3 次',code:502,ms:3004,ok:false},{t:'11-10 17:58:06',tr:'测试',code:200,ms:96,ok:true}],
+  runSel:null, aiApplied:false, kbQ:'打车费能报吗', kbRes:true, mcpTest:0, perm:'询问权限', unattended:'按入口默认', effort:'中',
+}}
+const S={
+  page:'market', view:'market', stage:'orch', role:'user',
+  created:true, cmdk:false, cmdkQ:'', cmdkIdx:0,
+  np:false, npMode:'desc', npGen:0, npStep:0, npDesc:'读取员工上传的发票和报销单，按《差旅报销制度 2026 版》做初审：单笔超 5000 元提醒部门负责人审批，发票抬头必须是星河数据科技有限公司，外币按开票日汇率换算。',
+  toast:null, modal:null, menu:false,
+  mkCat:'全部', mkQ:'', mkSort:'hot', mkApi:false, mkView:'grid', mkSel:null,
+  trial:false, trialSaved:false, trialForm:false, trialTools:false, trialExtra:[], rtab:'next', tocOn:'basic',
+  agent:freshAgent(),
+  adm:{tab:'accounts',sel:null,role:'全部',q:'',newAcc:false,pw:null,ptab:'providers'},
+  dev:'keys', acct:'overview',
+  chat:{sel:'s1',rtab:'files',file:'初审结果.json',tools:false,q:null,qDone:false,appr:'wait',arch:false,runSel:0},
+  mob:{tools:false,q:null,qDone:false},
+};
+/* ============ render core ============ */
+const PAGES=[['market','1 探索·市场首页'],['build','2 构建页·编排'],['flow','3 主流程：新建到接入'],['admin','4 平台管理·账号'],['mobile','5 移动端'],['chat','6 对话工作台']];
+function protoBar(){
+  return `<span class="pt">原型页面切换（非产品界面）</span>`+PAGES.map(([k,t])=>`<button class="${S.page===k?'on':''}" data-a="proto" data-v="${k}">${t}</button>`).join('')+`<span class="hint">按 <b>⌘K</b> / Ctrl+K 打开命令菜单</span>`;
+}
+function render(){
+  const ks={};document.querySelectorAll('[data-ks]').forEach(el=>ks[el.dataset.ks]=el.scrollTop);
+  const ae=document.activeElement;const fid=ae&&ae.id;let sel=null;try{sel=ae.selectionStart}catch(e){}
+  $('#proto').innerHTML=protoBar();
+  $('#board').innerHTML=board();
+  document.querySelectorAll('[data-ks]').forEach(el=>{if(ks[el.dataset.ks]!=null)el.scrollTop=ks[el.dataset.ks]});
+  if(fid){const el=document.getElementById(fid);if(el){el.focus();try{if(sel!=null)el.setSelectionRange(sel,sel)}catch(e){}}}
+  const pi=$('.pal-i.on');if(pi)pi.scrollIntoView({block:'nearest'});
+}
+function board(){
+  if(S.page==='mobile') return vMobile()+overlays();
+  let body='';
+  switch(S.view){
+    case 'market':body=vMarket();break;
+    case 'studio':body=vStudio();break;
+    case 'agent':body=vAgent();break;
+    case 'admin':body=vAdmin();break;
+    case 'dev':body=vDev();break;
+    case 'account':body=vAccount();break;
+    case 'chat':body=vChat();break;
+  }
+  return gnav()+body+overlays();
+}
+function gnav(){
+  const items=[['market','探索'],['chat','对话'],['studio','工作室'],['dev','开发者'],['account','账户']];
+  if(S.role==='admin') items.push(['admin','管理']);
+  const act=S.view==='agent'?'studio':S.view;
+  const me=S.role==='admin'?{n:'周',e:'zhoulan@xinghe.example',r:'管理员'}:{n:'林',e:'linzhou@xinghe.example',r:'普通账号'};
+  return `<header class="gnav">
+    <div class="brand" data-a="go" data-v="market">${LOGO}<span>Open Web Agents</span></div>
+    <nav>${items.map(([k,t])=>`<button class="${act===k?'on':''}" data-a="go" data-v="${k}">${t}</button>`).join('')}</nav>
+    <div class="sp"></div>
+    <button class="cmdk-btn" data-a="cmdk">${ic('search',15)}<span>搜索或跳转</span><span class="kbd">⌘K</span></button>
+    <button class="credit" data-a="go" data-v="account" title="积分账户">${ic('wallet',15)}<span class="n" style="font-weight:600">12,480</span><span class="muted" style="font-size:12px">积分</span></button>
+    <button class="av" data-a="menu" title="${me.e}" style="width:32px;height:32px">${me.n}</button>
+    ${S.menu?`<div style="position:absolute;right:12px;top:46px;width:260px;background:#fff;border:1px solid var(--line2);border-radius:8px;box-shadow:0 12px 32px rgba(0,0,0,.12);padding:6px;z-index:40">
+      <div style="padding:8px 10px 10px"><div style="font-weight:600">${me.e}</div><div class="muted" style="font-size:12px">${me.r}</div></div><div class="hr"></div>
+      <button class="pal-i" data-a="goAcct" data-v="security">${ic('lock',15)}账号安全</button>
+      <button class="pal-i" data-a="goAcct" data-v="audit">${ic('doc',15)}操作日志</button>
+      <button class="pal-i" data-a="role">${ic('users',15)}以${S.role==='admin'?'普通账号 林舟':'管理员 周岚'}查看<span class="r">原型</span></button>
+      <div class="hr"></div><button class="pal-i" data-a="toast" data-v="已登出（原型）">登出</button></div>`:''}
+  </header>`;
+}
+function overlays(){
+  let h='';
+  if(S.np) h+=newPanel();
+  if(S.cmdk) h+=cmdkPanel();
+  if(S.modal) h+=`<div class="ov" data-a="closeOv"><div class="modal" role="dialog"><h3>${S.modal.title}</h3><div class="muted" style="line-height:1.65">${S.modal.body}</div><div class="acts"><button class="btn" data-a="modalNo">取消</button><button class="btn ${S.modal.danger?'danger':'pri'}" data-a="modalOk">${S.modal.ok}</button></div></div></div>`;
+  if(S.toast) h+=`<div class="toast">${ic('check',16,2.2)}${S.toast}</div>`;
+  return h;
+}
+let toastT=null;
+function toast(t){S.toast=t;render();clearTimeout(toastT);toastT=setTimeout(()=>{S.toast=null;render()},2600)}
+function confirmBox(title,body,ok,fn,danger){S.modal={title,body,ok,fn,danger};render()}
+
+/* ============ ⌘K ============ */
+function cmds(){
+  const A=S.agent;
+  const L=[
+   {g:'跳转',t:'探索·市场首页',i:'store',k:'G E',f:()=>go('market')},
+   {g:'跳转',t:'对话',i:'chat',k:'G C',f:()=>go('chat')},
+   {g:'跳转',t:'工作室·我的智能体',i:'grid',k:'G S',f:()=>go('studio')},
+   {g:'跳转',t:'开发者·API Key',i:'key',k:'G D',f:()=>go('dev')},
+   {g:'跳转',t:'账户·积分与套餐',i:'wallet',k:'G A',f:()=>go('account')},
+   {g:'报销审核助手',t:'编排',i:'doc',k:'1',f:()=>openAgent('orch')},
+   {g:'报销审核助手',t:'评测',i:'check',k:'2',f:()=>openAgent('eval')},
+   {g:'报销审核助手',t:'发布',i:'up',k:'3',f:()=>openAgent('pub')},
+   {g:'报销审核助手',t:'接入',i:'plug',k:'4',f:()=>openAgent('access')},
+   {g:'报销审核助手',t:'运行记录',i:'clock',k:'5',f:()=>openAgent('runs')},
+   {g:'操作',t:'新建智能体',i:'plus',k:'N',f:()=>{S.np=true;S.npGen=0;S.npMode='desc'}},
+   {g:'操作',t:'用草稿试聊',i:'chat',k:'T',f:()=>{openAgent('orch');S.trial=true}},
+   {g:'操作',t:'运行评测（当前草稿）',i:'play',k:'',f:()=>{openAgent('eval');setTimeout(runEval,200)}},
+   {g:'操作',t:'签发限定本智能体的 API Key',i:'key',k:'',f:()=>{openAgent('access')}},
+  ];
+  if(S.role==='admin') L.push({g:'平台管理',t:'账号',i:'users',k:'',f:()=>{go('admin');S.adm.tab='accounts'}},{g:'平台管理',t:'模型与提供者',i:'cpu',k:'',f:()=>{go('admin');S.adm.tab='providers'}},{g:'平台管理',t:'市场上架',i:'store',k:'',f:()=>{go('admin');S.adm.tab='market'}});
+  AG.filter(a=>a.id!=='expense-reviewer').forEach(a=>L.push({g:'市场智能体',t:a.n,i:'store',k:'',f:()=>{go('market');S.mkSel=a.id}}));
+  const q=S.cmdkQ.trim();
+  return q?L.filter(x=>(x.g+x.t).toLowerCase().includes(q.toLowerCase())):L;
+}
+function cmdkPanel(){
+  const L=cmds();let g='',h='';
+  L.forEach((x,i)=>{if(x.g!==g){g=x.g;h+=`<div class="pal-g">${g}</div>`}
+    h+=`<button class="pal-i ${i===S.cmdkIdx?'on':''}" data-a="cmdRun" data-i="${i}"><span class="ii">${ic(x.i,15)}</span>${x.t}<span class="r">${x.k?x.k.split(' ').map(k=>`<span class="kbd">${k}</span>`).join(''):''}</span></button>`});
+  if(!L.length) h=`<div style="padding:28px;text-align:center" class="muted">没有匹配「${esc(S.cmdkQ)}」的命令</div>`;
+  return `<div class="ov" data-a="closeOv"><div class="pal" role="dialog" aria-label="命令菜单">
+   <div class="pal-in">${ic('search',18)}<input id="cmdkq" data-bindr="cmdkQ" value="${esc(S.cmdkQ)}" placeholder="搜索页面、智能体或操作" autocomplete="off"><span class="kbd">esc</span></div>
+   <div class="pal-list">${h}</div>
+   <div class="pal-foot"><span><span class="kbd">↑</span><span class="kbd">↓</span>选择</span><span><span class="kbd">↵</span>打开</span><span><span class="kbd">esc</span>关闭</span><span style="margin-left:auto">${L.length} 条结果</span></div>
+  </div></div>`;
+}
+
+/* ============ 新建面板 ============ */
+const GEN_STEPS=['起名与描述：报销审核助手','写提示词：角色、3 条规则、输出要求','选模型 claude-sonnet-4-5，最大轮次 20','推荐技能包 invoice-ocr、policy-lookup 与 MCP erp-finance','生成 5 个评测用例'];
+function newPanel(){
+  const m=S.npMode;
+  const tabs=[['desc','描述生成',ic('spark',15)],['blank','空白创建',ic('doc',15)],['clone','从市场克隆',ic('store',15)]];
+  let body='';
+  if(S.npGen){
+    body=`<div style="padding:18px 18px 8px"><div class="row" style="margin-bottom:12px"><b>正在生成草稿</b><span class="muted" style="font-size:12px">生成后直接进入编排，草稿自动保存</span></div>
+    <ol>${GEN_STEPS.map((t,i)=>`<li class="row" style="height:34px;border-top:1px solid var(--line)">${sd(i<S.npStep?'done':i===S.npStep?'run':'queue')}<span style="${i>S.npStep?'color:var(--fg2)':''}">${t}</span></li>`).join('')}</ol></div>`;
+  } else if(m==='desc'){
+    body=`<div style="padding:16px 18px 6px"><div class="lbl" style="margin-bottom:6px">描述你想要的智能体</div>
+      <textarea class="inp" id="npdesc" data-bind="npDesc" rows="4" style="font-size:15px">${esc(S.npDesc)}</textarea>
+      <div class="chips" style="margin-top:10px"><span class="lbl">试试</span>${['把会议速记整理成纪要和待办','按团队规范审查合并请求','用自然语言写 SQL'].map(t=>`<button class="badge" data-a="npFill" data-v="${t}">${t}</button>`).join('')}</div></div>`;
+  } else if(m==='blank'){
+    body=`<div style="padding:16px 18px 6px" class="g2"><div class="field"><label class="lbl">名称 *</label><input class="inp" id="npname" value="报销审核助手"></div><div class="field"><label class="lbl">ID</label><input class="inp mono" placeholder="留空自动生成" value=""><span class="help">创建后不能再改</span></div></div>`;
+  } else {
+    body=`<div style="padding:8px 8px 2px;max-height:300px;overflow:auto">${AG.filter(a=>a.id!=='expense-reviewer').slice(0,6).map(a=>`<div class="pal-i" style="height:52px">${geo(a.seed,32)}<div><div style="font-weight:500">${a.n}</div><div class="muted" style="font-size:12px">${a.a}<i class="dot"></i><span class="n">v${a.v}</span></div></div><span class="r"><button class="btn sm" data-a="npClone" data-v="${a.n}">克隆</button></span></div>`).join('')}</div>`;
+  }
+  const foot=S.npGen?'':`<div class="pal-foot" style="height:52px"><span>${ic('check',14)}不用先保存：确认后立即建好草稿</span><span style="margin-left:auto"></span>
+     ${m==='clone'?'':`<button class="btn pri sm" data-a="npCreate">${m==='desc'?ic('spark',14)+'生成草稿':'创建并进入编排'}<span class="kbd">↵</span></button>`}</div>`;
+  return `<div class="ov" data-a="closeOv"><div class="pal" role="dialog" aria-label="新建智能体" style="width:680px">
+    <div class="pal-in" style="gap:6px">${ic('plus',18)}<b style="margin-right:12px">新建智能体</b>
+      <div class="seg">${tabs.map(([k,t,i])=>`<button class="${m===k?'on':''}" data-a="npMode" data-v="${k}" ${S.npGen?'disabled':''}><span class="row" style="gap:5px">${i}${t}</span></button>`).join('')}</div>
+      <span class="sp"></span><span class="kbd">esc</span></div>
+    ${body}${foot}</div></div>`;
+}
+
+/* ============ 市场 ============ */
+function mkList(){
+  let L=AG.filter(a=>(S.mkCat==='全部'||a.c===S.mkCat)&&(!S.mkQ||(a.n+a.d+a.a).includes(S.mkQ))&&(!S.mkApi||a.api));
+  if(S.mkSort==='hot') L=L.slice().sort((a,b)=>b.u-a.u);
+  if(S.mkSort==='new') L=L.slice().sort((a,b)=>b.up.localeCompare(a.up));
+  if(S.mkSort==='cheap') L=L.slice().sort((a,b)=>a.p-b.p);
+  return L;
+}
+function vMarket(){
+  const L=mkList();
+  const cnt=c=>c==='全部'?AG.length:AG.filter(a=>a.c===c).length;
+  const grid=L.length?(S.mkView==='grid'?`<div class="mk-grid">${L.map(a=>`<button class="mk-card" data-a="mkOpen" data-v="${a.id}">
+      <div class="t">${geo(a.seed,44)}<div><div class="nm">${a.n}</div><div class="by">${a.a}<i class="dot"></i><span class="n">v${a.v}</span></div></div><span class="badge">${a.c}</span></div>
+      <div class="d">${a.d}</div>
+      <div class="f"><span>约 <span class="n">${a.p}</span> 积分/次</span><span><span class="n">${fmt(a.u)}</span> 次使用</span>${a.api?`<span class="row" style="gap:4px;margin-left:auto">${ic('plug',13)}可 API 接入</span>`:''}</div></button>`).join('')}</div>`
+    :`<table class="tbl" style="border-top:1px solid var(--line)"><thead><tr><th>智能体</th><th>分类</th><th>作者</th><th>版本</th><th class="r">单价</th><th class="r">使用次数</th><th>API</th></tr></thead><tbody>${L.map(a=>`<tr class="click" data-a="mkOpen" data-v="${a.id}"><td><span class="row">${geo(a.seed,28)}<b style="font-weight:500">${a.n}</b></span></td><td>${a.c}</td><td>${a.a}</td><td class="n">v${a.v}</td><td class="r n">约 ${a.p} 积分/次</td><td class="r n">${fmt(a.u)}</td><td>${a.api?'<span class="badge pri">可接入</span>':'<span class="muted">—</span>'}</td></tr>`).join('')}</tbody></table>`)
+    :`<div style="padding:60px 0;text-align:center"><div style="font-weight:600">没有符合条件的智能体</div><div class="muted" style="margin-top:4px">换个关键词，或 <span class="link" data-a="mkReset">清除筛选</span></div></div>`;
+  return `<div class="page mk" data-ks="mk">
+   <aside class="mk-side">
+     <div class="side-g">分类</div>
+     ${CATS.map(c=>`<button class="side-i ${S.mkCat===c?'on':''}" data-a="mkCat" data-v="${c}">${c}<span class="n">${cnt(c)}</span></button>`).join('')}
+     <div class="hr" style="margin:12px 0 4px"></div>
+     <div class="side-g">最近使用</div>
+     ${['meeting-notes','expense-reviewer','sql-helper'].map(id=>{const a=AG.find(x=>x.id===id);return `<button class="side-i" data-a="mkOpen" data-v="${id}">${geo(a.seed,20)}${a.n}</button>`}).join('')}
+     <div class="hr" style="margin:12px 0 4px"></div>
+     <button class="side-i" data-a="go" data-v="studio">${ic('grid',15)}我的智能体</button>
+     <button class="side-i" data-a="newOpen">${ic('plus',15)}新建智能体</button>
+   </aside>
+   <main class="mk-main">
+     <div class="mk-head"><div><h1>找一个智能体，<br>点开就能用。</h1><p>上架的智能体都经过评测和发布。立即对话、克隆到自己的工作室，或用 API 接到你的系统里。</p></div>
+       <div class="stats"><div><div class="v">9</div><div class="k">已上架</div></div><div><div class="v">63,512</div><div class="k">本月对话与调用</div></div><div><div class="v">1–6</div><div class="k">积分/次</div></div><div><div class="v">7</div><div class="k">可 API 接入</div></div></div></div>
+     <div class="mk-bar">
+       <div class="search">${ic('search',15)}<input class="inp" id="mkq" data-bindr="mkQ" value="${esc(S.mkQ)}" placeholder="搜索名称、说明或作者"></div>
+       <div class="seg">${[['hot','最常用'],['new','最近更新'],['cheap','积分最低']].map(([k,t])=>`<button class="${S.mkSort===k?'on':''}" data-a="mkSort" data-v="${k}">${t}</button>`).join('')}</div>
+       <button class="btn sm ${S.mkApi?'dark':''}" data-a="mkApi">${ic('plug',14)}只看可 API 接入</button>
+       <span class="sp"></span><span class="muted" style="font-size:12px"><span class="n">${L.length}</span> 个结果</span>
+       <div class="seg"><button class="${S.mkView==='grid'?'on':''}" data-a="mkView" data-v="grid" title="网格">${ic('grid',14)}</button><button class="${S.mkView==='list'?'on':''}" data-a="mkView" data-v="list" title="列表">${ic('list',14)}</button></div>
+     </div>
+     ${grid}
+   </main>
+   ${S.mkSel?mkDrawer():''}
+  </div>`;
+}
+function mkDrawer(){
+  const a=AG.find(x=>x.id===S.mkSel);
+  return `<div class="dim" data-a="mkClose" style="top:48px"></div><div class="drawer" style="top:48px">
+    <div class="drawer-h"><button class="btn ghost sm" data-a="mkClose">${ic('chevl',14)}返回市场</button><span class="sp"></span><span class="muted mono" style="font-size:12px">${a.id}</span><button class="btn ghost sm" data-a="mkClose" title="关闭">${ic('x',15)}</button></div>
+    <div class="drawer-b">
+      <div class="row" style="gap:14px;align-items:flex-start">${geo(a.seed,64)}<div><div style="font-size:22px;font-weight:700;letter-spacing:-.02em">${a.n}</div><div class="muted" style="margin-top:2px">${a.a}<i class="dot"></i>${a.c}<i class="dot"></i>已发布 <span class="n">v${a.v}</span>，${a.up} 更新</div></div></div>
+      <p style="margin:14px 0 16px;line-height:1.7">${a.d}。</p>
+      <div class="row" style="gap:8px"><button class="btn pri lg" data-a="useAgent" data-v="${a.id}">${ic('chat',16)}立即使用</button><button class="btn lg" data-a="cloneAgent" data-v="${a.n}">${ic('copy',16)}克隆到我的智能体</button>${a.api?`<button class="btn lg" data-a="apiAgent" data-v="${a.id}">${ic('plug',16)}API 接入</button>`:''}</div>
+      <div class="stats" style="margin:20px 0 4px"><div><div class="v">${a.p}</div><div class="k">约积分/次</div></div><div><div class="v">${fmt(a.u)}</div><div class="k">次使用</div></div><div><div class="v">v${a.v}</div><div class="k">发布版</div></div><div><div class="v">${a.api?'是':'否'}</div><div class="k">接口契约</div></div></div>
+      <div class="dsec" style="border-top:0"><h4>示例问题</h4>${a.st.map(s=>`<button class="starter" data-a="useAgent" data-v="${a.id}">${ic('chat',15)}${s}</button>`).join('')}</div>
+      <div class="dsec"><h4>模型与价格</h4><dl class="kv"><dt>模型</dt><dd class="mono">${a.m}</dd><dt>单价</dt><dd>${({'claude-haiku-4-5':'输入 <span class="n">100</span> / 输出 <span class="n">500</span>','claude-opus-4-1':'输入 <span class="n">1,500</span> / 输出 <span class="n">7,500</span>'})[a.m]||'输入 <span class="n">300</span> / 输出 <span class="n">1,500</span>'} 积分每百万 token</dd><dt>使用的版本</dt><dd>别人使用和接口调用都跑发布版 <span class="n">v${a.v}</span></dd></dl></div>
+      ${a.api?`<div class="dsec"><h4>输入契约</h4><div class="code" style="white-space:pre-wrap">${a.id==='expense-reviewer'?'{ <span class="s">"invoice_url"</span>: string, <span class="s">"amount"</span>: number, <span class="s">"currency"</span>: string }':'{ <span class="s">"text"</span>: string, <span class="s">"options"</span>?: object }'}</div><h4 style="margin-top:14px">输出契约</h4><div class="code" style="white-space:pre-wrap">${a.id==='expense-reviewer'?'{ <span class="s">"verdict"</span>: <span class="s">"pass"</span> | <span class="s">"reject"</span> | <span class="s">"need_approval"</span>, <span class="s">"reasons"</span>: string[] }':'{ <span class="s">"result"</span>: string, <span class="s">"items"</span>: object[] }'}</div></div>`:`<div class="dsec"><h4>接口</h4><div class="muted">这个智能体没有定义输出契约，按文本对话使用。</div></div>`}
+    </div></div>`;
+}
+
+/* ============ 工作室 ============ */
+function stageStates(){
+  const t=trackData();return t.map(x=>x.st==='blocked'?'warn':x.st);
+}
+function vStudio(){
+  const A=S.agent;
+  const mine=[];
+  if(S.created) mine.push({id:'expense-reviewer',n:'报销审核助手',seed:4,ver:A.published?'已发布 v'+A.published:'未发布',ch:A.changes?`草稿 ${A.changes} 处修改`:'与发布版一致',ev:evalLabel(),runs:128,up:'刚刚',tr:stageStates(),open:true});
+  mine.push({id:'weekly-report',n:'周报生成器',seed:9,ver:'已发布 v1',ch:'与发布版一致',ev:'3/3',runs:41,up:'09-17',tr:['done','done','done','done','todo']});
+  mine.push({id:'travel-planner',n:'差旅行程规划',seed:13,ver:'未发布',ch:'草稿',ev:'无用例',runs:2,up:'11-03',tr:['done','active','todo','todo','todo']});
+  const shared=[{n:'会议纪要整理',seed:11,who:'周岚',perm:'只读',ver:'v5'},{n:'客服知识问答',seed:6,who:'周岚',perm:'可编辑',ver:'v6'}];
+  return `<div class="page" data-ks="studio"><div class="wrap">
+   <div class="ph"><div><h1>工作室</h1><p>我建的和分享给我的智能体。每行的轨道是它的上线进度：新建、编排、评测、发布、接入。</p></div><span class="sp"></span>
+     <button class="btn" data-a="cmdk">${ic('search',15)}查找<span class="kbd">⌘K</span></button>
+     <button class="btn pri" data-a="newOpen" id="newbtn">${ic('plus',15)}新建智能体<span class="kbd">N</span></button></div>
+   <table class="tbl" style="border-top:1px solid var(--line)"><thead><tr><th style="width:34%">我的智能体 <span class="n">${mine.length}</span></th><th>上线轨道</th><th>发布</th><th>草稿</th><th>评测</th><th class="r">7 天运行</th><th class="r">更新</th></tr></thead>
+   <tbody>${mine.map(r=>`<tr class="click" data-a="${r.open?'openAgent':'toast'}" data-v="${r.open?'orch':'原型只展开了「报销审核助手」'}"><td><span class="row" style="gap:10px">${geo(r.seed,30)}<span><b style="font-weight:600">${r.n}</b><br><span class="muted mono" style="font-size:12px">${r.id}</span></span></span></td>
+     <td><span class="mini-track">${r.tr.map(s=>`<i class="${s}"></i>`).join('')}</span></td><td>${r.ver}</td><td class="muted">${r.ch}</td><td class="n">${r.ev}</td><td class="r n">${r.runs}</td><td class="r muted">${r.up}</td></tr>`).join('')}</tbody></table>
+   ${!S.created?`<div class="callout pri np-card">${ic('spark',16)}<div><b>从一句话开始</b><div class="muted">点「新建智能体」描述你想要的样子，生成后直接进入编排；草稿自动保存，不需要先点保存。</div></div></div>`:''}
+   <div class="subh"><h2>分享给我的</h2><span class="muted n">2</span></div>
+   <table class="tbl" style="border-top:1px solid var(--line)"><thead><tr><th style="width:34%">智能体</th><th>所有者</th><th>权限</th><th>发布版</th><th></th></tr></thead><tbody>
+   ${shared.map(r=>`<tr><td><span class="row" style="gap:10px">${geo(r.seed,30)}<b style="font-weight:500">${r.n}</b></span></td><td>${r.who}</td><td><span class="badge ${r.perm==='只读'?'':'pri'}">${r.perm}</span></td><td class="n">${r.ver}</td><td class="r"><button class="btn sm" data-a="go" data-v="chat">${ic('chat',14)}对话</button></td></tr>`).join('')}
+   </tbody></table>
+  </div></div>`;
+}
+/* ============ 智能体构建页 ============ */
+function orchDone(){const A=S.agent;return 9+(A.todo.varToken?1:0)+(A.todo.hook?1:0)}
+function passCount(){return S.agent.cases.filter(c=>c.st==='pass').length}
+function evalLabel(){const A=S.agent,n=A.cases.length;if(A.evalState==='none')return n+' 用例';return passCount()+'/'+n}
+function pubReady(){const A=S.agent;return orchDone()===11&&A.evalState==='passed'&&A.changes>0}
+function trackData(){
+  const A=S.agent,o=orchDone(),n=A.cases.length,p=passCount();
+  const T=[];
+  T.push({k:'new',n:'新建',st:'done',mt:'10-12',sub:'描述生成',sc:''});
+  T.push({k:'orch',n:'编排',st:o===11?'done':'active',mt:o+'/11',sub:o===11?'配置完整':`还差 ${11-o} 项`,sc:o===11?'ok':'',frac:o/11});
+  let e;
+  if(!A.todo.varToken) e={st:'blocked',mt:n+' 用例',sub:'阻塞：ERP_TOKEN 未填测试值',sc:'warn'};
+  else if(A.evalState==='none') e={st:'todo',mt:n+' 用例',sub:'还没运行',sc:''};
+  else if(A.evalState==='running'){const d=A.cases.filter(c=>c.st==='pass'||c.st==='fail').length;e={st:'run',mt:d+'/'+n,sub:'运行中',sc:'pri'}}
+  else if(A.evalState==='failed') e={st:'fail',mt:p+'/'+n,sub:`${n-p} 个未通过`,sc:'bad'};
+  else if(A.evalState==='stale') e={st:'warn',mt:p+'/'+n,sub:'配置已变化，需要重跑',sc:'warn'};
+  else if(A.evalState==='cases_changed') e={st:'warn',mt:p+'/'+(n-1),sub:'用例已改动，需要重跑',sc:'warn'};
+  else e={st:'done',mt:p+'/'+n,sub:'当前草稿全部通过',sc:'ok'};
+  T.push(Object.assign({k:'eval',n:'评测'},e));
+  let pb;
+  if(A.changes===0) pb={st:'done',mt:'v'+A.published,sub:'草稿与发布版一致',sc:'ok'};
+  else if(pubReady()) pb={st:'active',mt:'v'+A.published+'›v'+(maxV()+1),sub:'可以发布',sc:'pri'};
+  else pb={st:'blocked',mt:'v'+A.published,sub:o<11?'阻塞：编排未完成':'阻塞：评测未全部通过',sc:'warn'};
+  T.push(Object.assign({k:'pub',n:'发布'},pb));
+  let ac;
+  if(A.keyStage===2&&A.tryState===2) ac={st:'done',mt:'1 Key',sub:'已签发并试调成功',sc:'ok'};
+  else if(A.keyStage===2) ac={st:'active',mt:'1 Key',sub:'还没试调',sc:''};
+  else ac={st:'todo',mt:'0 Key',sub:A.published>3?'发布完成，去签发 Key':'未签发本智能体的 Key',sc:A.published>3?'pri':''};
+  T.push(Object.assign({k:'access',n:'接入'},ac));
+  return T;
+}
+function maxV(){return Math.max(...S.agent.versions.map(v=>v.v))}
+function track(){
+  const T=trackData();
+  return `<div class="track" role="tablist" aria-label="上线轨道">${T.map((t,i)=>`<button class="tseg ${S.stage===t.k?'cur':''}" data-a="stage" data-v="${t.k}" role="tab">
+     <div class="r1"><span class="no">${i+1}</span>${t.st==='active'&&t.frac!=null?ring(t.frac):sd(t.st)}<span class="nm">${t.n}</span><span class="mt">${t.mt}</span></div>
+     <div class="sub ${t.sc}">${t.sub}</div>${i<T.length-1?`<span class="chev">${ic('chev',12,2)}</span>`:''}</button>`).join('')}
+     <button class="tseg runs ${S.stage==='runs'?'cur':''}" data-a="stage" data-v="runs" role="tab"><div class="r1">${ic('clock',14)}<span class="nm">运行</span><span class="mt">128</span></div><div class="sub" style="padding-left:22px">近 7 天，失败率 <span class="mono">2.3%</span></div></button>
+  </div>`;
+}
+function vAgent(){
+  const A=S.agent;
+  return `<div class="ahead">
+     <div class="crumb"><button data-a="go" data-v="studio">工作室</button><span>/</span></div>
+     ${geo(4,28)}<span class="nm">报销审核助手</span><span class="mono muted" style="font-size:12px">expense-reviewer</span>
+     <span class="badge ok">${sd('done',12)}已发布 v${A.published}</span>
+     ${A.changes?`<span class="badge warn">草稿有 ${A.changes} 处未发布修改</span>`:`<span class="badge">草稿与发布版一致</span>`}
+     <span class="saved" style="margin-left:6px"><i></i>草稿已自动保存 <span class="mono">${A.savedAt}</span></span>
+     <span class="sp"></span>
+     <button class="btn ghost sm" data-a="cmdk" title="命令菜单"><span class="kbd">⌘K</span></button>
+     <button class="btn sm" data-a="trial">${ic('chat',14)}试聊草稿</button>
+     <button class="btn sm" data-a="useAgent" data-v="expense-reviewer">${ic('ext',14)}在对话中打开</button>
+     <button class="btn pri sm" data-a="stage" data-v="pub">${ic('up',14)}发布</button>
+   </div>${track()}
+   <div class="abody" data-ks="abody-${S.stage}" id="abody">${stageBody()}</div>
+   ${S.stage==='orch'||S.stage==='eval'?(S.trial?trialDrawer():`<button class="fab" data-a="trial">${ic('chat',16)}试聊草稿<span class="kbd">T</span></button>`):''}`;
+}
+function stageBody(){
+  switch(S.stage){case 'orch':return stOrch();case 'eval':return stEval();case 'pub':return stPub();case 'access':return stAccess();case 'runs':return stRuns();case 'new':return stNew();}
+}
+function lay(toc,doc,np){return `<div class="alayout"><nav class="toc">${toc}</nav><div class="doc">${doc}</div>${np}</div>`}
+function tocList(items){return `<div class="lbl">本页</div>`+items.map(([id,t,st,n])=>`<button class="${S.tocOn===id?'on':''}" data-a="toc" data-v="${id}">${sd(st||'done',12)}${t}${n?`<span class="tn">${n}</span>`:''}</button>`).join('')}
+
+/* ---------- 下一步面板 ---------- */
+function npItem(i){return `<li class="${i.done?'done':''}">${sd(i.done?'done':(i.st||'todo'))}<div style="min-width:0"><div class="t">${i.t}</div><div class="s">${i.s}</div></div>${!i.done&&i.b?`<button class="btn sm" data-a="${i.a}" data-v="${i.v||''}">${i.b}</button>`:''}</li>`}
+function nextPanel(){
+  const A=S.agent,st=S.stage;let head='',items=[],pri='',extra='';
+  if(st==='orch'||st==='new'){
+    const o=orchDone();
+    head=`${ring(o/11,18,o===11?'#0A7D32':'#0B5FFF')}<b>下一步</b><span class="sp"></span><span class="mono" style="font-size:13px">${o}/11 节完成</span>`;
+    items=[
+      {t:'填写 ERP_TOKEN 测试值',s:'变量与密钥；试聊和评测要连 ERP',done:A.todo.varToken,st:'warn',b:'去处理',a:'goSec',v:'vars'},
+      {t:'发送一次 Webhook 测试投递',s:'Webhook；确认回调地址能收到',done:A.todo.hook,b:'去处理',a:'goSec',v:'hook'},
+      {t:'试聊一次，存为评测用例',s:'试聊回复下方点「存为评测用例」',done:S.trialSaved,b:'打开试聊',a:'trial'},
+    ];
+    pri=`<button class="btn ${o===11?'pri':'dark'} block" data-a="stage" data-v="eval">进入评测<span class="mono" style="opacity:.8;font-size:12px;margin-left:4px">${A.cases.length} 用例</span></button>`;
+    extra=`<div class="muted" style="font-size:12px;margin-top:10px;line-height:1.6">相对已发布 v${A.published}：<span class="link" data-a="stage" data-v="pub">${A.changes} 处修改</span>。编排不需要保存，评测跑的就是这份草稿。</div>`;
+  } else if(st==='eval'){
+    const p=passCount(),n=A.cases.length;
+    head=`${sd(A.evalState==='passed'?'done':A.evalState==='failed'?'fail':'active',18)}<b>下一步</b><span class="sp"></span><span class="mono" style="font-size:13px">${A.evalState==='none'?n+' 用例':p+'/'+n+' 通过'}</span>`;
+    if(!A.todo.varToken) items.push({t:'先填 ERP_TOKEN 测试值',s:'评测会真实调用 ERP；缺它无法运行',st:'warn',b:'去处理',a:'goSec',v:'vars'});
+    items.push({t:'运行评测',s:`当前草稿，${n} 次模型调用，约 ${A.cases.reduce((s,c)=>s+c.c,0)} 积分`,done:['failed','passed'].includes(A.evalState)||(A.evalState==='stale'),b:'运行',a:'runEval'});
+    if(A.evalState!=='none'&&A.evalState!=='running'||A.fixApplied) items.push({t:'修复 2 个未通过的用例',s:'外币换算、多张发票合并',done:A.fixApplied,st:'fail',b:'看建议',a:'scrollFix'});
+    if(A.fixApplied) items.push({t:'重跑并全部通过',s:'修改配置后，之前的结论作废',done:A.evalState==='passed',st:'warn',b:'重跑',a:'runEval'});
+    pri=A.evalState==='passed'?`<button class="btn pri block" data-a="stage" data-v="pub">去发布 v${maxV()+1}</button>`:`<button class="btn dark block" data-a="runEval" ${(!A.todo.varToken||A.evalState==='running')?'disabled':''}>${A.evalState==='running'?sd('run')+'运行中':ic('play',14)+'运行评测'}</button>`;
+    extra=`<div class="muted" style="font-size:12px;margin-top:10px;line-height:1.6">每个用例真实调用一次模型并计费，费用记在你名下。</div>`;
+  } else if(st==='pub'){
+    const done=A.changes===0;
+    head=`${sd(done?'done':pubReady()?'active':'warn',18)}<b>下一步</b><span class="sp"></span><span class="mono" style="font-size:13px">${done?'v'+A.published+' 已发布':'v'+A.published+' › v'+(maxV()+1)}</span>`;
+    items=readyItems().map(r=>({t:r.t,s:r.s,done:r.ok,st:'warn',b:r.b,a:r.a,v:r.v}));
+    if(done) items.push({t:'签发 Key 并试调',s:'接入阶段，一页完成',b:'去接入',a:'stage',v:'access'});
+    pri=done?`<button class="btn pri block" data-a="stage" data-v="access">去接入</button>`:`<button class="btn pri block" data-a="publish" ${pubReady()?'':'disabled'}>${ic('up',14)}发布为 v${maxV()+1}</button>`;
+  } else if(st==='access'){
+    head=`${sd(A.keyStage===2&&A.tryState===2?'done':'active',18)}<b>下一步</b><span class="sp"></span><span class="mono" style="font-size:13px">${[A.keyStage===2,A.copied,A.tryState===2,A.deliv.every(d=>d.ok)].filter(Boolean).length}/4</span>`;
+    items=[
+      {t:'签发限定本智能体的 Key',s:'明文只显示一次',done:A.keyStage===2,b:'签发',a:'goSec',v:'key'},
+      {t:'复制调用代码',s:'curl / Python / Node',done:A.copied,b:'去复制',a:'goSec',v:'code'},
+      {t:'在线试调一次 invoke',s:'不用离开这页',done:A.tryState===2,b:'试调',a:'goSec',v:'try'},
+      {t:'重发失败的 Webhook 投递',s:'11-10 18:02 返回 502',done:A.deliv.every(d=>d.ok),st:'fail',b:'查看',a:'goSec',v:'wh'},
+    ];
+    pri=`<button class="btn dark block" data-a="stage" data-v="runs">${ic('clock',14)}查看运行记录</button>`;
+  } else {
+    head=`${ic('clock',16)}<b>运行概况</b>`;
+    items=[{t:'1 次运行正在进行',s:'run_9d41，评测来源',st:'run',b:'查看',a:'runSel',v:'0'},{t:'2 次失败',s:'都是 ERP 超时，已自动重试',st:'fail',done:false,b:'筛选',a:'toast',v:'已筛选：失败'}];
+    pri=`<button class="btn block" data-a="stage" data-v="orch">回到编排</button>`;
+  }
+  const tabs=(st==='orch')?`<div class="np-tabs"><button class="${S.rtab==='next'?'on':''}" data-a="rtab" data-v="next">下一步</button><button class="${S.rtab==='ai'?'on':''}" data-a="rtab" data-v="ai">${ic('spark',14)} AI 助手</button></div>`:'';
+  if(st==='orch'&&S.rtab==='ai') return `<aside class="next">${tabs}${aiPanel()}</aside>`;
+  return `<aside class="next">${tabs}<div class="np-b"><div class="np-head">${head}</div><ol class="np-list">${items.map(npItem).join('')}</ol><div style="margin-top:12px">${pri}</div>${extra}</div>
+    <div class="np-foot"><div class="row"><span class="saved"><i></i></span>草稿已自动保存 <span class="mono">${A.savedAt}</span></div>没有保存按钮；改动随时生效于草稿，发布前不影响调用方。</div></aside>`;
+}
+function aiPanel(){
+  const A=S.agent;
+  return `<div class="np-b" style="display:flex;flex-direction:column;gap:10px">
+    <div class="muted" style="font-size:12px">用对话改草稿。AI 给出差异，你确认后才写入。</div>
+    <div class="msg-u" style="font-size:14px">输出里再加一个人民币合计字段 total_cny</div>
+    <div class="msg-a" style="font-size:14px">建议改输出契约，新增字段：
+      <div class="code" style="margin-top:8px;font-size:12px;white-space:pre-wrap"><span class="c">outputSchema.properties</span>
+<span class="add">+ "total_cny": { "type": "number" }</span><span class="add">+ required: [..., "total_cny"]</span></div>
+      <div class="row" style="margin-top:10px">${A.aiApplied?`<span class="badge ok">${sd('done',12)}已应用到草稿</span>`:`<button class="btn pri sm" data-a="aiApply">应用到草稿</button><button class="btn sm" data-a="toast" data-v="已忽略这条建议">忽略</button>`}</div></div>
+    <div class="composer" style="padding:8px 8px 6px 10px"><textarea placeholder="例：把输出改成 JSON" style="height:40px"></textarea><div class="row"><span class="muted" style="font-size:12px">AI 编辑会计费</span><span class="sp"></span><button class="sendb" data-a="toast" data-v="原型：AI 助手已收到">${ic('send',15,2)}</button></div></div>
+  </div>`;
+}
+
+/* ---------- 编排 ---------- */
+function secH(id,n,t,st,right){return `<div class="sec-h"><span class="sec-n">${n}</span>${sd(st,14)}<h2>${t}</h2><span class="sp"></span>${right||''}</div>`}
+function stOrch(){
+  const A=S.agent;
+  const stOf=id=>id==='vars'?(A.todo.varToken?'done':'warn'):id==='hook'?(A.todo.hook?'done':'warn'):'done';
+  const toc=tocList(SECS.map(([id,t])=>[id,t,stOf(id)]));
+  const prompt=PROMPT0+(A.fixApplied?PROMPT_FIX:'');
+  const doc=`
+  <h1>编排</h1><p class="lead">一份文档写完整个智能体。所有改动自动保存到草稿；右侧告诉你还差什么，右下角可以随时用草稿试聊。</p>
+  <section class="sec" id="sec-basic" style="margin-top:18px">${secH('basic',1,'基本信息','done')}
+    <div class="sec-b"><div class="row" style="gap:16px;align-items:flex-start">
+      <div class="field"><label class="lbl">头像</label><div class="row" style="gap:6px">${[4,12,21,30].map((s,i)=>`<button style="border-radius:7px;outline:${i===0?'2px solid var(--fg)':'none'};outline-offset:2px" data-a="toast" data-v="已换头像，自动保存">${geo(s,40)}</button>`).join('')}</div></div>
+      <div class="field" style="flex:1"><label class="lbl">名称 *</label><input class="inp" value="报销审核助手" data-a2="save"></div>
+      <div class="field" style="width:220px"><label class="lbl">ID</label><div class="inp mono row" style="background:var(--bg2);color:var(--fg2)">${ic('lock',13)}expense-reviewer</div></div></div>
+      <div class="field"><label class="lbl">描述</label><input class="inp" value="读取发票和报销单，按公司制度做初审，超额提醒审批"></div>
+      <div class="field"><label class="lbl">开场建议 <span class="muted">最多 4 条，对话为空时显示</span></label>
+        ${['这张 6,800 元的住宿发票能直接报吗？','外币发票按哪天的汇率换算？','帮我核对这三张打车票'].map(s=>`<div class="row"><input class="inp" value="${s}"><button class="btn ghost sm" title="删除">${ic('x',14)}</button></div>`).join('')}
+        <button class="btn sm" style="align-self:flex-start">${ic('plus',14)}添加一条</button></div></div></section>
+  <section class="sec" id="sec-prompt">${secH('prompt',2,'提示词','done',`<span class="muted mono" style="font-size:12px">${prompt.length} 字</span><button class="btn sm" data-a="rtabAi">${ic('spark',14)}让 AI 改</button>`)}
+    <textarea class="inp mono" rows="${A.fixApplied?16:13}" style="font-size:13px">${esc(prompt)}</textarea>
+    <div class="muted" style="font-size:12px;margin-top:8px">用 <span class="mono">{{变量名}}</span> 引用变量；密钥类变量不会进入提示词。</div></section>
+  <section class="sec" id="sec-model">${secH('model',3,'模型','done')}
+    <div class="sec-b"><div class="field"><label class="lbl">模型</label><select class="inp"><option>claude-sonnet-4-5　输入 300 / 输出 1,500 积分每百万 token</option><option>claude-opus-4-1　输入 1,500 / 输出 7,500</option><option>claude-haiku-4-5　输入 100 / 输出 500</option><option>跟随平台默认（别名 sonnet）</option></select></div>
+    <div class="g2"><div class="field"><label class="lbl">最大轮次</label><input class="inp mono" value="20"></div>
+      <div class="field"><label class="lbl">推理强度</label><div class="seg" style="align-self:flex-start">${['低','中','高'].map(e=>`<button class="${A.effort===e?'on':''}" data-a="effort" data-v="${e}">${e}</button>`).join('')}</div></div></div></div></section>
+  <section class="sec" id="sec-tools">${secH('tools',4,'工具与技能包','done')}
+    <div class="sec-b"><div class="field"><label class="lbl">工具白名单 <span class="muted">留空表示不限制</span></label><div class="chips">${['Read','Grep','WebFetch'].map(t=>`<span class="chip">${t}<button title="移除">${ic('x',12)}</button></span>`).join('')}<button class="btn xs">${ic('plus',12)}添加工具</button></div></div>
+    <div class="field"><label class="lbl">技能包</label><div class="card">
+      ${[['invoice-ocr','识别发票字段：抬头、税号、金额、币种、开票日','SKILL.md 2,184 字，附属文件 3 个'],['policy-lookup','按问题检索报销制度条款并给出处','SKILL.md 1,206 字，附属文件 1 个']].map(([n,d,m])=>`<div class="lrow">${ic('book',16)}<div style="flex:1;min-width:0"><div class="tt mono">${n}</div><div class="ds">${d}</div></div><span class="muted" style="font-size:12px">${m}</span><button class="btn ghost sm">${ic('chevd',14)}</button></div>`).join('')}
+      </div><button class="btn sm" style="align-self:flex-start">${ic('plus',14)}添加技能包</button></div></div></section>
+  <section class="sec" id="sec-mcp">${secH('mcp',5,'MCP','done')}
+    <div class="card"><div class="lrow" style="flex-wrap:wrap">${ic('plug',16)}<div style="flex:1"><div class="tt mono">erp-finance</div><div class="ds mono">http　https://erp.example.com/mcp</div></div>
+      ${A.mcpTest===1?`<span class="badge pri">${sd('run',12)}测试中</span>`:`<span class="badge ok">${sd('done',12)}已连通，<span class="mono">12</span> 个工具</span>`}
+      <button class="btn sm" data-a="mcpTest">测试连接</button><button class="btn ghost sm" title="删除">${ic('trash',14)}</button></div>
+      <div class="lrow ds" style="background:var(--bg2)">测试连接会带上你保存过的变量值（ERP_TOKEN）。上次结果：erp-finance，MCP 2025-06-18，12 个工具（未调用）。</div></div>
+    <button class="btn sm" style="margin-top:12px">${ic('plus',14)}添加 MCP 服务</button></section>
+  <section class="sec" id="sec-sub">${secH('sub',6,'子代理','done')}
+    <div class="card"><div class="lrow">${ic('branch',16)}<div style="flex:1"><div class="tt mono">currency-converter</div><div class="ds">何时使用：发票币种不是人民币时，按开票日汇率换算</div></div><span class="badge">模型：同主 agent</span><button class="btn ghost sm">${ic('chevd',14)}</button></div></div></section>
+  <section class="sec" id="sec-kb">${secH('kb',7,'知识','done',`<span class="muted" style="font-size:12px">已用 <span class="mono">3/50</span> 篇，<span class="mono">1.5 万/50 万</span> 字</span>`)}
+    <div class="sec-b"><div class="card">
+      ${[['doc','《差旅报销制度 2026 版》.pdf','18 页，1.2 万字'],['doc','《发票抬头规范》.docx','2,140 字'],['doc','常见问题','手动添加，860 字']].map(([i,n,m])=>`<div class="lrow">${ic(i,16)}<div style="flex:1" class="tt">${n}</div><span class="muted" style="font-size:12px">${m}</span><button class="btn ghost sm">查看</button></div>`).join('')}</div>
+      <div class="row"><button class="btn sm">${ic('upload',14)}上传文件</button><button class="btn sm">${ic('plus',14)}手动添加</button><span class="muted" style="font-size:12px">PDF、docx、pptx、xlsx、文本，单个 20MB 以内</span></div>
+      <div class="field"><label class="lbl">检索测试</label><div class="row"><input class="inp" id="kbq" value="${esc(A.kbQ)}"><button class="btn sm" data-a="kbTest">检索</button></div>
+        ${A.kbRes?`<div class="card">${[['0.82','差旅报销制度 §3.2','市内交通（含网约车、出租车）凭发票实报实销，单日不超过 200 元。'],['0.74','常见问题 #4','加班 21:00 以后打车回家可报销，需附加班记录。'],['0.61','差旅报销制度 §3.5','机场往返打车费用计入差旅交通费。']].map(([s,src,t],i)=>`<div class="lrow"><span class="mono muted" style="font-size:12px">#${i+1}</span><div style="flex:1;min-width:0"><div class="ds">${src}</div><div style="white-space:normal">${t}</div></div><span class="mono" style="font-size:12px">${s}</span></div>`).join('')}</div><span class="link" style="font-size:12px">查看实际注入给模型的文本</span>`:''}</div></div></section>
+  <section class="sec" id="sec-vars" >${secH('vars',8,'变量与密钥',A.todo.varToken?'done':'warn')}
+    <div class="sec-b"><table class="tbl card" style="border:1px solid var(--line)"><thead><tr><th>变量名</th><th>说明</th><th>必填</th><th>密钥</th><th>你的测试值</th></tr></thead><tbody>
+      <tr><td class="mono">ERP_TOKEN</td><td>ERP 接口令牌</td><td>${sd('done',12)}</td><td><span class="badge">${ic('lock',12)}加密存储</span></td><td>${A.todo.varToken?`<span class="mono">••••••••7f3a</span>`:`<span class="badge warn">未填写</span>`}</td></tr>
+      <tr><td class="mono">DEPT</td><td>部门</td><td class="muted">否</td><td class="muted">—</td><td>财务部</td></tr></tbody></table>
+      ${A.todo.varToken?'':`<div class="callout warn" id="fix-token">${ic('alert',16)}<div style="flex:1"><b>ERP_TOKEN 还没有测试值</b><div style="font-size:13px;margin:2px 0 10px">试聊、评测和 MCP 测试都会用它连 ERP。只保存在你的账号下，不进提示词。</div>
+        <div class="row"><input class="inp mono" type="password" value="erp_live_8c1d7f3a" style="max-width:280px;background:#fff"><button class="btn dark sm" data-a="fixToken">保存测试值</button></div></div></div>`}
+      <button class="btn sm" style="align-self:flex-start">${ic('plus',14)}添加变量</button></div></section>
+  <section class="sec" id="sec-contract">${secH('contract',9,'输入输出契约','done')}
+    <div class="g2"><div class="field"><label class="lbl row">inputSchema<span class="badge ok" style="margin-left:auto">schema 合法</span></label><div class="code" style="font-size:12px">{
+  <span class="s">"type"</span>: <span class="s">"object"</span>,
+  <span class="s">"required"</span>: [<span class="s">"invoice_url"</span>, <span class="s">"amount"</span>],
+  <span class="s">"properties"</span>: {
+    <span class="s">"invoice_url"</span>: { <span class="s">"type"</span>: <span class="s">"string"</span> },
+    <span class="s">"amount"</span>: { <span class="s">"type"</span>: <span class="s">"number"</span> },
+    <span class="s">"currency"</span>: { <span class="s">"type"</span>: <span class="s">"string"</span> }
+  }
+}</div></div>
+    <div class="field"><label class="lbl row">outputSchema<span class="badge ok" style="margin-left:auto">schema 合法</span></label><div class="code" style="font-size:12px">{
+  <span class="s">"type"</span>: <span class="s">"object"</span>,
+  <span class="s">"properties"</span>: {
+    <span class="s">"verdict"</span>: { <span class="s">"enum"</span>: [<span class="s">"pass"</span>,
+      <span class="s">"reject"</span>, <span class="s">"need_approval"</span>] },
+    <span class="s">"reasons"</span>: { <span class="s">"type"</span>: <span class="s">"array"</span> }${A.aiApplied?`,
+<span class="add">    "total_cny": { "type": "number" }</span>`:''}
+  }
+}</div></div></div>
+    <div class="muted" style="font-size:12px;margin-top:8px">填了 inputSchema 后，入参不符合会返回 400。</div></section>
+  <section class="sec" id="sec-perm">${secH('perm',10,'审批与权限','done')}
+    <div class="sec-b"><div class="field"><label class="lbl">权限模式</label><div class="card">${[['询问权限','改文件、跑命令前先问你'],['自动接受编辑','文件修改直接通过，命令仍询问'],['规划模式','只读，先给计划'],['自动判定','由模型判断是否需要询问'],['跳过权限检查','全部放行，子代理会一并继承'],['从不询问','不询问，未授权的直接拒绝']].map(([t,d])=>`<button class="lrow" style="width:100%;text-align:left" data-a="perm" data-v="${t}"><span class="radio ${A.perm===t?'on':''}"></span><span class="tt">${t}</span><span class="ds">${d}</span></button>`).join('')}</div></div>
+    <div class="g2"><div class="field"><label class="lbl">无人值守审批</label><div class="seg" style="align-self:flex-start">${['按入口默认','一律拒绝','一律放行'].map(t=>`<button class="${A.unattended===t?'on':''}" data-a="unatt" data-v="${t}">${t}</button>`).join('')}</div><span class="help">接口调用默认放行；网页里始终等人审批。</span></div>
+    <div class="field"><label class="lbl">需审批的工具</label><div class="chips"><span class="chip">erp-finance.submit<button>${ic('x',12)}</button></span><button class="btn xs">${ic('plus',12)}添加</button></div><label class="lbl" style="margin-top:6px">需审批的命令模式</label><div class="chips"><span class="chip">rm *</span><span class="chip">curl * -X POST</span></div></div></div></div></section>
+  <section class="sec" id="sec-hook">${secH('hook',11,'Webhook',A.todo.hook?'done':'warn')}
+    <div class="sec-b"><div class="field"><label class="lbl">回调 URL <span class="muted">运行到终态时推送，用账号级签名密钥签名</span></label><div class="row"><input class="inp mono" value="https://hooks.xinghe.example/owa"><button class="btn sm" data-a="hookTest">${A.hookTest===1?sd('run')+'发送中':'发送测试'}</button></div></div>
+      ${A.todo.hook?`<div class="callout ok">${sd('done')}<div>测试投递成功：<span class="mono">200 OK，112ms</span>。投递记录与重发在 <span class="link" data-a="stage" data-v="access">接入</span>。</div></div>`:`<div class="callout warn">${ic('alert',16)}<div>还没有发过测试投递，不确定对方能收到。</div></div>`}
+      <div class="muted" style="font-size:12px">签名密钥：已配置 <span class="mono">whsec_••••8f2a</span>（账号级，所有智能体共用），在 <span class="link" data-a="go" data-v="dev">开发者</span> 管理。</div></div></section>`;
+  return lay(toc,doc,nextPanel());
+}
+function stNew(){return stOrch()}
+
+/* ---------- 试聊抽屉 ---------- */
+function trialDrawer(){
+  const A=S.agent;
+  const tools=[['invoice-ocr','识别 1 张发票：住宿，¥6,800.00','1.2s'],['policy-lookup','差旅报销制度 §2.1 住宿标准','0.4s'],['erp-finance.lookup','查询部门预算余额','0.9s']];
+  return `<div class="trial" role="dialog" aria-label="试聊">
+    <div class="trial-h">${geo(4,24)}<b>试聊</b><span class="badge warn">草稿</span><span class="muted" style="font-size:12px">计费记在你名下</span><span class="sp"></span><button class="btn ghost sm" data-a="toast" data-v="已清空试聊">清空</button><button class="btn ghost sm" data-a="trial" title="收起">${ic('chevd',16)}</button></div>
+    <div class="trial-b" data-ks="trial">
+      <div class="msg-u">帮我看下这张住宿发票：杭州 3 晚，合计 6,800 元，抬头星河数据科技有限公司。</div>
+      <div>
+        <button class="toolsum" data-a="trialTools">${sd('done',13)}调用了 3 个工具<span class="mono">invoice-ocr，policy-lookup，erp-finance.lookup</span><span class="sp"></span><span class="mono">2.5s</span>${ic(S.trialTools?'chevd':'chev',13)}</button>
+        ${S.trialTools?`<div class="toolrows" style="margin-top:0">${tools.map(([n,d,t])=>`<div>${sd('done',12)}<span class="mono">${n}</span><span class="muted">${d}</span><span class="sp"></span><span class="mono muted">${t}</span></div>`).join('')}</div>`:''}
+      </div>
+      <div class="msg-a"><b>初审结论：需要审批。</b>单笔 6,800 元超过 5,000 元上限，需部门负责人审批；发票抬头与公司全称一致；住宿 3 晚均在制度标准内。
+        <div class="code" style="margin-top:8px;font-size:12px;padding:8px 10px">{ <span class="s">"verdict"</span>: <span class="s">"need_approval"</span>,
+  <span class="s">"reasons"</span>: [<span class="s">"单笔超过 5000 元，需部门负责人审批"</span>] }</div>
+        <div class="msg-meta"><span class="mono">3.8s</span><i class="dot"></i><span class="mono">2,904 tokens</span><i class="dot"></i><span class="mono">6 积分</span><span class="sp"></span>
+          <button class="btn ghost xs" data-a="toast" data-v="已复制回答">${ic('copy',12)}复制</button><button class="btn ghost xs" data-a="toast" data-v="原型：已用草稿重跑">${ic('refresh',12)}重跑</button>
+          ${S.trialSaved?`<span class="badge ok">${sd('done',11)}已存为用例</span>`:`<button class="btn xs" style="border-color:var(--pri);color:var(--pri)" data-a="trialForm" id="savecase-btn">${ic('plus',12)}存为评测用例</button>`}</div>
+      </div>
+      ${S.trialForm&&!S.trialSaved?`<div class="savecase"><b style="font-size:14px">存为评测用例</b>
+        <div class="field"><label class="lbl">用例名 *</label><input class="inp" value="超额需审批"></div>
+        <div class="field"><label class="lbl">输入 *（来自这条消息）</label><textarea class="inp" rows="2" style="font-size:13px">帮我看下这张住宿发票：杭州 3 晚，合计 6,800 元，抬头星河数据科技有限公司。</textarea></div>
+        <div class="field"><label class="lbl">期望（按这条回复自动生成，可改）</label><div class="code" style="font-size:12px;padding:8px 10px;background:#fff">结构化字段等于  verdict = "need_approval"
+正文须包含      部门负责人</div></div>
+        <div class="row"><button class="btn pri sm" data-a="saveCase">保存用例</button><button class="btn sm" data-a="trialForm">取消</button><span class="muted" style="font-size:12px">保存后评测变为 ${A.cases.length+1} 个用例</span></div></div>`:''}
+      ${S.trialExtra.map(m=>m.u?`<div class="msg-u">${esc(m.t)}</div>`:`<div class="msg-a">${m.t}</div>`).join('')}
+    </div>
+    <div class="trial-in"><div class="box"><textarea id="trialin" placeholder="用草稿试聊，回车发送"></textarea><button class="sendb" data-a="trialSend" title="发送">${ic('send',15,2)}</button></div>
+      <div class="muted" style="font-size:12px;margin-top:6px">跑的是自动保存的草稿；ERP_TOKEN 用你的测试值。</div></div>
+  </div>`;
+}
+
+/* ---------- 评测 ---------- */
+function stEval(){
+  const A=S.agent,n=A.cases.length,p=passCount();
+  const fails=A.cases.filter(c=>c.st==='fail');
+  const running=A.evalState==='running';
+  const tSum=A.cases.filter(c=>c.st==='pass'||c.st==='fail').reduce((s,c)=>s+c.t,0);
+  const cSum=A.cases.filter(c=>c.st==='pass'||c.st==='fail').reduce((s,c)=>s+c.c,0);
+  const toc=tocList([['ev-run','运行',A.evalState==='passed'?'done':A.evalState==='failed'?'fail':'active'],['ev-cases','用例',fails.length?'fail':'done',String(n)],['ev-add','添加用例','todo'],['ev-hist','历史',null,String(A.history.length)]]);
+  const caseRow=(c,i)=>{const st=c.st||'todo';const ex=A.exp[c.n]&&(c.st==='fail'||c.st==='pass');
+    return `<div class="case ${st==='run'?'run':''}"><button class="case-r" data-a="caseExp" data-v="${esc(c.n)}">${sd(st==='pass'?'done':st)}
+      <div style="min-width:0"><div class="row" style="gap:6px"><span class="nm">${c.n}</span>${c.src?`<span class="badge pri">${c.src}</span>`:''}${st==='fail'?'<span class="badge bad">未通过</span>':st==='run'?'<span class="badge pri">运行中</span>':''}</div><div class="as">${c.as}</div></div>
+      <span class="num">${c.st==='pass'||c.st==='fail'?c.t.toFixed(1)+'s':'—'}</span><span class="num">${c.st==='pass'||c.st==='fail'?c.c+' 分':'—'}</span><span class="num muted" style="font-size:12px">${c.st==='pass'||c.st==='fail'?'run_'+(9100+i*37).toString(16):''}</span>${ic(ex?'chevd':'chev',14)}</button>
+      ${ex?`<div class="case-x">${c.st==='fail'?`<div class="callout bad" style="font-size:13px">${ic('x',15)}<div><b>失败原因</b><div>${c.why}</div></div></div>`:''}
+        <div class="g2"><div class="field"><label class="lbl">输入</label><div class="code" style="font-size:12px;white-space:pre-wrap">${esc(c.inp||'{ "invoice_url": "https://files.xinghe.example/inv/'+(i+1)+'.pdf", "amount": 3200, "currency": "CNY" }')}</div></div>
+        <div class="field"><label class="lbl">判分时的输出快照</label><div class="code" style="font-size:12px">${esc(c.st==='fail'?c.out:'{\n  "verdict": "'+(c.as.match(/"(\w+)"/)||[0,'pass'])[1]+'",\n  "reasons": ["符合制度"]\n}')}</div></div></div>
+        <div class="row muted" style="font-size:12px">${ic('clock',13)}<span class="mono">${c.t.toFixed(1)}s</span><i class="dot"></i><span class="mono">${c.c} 积分</span><span class="sp"></span><span class="link" data-a="stage" data-v="runs">查看运行详情</span></div></div>`:''}</div>`};
+  const doc=`<h1>评测</h1><p class="lead">每个用例真实调用一次模型并计费。发布要求：对当前草稿全部通过，且之后没改过配置或用例。</p>
+   <div class="runbar" id="sec-ev-run"><div class="field" style="width:300px"><label class="lbl">评测目标</label><select class="inp" id="evtarget"><option>当前草稿（已自动保存，cfg ${A.hash}）</option>${A.versions.map(v=>`<option>v${v.v}${v.cur?'（当前发布版）':''}</option>`).join('')}</select></div>
+     <div class="col" style="gap:2px;margin-top:18px"><span class="mono" style="font-size:13px">${n} 次模型调用，约 ${A.cases.reduce((s,c)=>s+c.c,0)} 积分</span>${!A.todo.varToken?`<span style="font-size:12px;color:var(--warn)">缺 ERP_TOKEN 测试值，无法运行。<span class="link" data-a="goSec" data-v="vars">去填写</span></span>`:`<span class="muted" style="font-size:12px">按顺序运行，失败的会展开输出快照</span>`}</div>
+     <span class="sp"></span><button class="btn ${A.evalState==='passed'?'':'dark'}" style="margin-top:18px" data-a="runEval" ${(!A.todo.varToken||running)?'disabled':''}>${running?sd('run')+'运行中':ic('play',14)+(A.evalState==='none'?'运行评测':'重新运行')}</button></div>
+   <div class="bign"><div><div class="v" style="color:${A.evalState==='passed'?'var(--ok)':A.evalState==='failed'?'var(--bad)':'var(--fg)'}">${A.evalState==='none'?'—':p+'/'+n}</div><div class="k">通过</div></div><div><div class="v">${tSum?tSum.toFixed(1)+'s':'—'}</div><div class="k">总耗时</div></div><div><div class="v">${cSum||'—'}</div><div class="k">消耗积分</div></div><div><div class="v" style="font-size:20px;padding-top:4px">${A.hash}</div><div class="k">配置哈希${A.evalState==='stale'?'，<span style="color:var(--warn)">已变化</span>':''}</div></div></div>
+   ${A.evalState==='stale'?`<div class="callout warn" style="margin-top:16px">${ic('alert',16)}<div><b>配置已变化</b>，上次 ${p}/${n} 的结论作废，需要重跑才能发布。</div><span class="sp"></span><button class="btn dark sm" data-a="runEval">${ic('play',13)}重跑</button></div>`:''}
+   ${A.evalState==='cases_changed'?`<div class="callout warn" style="margin-top:16px">${ic('alert',16)}<div><b>用例已改动</b>（新增「超额需审批」），需要重跑。</div><span class="sp"></span><button class="btn dark sm" data-a="runEval">${ic('play',13)}重跑</button></div>`:''}
+   ${A.evalState==='failed'&&!A.fixApplied?`<div class="fix" id="fixbox"><div class="row">${ic('spark',16)}<span class="h3">修复建议</span><span class="muted" style="font-size:12px">2 个未通过都缺同一类规则</span></div>
+     <div class="code" style="margin-top:10px;font-size:12px"><span class="c">提示词 ## 规则</span>
+  3. 外币按开票日汇率换算
+<span class="add">+ 4. 外币金额先交给子代理 currency-converter 换算为人民币，再套用规则 1</span><span class="add">+ 5. 同一报销单的多张发票按合计金额判断是否超额</span></div>
+     <div class="row" style="margin-top:10px"><button class="btn pri sm" data-a="applyFix">应用到草稿</button><button class="btn sm" data-a="goSec" data-v="prompt">在编排里手改</button><span class="muted" style="font-size:12px">应用后草稿自动保存，需要重跑</span></div></div>`:''}
+   <div class="subh" id="sec-ev-cases"><h2>用例</h2><span class="mono muted">${n}</span><span class="sp"></span><button class="btn sm" data-a="addCase">${ic('plus',14)}添加用例</button></div>
+   <div class="cases" style="margin-top:0">${A.cases.map(caseRow).join('')}</div>
+   <div id="sec-ev-add">${A.addCase?`<div class="card" style="padding:16px;margin-top:16px"><div class="h3" style="margin-bottom:12px">添加用例</div><div class="sec-b">
+     <div class="field"><label class="lbl">用例名 *</label><input class="inp" placeholder="例：抬头缺「有限公司」"></div>
+     <div class="field"><label class="lbl">输入 *</label><textarea class="inp mono" rows="3">{ "invoice_url": "", "amount": 0, "currency": "CNY" }</textarea><label class="row" style="font-size:13px"><span class="check on">${ic('check',11,3)}</span>按 JSON 对象解析（智能体有 inputSchema，默认勾选）</label><label class="row" style="font-size:13px"><span class="check on">${ic('check',11,3)}</span>期望运行成功</label></div>
+     <div class="g2"><div class="field"><label class="lbl">正文须包含（每行一个）</label><textarea class="inp" rows="2"></textarea></div><div class="field"><label class="lbl">正文不得包含（每行一个）</label><textarea class="inp" rows="2"></textarea></div></div>
+     <div class="field"><label class="lbl">结构化字段等于（每行「路径 = 值」）</label><textarea class="inp mono" rows="2">verdict = "reject"</textarea></div>
+     <div class="g2"><div class="field"><label class="lbl">花费上限（美元）</label><input class="inp mono" value="0.05"></div><div class="field"><label class="lbl">耗时上限（秒）</label><input class="inp mono" value="30"></div></div>
+     <div class="row"><button class="btn pri sm" data-a="addCase">保存用例</button><button class="btn sm" data-a="addCase">取消</button></div></div></div>`:''}</div>
+   <div class="subh" id="sec-ev-hist"><h2>历史</h2></div>
+   <table class="tbl" style="border-top:1px solid var(--line)"><thead><tr><th>目标</th><th>配置哈希</th><th>标记</th><th class="r">通过</th><th class="r">时间</th></tr></thead><tbody>
+    ${A.history.map(h=>`<tr><td>${h.tgt}</td><td class="mono">${h.hash}</td><td><span class="badge ${h.mark.startsWith('=')?'ok':'warn'}">${h.mark}</span></td><td class="r mono">${h.p}/${h.n}（${Math.round(h.p/h.n*100)}%）</td><td class="r mono muted">${h.t}</td></tr>`).join('')}</tbody></table>`;
+  return lay(toc,doc,nextPanel());
+}
+
+/* ---------- 发布 ---------- */
+function readyItems(){
+  const A=S.agent,o=orchDone();
+  return [
+   {t:'编排完整',s:o===11?'11/11 节，名称和提示词非空':`还差 ${11-o} 项`,ok:o===11,b:'去修复',a:'stage',v:'orch'},
+   {t:'评测全部通过',s:A.evalState==='passed'?`当前草稿 ${passCount()}/${A.cases.length}，之后没改过配置或用例`:A.evalState==='none'?'当前草稿还没评测':A.evalState==='stale'?'配置已变化，需要重跑':A.evalState==='cases_changed'?'用例已改动，需要重跑':`当前草稿 ${passCount()}/${A.cases.length}`,ok:A.evalState==='passed',b:'去修复',a:'stage',v:'eval'},
+   {t:'有可发布的修改',s:A.changes?`相对 v${A.published} 有 ${A.changes} 处修改`:(A.versions[0].fresh?`已发布为 v${A.published}，草稿与发布版一致`:'没有可发布的修改'),ok:A.changes>0||!!A.versions[0].fresh,b:'',a:''},
+   {t:'草稿已保存',s:'自动保存于 '+A.savedAt,ok:true},
+  ];
+}
+function stPub(){
+  const A=S.agent,R=readyItems(),next=maxV()+1,justPub=A.changes===0&&A.published===maxV()&&A.versions[0].fresh;
+  const toc=tocList([['pb-ready','上线清单',R.every(r=>r.ok)?'done':'warn'],['pb-note','版本说明',A.changes?'todo':'done'],['pb-vers','版本',null,String(A.versions.length)],['pb-share','公开与上架',A.isPublic?'done':'todo']]);
+  const diffs=[['修改','提示词','规则 4、5（外币换算、多张合并）',A.fixApplied],['新增','评测用例','超额需审批（来自试聊）',S.trialSaved],['修改','变量与密钥','ERP_TOKEN 标为必填',true],['新增','知识','《发票抬头规范》.docx',true],['修改','审批与权限','erp-finance.submit 需审批',true],['修改','模型','推理强度 低 › 中',true]].filter(d=>d[3]);
+  const cmpBox=v=>`<tr><td colspan="5" style="padding:0 12px 14px;height:auto;background:var(--bg2)"><div class="row" style="padding:10px 0 8px"><b style="font-size:13px">v${v} 对比${S.agent.cmp.mode==='draft'?'草稿':'上一版'}</b><span class="sp"></span><button class="btn ghost xs" data-a="cmp" data-v="">${ic('x',12)}收起</button></div><div class="code" style="font-size:12px;background:#fff"><span class="c">提示词</span>
+<span class="del">- 3. 外币按开票日汇率换算（仅提醒）</span><span class="add">+ 3. 外币按开票日汇率换算</span><span class="add">+ 4. 外币金额先交给子代理 currency-converter 换算为人民币，再套用规则 1</span><span class="c">知识</span>
+<span class="add">+ 《发票抬头规范》.docx</span><span class="c">审批与权限.需审批的工具</span>
+<span class="add">+ erp-finance.submit</span></div></td></tr>`;
+  const doc=`<h1>发布</h1><p class="lead">未发布时，接口调用和其他人使用都直接跑草稿；发布后他们用发布版，调用方可以用 <span class="mono">version</span> 锁定某一版。回滚和设为发布版不受评测限制。</p>
+   ${justPub?`<div class="callout ok" style="margin-top:18px">${sd('done',16)}<div style="flex:1"><b>已发布 v${A.published}</b>，秒级生效，进行中的会话不受影响。下一步：签发 Key 并试调。</div><button class="btn pri sm" data-a="stage" data-v="access">去接入</button></div>`:''}
+   <div class="subh" id="sec-pb-ready" style="margin-top:22px"><h2>上线清单</h2><span class="sp"></span>${R.every(r=>r.ok)?'<span class="badge ok">全部就绪</span>':`<span class="badge warn">${R.filter(r=>!r.ok).length} 项未就绪</span>`}</div>
+   <ul class="ready card">${R.map(r=>`<li>${sd(r.ok?'done':'warn')}<div><div class="t">${r.t}</div><div class="s">${r.s}</div></div>${!r.ok&&r.b?`<button class="btn sm" data-a="${r.a}" data-v="${r.v}">${r.b}</button>`:''}</li>`).join('')}</ul>
+   <div class="subh" id="sec-pb-note"><h2>${A.changes?`将发布为 v${next}`:'没有可发布的修改'}</h2>${A.changes?`<span class="mono muted">相对 v${A.published}，${diffs.length} 处</span>`:''}</div>
+   ${A.changes?`<div class="card">${diffs.map(([k,a,b])=>`<div class="lrow"><span class="badge ${k==='新增'?'ok':'pri'}">${k}</span><span class="tt">${a}</span><span class="ds">${b}</span></div>`).join('')}</div>
+   <div class="field" style="margin-top:14px"><label class="lbl row">版本说明<span class="sp"></span><span class="mono">${A.pubNote.length}/512</span></label><textarea class="inp" rows="2" id="pubnote" data-bind="agent.pubNote">${esc(A.pubNote)}</textarea></div>
+   <div class="row" style="margin-top:12px"><button class="btn pri" data-a="publish" ${pubReady()?'':'disabled'}>${ic('up',14)}发布为 v${next}</button>${pubReady()?'<span class="muted" style="font-size:12px">发布后：调用方默认用 v'+next+'，锁了旧版的不受影响</span>':`<span style="font-size:12px;color:var(--warn)">清单未全部就绪，暂不能发布</span>`}</div>`
+   :`<div class="callout">${ic('check',16)}<div>草稿和发布版 v${A.published} 相同。改动编排后这里会出现新的版本。</div></div>`}
+   <div class="subh" id="sec-pb-vers"><h2>版本</h2></div>
+   <table class="tbl" style="border-top:1px solid var(--line)"><thead><tr><th>版本</th><th>评测</th><th>说明</th><th></th><th></th></tr></thead><tbody>
+   ${A.versions.map((v,i)=>`<tr class="vrow"><td><span class="row"><b class="mono">v${v.v}</b>${v.cur?'<span class="badge ok">当前发布</span>':''}</span><div class="mono muted" style="font-size:12px">${v.t}</div></td><td><span class="badge ok">${v.ev}</span></td><td class="wrap" style="min-width:200px;white-space:normal">${v.note}</td>
+     <td colspan="2" class="r"><span class="row" style="justify-content:flex-end;gap:4px"><button class="btn ghost xs" data-a="cmp" data-v="${v.v}:draft">对比草稿</button>${i<A.versions.length-1?`<button class="btn ghost xs" data-a="cmp" data-v="${v.v}:prev">对比上一版</button>`:''}<button class="btn ghost xs" data-a="loadDraft" data-v="${v.v}">载入草稿</button>${v.cur?'':`<button class="btn xs" data-a="rollback" data-v="${v.v}">${v.v<A.published?'回滚到此版':'设为发布版'}</button>`}</span></td></tr>${A.cmp&&A.cmp.v===v.v?cmpBox(v.v):''}`).join('')}</tbody></table>
+   <div class="subh" id="sec-pb-share"><h2>公开与上架</h2></div>
+   <div class="card">
+     <div class="lrow"><button class="toggle ${A.isPublic?'on':''}" data-a="pubToggle" aria-label="公开给所有账号"></button><div style="flex:1"><div class="tt">公开给所有账号</div><div class="ds">所有登录账号只读可用，跑发布版。公开不等于上架市场。</div></div></div>
+     <div class="lrow">${ic('store',16)}<div style="flex:1"><div class="tt">申请上架市场</div><div class="ds">由管理员审核，上架后出现在探索页。<span class="badge" style="height:18px">需后端</span></div></div>${A.listing?`<span class="badge pri">${sd('active',12)}已提交，等待管理员审核</span>`:`<button class="btn sm" data-a="listing" ${A.published<1?'disabled':''}>申请上架</button>`}</div>
+     <div class="lrow" style="flex-direction:column;align-items:stretch;gap:10px">${'<div class="row">'+ic('users',16)+'<div><div class="tt">定向授权</div><div class="ds">给某个账号只读或可编辑权限</div></div></div>'}
+       <div class="row"><input class="inp" placeholder="账号邮箱，例 chenmo@xinghe.example" id="grantin"><select class="inp" style="width:120px"><option>只读</option><option>可编辑</option></select><button class="btn sm" data-a="grant">添加</button></div>
+       ${A.grants.map((g,i)=>`<div class="row" style="font-size:14px"><span class="mono">${g.who}</span><span class="badge">${g.perm}</span><span class="sp"></span><button class="btn ghost xs danger" data-a="revoke" data-v="${i}">撤销</button></div>`).join('')}</div>
+   </div>`;
+  return lay(toc,doc,nextPanel());
+}
+
+/* ---------- 接入 ---------- */
+function codeFor(tab,key){
+  const k=key||'owa_live_••••••••';
+  if(tab==='curl') return `<span class="c"># 发起调用（异步），返回 run_id</span>
+curl -X POST https://agents.xinghe.example/api/agents/expense-reviewer/invoke \\
+  -H <span class="s">"Authorization: Bearer ${k}"</span> \\
+  -H <span class="s">"Content-Type: application/json"</span> \\
+  -d <span class="s">'{"version": 4, "input": {"invoice_url": "https://files.xinghe.example/inv/2026-1104.pdf", "amount": 6800, "currency": "CNY"}}'</span>
+
+<span class="c"># 轮询结果</span>
+curl https://agents.xinghe.example/api/agents/expense-reviewer/result?run_id=<span class="a">$RUN_ID</span> \\
+  -H <span class="s">"Authorization: Bearer ${k}"</span>`;
+  if(tab==='python') return `<span class="k">import</span> os, time, requests
+
+BASE = <span class="s">"https://agents.xinghe.example/api/agents/expense-reviewer"</span>
+H = {<span class="s">"Authorization"</span>: <span class="s">f"Bearer {os.environ['OWA_KEY']}"</span>}  <span class="c"># ${k.slice(0,13)}…</span>
+
+run = requests.post(<span class="s">f"{BASE}/invoke"</span>, headers=H, json={
+    <span class="s">"version"</span>: 4,
+    <span class="s">"input"</span>: {<span class="s">"invoice_url"</span>: url, <span class="s">"amount"</span>: 6800, <span class="s">"currency"</span>: <span class="s">"CNY"</span>},
+}).json()
+<span class="k">while</span> (r := requests.get(<span class="s">f"{BASE}/result"</span>, headers=H, params={<span class="s">"run_id"</span>: run[<span class="s">"run_id"</span>]}).json())[<span class="s">"status"</span>] == <span class="s">"running"</span>:
+    time.sleep(1)
+print(r[<span class="s">"output"</span>][<span class="s">"verdict"</span>])`;
+  return `<span class="k">const</span> BASE = <span class="s">"https://agents.xinghe.example/api/agents/expense-reviewer"</span>;
+<span class="k">const</span> headers = { Authorization: <span class="s">\`Bearer \${process.env.OWA_KEY}\`</span>, <span class="s">"Content-Type"</span>: <span class="s">"application/json"</span> };
+
+<span class="k">const</span> { run_id } = <span class="k">await</span> (<span class="k">await</span> fetch(<span class="s">\`\${BASE}/invoke\`</span>, {
+  method: <span class="s">"POST"</span>, headers,
+  body: JSON.stringify({ version: 4, input: { invoice_url, amount: 6800, currency: <span class="s">"CNY"</span> } }),
+})).json();
+<span class="k">let</span> r;
+<span class="k">do</span> { <span class="k">await</span> new Promise(s => setTimeout(s, 1000));
+  r = <span class="k">await</span> (<span class="k">await</span> fetch(<span class="s">\`\${BASE}/result?run_id=\${run_id}\`</span>, { headers })).json();
+} <span class="k">while</span> (r.status === <span class="s">"running"</span>);`;
+}
+function stAccess(){
+  const A=S.agent;
+  const toc=tocList([['key','API Key',A.keyStage===2?'done':'todo'],['code','调用代码',A.copied?'done':'todo'],['try','在线试调',A.tryState===2?'done':'todo'],['wh','Webhook',A.deliv.every(d=>d.ok)?'done':'fail']]);
+  const masked='owa_live_7Hq2…a91F';
+  let keyBlock='';
+  if(A.keyStage===0) keyBlock=`<div class="card" style="padding:16px"><div class="g2"><div class="field"><label class="lbl">用途备注</label><input class="inp" value="${esc(A.keyNote)}"></div><div class="field"><label class="lbl">每分钟上限</label><input class="inp mono" value="${A.keyRpm}"></div></div>
+     <div class="g2" style="margin-top:14px"><div class="field"><label class="lbl">有效期</label><div class="seg" style="align-self:flex-start">${['不过期','30 天','90 天','1 年'].map(t=>`<button class="${A.keyExp===t?'on':''}" data-a="keyExp" data-v="${t}">${t}</button>`).join('')}</div></div>
+     <div class="field"><label class="lbl">限定智能体</label><div class="inp row" style="background:var(--bg2)">${ic('lock',13)}仅 报销审核助手<span class="mono muted" style="font-size:12px;margin-left:auto">expense-reviewer</span></div></div></div>
+     <div class="row" style="margin-top:14px"><button class="btn dark" data-a="issueKey">${ic('key',14)}签发 Key</button><span class="muted" style="font-size:12px">平台默认每 Key 60 次/分钟、每智能体合计 300 次/分钟，超出返回 429</span></div></div>`;
+  else if(A.keyStage===1) keyBlock=`<div class="callout warn" style="flex-direction:column;align-items:stretch;gap:10px"><div class="row">${ic('alert',16)}<b>明文只显示这一次</b><span class="muted" style="font-size:13px">关掉后无法再查看，只能轮换</span></div>
+     <div class="row"><div class="inp mono row" style="background:#fff;font-size:14px;font-weight:500" id="keyplain">${A.keyPlain}</div><button class="btn" data-a="copyKey">${ic('copy',14)}复制</button><button class="btn dark" data-a="keySaved">我已保存</button></div></div>`;
+  else keyBlock=`<table class="tbl card" style="border:1px solid var(--line)"><thead><tr><th>名称</th><th>Key</th><th>有效期</th><th>最近使用</th><th class="r">每分钟</th><th class="r">本月积分</th><th></th></tr></thead><tbody>
+     <tr><td>${esc(A.keyNote)}<div class="muted" style="font-size:12px">仅 报销审核助手</div></td><td class="mono">${masked}</td><td>${A.keyExp==='不过期'?'不过期':A.keyExp+'后过期'}</td><td class="muted">${A.tryState===2?'刚刚':'从未使用'}</td><td class="r mono">${A.keyRpm}</td><td class="r mono">${A.tryState===2?6:0} / 不限</td><td class="r"><button class="btn ghost xs" data-a="rotate">轮换</button><button class="btn ghost xs danger" data-a="revokeKey">吊销</button></td></tr></tbody></table>
+     <div class="muted" style="font-size:12px;margin-top:8px">轮换后立即签发新 Key，旧 Key 24 小时内仍有效。全部 Key 在 <span class="link" data-a="go" data-v="dev">开发者</span>。</div>`;
+  const tr=A.tryState;
+  const doc=`<h1>接入</h1><p class="lead">把报销审核助手接到你的系统里：签一把只能调它的 Key，复制代码，在这页直接试一次。</p>
+   <div class="row" style="margin-top:14px;flex-wrap:wrap"><span class="badge ok">已发布 v${A.published}</span><span class="badge">结构化入参</span><span class="badge">结构化结果</span><span class="mono" style="font-size:13px;margin-left:6px">POST /api/agents/expense-reviewer/invoke</span><span class="sp"></span><button class="btn ghost sm" data-a="openapi">${ic('doc',14)}OpenAPI 文档</button></div>
+   ${A.openapi?`<div class="card" style="margin-top:10px">${[['POST','/invoke','发起调用，返回 run_id；入参按 inputSchema 校验，不符返回 400'],['GET','/result','按 run_id 轮询状态与结构化结果'],['GET','/sessions/{id}/events','事件流（SSE）'],['GET','/sessions/{id}/files','运行产生的文件列表与下载']].map(([m,p,d])=>`<div class="lrow"><span class="badge ${m==='POST'?'pri':''} mono" style="width:48px;justify-content:center">${m}</span><span class="mono">${p}</span><span class="ds">${d}</span></div>`).join('')}</div>`:''}
+   <div class="subh" id="sec-key" style="margin-top:26px"><span class="sec-n mono muted">1</span><h2>API Key</h2>${A.keyStage===2?'<span class="badge ok">已签发</span>':''}</div>${keyBlock}
+   <div class="subh" id="sec-code"><span class="sec-n mono muted">2</span><h2>调用代码</h2><span class="sp"></span><div class="seg">${[['curl','curl'],['python','Python'],['node','Node']].map(([k,t])=>`<button class="${A.codeTab===k?'on':''}" data-a="codeTab" data-v="${k}">${t}</button>`).join('')}</div><button class="btn sm" data-a="copyCode">${ic('copy',14)}${A.copied?'已复制':'复制'}</button></div>
+   <div class="code" style="font-size:12px">${codeFor(A.codeTab,A.keyStage>=1?A.keyPlain:'')}</div>
+   <div class="muted" style="font-size:12px;margin-top:8px">示例入参按 inputSchema 生成，<span style="color:var(--ok)">校验通过</span>。传 <span class="mono">version</span> 锁定版本；不传则跟随当前发布版，草稿的修改不影响调用方。</div>
+   <div class="subh" id="sec-try"><span class="sec-n mono muted">3</span><h2>在线试调</h2><span class="sp"></span><select class="inp" style="width:170px;height:30px"><option>v${A.published}（当前发布版）</option><option>草稿</option></select></div>
+   <div class="g2"><div class="field"><label class="lbl">请求体</label><textarea class="inp mono" rows="8" style="font-size:12px">{
+  "version": ${A.published},
+  "input": {
+    "invoice_url": "https://files.xinghe.example/inv/2026-1104.pdf",
+    "amount": 6800,
+    "currency": "CNY"
+  }
+}</textarea><div class="row"><button class="btn dark sm" data-a="tryInvoke" ${A.keyStage<2?'disabled':''}>${tr===1?sd('run')+'等待结果':ic('play',13)+'发送请求'}</button>${A.keyStage<2?'<span class="muted" style="font-size:12px">先签发 Key</span>':'<span class="muted" style="font-size:12px">用刚签发的 Key，按次计费</span>'}</div></div>
+   <div class="field"><label class="lbl row">响应${tr?`<span class="sp"></span><span class="badge ${tr===2?'ok':'pri'} mono">${tr===2?'200 OK，4.1s':'202 Accepted，38ms'}</span>`:''}</label><div class="code" style="font-size:12px;min-height:190px">${tr===0?'<span class="c">// 发送后在这里显示响应</span>':tr===1?`{
+  <span class="s">"run_id"</span>: <span class="s">"run_b7e2c0"</span>,
+  <span class="s">"status"</span>: <span class="s">"running"</span>,
+  <span class="s">"version"</span>: ${A.published}
+}
+<span class="c">// 正在轮询 /result …</span>`:`{
+  <span class="s">"run_id"</span>: <span class="s">"run_b7e2c0"</span>,
+  <span class="s">"status"</span>: <span class="s">"succeeded"</span>,
+  <span class="s">"version"</span>: ${A.published},
+  <span class="s">"output"</span>: {
+    <span class="s">"verdict"</span>: <span class="s">"need_approval"</span>,
+    <span class="s">"reasons"</span>: [<span class="s">"单笔超过 5000 元，需部门负责人审批"</span>]
+  },
+  <span class="s">"usage"</span>: { <span class="s">"input_tokens"</span>: 2410, <span class="s">"output_tokens"</span>: 494, <span class="s">"credits"</span>: 6 }
+}`}</div></div></div>
+   <div class="subh" id="sec-wh"><span class="sec-n mono muted">4</span><h2>Webhook</h2><span class="sp"></span><button class="btn sm" data-a="toast" data-v="已发送测试投递">发送测试</button><button class="btn ghost sm" data-a="toast" data-v="已刷新">${ic('refresh',14)}刷新</button></div>
+   <div class="card"><div class="lrow">${ic('link',16)}<span class="mono">https://hooks.xinghe.example/owa</span><span class="sp"></span><span class="link" style="font-size:13px" data-a="goSec" data-v="hook">在编排中修改</span></div>
+     <div class="lrow">${ic('shield',16)}<div style="flex:1"><div class="tt">签名密钥 <span class="mono muted" style="font-weight:400">whsec_••••8f2a</span></div><div class="ds">账号级，所有智能体共用。请求头带 X-OWA-Signature 与 X-OWA-Timestamp。</div></div><button class="btn ghost sm" data-a="go" data-v="dev">管理</button></div></div>
+   <table class="tbl" style="margin-top:12px;border-top:1px solid var(--line)"><thead><tr><th>时间</th><th>触发</th><th>结果</th><th class="r">耗时</th><th></th></tr></thead><tbody>
+   ${A.deliv.map((d,i)=>`<tr><td class="mono">${d.t}</td><td>${d.tr}</td><td>${d.re===1?`<span class="badge pri">${sd('run',11)}重发中</span>`:`<span class="badge ${d.ok?'ok':'bad'} mono">${d.code} ${d.ok?'OK':'Bad Gateway'}</span>`}</td><td class="r mono">${d.ms}ms</td><td class="r">${d.ok?'':`<button class="btn xs" data-a="redeliver" data-v="${i}">${ic('refresh',12)}重发</button>`}</td></tr>`).join('')}</tbody></table>
+   <div style="margin-top:8px"><span class="link" style="font-size:13px" data-a="toast" data-v="没有更早的投递记录">加载更多</span></div>`;
+  return lay(toc,doc,nextPanel());
+}
+
+/* ---------- 运行 ---------- */
+const RUNS=[
+ {t:'14:36:02',v:'草稿',src:'评测',st:'run',inp:'外币换算：820 USD',d:'—',c:'—'},
+ {t:'14:31:40',v:'v3',src:'接口调用',st:'done',inp:'{ "amount": 6800, "currency": "CNY" }',d:'4.1s',c:'6'},
+ {t:'14:12:09',v:'草稿',src:'试聊',st:'done',inp:'帮我看下这张住宿发票…',d:'3.8s',c:'6'},
+ {t:'13:58:51',v:'v3',src:'工作台',st:'done',inp:'这张 6,800 元的住宿发票能直接报吗？',d:'5.2s',c:'7'},
+ {t:'13:40:17',v:'v3',src:'接口调用',st:'fail',inp:'{ "amount": 1290, "currency": "EUR" }',d:'30.0s',c:'2'},
+ {t:'11:22:45',v:'v3',src:'API 会话',st:'done',inp:'核对 BX-2026-1098 的 4 张发票',d:'6.6s',c:'9'},
+ {t:'10:05:33',v:'草稿',src:'AI 编辑',st:'done',inp:'把输出改成也返回 total_cny',d:'8.9s',c:'11'},
+ {t:'09:14:20',v:'v3',src:'接口调用',st:'fail',inp:'{ "amount": 420, "currency": "CNY" }',d:'30.0s',c:'1'},
+ {t:'09:02:11',v:'v3',src:'接口调用',st:'cancel',inp:'{ "amount": 9800, "currency": "CNY" }',d:'1.2s',c:'0'},
+];
+function runTable(sel,act){
+  return `<table class="tbl" style="border-top:1px solid var(--line)"><thead><tr><th>时间</th><th>版本</th><th>来源</th><th>状态</th><th>输入</th><th class="r">耗时</th><th class="r">积分</th></tr></thead><tbody>
+   ${RUNS.map((r,i)=>`<tr class="click ${sel===i?'sel':''}" data-a="${act}" data-v="${i}"><td class="mono">${r.t}</td><td class="mono">${r.v}</td><td>${r.src}</td><td><span class="row" style="gap:6px">${sd(r.st==='cancel'?'todo':r.st)}${({run:'运行中',done:'成功',fail:'失败',cancel:'已取消'})[r.st]}</span></td><td style="max-width:220px;overflow:hidden;text-overflow:ellipsis">${esc(r.inp)}</td><td class="r mono">${r.d}</td><td class="r mono">${r.c}</td></tr>`).join('')}</tbody></table>`;
+}
+function stRuns(){
+  const A=S.agent;
+  const doc=`<h1>运行</h1><p class="lead">这个智能体的全部运行：工作台、API 会话、接口调用、评测、试聊和 AI 编辑。</p>
+   <div class="bign"><div><div class="v">128</div><div class="k">近 7 天运行</div></div><div><div class="v">2.3%</div><div class="k">失败率</div></div><div><div class="v">1,842</div><div class="k">消耗积分</div></div><div><div class="v">4.6s</div><div class="k">平均耗时</div></div></div>
+   <div class="row" style="margin:18px 0 10px"><select class="inp" style="width:140px;height:30px"><option>全部状态</option><option>排队中</option><option>运行中</option><option>成功</option><option>失败</option><option>已取消</option></select><select class="inp" style="width:140px;height:30px"><option>全部来源</option><option>工作台</option><option>API 会话</option><option>接口调用</option><option>评测</option><option>AI 编辑</option></select><span class="sp"></span><button class="btn ghost sm" data-a="toast" data-v="已刷新">${ic('refresh',14)}刷新</button></div>
+   ${runTable(A.runSel,'runSel')}`;
+  const r=A.runSel!=null?RUNS[A.runSel]:null;
+  const side=r?`<aside class="next"><div class="np-b"><div class="np-head">${sd(r.st==='cancel'?'todo':r.st,16)}<b>运行详情</b><span class="sp"></span><button class="btn ghost xs" data-a="runSel" data-v="">${ic('x',13)}</button></div>
+     <dl class="kv" style="grid-template-columns:72px 1fr;font-size:13px"><dt>任务</dt><dd class="mono">run_${(9100+A.runSel*53).toString(16)}</dd><dt>版本</dt><dd>${r.v}</dd><dt>来源</dt><dd>${r.src}</dd><dt>耗时</dt><dd class="mono">${r.d}</dd></dl>
+     <div class="lbl" style="margin:12px 0 6px">输入</div><div class="code" style="font-size:12px;white-space:pre-wrap">${esc(r.inp)}</div>
+     ${r.st==='fail'?`<div class="callout bad" style="margin-top:10px;font-size:13px">${ic('x',14)}<div><b>timeout</b>：erp-finance.lookup 30 秒无响应</div></div>`:''}
+     ${r.st==='done'?`<div class="lbl" style="margin:12px 0 6px">结构化结果</div><div class="code" style="font-size:12px">{ "verdict": "need_approval" }</div>`:''}
+     <div class="row" style="margin-top:12px">${r.st==='run'?`<button class="btn danger sm" data-a="cancelRun">取消运行</button>`:''}<button class="btn sm" data-a="useAgent" data-v="expense-reviewer">${ic('ext',13)}在对话中查看完整过程</button></div></div></aside>`:nextPanel();
+  return lay(tocList([['runs','全部运行','done','128']]),doc,side);
+}
+/* ============ 平台管理 ============ */
+const ACC=(()=>{const N=[['zhoulan','管理员',1,'2025-03-02',4,52300,null],['linzhou','普通账号',1,'2025-06-18',3,8640,20000],['chenmo','普通账号',1,'2025-06-20',2,31220,50000],['xuqing','普通账号',1,'2025-07-01',6,64810,80000],['suyao','普通账号',1,'2025-07-09',1,12030,20000],['hechuan','普通账号',1,'2025-08-15',1,4410,10000],['wangyi','普通账号',1,'2025-08-21',0,0,10000],['liming','管理员',1,'2025-09-02',2,22870,null],['zhaoxue','普通账号',0,'2025-09-11',1,0,5000],['sunhao','普通账号',1,'2025-09-30',3,18900,30000],['qianyu','普通账号',1,'2025-10-08',0,1240,5000],['fangqi','普通账号',1,'2025-10-12',2,9970,20000],['tangning','普通账号',1,'2025-10-19',1,6630,10000],['guoyan','普通账号',0,'2025-10-27',0,0,0],['luoqi','普通账号',1,'2025-11-02',4,42150,60000],['yejun','普通账号',1,'2025-11-15',1,3020,10000],['heming','普通账号',1,'2025-12-01',0,880,5000],['caolin','普通账号',1,'2026-01-06',2,15410,20000],['xiaoan','普通账号',0,'2026-02-11',0,0,5000],['dengke','普通账号',1,'2026-03-04',1,7290,10000],['pengyue','普通账号',1,'2026-04-18',3,26110,40000],['luyao','普通账号',1,'2026-06-07',1,2190,5000],['jiangtao','普通账号',1,'2026-08-25',2,11380,20000],['weinan','普通账号',1,'2026-10-30',0,0,5000]];
+  return N.map(([u,r,on,d,a,c,l])=>({e:u+'@xinghe.example',r,on:!!on,d,a,c,l}))})();
+function vAdmin(){
+  const T=S.adm.tab;
+  const nav=[['accounts','账号','users','24'],['providers','模型与提供者','cpu',''],['market','市场上架','store','1'],['packages','套餐与订单','wallet','2'],['billing','计费','db',''],['usage','平台用量','gauge',''],['runs','平台运行','clock',''],['audit','平台审计','shield','']];
+  let main='';
+  if(T==='accounts') main=admAccounts();
+  else if(T==='providers') main=admProviders();
+  else if(T==='market') main=admMarket();
+  else main=admSimple(T);
+  return `<div class="adm"><aside class="adm-side"><div class="side-g">平台管理</div>${nav.map(([k,t,i,n])=>`<button class="side-i ${T===k?'on':''}" data-a="admTab" data-v="${k}">${ic(i,15)}${t}${n?`<span class="n">${n}</span>`:''}</button>`).join('')}
+    <div class="hr" style="margin:14px 0"></div><div class="muted" style="font-size:12px;padding:0 10px;line-height:1.6">会话是私有的，管理员也看不到别人的会话内容。</div></aside>
+    <div class="adm-main" data-ks="adm-${T}">${main}</div></div>`;
+}
+function admAccounts(){
+  const q=S.adm.q,rf=S.adm.role;
+  const L=ACC.filter(a=>(!q||a.e.includes(q))&&(rf==='全部'||a.r===rf));
+  const sel=S.adm.sel!=null?ACC[S.adm.sel]:null;
+  return `<div class="adm-top"><div class="row"><h1>账号</h1><span class="sp"></span><button class="btn pri" data-a="newAcc">${ic('plus',14)}创建账号</button></div>
+     <div class="muted" style="margin-top:4px"><span class="n">24</span> 个账号<i class="dot"></i><span class="n">${ACC.filter(a=>a.on).length}</span> 个启用中<i class="dot"></i>本月消耗 <span class="n">386,240</span> 积分</div></div>
+   <div class="toolbar"><div class="search" style="width:300px">${ic('search',15)}<input class="inp" id="admq" data-bindr="adm.q" value="${esc(q)}" placeholder="按邮箱筛选"></div>
+     <div class="seg">${['全部','管理员','普通账号'].map(r=>`<button class="${rf===r?'on':''}" data-a="admRole" data-v="${r}">${r}</button>`).join('')}</div><span class="sp"></span><span class="muted" style="font-size:12px"><span class="n">${L.length}</span> 条</span></div>
+   ${S.adm.newAcc?`<div style="margin:0 32px 14px" class="callout pri">${ic('user',16)}<div style="flex:1"><div class="row"><input class="inp" style="max-width:280px;background:#fff" value="songjia@xinghe.example"><select class="inp" style="width:130px;background:#fff"><option>普通账号</option><option>管理员</option></select><button class="btn dark sm" data-a="createAcc">创建</button><button class="btn sm" data-a="newAcc">取消</button></div>${S.adm.created?`<div style="margin-top:10px">已创建。一次性初始密码：<span class="mono" style="font-weight:600">Kq7-mz2P-41xv</span>　<span class="link" data-a="toast" data-v="已复制初始密码">复制</span>，关掉后无法再看。</div>`:''}</div></div>`:''}
+   <div class="adm-tbl" style="${sel?'padding-right:412px':''}"><table class="tbl"><thead><tr><th>邮箱</th><th>角色</th><th>注册日期</th><th class="r">智能体</th><th class="r">本月消耗</th><th class="r">月度上限</th><th>状态</th></tr></thead><tbody>
+   ${L.map(a=>{const i=ACC.indexOf(a);return `<tr class="click ${S.adm.sel===i?'sel':''}" data-a="admSel" data-v="${i}"><td><span class="row" style="gap:8px"><span class="av" style="width:24px;height:24px;font-size:12px;background:${a.on?'#0A0A0A':'#BDBDBD'}">${a.e[0].toUpperCase()}</span><span class="mono" style="font-size:13px;${a.on?'':'color:var(--fg2)'}">${a.e}</span>${i===0?'<span class="self">你自己</span>':''}</span></td>
+     <td>${a.r==='管理员'?'<span class="badge dark">管理员</span>':'<span class="muted">普通账号</span>'}</td><td class="mono muted">${a.d}</td><td class="r mono">${a.a}</td><td class="r mono">${fmt(a.c)}</td><td class="r mono">${a.l==null?'<span class="muted">不限</span>':a.l===0?'<span style="color:var(--bad)">禁止消费</span>':fmt(a.l)}</td><td>${a.on?`<span class="row" style="gap:6px">${sd('done',12)}启用</span>`:`<span class="row muted" style="gap:6px">${sd('todo',12)}已停用</span>`}</td></tr>`}).join('')}</tbody></table></div>
+   ${sel?admDrawer(sel):''}`;
+}
+function admDrawer(a){
+  const self=S.adm.sel===0;
+  return `<div class="drawer" style="width:400px;top:48px"><div class="drawer-h"><span class="av" style="background:${a.on?'#0A0A0A':'#BDBDBD'}">${a.e[0].toUpperCase()}</span><div><div class="mono" style="font-weight:600;font-size:13px">${a.e}</div><div class="muted" style="font-size:12px">${a.r}${self?'，你自己':''}</div></div><span class="sp"></span><button class="btn ghost sm" data-a="admSel" data-v="" title="关闭">${ic('x',15)}</button></div>
+   <div class="drawer-b">
+    <div class="stats"><div><div class="v">${a.a}</div><div class="k">智能体</div></div><div><div class="v">${fmt(a.c)}</div><div class="k">本月消耗</div></div><div><div class="v" style="font-size:13px;padding-top:7px;white-space:nowrap">${a.d}</div><div class="k">注册</div></div><div><div class="v" style="font-size:15px;padding-top:6px">${a.on?'启用':'已停用'}</div><div class="k">状态</div></div></div>
+    <div class="dsec" style="margin-top:18px"><h4>月度上限（积分）</h4><div class="row"><input class="inp mono" value="${a.l==null?'':a.l}" placeholder="不限"><button class="btn sm" data-a="toast" data-v="已保存月度上限">保存</button></div><div class="muted" style="font-size:12px;margin-top:6px">留空表示不限，0 表示禁止消费；超过后新运行会被拒绝。本月已用 <span class="mono">${fmt(a.c)}</span>。</div></div>
+    <div class="dsec"><h4>角色</h4><div class="row"><span>${a.r}</span><span class="sp"></span><button class="btn sm" data-a="admRoleSet" ${self?'disabled':''}>${a.r==='管理员'?'取消管理员':'设为管理员'}</button></div>${self?'<div class="muted" style="font-size:12px;margin-top:6px">不能修改自己的角色或停用自己。</div>':''}</div>
+    <div class="dsec"><h4>重置密码</h4>${S.adm.pw?`<div class="callout warn">${ic('key',15)}<div>新的一次性密码 <span class="mono" style="font-weight:600">${S.adm.pw}</span><br><span style="font-size:12px">只显示这一次，对方登录后需修改。</span></div></div>`:`<button class="btn sm" data-a="resetPw">生成新的一次性密码</button>`}</div>
+    <div class="dsec"><h4>${a.on?'停用账号':'恢复账号'}</h4><div class="muted" style="font-size:13px;margin-bottom:10px">${a.on?'停用会立即登出该账号，并停用它的全部 API Key。':'恢复后，原来的 Key 不会自动恢复，需要重新签发。'}</div><button class="btn sm ${a.on?'danger':''}" data-a="admToggle" ${self?'disabled':''}>${a.on?'停用账号':'恢复账号'}</button></div>
+   </div></div>`;
+}
+function admProviders(){
+  const pt=S.adm.ptab;
+  return `<div class="adm-top"><div class="row"><h1>模型与提供者</h1><span class="sp"></span><button class="btn pri" data-a="toast" data-v="原型：打开「添加提供者」">${ic('plus',14)}添加提供者</button></div>
+    <div class="tabs">${[['providers','提供者'],['models','模型总览'],['routes','默认模型路由']].map(([k,t])=>`<button class="${pt===k?'on':''}" data-a="ptab" data-v="${k}">${t}</button>`).join('')}</div></div>
+   <div class="adm-tbl" style="padding-top:16px">${pt==='providers'?`<table class="tbl"><thead><tr><th>名称</th><th>协议</th><th>API Key</th><th>文本接入</th><th class="r">模型</th><th>状态</th></tr></thead><tbody>
+     <tr class="click"><td><b style="font-weight:600">Anthropic 官方</b></td><td>Anthropic</td><td><span class="badge ok">已配置</span></td><td class="mono">https://api.anthropic.com</td><td class="r mono">6</td><td><span class="row" style="gap:6px">${sd('done',12)}启用</span></td></tr>
+     <tr class="click"><td><b style="font-weight:600">内网代理</b></td><td>OpenAI 兼容</td><td><span class="badge ok">已配置</span></td><td class="mono">http://llm-gw.xinghe.internal/v1</td><td class="r mono">3</td><td><span class="row" style="gap:6px">${sd('done',12)}启用</span></td></tr></tbody></table>
+     <div class="callout" style="margin-top:16px">${ic('lock',16)}<div class="muted">API Key 加密保存，只能替换不能查看。停用提供者前会提示影响的智能体和别名。</div></div>`
+   :pt==='models'?`<table class="tbl"><thead><tr><th>模型</th><th>提供者</th><th>类型</th><th class="r">成本（元/百万 token）</th><th class="r">加价</th><th class="r">售价（积分/百万 token）</th><th>状态</th></tr></thead><tbody>
+     ${[['claude-opus-4-1','Anthropic 官方','文本','15 / 75','0%','1,500 / 7,500'],['claude-sonnet-4-5','Anthropic 官方','文本','3 / 15','0%','300 / 1,500'],['claude-haiku-4-5','Anthropic 官方','文本','1 / 5','0%','100 / 500'],['claude-sonnet-4-5-1m','Anthropic 官方','文本','6 / 22.5','0%','600 / 2,250'],['claude-opus-4-1-batch','Anthropic 官方','文本','7.5 / 37.5','0%','750 / 3,750'],['claude-haiku-3-5','Anthropic 官方','文本','0.8 / 4','0%','80 / 400'],['qwen3-72b','内网代理','文本','2 / 6','20%','240 / 720'],['glm-4.6','内网代理','文本','2 / 8','20%','240 / 960'],['bge-m3','内网代理','向量','0.5','20%','60']].map(r=>`<tr><td class="mono">${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td class="r mono">${r[3]}</td><td class="r mono">${r[4]}</td><td class="r mono">${r[5]}</td><td><span class="row" style="gap:6px">${sd('done',12)}启用</span></td></tr>`).join('')}</tbody></table>`
+   :`<div class="card" style="padding:16px;max-width:620px"><div class="field"><label class="lbl">所属提供者</label><select class="inp"><option>Anthropic 官方</option><option>内网代理</option></select></div>
+     ${[['fable','claude-haiku-3-5'],['opus','claude-opus-4-1'],['sonnet','claude-sonnet-4-5'],['haiku','claude-haiku-4-5']].map(([a,m])=>`<div class="row" style="margin-top:12px"><span class="mono" style="width:80px">${a}</span><select class="inp"><option>${m}</option></select></div>`).join('')}
+     <button class="btn dark sm" style="margin-top:16px" data-a="toast" data-v="已保存别名映射">保存别名映射</button></div>`}</div>`;
+}
+function admMarket(){
+  return `<div class="adm-top"><h1>市场上架</h1><div class="muted" style="margin-top:4px">只有已发布的智能体能上架；公开不等于上架。</div></div>
+   <div class="adm-tbl" style="padding-top:18px"><div class="subh" style="margin-top:0"><h2>上架申请</h2><span class="badge">需后端</span></div>
+   <table class="tbl" style="border-top:1px solid var(--line)"><thead><tr><th>智能体</th><th>申请人</th><th>版本</th><th>评测</th><th>分类</th><th></th></tr></thead><tbody>
+    <tr><td><span class="row">${geo(4,26)}报销审核助手</span></td><td>林舟</td><td class="mono">v${S.agent.published}</td><td><span class="badge ok">6/6 通过</span></td><td><select class="inp" style="height:30px;width:120px"><option>办公运营</option></select></td><td class="r"><button class="btn sm" data-a="toast" data-v="已驳回申请">驳回</button> <button class="btn dark sm" data-a="toast" data-v="已上架「报销审核助手」">上架</button></td></tr></tbody></table>
+   <div class="subh"><h2>已发布的智能体</h2></div>
+   <table class="tbl" style="border-top:1px solid var(--line)"><thead><tr><th>智能体</th><th>作者</th><th>版本</th><th>分类</th><th>状态</th><th></th></tr></thead><tbody>
+   ${AG.slice(1).map(a=>`<tr><td><span class="row">${geo(a.seed,26)}${a.n}</span></td><td>${a.a}</td><td class="mono">v${a.v}</td><td>${a.c}</td><td><span class="badge ok">已上架</span></td><td class="r"><button class="btn ghost sm danger" data-a="toast" data-v="原型：下架需要确认">下架</button></td></tr>`).join('')}</tbody></table></div>`;
+}
+function admSimple(T){
+  const M={
+   packages:['套餐与订单','维护积分包目录，人工确认订单后发放积分。',['订单','账号','积分包','金额','状态',''],[['OD-2611-0042','linzhou@xinghe.example','标准包 v2','¥ 500','待人工处理','确认'],['OD-2611-0039','chenmo@xinghe.example','团队包 v1','¥ 2,000','待人工处理','确认'],['OD-2610-0031','xuqing@xinghe.example','标准包 v2','¥ 500','积分已发放','']]],
+   billing:['计费','概览、账户与发放、对账与待核对。',['日期','提供者','运行数','成本估算（元）','应扣','实际扣除'],[['11-10','Anthropic 官方','2,104','1,182.40','124,880','124,880'],['11-10','内网代理','611','96.20','11,530','11,530'],['11-09','Anthropic 官方','1,877','1,020.75','108,210','108,090']]],
+   usage:['平台用量','全平台 token 用量，最近 7 天。',['智能体','运行','失败','输入 tokens','输出 tokens',''],[['客服知识问答','6,012','41','18.2M','3.1M',''],['小红书文案','3,880','12','4.6M','6.9M',''],['会议纪要整理','2,451','9','9.8M','2.2M','']]],
+   runs:['平台运行','全平台运行列表；只显示元数据，不显示会话内容。',['时间','账号','智能体','来源','状态',''],[['14:36:02','linzhou@','报销审核助手','评测','运行中','取消'],['14:35:51','suyao@','小红书文案','工作台','成功',''],['14:35:10','xuqing@','代码审查员','接口调用','失败','']]],
+   audit:['平台审计','全平台操作记录。',['时间','操作者','操作','内容','来源地址',''],[['14:32:08','linzhou@','评测.运行','expense-reviewer 草稿','10.2.14.31',''],['14:20:41','zhoulan@','账号.修改上限','chenmo@ 50,000','10.2.1.8',''],['13:55:02','xuqing@','Key.签发','owa_live_3Fa…','10.2.9.77','']]],
+  }[T];
+  return `<div class="adm-top"><h1>${M[0]}</h1><div class="muted" style="margin-top:4px">${M[1]}</div></div><div class="adm-tbl" style="padding-top:18px"><table class="tbl" style="border-top:1px solid var(--line)"><thead><tr>${M[2].map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${M[3].map(r=>`<tr>${r.map((c,i)=>`<td class="${i===0?'mono':''}">${i===r.length-1&&c?`<button class="btn sm" data-a="toast" data-v="原型：${c}">${c}</button>`:c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+}
+
+/* ============ 开发者 / 账户 ============ */
+function vDev(){
+  const A=S.agent,T=S.dev;
+  const keys=[{n:'报销系统测试',k:'owa_live_Zp0c…41de',sc:'仅 报销审核助手',ex:'30 天后过期',u:'11-09 17:20',rpm:60,m:'312 / 2,000'},{n:'周报定时任务',k:'owa_live_u8Kd…0b7c',sc:'仅 周报生成器',ex:'不过期',u:'从未使用',rpm:30,m:'0 / 不限'}];
+  if(A.keyStage===2) keys.unshift({n:A.keyNote,k:'owa_live_7Hq2…a91F',sc:'仅 报销审核助手',ex:A.keyExp==='不过期'?'不过期':A.keyExp+'后过期',u:A.tryState===2?'刚刚':'从未使用',rpm:A.keyRpm,m:(A.tryState===2?6:0)+' / 不限'});
+  let body='';
+  if(T==='keys') body=`<table class="tbl" style="border-top:1px solid var(--line)"><thead><tr><th>名称</th><th>Key</th><th>限定</th><th>有效期</th><th>最近使用</th><th class="r">每分钟</th><th class="r">本月积分</th><th></th></tr></thead><tbody>${keys.map(k=>`<tr><td>${k.n}</td><td class="mono">${k.k}</td><td>${k.sc}</td><td>${k.ex}</td><td class="muted">${k.u}</td><td class="r mono">${k.rpm}</td><td class="r mono">${k.m}</td><td class="r"><button class="btn ghost xs" data-a="toast" data-v="已轮换：旧 Key 24 小时后失效">轮换</button><button class="btn ghost xs danger" data-a="toast" data-v="原型：吊销需确认">吊销</button></td></tr>`).join('')}</tbody></table>
+    <div class="callout" style="margin-top:16px">${ic('plug',16)}<div class="muted">单个智能体的 Key 建议在它的「接入」阶段签发，会自动限定到该智能体。</div></div>`;
+  else if(T==='sign') body=`<div class="card" style="padding:18px;max-width:720px"><div class="row"><b>Webhook 签名密钥</b><span class="badge ok">已配置</span><span class="mono muted">whsec_••••8f2a</span></div><p class="muted" style="margin:8px 0 14px;line-height:1.65">账号级，所有智能体共用。投递时用 HMAC-SHA256 签名，请求头 X-OWA-Signature 与 X-OWA-Timestamp。重新生成后，旧密钥在一段时间内继续用 Previous 头额外签名。</p><div class="row"><button class="btn sm" data-a="toast" data-v="新密钥只显示一次（原型）">重新生成</button><button class="btn sm" data-a="toast" data-v="原型：自定义密钥至少 24 个字符">自定义</button><button class="btn ghost sm danger" data-a="toast" data-v="原型：清除需确认">清除</button></div></div>`;
+  else body=`<div class="row" style="margin-bottom:10px"><select class="inp" style="width:160px;height:30px"><option>全部智能体</option><option>报销审核助手</option></select><select class="inp" style="width:130px;height:30px"><option>全部状态</option></select><select class="inp" style="width:130px;height:30px"><option>全部来源</option></select></div>${runTable(null,'toast')}`;
+  return `<div class="page" data-ks="dev"><div class="wrap"><div class="ph"><div><h1>开发者</h1><p>账号级的 API Key、Webhook 签名密钥和全部运行记录。</p></div></div>
+   <div class="tabs" style="margin-bottom:18px">${[['keys','API Key'],['sign','Webhook 签名密钥'],['runs','全部运行']].map(([k,t])=>`<button class="${T===k?'on':''}" data-a="devTab" data-v="${k}">${t}</button>`).join('')}</div>${body}</div></div>`;
+}
+function vAccount(){
+  const T=S.acct;
+  const nav=[['overview','积分概览'],['orders','充值与订单'],['ledger','账户流水'],['consume','运行消耗'],['usage','用量分析'],['price','模型价格'],['security','账号安全'],['audit','操作日志']];
+  let b='';
+  if(T==='overview') b=`<div class="bign" style="margin-top:0"><div><div class="v">12,480</div><div class="k">可用积分</div></div><div><div class="v">120</div><div class="k">冻结中</div></div><div><div class="v">8,640</div><div class="k">本月已用</div></div><div><div class="v">20,000</div><div class="k">月度上限</div></div></div>
+    <div class="subh"><h2>最近流水</h2><span class="sp"></span><button class="btn sm" data-a="acctTab" data-v="orders">${ic('plus',14)}充值</button></div>
+    <table class="tbl" style="border-top:1px solid var(--line)"><thead><tr><th>时间</th><th>类型</th><th>说明</th><th class="r">积分</th><th class="r">可用余额</th></tr></thead><tbody>${[['11-11 14:36','冻结','评测 报销审核助手 草稿','-120','12,480'],['11-11 14:31','结算','接口调用 run_7c2e','-6','12,600'],['11-11 14:12','结算','试聊 报销审核助手','-6','12,606'],['11-10 09:00','人工入账','订单 OD-2611-0018 标准包','+5,000','12,612'],['11-09 18:20','多扣退还','run_51a0 实际用量低于冻结','+14','7,612']].map(r=>`<tr><td class="mono">${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td class="r mono" style="color:${r[3][0]==='+'?'var(--ok)':'var(--fg)'}">${r[3]}</td><td class="r mono">${r[4]}</td></tr>`).join('')}</tbody></table>`;
+  else if(T==='orders') b=`<div class="g3">${[['入门包','1,000','¥ 100'],['标准包','5,000','¥ 500'],['团队包','20,000','¥ 2,000']].map(([n,c,p])=>`<div class="card" style="padding:16px"><div class="muted">${n} <span class="mono">v2</span></div><div class="mono" style="font-size:26px;margin:6px 0">${c}</div><div class="muted">积分，长期有效</div><div class="row" style="margin-top:12px"><b class="mono">${p}</b><span class="sp"></span><button class="btn sm" data-a="toast" data-v="已创建订单，等待管理员人工处理">创建订单</button></div></div>`).join('')}</div><div class="muted" style="font-size:12px;margin-top:12px">在线支付未启用；订单由管理员人工确认后发放积分。</div>`;
+  else if(T==='price') b=`<table class="tbl" style="border-top:1px solid var(--line)"><thead><tr><th>模型</th><th class="r">输入（积分/百万 token）</th><th class="r">输出</th><th>状态</th></tr></thead><tbody>${[['claude-opus-4-1','1,500','7,500'],['claude-sonnet-4-5','300','1,500'],['claude-haiku-4-5','100','500']].map(r=>`<tr><td class="mono">${r[0]}</td><td class="r mono">${r[1]}</td><td class="r mono">${r[2]}</td><td><span class="badge ok">可用</span></td></tr>`).join('')}</tbody></table><div class="muted" style="font-size:12px;margin-top:10px">算力来源：平台统一提供，已配置。</div>`;
+  else if(T==='security') b=`<div class="card" style="padding:18px;max-width:440px"><div class="sec-b"><div class="field"><label class="lbl">当前密码</label><input class="inp" type="password"></div><div class="field"><label class="lbl">新密码（至少 8 位）</label><input class="inp" type="password"></div><div class="field"><label class="lbl">再次输入</label><input class="inp" type="password"></div><button class="btn dark" style="align-self:flex-start" data-a="toast" data-v="密码已修改">修改密码</button></div></div>`;
+  else b=`<table class="tbl" style="border-top:1px solid var(--line)"><thead><tr><th>维度</th><th class="r">次数</th><th class="r">实际扣除</th><th class="r">欠额</th><th class="r">冻结中</th></tr></thead><tbody>${[['报销审核助手',412,2310,0,120],['周报生成器',41,96,0,0],['会议纪要整理（市场）',88,176,0,0]].map(r=>`<tr><td>${r[0]}</td><td class="r mono">${r[1]}</td><td class="r mono">${fmt(r[2])}</td><td class="r mono">${r[3]}</td><td class="r mono">${r[4]}</td></tr>`).join('')}</tbody></table>`;
+  return `<div class="adm"><aside class="adm-side"><div class="side-g">账户</div>${nav.map(([k,t])=>`<button class="side-i ${T===k?'on':''}" data-a="acctTab" data-v="${k}">${t}</button>`).join('')}</aside>
+   <div class="adm-main" data-ks="acct"><div class="adm-top"><h1>${nav.find(n=>n[0]===T)[1]}</h1><div class="muted" style="margin-top:4px">林舟<i class="dot"></i><span class="mono">linzhou@xinghe.example</span></div></div><div class="adm-tbl" style="padding-top:20px">${b}</div></div></div>`;
+}
+
+/* ============ 对话工作台 ============ */
+function vChat(){
+  const C=S.chat,A=S.agent;
+  const groups=[['报销审核助手',4,[['s1','10 月差旅报销初审','14:36'],['s2','外币发票换算','昨天'],['s3','打车票批量核对','11-08']]],['会议纪要整理',11,[['s4','周一例会纪要','11-10']]],['竞品周报',5,[['s5','第 45 周竞品周报','11-07']]]];
+  const files=[['发票_住宿.pdf','doc'],['发票_打车x3.pdf','doc'],['初审结果.json','doc'],['报销单_BX-2026-1104.md','doc']];
+  const tree=[['invoice-ocr','识别 4 张发票','1.2s'],['policy-lookup','差旅报销制度 §3.2','0.4s'],['erp-finance.lookup','查询财务部预算余额','0.9s'],['currency-converter','子代理：无外币，跳过','0.1s'],['erp-finance.submit','提交审批（等待你确认）','—']];
+  const qOpts=['是，有加班审批单','否，属于私人行程'];
+  return `<div class="chat">
+   <aside class="cl"><div class="cl-h"><button class="btn dark sm" data-a="toast" data-v="已新建会话">${ic('plus',14)}新会话</button><div class="search" style="width:100%">${ic('search',15)}<input class="inp" placeholder="搜索会话" style="height:32px"></div></div>
+    <div class="cl-b" data-ks="cl">${groups.map(([n,s,L])=>`<div class="cl-g">${geo(s,18)}${n}</div>${L.map(([id,t,tm])=>`<button class="cl-i ${C.sel===id?'on':''}" data-a="chatSel" data-v="${id}">${t}<span class="tm">${tm}</span></button>`).join('')}`).join('')}
+     <button class="cl-g" style="width:100%" data-a="chatArch">${ic(C.arch?'chevd':'chev',13)}已归档<span class="mono">2</span></button>
+     ${C.arch?[['9 月差旅补录','09-28'],['旧版本试用','09-14']].map(([t,tm])=>`<div class="cl-i" style="color:var(--fg2)">${t}<span class="sp"></span><button class="btn xs" data-a="toast" data-v="已恢复会话「${t}」">恢复</button></div>`).join(''):''}</div></aside>
+   <section class="cv"><div class="cv-h">${geo(4,24)}<b style="white-space:nowrap">10 月差旅报销初审</b><span class="badge ok">已发布 v${A.published}</span><span class="muted mono" style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">claude-sonnet-4-5　300 / 1,500 积分每百万 token</span><span class="sp"></span>
+     <button class="btn sm ${C.rtab==='files'?'':'ghost'}" data-a="chatR" data-v="files">${ic('folder',14)}工作空间</button><button class="btn sm ${C.rtab==='tree'?'':'ghost'}" data-a="chatR" data-v="tree">${ic('branch',14)}执行详情</button></div>
+    <div class="cv-b" data-ks="cvb"><div class="cv-in">
+      <div class="callout" style="font-size:13px">${ic('user',15)}<div style="flex:1">变量 <span class="mono">DEPT</span>＝财务部，<span class="mono">ERP_TOKEN</span> 已填写</div><span class="link" data-a="toast" data-v="原型：打开变量弹窗">管理变量</span></div>
+      <div class="msg-u">这是我 10 月去深圳出差的 4 张发票，帮我初审一下，没问题就提交。<div class="row" style="margin-top:6px;gap:6px">${['发票_住宿.pdf','发票_打车x3.pdf'].map(f=>`<span class="badge" style="background:#262626;color:#ddd;border-color:#333">${ic('doc',12)}${f}</span>`).join('')}</div></div>
+      <div><button class="toolsum" data-a="chatTools">${sd('done',13)}调用了 5 个工具<span class="mono">2 个技能包，1 个子代理，2 次 MCP</span><span class="sp"></span><span class="mono">2.6s</span>${ic(C.tools?'chevd':'chev',13)}</button>
+       ${C.tools?`<div class="toolrows" style="margin-top:0">${tree.map(([n,d,t],i)=>`<div>${sd(i===4?'warn':'done',12)}<span class="mono">${n}</span><span class="muted">${d}</span><span class="sp"></span><span class="mono muted">${t}</span></div>`).join('')}</div>`:''}</div>
+      <div class="msg-a"><b>初审结果：需要审批。</b><ul style="margin:6px 0 0 18px;list-style:disc;line-height:1.75"><li>住宿 3 晚合计 6,800 元，超过单笔 5,000 元上限，需部门负责人审批。</li><li>3 张打车票合计 186 元，单日未超过 200 元标准，可报销。</li><li>4 张发票抬头均为「星河数据科技有限公司」。</li></ul>
+        <div class="msg-meta"><span class="mono">↑ 8,214 ↓ 1,032</span><i class="dot"></i><span class="mono">6 积分</span><span class="sp"></span><button class="btn ghost xs" data-a="toast" data-v="已复制">${ic('copy',12)}复制</button><button class="btn ghost xs" data-a="toast" data-v="原型：重跑本轮">${ic('refresh',12)}重跑</button></div></div>
+      <div class="qcard"><div class="qh">${ic('chat',14)}智能体在问你<span class="sp"></span><span class="mono">剩余 04:32</span></div><div style="padding:12px 14px">
+        <div style="font-weight:500;margin-bottom:10px">11-03 那晚的住宿，是加班留宿吗？</div>
+        ${C.qDone?`<div class="badge ok">${sd('done',12)}已回答：${qOpts[C.q]||'其他'}</div>`:[...qOpts,'其他（自己填写）'].map((o,i)=>`<button class="qopt ${C.q===i?'on':''}" data-a="chatQ" data-v="${i}"><span class="radio ${C.q===i?'on':''}"></span>${o}</button>`).join('')+`<div class="row" style="margin-top:8px"><button class="btn sm" data-a="toast" data-v="你选择了不回答">不回答</button><button class="btn dark sm" data-a="chatQSubmit" ${C.q==null?'disabled':''}>${C.q==null?'请先回答每个问题':'提交回答'}</button></div>`}</div></div>
+    </div></div>
+    <div class="cv-f"><div class="inner">
+      ${C.appr==='wait'?`<div class="approval"><div class="row">${ic('shield',16)}<b>智能体在等你确认</b><span class="muted" style="font-size:13px">提交到 ERP 需要你批准</span><span class="sp"></span><span class="mono" style="font-size:12px;color:var(--warn)">4:52 后自动拒绝</span></div>
+        <div class="code" style="margin:8px 0;font-size:12px;padding:8px 10px;background:#fff">erp-finance.submit  { "report_id": "BX-2026-1104", "verdict": "need_approval" }</div>
+        <div class="row"><button class="btn dark sm" data-a="appr" data-v="ok">批准</button><button class="btn sm" data-a="appr" data-v="okAll">批准，本会话内 erp-finance.submit 不再询问</button><span class="sp"></span><button class="btn sm" data-a="appr" data-v="no">拒绝</button><button class="btn ghost sm" data-a="toast" data-v="原型：填写拒绝原因">拒绝并说明</button></div></div>`
+       :`<div class="callout ok" style="font-size:13px">${sd('done',14)}<div>${C.appr==='no'?'已拒绝，原因会交给智能体':'已批准 erp-finance.submit'}${C.appr==='okAll'?'，本会话内不再询问':''}</div>${C.appr==='okAll'?'<span class="sp"></span><span class="link" data-a="appr" data-v="wait">撤销授权</span>':''}</div>`}
+      <div class="composer"><textarea placeholder="说点什么，或输入 /"></textarea><div class="row"><button class="btn ghost xs" title="添加图片或文件">${ic('attach',14)}</button><span class="kbd">/</span><span class="muted" style="font-size:12px">命令</span><span class="sp"></span>${ring(.18,16)}<span class="mono muted" style="font-size:12px">18%，36k / 200k</span><button class="sendb" data-a="toast" data-v="原型：已发送">${ic('send',15,2)}</button></div></div>
+    </div></div></section>
+   <aside class="rp"><div class="tabs" style="margin:0;padding:0 14px">${[['files','工作空间'],['tree','执行详情']].map(([k,t])=>`<button class="${C.rtab===k?'on':''}" data-a="chatR" data-v="${k}">${t}</button>`).join('')}</div>
+    ${C.rtab==='files'?`<div style="padding:10px 12px;border-bottom:1px solid var(--line)" class="row"><span class="mono muted" style="font-size:12px">workspaces/9c1f2a7e</span><span class="sp"></span><button class="btn ghost xs" data-a="toast" data-v="已刷新">${ic('refresh',13)}</button></div>
+     <div class="ftree" style="padding:6px">${files.map(([f,i])=>`<button class="${C.file===f?'on':''}" data-a="chatFile" data-v="${f}">${ic(i,14)}${f}</button>`).join('')}</div>
+     <div style="border-top:1px solid var(--line);padding:12px;flex:1;overflow:auto"><div class="row" style="margin-bottom:8px"><b style="font-size:13px">${C.file}</b><span class="sp"></span><button class="btn ghost xs" data-a="toast" data-v="已复制">${ic('copy',12)}</button><button class="btn ghost xs" data-a="toast" data-v="已开始下载">${ic('upload',12)}</button></div>
+     ${C.file.endsWith('.json')?`<div class="code" style="font-size:12px">{
+  <span class="s">"verdict"</span>: <span class="s">"need_approval"</span>,
+  <span class="s">"reasons"</span>: [
+    <span class="s">"住宿 6,800 元超过单笔上限"</span>
+  ],
+  <span class="s">"total_cny"</span>: 6986
+}</div>`:C.file.endsWith('.pdf')?`<div class="card" style="height:220px;display:flex;align-items:center;justify-content:center;background:var(--bg2)" class="muted">${ic('doc',28)}<span class="muted" style="margin-left:8px">PDF 预览，1 页</span></div>`:`<div class="code" style="font-size:12px;white-space:pre-wrap"># 报销单 BX-2026-1104
+申请人：林舟　部门：财务部
+合计：6,986.00 元</div>`}</div>`
+    :`<div style="padding:12px;overflow:auto"><div class="row muted" style="font-size:12px;margin-bottom:8px">共 <span class="mono">5</span> 次调用，<span class="mono">0</span> 失败</div><div class="lbl" style="margin-bottom:6px">第 1 轮，5 次，0 失败</div>
+     ${tree.map(([n,d,t],i)=>`<button class="lrow card" style="width:100%;margin-bottom:6px;text-align:left;${C.runSel===i?'border-color:var(--pri)':''}" data-a="chatRun" data-v="${i}">${sd(i===4?'warn':'done',13)}<div style="flex:1;min-width:0"><div class="mono" style="font-size:13px">${n}</div><div class="ds">${d}</div></div><span class="mono muted" style="font-size:12px">${t}</span></button>`).join('')}
+     <div class="lbl" style="margin:10px 0 6px">${tree[C.runSel][0]} 的输入</div><div class="code" style="font-size:12px">{ "files": ["发票_住宿.pdf", "发票_打车x3.pdf"] }</div>
+     <div class="lbl" style="margin:10px 0 6px">输出</div><div class="code" style="font-size:12px">${C.runSel===4?'<span class="c">运行中…（等待审批）</span>':'{ "ok": true, "items": 4 }'}</div></div>`}
+   </aside></div>`;
+}
+
+/* ============ 移动端 ============ */
+function phone(lab,inner){return `<div style="position:relative"><div class="mlab" style="top:-30px">${lab}</div><div class="phone"><div class="notch"></div><div class="stb"><span>9:41</span><span>5G</span></div>${inner}</div></div>`}
+function vMobile(){
+  const M=S.mob,a=AG[0],A=S.agent;
+  const p1=`<div class="ph-h"><button class="ib" data-a="toast" data-v="返回市场">${ic('chevl',20)}</button><b style="font-size:16px">智能体详情</b><span class="sp"></span><button class="ib" data-a="toast" data-v="已复制链接">${ic('link',18)}</button></div>
+   <div class="ph-b"><div style="padding:18px 16px 8px"><div class="row" style="gap:14px">${geo(a.seed,64)}<div><div style="font-size:22px;font-weight:700;letter-spacing:-.02em">${a.n}</div><div class="muted" style="font-size:14px">${a.a}<i class="dot"></i>办公运营<i class="dot"></i><span class="mono">v${A.published}</span></div></div></div>
+    <p style="margin:14px 0;line-height:1.65">读取发票和报销单，按公司制度做初审，超额提醒审批。</p>
+    <div class="stats" style="grid-template-columns:repeat(3,1fr)"><div><div class="v" style="font-size:20px">3</div><div class="k">约积分/次</div></div><div><div class="v" style="font-size:20px">1,284</div><div class="k">次使用</div></div><div><div class="v" style="font-size:20px">6/6</div><div class="k">评测通过</div></div></div>
+    <button class="btn pri" style="width:100%;height:48px;font-size:16px;margin-top:16px" data-a="toast" data-v="已新建会话">${ic('chat',18)}立即使用</button>
+    <div class="row" style="margin-top:8px"><button class="btn" style="flex:1;height:44px;font-size:15px" data-a="toast" data-v="已克隆到我的智能体">克隆</button><button class="btn" style="flex:1;height:44px;font-size:15px" data-a="toast" data-v="请在桌面端签发 Key">API 接入</button></div>
+    <div class="lbl" style="margin:20px 0 8px;font-size:13px">试试这样问</div>${a.st.map(s=>`<button class="starter" style="min-height:48px;font-size:15px" data-a="toast" data-v="已发送：${s}">${s}</button>`).join('')}
+    <div class="lbl" style="margin:16px 0 8px;font-size:13px">同类智能体</div>${AG.filter(x=>x.c==='办公运营'&&x.id!==a.id).concat(AG[7]).map(x=>`<div class="row" style="height:60px;border-top:1px solid var(--line)">${geo(x.seed,36)}<div style="flex:1"><div style="font-weight:600;font-size:15px">${x.n}</div><div class="muted" style="font-size:13px">约 ${x.p} 积分/次</div></div><button class="btn" style="height:36px">打开</button></div>`).join('')}</div></div>
+   <div class="tabbar"><button class="on">${ic('store',22)}探索</button><button>${ic('chat',22)}对话</button><button>${ic('wallet',22)}账户</button></div>`;
+  const tools=[['invoice-ocr','识别 4 张发票'],['policy-lookup','制度 §3.2'],['erp-finance.lookup','预算余额']];
+  const p2=`<div class="ph-h"><button class="ib">${ic('chevl',20)}</button>${geo(a.seed,28)}<div style="flex:1;min-width:0"><div style="font-weight:600;font-size:15px">报销审核助手</div><div class="muted" style="font-size:12px">v${A.published}，3 积分/次</div></div><button class="ib" data-a="toast" data-v="打开工作空间">${ic('folder',20)}</button></div>
+   <div class="ph-b" style="background:var(--bg2);padding:14px 12px;display:flex;flex-direction:column;gap:12px">
+    <div class="msg-u" style="font-size:16px">帮我初审 10 月深圳出差的 4 张发票</div>
+    <div><button class="toolsum" style="min-height:44px;font-size:14px" data-a="mobTools">${sd('done',14)}调用了 3 个工具<span class="sp"></span><span class="mono">2.5s</span>${ic(M.tools?'chevd':'chev',14)}</button>
+     ${M.tools?`<div class="toolrows" style="margin-top:0">${tools.map(([n,d])=>`<div style="font-size:14px">${sd('done',12)}<span class="mono">${n}</span><span class="muted">${d}</span></div>`).join('')}</div>`:''}</div>
+    <div class="msg-a" style="font-size:16px"><b>需要审批。</b>住宿 6,800 元超过单笔 5,000 元上限，需部门负责人审批；打车票合计 186 元，可报销。</div>
+    <div class="qcard"><div class="qh" style="font-size:14px">${ic('chat',14)}智能体在问你<span class="sp"></span><span class="mono">04:32</span></div><div style="padding:12px">
+     <div style="font-weight:600;margin-bottom:10px;font-size:16px">11-03 那晚的住宿，是加班留宿吗？</div>
+     ${M.qDone?`<span class="badge ok">${sd('done',12)}已回答</span>`:['是，有加班审批单','否，属于私人行程','其他（自己填写）'].map((o,i)=>`<button class="qopt ${M.q===i?'on':''}" style="min-height:48px;font-size:15px" data-a="mobQ" data-v="${i}"><span class="radio ${M.q===i?'on':''}"></span>${o}</button>`).join('')+`<button class="btn dark" style="width:100%;height:46px;font-size:15px;margin-top:4px" data-a="mobQSubmit" ${M.q==null?'disabled':''}>${M.q==null?'请先回答':'提交回答'}</button>`}</div></div>
+   </div>
+   <div style="padding:8px 10px 26px;border-top:1px solid var(--line);flex:none"><div class="row" style="border:1px solid var(--line2);border-radius:22px;padding:4px 4px 4px 14px"><span class="muted" style="flex:1;font-size:16px">说点什么</span><button class="sendb" style="width:38px;height:38px;border-radius:19px">${ic('send',17,2)}</button></div></div>`;
+  const T=trackData();
+  const p3=`<div class="ph-h"><button class="ib">${ic('chevl',20)}</button><b style="font-size:16px">上线进度</b><span class="sp"></span><span class="badge ok">v${A.published}</span></div>
+   <div class="ph-b" style="padding:16px">
+    <div class="row" style="gap:12px">${geo(4,44)}<div><div style="font-weight:700;font-size:18px">报销审核助手</div><div class="muted" style="font-size:13px">草稿自动保存 <span class="mono">${A.savedAt}</span></div></div></div>
+    <ol style="margin-top:18px;border:1px solid var(--line);border-radius:8px">${T.map((t,i)=>`<li class="row" style="min-height:60px;padding:0 14px;border-top:${i?'1px solid var(--line)':'0'};gap:12px"><span class="mono muted" style="font-size:13px;width:12px">${i+1}</span>${sd(t.st==='active'?'active':t.st,18)}<div style="flex:1"><div style="font-weight:600;font-size:16px">${t.n}</div><div style="font-size:13px" class="${t.sc==='bad'?'':''}"><span style="color:${t.sc==='bad'?'var(--bad)':t.sc==='warn'?'var(--warn)':t.sc==='ok'?'var(--ok)':'var(--fg2)'}">${t.sub}</span></div></div><span class="mono" style="font-size:14px">${t.mt}</span></li>`).join('')}</ol>
+    <div class="callout pri" style="margin-top:16px;flex-direction:column;align-items:stretch"><b style="font-size:16px">下一步</b><div style="font-size:15px">${A.changes===0?'签发 Key 并试调一次，建议在桌面端完成。':'评测全部通过后即可发布新版本。'}</div><button class="btn pri" style="height:46px;font-size:15px;margin-top:6px" data-a="toast" data-v="已在桌面端打开（原型）">${A.changes===0?'去接入':'查看评测'}</button></div>
+    <div class="stats" style="grid-template-columns:repeat(2,1fr);margin-top:16px"><div><div class="v" style="font-size:20px">128</div><div class="k">近 7 天运行</div></div><div><div class="v" style="font-size:20px">12,480</div><div class="k">可用积分</div></div></div>
+   </div>
+   <div class="tabbar"><button>${ic('store',22)}探索</button><button>${ic('chat',22)}对话</button><button class="on">${ic('grid',22)}工作室</button><button>${ic('wallet',22)}账户</button></div>`;
+  return `<div class="mob">${phone('市场·智能体详情',p1)}${phone('对话·工具调用与提问卡片',p2)}${phone('工作室·上线进度',p3)}</div>`;
+}
+
+/* ============ actions ============ */
+function go(v){S.view=v;S.menu=false;S.mkSel=null;if(v==='market'&&S.page!=='market')S.page='market';if(v==='chat')S.page='chat';if(v==='admin'){S.page='admin';S.role='admin'}if(v==='studio'||v==='agent'){if(S.page!=='flow')S.page='build'}if(v==='dev'||v==='account'){}}
+function openAgent(stage){S.view='agent';S.stage=stage||'orch';S.created=true;if(S.page!=='flow')S.page='build';S.menu=false;S.tocOn=stage==='orch'?'basic':S.tocOn}
+function stamp(){S.agent.savedAt=now()}
+function scrollToSec(id){
+  setTimeout(()=>{const box=$('#abody'),el=document.getElementById('sec-'+id);if(!box||!el)return;
+    const top=el.getBoundingClientRect().top-box.getBoundingClientRect().top+box.scrollTop-20;box.scrollTo({top,behavior:'smooth'});el.classList.remove('flash');void el.offsetWidth;el.classList.add('flash')},30);
+}
+function runEval(){
+  const A=S.agent;if(!A.todo.varToken||A.evalState==='running')return;
+  if(S.view!=='agent'||S.stage!=='eval'){openAgent('eval')}
+  A.evalState='running';A.exp={};A.cases.forEach(c=>c.st='queue');let i=0;
+  const step=()=>{
+    if(i>0){const c=A.cases[i-1];c.st=(c.fail&&!A.fixApplied)?'fail':'pass';if(c.st==='fail')A.exp[c.n]=true}
+    if(i<A.cases.length){A.cases[i].st='run';i++;render();setTimeout(step,620);return}
+    const p=passCount(),n=A.cases.length;
+    A.evalState=p===n?'passed':'failed';
+    A.history.forEach(h=>{if(h.mark==='= 当前草稿')h.mark='配置已变化'});
+    A.history.unshift({tgt:'草稿',hash:A.hash,p,n,t:'11-11 '+now().slice(0,5),mark:'= 当前草稿'});
+    toast(p===n?`评测通过 ${p}/${n}，可以发布`:`评测完成 ${p}/${n}，${n-p} 个未通过`);
+  };
+  render();setTimeout(step,300);
+}
+const ACT={
+  proto(d){const v=d.v;S.page=v;S.menu=false;S.mkSel=null;S.cmdk=false;S.np=false;S.modal=null;
+    if(v==='market'){S.view='market';S.role='user'}
+    if(v==='build'){S.view='agent';S.stage='orch';S.created=true;S.role='user';S.rtab='next'}
+    if(v==='flow'){S.agent=freshAgent();S.created=false;S.trialSaved=false;S.trialForm=false;S.trial=false;S.trialExtra=[];S.view='studio';S.role='user';S.np=true;S.npGen=0;S.npStep=0;S.npMode='desc'}
+    if(v==='admin'){S.view='admin';S.role='admin';S.adm.tab='accounts';S.adm.sel=1}
+    if(v==='chat'){S.view='chat';S.role='user'}
+    render()},
+  go(d){go(d.v);render()},
+  goAcct(d){S.acct=d.v;go('account');render()},
+  menu(){S.menu=!S.menu;render()},
+  role(){S.role=S.role==='admin'?'user':'admin';S.menu=false;if(S.role==='user'&&S.view==='admin')S.view='market';render();toast(S.role==='admin'?'已切换为管理员 周岚':'已切换为普通账号 林舟')},
+  toast(d){if(d.v)toast(d.v)},
+  cmdk(){S.cmdk=true;S.cmdkQ='';S.cmdkIdx=0;S.menu=false;render();setTimeout(()=>{const i=$('#cmdkq');i&&i.focus()},10)},
+  cmdRun(d){const L=cmds();const x=L[+d.i];S.cmdk=false;if(x){x.f();render()}},
+  closeOv(d,el,e){if(e.target!==el)return;S.cmdk=false;S.modal=null;if(!S.npGen)S.np=false;render()},
+  modalNo(){S.modal=null;render()},
+  modalOk(){const f=S.modal&&S.modal.fn;S.modal=null;f&&f();render()},
+  newOpen(){S.np=true;S.npGen=0;S.npStep=0;S.npMode='desc';render()},
+  npMode(d){S.npMode=d.v;render()},
+  npFill(d){S.npDesc=d.v;render()},
+  npClone(d){S.np=false;S.created=true;openAgent('orch');stamp();render();toast(`已克隆「${d.v}」为你的草稿（原型沿用演示智能体）`)},
+  npCreate(){
+    if(S.npMode==='blank'){S.np=false;S.created=true;openAgent('orch');stamp();render();toast('已创建草稿，自动保存');return}
+    S.npGen=1;S.npStep=0;render();
+    const t=()=>{S.npStep++;if(S.npStep<GEN_STEPS.length){render();setTimeout(t,420)}else{render();setTimeout(()=>{S.np=false;S.npGen=0;S.created=true;openAgent('orch');S.page=S.page==='flow'?'flow':'build';stamp();render();toast('已生成草稿「报销审核助手」，自动保存')},380)}};
+    setTimeout(t,420)},
+  mkCat(d){S.mkCat=d.v;render()},
+  mkSort(d){S.mkSort=d.v;render()},
+  mkApi(){S.mkApi=!S.mkApi;render()},
+  mkView(d){S.mkView=d.v;render()},
+  mkReset(){S.mkQ='';S.mkCat='全部';S.mkApi=false;render()},
+  mkOpen(d){S.view='market';S.mkSel=d.v;render()},
+  mkClose(){S.mkSel=null;render()},
+  useAgent(){S.mkSel=null;go('chat');render();toast('已用发布版新建会话')},
+  cloneAgent(d){S.mkSel=null;go('studio');render();toast(`已克隆「${d.v}」到工作室`)},
+  apiAgent(d){S.mkSel=null;if(d.v==='expense-reviewer'){openAgent('access')}else{go('dev')}render()},
+  openAgent(d){openAgent(d.v);render()},
+  stage(d){S.view='agent';S.stage=d.v;if(d.v==='orch')S.tocOn='basic';render();const b=$('#abody');if(b)b.scrollTop=0},
+  toc(d){S.tocOn=d.v;render();scrollToSec(d.v)},
+  goSec(d){S.trial=false;const map={vars:'orch',hook:'orch',prompt:'orch',key:'access',code:'access',try:'access',wh:'access'};const st=map[d.v]||S.stage;if(S.stage!==st){S.stage=st;render()}S.tocOn=d.v;render();scrollToSec(d.v)},
+  scrollFix(){setTimeout(()=>{const el=$('#fixbox')||$('#sec-ev-cases');const box=$('#abody');if(el&&box){box.scrollTo({top:el.offsetTop-20,behavior:'smooth'});el.classList.add('flash')}},20)},
+  rtab(d){S.rtab=d.v;render()},
+  rtabAi(){S.rtab='ai';render()},
+  fixToken(){S.agent.todo.varToken=true;stamp();render();toast('已保存 ERP_TOKEN 测试值，评测可以运行了')},
+  hookTest(){const A=S.agent;A.hookTest=1;render();setTimeout(()=>{A.hookTest=2;A.todo.hook=true;stamp();render();toast('测试投递成功：200 OK，112ms')},800)},
+  mcpTest(){const A=S.agent;A.mcpTest=1;render();setTimeout(()=>{A.mcpTest=2;render();toast('连接成功：erp-finance，12 个工具（未调用）')},700)},
+  kbTest(){S.agent.kbQ=($('#kbq')||{}).value||'';S.agent.kbRes=true;render();toast('命中 3 段')},
+  effort(d){S.agent.effort=d.v;stamp();render()},
+  perm(d){S.agent.perm=d.v;stamp();render()},
+  unatt(d){S.agent.unattended=d.v;stamp();render()},
+  aiApply(){S.agent.aiApplied=true;S.agent.changes++;stamp();render();toast('已应用到草稿：输出契约新增 total_cny')},
+  trial(){S.trial=!S.trial;render()},
+  trialTools(){S.trialTools=!S.trialTools;render()},
+  trialForm(){S.trialForm=!S.trialForm;render();setTimeout(()=>{const b=document.querySelector('[data-ks="trial"]');if(b)b.scrollTop=b.scrollHeight},20)},
+  saveCase(){const A=S.agent;A.cases.unshift(Object.assign({},CASE_TRIAL,{st:null}));S.trialSaved=true;S.trialForm=false;
+    if(A.evalState==='passed'||A.evalState==='failed')A.evalState='cases_changed';A.changes++;stamp();render();toast(`已存为评测用例「超额需审批」，共 ${A.cases.length} 个`)},
+  trialSend(){const i=$('#trialin');const v=(i&&i.value.trim())||'外币发票按哪天的汇率换算？';S.trialExtra.push({u:1,t:v});render();
+    setTimeout(()=>{S.trialExtra.push({t:'按<b>开票日</b>汇率换算为人民币后再判断是否超额。<div class="msg-meta"><span class="mono">2.1s</span><i class="dot"></i><span class="mono">1,204 tokens</span><i class="dot"></i><span class="mono">3 积分</span></div>'});render();const b=document.querySelector('[data-ks="trial"]');if(b)b.scrollTop=b.scrollHeight},800)},
+  runEval(){runEval()},
+  caseExp(d){const A=S.agent;A.exp[d.v]=!A.exp[d.v];render()},
+  addCase(){S.agent.addCase=!S.agent.addCase;render();if(S.agent.addCase)scrollToSec('ev-add')},
+  applyFix(){const A=S.agent;A.fixApplied=true;A.hash='8b40e7d';A.evalState='stale';A.changes++;stamp();render();toast('已应用到草稿：提示词新增规则 4、5，需要重跑')},
+  publish(){const A=S.agent;if(!pubReady())return;const v=maxV()+1;
+    confirmBox(`发布为 v${v}？`,`发布后，接口调用和其他人默认使用 v${v}；锁定了旧版本的调用方不受影响。进行中的会话不受影响。`,`发布 v${v}`,()=>{
+      A.versions.forEach(x=>x.cur=false);A.versions.unshift({v,cur:true,t:'11-11 '+now().slice(0,5),note:A.pubNote||'（无说明）',ev:`${passCount()}/${A.cases.length} 通过`,by:'林舟',fresh:true});
+      A.published=v;A.changes=0;stamp();setTimeout(()=>toast(`已发布 v${v}`),10)})},
+  cmp(d){const A=S.agent;if(!d.v){A.cmp=null}else{const [v,m]=d.v.split(':');A.cmp={v:+v,mode:m}}render()},
+  loadDraft(d){confirmBox(`用 v${d.v} 覆盖草稿？`,'草稿会被替换为该版本的配置，已发布的版本不受影响。','载入草稿',()=>{stamp();setTimeout(()=>toast(`已把 v${d.v} 载入草稿`),10)})},
+  rollback(d){const A=S.agent,v=+d.v;confirmBox(`${v<A.published?'回滚到':'设为发布版'} v${v}？`,'只需确认，不受评测限制，秒级生效；进行中的会话不受影响。','确认',()=>{A.versions.forEach(x=>x.cur=x.v===v);A.published=v;A.changes=Math.max(A.changes,1);setTimeout(()=>toast(`当前发布版：v${v}`),10)})},
+  pubToggle(){S.agent.isPublic=!S.agent.isPublic;render();toast(S.agent.isPublic?'已公开给所有账号（只读）':'已取消公开')},
+  listing(){S.agent.listing=1;render();toast('已提交上架申请，等待管理员审核')},
+  grant(){const i=$('#grantin');const v=(i&&i.value.trim())||'chenmo@xinghe.example';S.agent.grants.push({who:v,perm:'只读'});render();toast('已授权 '+v)},
+  revoke(d){S.agent.grants.splice(+d.v,1);render();toast('已撤销授权')},
+  keyExp(d){S.agent.keyExp=d.v;render()},
+  issueKey(){const A=S.agent;A.keyStage=1;A.keyPlain='owa_live_7Hq2mWx4cR9tLz0bVn3kPe8sJd5Ya91F';render()},
+  copyKey(){try{navigator.clipboard&&navigator.clipboard.writeText(S.agent.keyPlain).catch(()=>{})}catch(e){}toast('已复制 Key')},
+  keySaved(){S.agent.keyStage=2;render();toast('Key 已签发，明文已隐藏')},
+  rotate(){toast('已签发新 Key；旧 Key 24 小时后失效')},
+  revokeKey(){confirmBox('吊销这把 Key？','吊销后立即生效，使用它的调用会返回 401。','吊销',()=>{S.agent.keyStage=0;setTimeout(()=>toast('已吊销'),10)},true)},
+  codeTab(d){S.agent.codeTab=d.v;render()},
+  copyCode(){S.agent.copied=true;try{navigator.clipboard&&navigator.clipboard.writeText('curl ...').catch(()=>{})}catch(e){}render();toast('已复制调用代码')},
+  openapi(){S.agent.openapi=!S.agent.openapi;render()},
+  tryInvoke(){const A=S.agent;A.tryState=1;render();setTimeout(()=>{A.tryState=2;render();toast('试调成功：200 OK，verdict = need_approval')},1300)},
+  redeliver(d){const A=S.agent,x=A.deliv[+d.v];x.re=1;render();setTimeout(()=>{x.re=0;x.ok=true;x.code=200;x.ms=134;x.tr=x.tr.replace('第 3 次','第 4 次（手动重发）');render();toast('重发成功：200 OK')},900)},
+  runSel(d){S.agent.runSel=d.v===''?null:+d.v;render()},
+  cancelRun(){RUNS[0].st='cancel';RUNS[0].d='4.4s';RUNS[0].c='2';render();toast('已取消运行')},
+  admTab(d){S.adm.tab=d.v;S.adm.sel=null;render()},
+  admSel(d){S.adm.sel=d.v===''?null:+d.v;S.adm.pw=null;render()},
+  admRole(d){S.adm.role=d.v;render()},
+  newAcc(){S.adm.newAcc=!S.adm.newAcc;S.adm.created=false;render()},
+  createAcc(){S.adm.created=true;render();toast('账号已创建')},
+  resetPw(){S.adm.pw='Vt3q-8Lmw-Rx27';render()},
+  admRoleSet(){const a=ACC[S.adm.sel];a.r=a.r==='管理员'?'普通账号':'管理员';render();toast('角色已更新')},
+  admToggle(){const a=ACC[S.adm.sel];if(a.on)confirmBox('停用 '+a.e+'？','停用会立即登出该账号，并停用它的全部 API Key。恢复后 Key 需要重新签发。','停用',()=>{a.on=false;setTimeout(()=>toast('已停用'),10)},true);else{a.on=true;render();toast('已恢复，Key 需要重新签发')}},
+  ptab(d){S.adm.ptab=d.v;render()},
+  devTab(d){S.dev=d.v;render()},
+  acctTab(d){S.acct=d.v;render()},
+  chatSel(d){S.chat.sel=d.v;render()},
+  chatArch(){S.chat.arch=!S.chat.arch;render()},
+  chatR(d){S.chat.rtab=d.v;render()},
+  chatFile(d){S.chat.file=d.v;render()},
+  chatRun(d){S.chat.runSel=+d.v;render()},
+  chatTools(){S.chat.tools=!S.chat.tools;render()},
+  chatQ(d){S.chat.q=+d.v;render()},
+  chatQSubmit(){S.chat.qDone=true;render();toast('已提交回答')},
+  appr(d){S.chat.appr=d.v;render();if(d.v!=='wait')toast(d.v==='no'?'已拒绝':'已批准')},
+  mobTools(){S.mob.tools=!S.mob.tools;render()},
+  mobQ(d){S.mob.q=+d.v;render()},
+  mobQSubmit(){S.mob.qDone=true;render()},
+};
+document.addEventListener('click',e=>{
+  const t=e.target.closest('[data-a]');
+  if(!t){if(S.menu&&!e.target.closest('.gnav')){S.menu=false;render()}return}
+  const f=ACT[t.dataset.a];if(f){e.preventDefault();f(t.dataset,t,e)}
+});
+function setPath(p,v){const ks=p.split('.');let o=S;for(let i=0;i<ks.length-1;i++)o=o[ks[i]];o[ks[ks.length-1]]=v}
+document.addEventListener('input',e=>{
+  const el=e.target;
+  if(el.dataset.bind){setPath(el.dataset.bind,el.value);if(el.dataset.bind.startsWith('agent.'))S.agent.savedAt=now();return}
+  if(el.dataset.bindr){setPath(el.dataset.bindr,el.value);if(el.dataset.bindr==='cmdkQ')S.cmdkIdx=0;render()}
+});
+document.addEventListener('keydown',e=>{
+  const k=e.key;
+  if((e.metaKey||e.ctrlKey)&&k.toLowerCase()==='k'){e.preventDefault();if(S.cmdk){S.cmdk=false;render()}else ACT.cmdk();return}
+  if(S.cmdk){
+    const L=cmds();
+    if(k==='ArrowDown'){e.preventDefault();S.cmdkIdx=Math.min(L.length-1,S.cmdkIdx+1);render()}
+    else if(k==='ArrowUp'){e.preventDefault();S.cmdkIdx=Math.max(0,S.cmdkIdx-1);render()}
+    else if(k==='Enter'){e.preventDefault();const x=L[S.cmdkIdx];S.cmdk=false;if(x)x.f();render()}
+    else if(k==='Escape'){S.cmdk=false;render()}
+    return;
+  }
+  if(k==='Escape'){if(S.modal){S.modal=null;render()}else if(S.np&&!S.npGen){S.np=false;render()}else if(S.trial){S.trial=false;render()}else if(S.mkSel){S.mkSel=null;render()}else if(S.adm.sel!=null&&S.view==='admin'){S.adm.sel=null;render()}return}
+  if(S.np&&k==='Enter'&&!e.shiftKey&&!S.npGen&&S.npMode!=='clone'){e.preventDefault();ACT.npCreate();return}
+  const tag=(e.target.tagName||'').toLowerCase();if(tag==='input'||tag==='textarea'||tag==='select'||e.metaKey||e.ctrlKey||e.altKey)return;
+  if(k==='n'&&(S.view==='studio'||S.view==='market')){e.preventDefault();ACT.newOpen()}
+  else if(k==='t'&&S.view==='agent'&&(S.stage==='orch'||S.stage==='eval')){ACT.trial()}
+  else if(S.view==='agent'&&/^[1-6]$/.test(k)){const st=['new','orch','eval','pub','access','runs'][+k-1];if(st!=='new'){S.stage=st;render()}}
+});
+document.addEventListener('keydown',e=>{if(e.target&&e.target.id==='trialin'&&e.key==='Enter'&&!e.shiftKey){e.preventDefault();ACT.trialSend()}},true);
+render();
+</script>
+</body>
+</html>

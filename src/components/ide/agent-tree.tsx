@@ -3,6 +3,7 @@
 import { activityOf, sessionLabel } from "@/features/workbench/session-groups";
 import type { AgentSummary, SessionSummary } from "@/features/workbench/types";
 import { errorText, fetchJson } from "@/lib/fetch-json";
+import { agentHref } from "@/lib/nav/routes";
 import { cn } from "@/lib/utils";
 import { Bot, ChevronDown, ChevronRight, MessageSquare, Plus, Search } from "lucide-react";
 import Link from "next/link";
@@ -104,12 +105,12 @@ export function AgentTree(props: Props) {
           const encoded = encodeURIComponent(agent.id);
           const href =
             props.tab === "config" && agent.canRead !== false
-              ? `/agents?id=${encoded}`
+              ? agentHref({ id: agent.id })
               : props.tab === "runs"
-                ? `/settings/runs?agent=${encoded}`
+                ? agentHref({ id: agent.id, stage: "runs" })
                 : props.tab === "integration"
-                  ? `/settings/keys?agent=${encoded}`
-                  : `/?agent=${encoded}`;
+                  ? agentHref({ id: agent.id, stage: "access" })
+                  : `/chat?agent=${encoded}`;
           const children = sessions
             .filter(
               (s) =>
@@ -175,7 +176,7 @@ export function AgentTree(props: Props) {
                       )}
                     >
                       <Link
-                        href={`/?session=${encodeURIComponent(s.id)}`}
+                        href={`/chat?session=${encodeURIComponent(s.id)}`}
                         data-close-drawer=""
                         title={sessionLabel(s)}
                         aria-current={props.activeSessionId === s.id ? "page" : undefined}
@@ -204,7 +205,7 @@ export function AgentTree(props: Props) {
                   ))}
                   <li>
                     <Link
-                      href={`/?agent=${encodeURIComponent(agent.id)}`}
+                      href={`/chat?agent=${encodeURIComponent(agent.id)}`}
                       data-close-drawer=""
                       className="flex min-h-11 items-center gap-2 px-3 text-sm text-muted-foreground hover:text-foreground"
                       onClick={

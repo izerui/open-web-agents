@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>积分与套餐 · Open Web Agents</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/owa.css">
+<style>
+.ab-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:16px}
+.ab-stats .stat .l{font-size:13px;color:var(--sub)}
+.ab-stats .stat .n{margin:4px 0 2px}
+.ab-bar{height:6px;border-radius:3px;background:#ECEAE3;overflow:hidden;margin-top:8px}
+.ab-bar i{display:block;height:100%;background:var(--ok)}
+.ab-sech{display:flex;align-items:center;gap:12px;padding:18px 22px 10px}
+.ab-sech h3{margin:0;font-size:16px}
+.ab-pk{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:16px}
+.ab-pkc{padding:20px;display:flex;flex-direction:column;gap:6px}
+.ab-pkc .nm{font-family:var(--serif);font-weight:700;font-size:18px}
+.ab-pkc .cr{font-size:28px;font-weight:600;font-family:var(--serif);line-height:1.2}
+.ab-pkc .pr{font-size:15px}
+.ab-pkc .btn{margin-top:8px}
+.ab-num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.ab-r,table.tb th.ab-r{text-align:right}
+.ab-plus{color:var(--ok)}
+.ab-tools{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.ab-tools select.inp{width:auto;min-width:140px}
+.ab-filter{display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 6px 0 12px;border-radius:16px;background:var(--btn);color:#fff;font-size:13px}
+.ab-filter button{height:24px;padding:0 10px;border-radius:12px;background:rgba(255,255,255,.16);color:#fff;font-size:12px}
+.ab-foot{display:flex;justify-content:center;align-items:center;gap:8px;padding:14px}
+.ab-tot td{font-weight:600;background:#FAF9F6}
+.ab-sw{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--sub);cursor:pointer}
+.ab-sw input{width:16px;height:16px;accent-color:#1C1C1C}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="assets/owa.js"></script>
+<script>
+"use strict";
+/* 账户，积分与套餐：合并原 /settings/billing（概览 / 运行消耗 / 流水）与 /settings/packages（充值与订单） */
+const TABS = [["overview", "概览"], ["packages", "充值与订单"], ["ledger", "账户流水"], ["cost", "运行消耗"]];
+let tab = (location.hash.slice(1) && TABS.some((t) => t[0] === location.hash.slice(1))) ? location.hash.slice(1) : "overview";
+let legacy = false;
+const CAP = 5000;
+
+/* 流水 */
+const LTYPE = { credit: ["人工入账", "ok"], freeze: ["冻结", "warn"], settle: ["结算", ""], refund: ["多扣退还", "ok"], release: ["释放冻结", "line"] };
+const ledger = [
+  { t: "14:32", ty: "freeze", amt: -80, bal: "12,480", d: "运行 run_8f2c1a 预冻结，报销审核助手（工作台）" },
+  { t: "14:31", ty: "freeze", amt: -40, bal: "12,560", d: "运行 run_8f2b77 预冻结，报销审核助手（接口调用）" },
+  { t: "14:20", ty: "refund", amt: 32.8, bal: "12,600", d: "运行 run_8f2a03 冻结 40、实际 7.2，多冻结的 32.8 退还" },
+  { t: "14:20", ty: "settle", amt: -7.2, bal: "12,567.2", d: "运行 run_8f2a03 结算，从冻结中扣除，不影响可用余额" },
+  { t: "14:02", ty: "settle", amt: -3.1, bal: "12,567.2", d: "评测「外币换算」结算，从冻结中扣除" },
+  { t: "11:05", ty: "release", amt: 39.4, bal: "12,567.2", d: "运行 run_8f27aa 已取消，释放剩余冻结（已结算 0.6）" },
+  { t: "11-10", ty: "credit", amt: 5000, bal: "12,527.8", d: "管理员 周岚 人工入账，订单 ORD-20261108-0042（标准包）" },
+  { t: "11-09", ty: "settle", amt: -21.0, bal: "7,527.8", d: "运行 run_8f1d10 结算，竞品周报（新版）" },
+];
+const ledgerMore = [
+  { t: "11-03", ty: "settle", amt: -18.4, bal: "7,527.8", d: "运行 run_8f0c92 结算，会议纪要整理" },
+  { t: "11-01", ty: "credit", amt: 3000, bal: "7,527.8", d: "管理员 周岚 人工入账，11 月部门额度" },
+  { t: "10-28", ty: "refund", amt: 12.5, bal: "4,527.8", d: "运行 run_8e77a0 多扣退还（用量回报后重算）" },
+];
+let ledgerAll = false;
+
+/* 套餐与订单 */
+const PKGS = [
+  { id: "p1", n: "体验包", cr: 1000, pr: 10, v: 1, d: "适合个人试用" },
+  { id: "p2", n: "标准包", cr: 5000, pr: 48, v: 2, d: "约 2,500 次轻量对话" },
+  { id: "p3", n: "团队包", cr: 20000, pr: 180, v: 1, d: "适合一个部门一个月" },
+  { id: "p4", n: "企业包", cr: 100000, pr: 850, v: 3, d: "长期接入、批量调用" },
+];
+let orders = [
+  { id: "ORD-20261111-0107", p: "团队包 v1", cr: 20000, pr: 180, at: "11-11 09:40", st: "pending" },
+  { id: "ORD-20261108-0042", p: "标准包 v2", cr: 5000, pr: 48, at: "11-08 16:12", st: "done", note: "11-10 周岚 确认：财务已转账" },
+  { id: "ORD-20261020-0019", p: "体验包 v1", cr: 1000, pr: 10, at: "10-20 10:03", st: "cancelled" },
+];
+const ordersMore = [{ id: "ORD-20260915-0008", p: "标准包 v1", cr: 5000, pr: 50, at: "09-15 14:22", st: "done", note: "09-16 周岚 确认" }];
+let ordersAll = false;
+const OST = { pending: ["待人工处理", "warn"], done: ["积分已发放", "ok"], cancelled: ["已取消", "line"] };
+
+/* 运行消耗 */
+const DIMS = { source: "来源", agent: "智能体", key: "API Key" };
+const BASE = {
+  source: [["工作台", 412, 806, 6, 80], ["API 会话", 96, 236, 0, 0], ["接口调用", 388, 604, 3.4, 40], ["评测", 54, 168, 0, 0], ["AI 编辑", 9, 48, 0, 0]],
+  agent: [["报销审核助手", 618, 1126, 3.4, 120], ["会议纪要整理", 142, 388, 0, 0], ["周报生成器", 96, 164, 6, 0], ["SQL 助手", 71, 92, 0, 0], ["竞品周报（新版）", 18, 58, 0, 0], ["合同条款比对", 14, 34, 0, 0]],
+  key: [["报销系统对接（生产）", 322, 572, 3.4, 40], ["会议纪要，飞书机器人", 162, 268, 0, 0], ["不经 Key（网页内使用）", 475, 1022, 6, 80]],
+};
+const PERIOD = { this: ["本月", 1], last: ["上月", 1.38], d30: ["近 30 天", 1.21], d90: ["近 90 天", 3.6] };
+let dim = "source", period = "this", drill = null;
+const DST = { frozen: ["冻结中", "warn"], settled: ["已结算", "ok"], refunded: ["多扣已退还", "ok"], debt: ["欠额", "bad"], pending: ["待核对", ""] };
+const DETAIL = [
+  { t: "11-11 14:32", ag: "报销审核助手", src: "工作台", key: "不经 Key（网页内使用）", st: "frozen", fz: 80, ded: 0, note: "运行中，结束后按实际用量结算" },
+  { t: "11-11 14:31", ag: "报销审核助手", src: "接口调用", key: "报销系统对接（生产）", st: "frozen", fz: 40, ded: 0, note: "排队中" },
+  { t: "11-11 14:20", ag: "报销审核助手", src: "接口调用", key: "报销系统对接（生产）", st: "refunded", fz: 40, ded: 7.2, note: "冻结 40，实际 7.2，退还 32.8" },
+  { t: "11-11 14:02", ag: "报销审核助手", src: "评测", key: "不经 Key（网页内使用）", st: "settled", fz: 20, ded: 3.1, note: "评测用例「外币换算」" },
+  { t: "11-11 13:47", ag: "会议纪要整理", src: "API 会话", key: "会议纪要，飞书机器人", st: "settled", fz: 40, ded: 18.4, note: "" },
+  { t: "11-11 10:41", ag: "报销审核助手", src: "AI 编辑", key: "不经 Key（网页内使用）", st: "settled", fz: 40, ded: 11.9, note: "" },
+  { t: "11-10 18:22", ag: "周报生成器", src: "工作台", key: "不经 Key（网页内使用）", st: "debt", fz: 20, ded: 20, note: "实际 26，冻结不足，欠额 6（下次充值后自动补扣）" },
+  { t: "11-10 15:40", ag: "报销审核助手", src: "接口调用", key: "报销系统对接（生产）", st: "debt", fz: 10, ded: 10, note: "实际 13.4，欠额 3.4" },
+  { t: "11-10 11:30", ag: "合同条款比对", src: "API 会话", key: "会议纪要，飞书机器人", st: "pending", fz: 40, ded: 4.4, note: "模型没回报完整用量，按已知部分扣除，等待核对" },
+  { t: "11-09 16:40", ag: "竞品周报（新版）", src: "工作台", key: "不经 Key（网页内使用）", st: "settled", fz: 40, ded: 21.0, note: "" },
+  { t: "11-09 16:10", ag: "SQL 助手", src: "工作台", key: "不经 Key（网页内使用）", st: "settled", fz: 10, ded: 1.0, note: "" },
+];
+
+OWA.mount({
+  nav: "account",
+  body: `<div class="bwrap">${sideNav("account")}
+    <main class="main">
+      <div class="ph"><div><h1>积分与套餐</h1><p class="muted" style="margin:6px 0 0">${OWA.me().name}的积分账户。运行开始时按模型预冻结，结束后按实际用量结算，多冻结的退还。</p></div>
+        <button class="btn" style="margin-left:auto" data-a="tab" data-t="packages">${ic("plus", 16)}充值</button></div>
+      <div class="tabs" role="tablist" id="ab-tabs"></div>
+      <div id="ab-body"></div>
+    </main></div>`,
+});
+
+function renderTabs() { $("#ab-tabs").innerHTML = TABS.map(([k, n]) => `<button role="tab" class="${tab === k ? "on" : ""}" aria-selected="${tab === k}" data-a="tab" data-t="${k}">${n}</button>`).join(""); }
+OWA.on("tab", (el) => { tab = el.dataset.t; history.replaceState(null, "", "#" + tab); render(); $(".main").scrollTop = 0; });
+const fmt = (n) => (Math.round(n * 10) / 10).toLocaleString(undefined, { maximumFractionDigits: 1 });
+
+function ledgerTable(rows, more) {
+  return `<table class="tb"><thead><tr><th style="padding-left:22px">时间</th><th>类型</th><th class="ab-r">积分</th><th class="ab-r">可用余额</th><th style="padding-right:22px">说明</th></tr></thead><tbody>
+    ${rows.map((r) => `<tr><td style="padding-left:22px" class="ab-num">${r.t}</td><td><span class="tag ${LTYPE[r.ty][1]}">${LTYPE[r.ty][0]}</span></td>
+      <td class="ab-r ab-num ${r.amt > 0 ? "ab-plus" : ""}">${r.amt > 0 ? "+" : ""}${fmt(r.amt)}</td><td class="ab-r ab-num">${r.bal}</td><td style="padding-right:22px">${esc(r.d)}</td></tr>`).join("")}</tbody></table>
+    ${more === undefined ? "" : `<div class="ab-foot">${more ? `<button class="btn ghost sm" data-a="ledger-more">加载更早的</button>` : `<span class="muted small">没有更早的流水了</span>`}</div>`}`;
+}
+
+function overview() {
+  const pct = Math.round((1862 / CAP) * 100);
+  return `<div class="row" style="justify-content:flex-end;margin:-4px 0 10px"><label class="ab-sw"><input type="checkbox" id="sw-legacy" ${legacy ? "checked" : ""}>原型：显示「旧上限未重设」提示</label></div>
+    ${legacy ? `<div class="banner warn">${ic("warn", 18)}<div><b>你的月度上限还是旧的美元额度（$20.00），需要按积分重新设置，设置前不能发起运行。</b><br>请联系管理员 周岚 在「平台管理，账号」里为你设置积分上限。</div></div>` : ""}
+    <div class="ab-stats">
+      <div class="stat"><div class="l">可用</div><div class="n">12,480</div><div class="small muted">积分长期有效，不清零</div></div>
+      <div class="stat"><div class="l">冻结中</div><div class="n">120</div><div class="small muted">2 个运行进行中，结束后按实际用量结算</div></div>
+      <div class="stat"><div class="l">本月已用 / 月度上限</div><div class="n">1,862 <span style="font-size:16px;color:var(--sub);font-family:var(--sans);font-weight:400">/ ${CAP.toLocaleString()}</span></div>
+        <div class="ab-bar"><i style="width:${pct}%"></i></div><div class="small muted" style="margin-top:6px">已用 ${pct}%，上限由管理员设置，超过后新运行会被拒绝</div></div>
+    </div>
+    <div class="grid2" style="grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:16px;align-items:start">
+      <section class="card"><div class="ab-sech"><h3>最近流水</h3><button class="link small" style="margin-left:auto" data-a="tab" data-t="ledger">查看全部流水</button></div>${ledgerTable(ledger.slice(0, 5))}<div style="height:6px"></div></section>
+      <section class="card" style="padding:20px 22px">
+        <h3 style="margin:0 0 4px;font-size:16px">本月花在哪</h3><p class="muted small" style="margin:0 0 12px">按来源，实际扣除</p>
+        ${BASE.source.map(([n, , d]) => `<div style="margin-bottom:10px"><div class="row" style="justify-content:space-between"><span>${n}</span><span class="ab-num">${d.toLocaleString()}</span></div><div class="ab-bar" style="margin-top:4px"><i style="width:${(d / 1862) * 100}%;background:#8A857A"></i></div></div>`).join("")}
+        <button class="btn ghost sm" style="margin-top:6px" data-a="tab" data-t="cost">看运行消耗明细</button>
+        <hr style="border:0;border-top:1px solid var(--line2);margin:18px 0 14px">
+        <div class="row"><div><div style="font-weight:600">积分不够了？</div><div class="small muted">买固定积分包，管理员人工确认后到账</div></div><button class="btn sm" style="margin-left:auto" data-a="tab" data-t="packages">去充值</button></div>
+      </section>
+    </div>`;
+}
+
+function packages() {
+  const list = ordersAll ? orders.concat(ordersMore) : orders;
+  return `<div class="banner info">${ic("info", 18)}<div>积分包是固定额度，买到就长期有效。下单后由管理员人工确认收款并发放积分；<b>在线支付和自动扣费都没有启用</b>，创建订单不会扣款。<button class="link" data-a="tab" data-t="overview">查看积分账户</button></div></div>
+    <div class="ab-pk">${PKGS.map((p) => `<div class="card ab-pkc"><div class="row"><span class="nm">${p.n}</span><span class="tag line" style="margin-left:auto">v${p.v}</span></div>
+      <div class="cr">${p.cr.toLocaleString()} <span style="font-size:14px;font-family:var(--sans);font-weight:400;color:var(--sub)">积分</span></div>
+      <div class="pr">¥${p.pr.toLocaleString()} <span class="muted small">CNY</span></div><div class="small muted">${p.d}</div>
+      <button class="btn ${p.id === "p2" ? "" : "ghost"}" data-a="order" data-id="${p.id}">创建订单</button></div>`).join("")}</div>
+    <section class="card"><div class="ab-sech"><h3>我的订单</h3><span class="muted small">${list.length} 笔</span></div>
+      <table class="tb"><thead><tr><th style="padding-left:22px">订单号</th><th>积分包</th><th class="ab-r">积分</th><th class="ab-r">金额</th><th>创建时间</th><th>状态</th><th style="padding-right:22px;text-align:right">操作</th></tr></thead><tbody>
+      ${list.map((o) => `<tr><td style="padding-left:22px;font-family:var(--mono);font-size:12.5px">${o.id}</td><td>${o.p}</td><td class="ab-r ab-num">${o.cr.toLocaleString()}</td><td class="ab-r ab-num">¥${o.pr}</td><td class="ab-num">${o.at}</td>
+        <td><span class="tag ${OST[o.st][1]}">${OST[o.st][0]}</span>${o.note ? `<div class="small muted">${o.note}</div>` : ""}${o.st === "pending" ? `<div class="small muted">等待管理员确认收款</div>` : ""}</td>
+        <td style="padding-right:22px;text-align:right">${o.st === "pending" ? `<button class="btn danger sm" data-a="cancel-order" data-id="${o.id}">取消订单</button>` : ""}</td></tr>`).join("")}
+      </tbody></table>
+      <div class="ab-foot">${ordersAll ? `<span class="muted small">没有更早的订单了</span>` : `<button class="btn ghost sm" data-a="orders-more">加载更早的</button>`}</div></section>`;
+}
+
+function ledgerTab() {
+  return `<section class="card"><div class="ab-sech"><h3>账户流水</h3><span class="muted small">可用 12,480，冻结中 120</span></div>${ledgerTable(ledgerAll ? ledger.concat(ledgerMore) : ledger, !ledgerAll)}</section>`;
+}
+
+function cost() {
+  const k = PERIOD[period][1];
+  const rows = BASE[dim].map(([n, c, d, debt, fz]) => ({ n, c: Math.round(c * k), d: d * k, debt: period === "this" ? debt : debt * k, fz: period === "this" || period === "d30" || period === "d90" ? fz : 0 }));
+  const tot = rows.reduce((a, r) => ({ c: a.c + r.c, d: a.d + r.d, debt: a.debt + r.debt, fz: a.fz + r.fz }), { c: 0, d: 0, debt: 0, fz: 0 });
+  const field = { source: "src", agent: "ag", key: "key" }[dim];
+  const det = drill ? DETAIL.filter((x) => x[field] === drill) : DETAIL;
+  return `<div class="ab-tools"><span class="muted">维度</span><div class="seg">${Object.entries(DIMS).map(([k2, n]) => `<button class="${dim === k2 ? "on" : ""}" data-a="dim" data-k="${k2}">${n}</button>`).join("")}</div>
+      <select class="inp" id="period" aria-label="时间范围" style="margin-left:8px">${Object.entries(PERIOD).map(([k2, [n]]) => `<option value="${k2}" ${period === k2 ? "selected" : ""}>${n}</option>`).join("")}</select>
+      <span class="muted small" style="margin-left:auto">合计 = 实际扣除 + 欠额 + 冻结中</span></div>
+    <section class="card" style="margin-bottom:16px"><table class="tb"><thead><tr><th style="padding-left:22px">${DIMS[dim]}</th><th class="ab-r">次数</th><th class="ab-r">实际扣除</th><th class="ab-r">欠额</th><th class="ab-r">冻结中</th><th class="ab-r" style="padding-right:22px">合计</th></tr></thead><tbody>
+      ${rows.map((r) => `<tr class="click ${drill === r.n ? "sel" : ""}" data-a="drill" data-n="${esc(r.n)}" title="查看「${esc(r.n)}」的运行明细"><td style="padding-left:22px"><span class="row" style="gap:6px">${r.n}${ic("chev", 14)}</span></td><td class="ab-r ab-num">${r.c.toLocaleString()}</td><td class="ab-r ab-num">${fmt(r.d)}</td>
+        <td class="ab-r ab-num" style="${r.debt ? "color:var(--bad)" : ""}">${r.debt ? fmt(r.debt) : '<span class="muted">0</span>'}</td><td class="ab-r ab-num">${r.fz ? fmt(r.fz) : '<span class="muted">0</span>'}</td><td class="ab-r ab-num" style="padding-right:22px">${fmt(r.d + r.debt + r.fz)}</td></tr>`).join("")}
+      <tr class="ab-tot"><td style="padding-left:22px">合计（${PERIOD[period][0]}）</td><td class="ab-r ab-num">${tot.c.toLocaleString()}</td><td class="ab-r ab-num">${fmt(tot.d)}</td><td class="ab-r ab-num">${fmt(tot.debt)}</td><td class="ab-r ab-num">${fmt(tot.fz)}</td><td class="ab-r ab-num" style="padding-right:22px">${fmt(tot.d + tot.debt + tot.fz)}</td></tr>
+    </tbody></table></section>
+    <section class="card" id="ab-detail"><div class="ab-sech"><h3>运行明细</h3>
+      ${drill ? `<span class="ab-filter">只看：${esc(drill)}<button data-a="drill-all">看全部</button></span>` : `<span class="muted small">点上表的一行，只看那一项</span>`}
+      <span class="muted small" style="margin-left:auto">${det.length} 条</span></div>
+      ${det.length ? `<table class="tb"><thead><tr><th style="padding-left:22px">时间</th><th>智能体</th><th>来源</th><th>API Key</th><th>状态</th><th class="ab-r">冻结</th><th class="ab-r">实际扣除</th><th style="padding-right:22px">说明</th></tr></thead><tbody>
+      ${det.map((x) => `<tr><td style="padding-left:22px" class="ab-num">${x.t}</td><td>${x.ag}</td><td>${x.src}</td><td class="small">${x.key}</td><td><span class="tag ${DST[x.st][1]}">${DST[x.st][0]}</span></td><td class="ab-r ab-num">${x.fz}</td><td class="ab-r ab-num">${x.st === "frozen" ? '<span class="muted">—</span>' : fmt(x.ded)}</td><td style="padding-right:22px" class="small muted">${x.note || "—"}</td></tr>`).join("")}</tbody></table>`
+      : `<div class="empty-state"><div class="serif">这个时间段里没有明细</div><button class="btn ghost sm" data-a="drill-all">看全部</button></div>`}
+      <div class="ab-foot"><a class="link small" href="dev-runs.html">去运行记录看每次运行的输入和回答</a></div></section>`;
+}
+
+function render() {
+  renderTabs();
+  $("#ab-body").innerHTML = { overview, packages, ledger: ledgerTab, cost }[tab]();
+  $("#sw-legacy")?.addEventListener("change", (e) => { legacy = e.target.checked; render(); });
+  $("#period")?.addEventListener("change", (e) => { period = e.target.value; render(); });
+}
+OWA.on("ledger-more", (el) => { el.outerHTML = '<span class="spin"></span>'; setTimeout(() => { ledgerAll = true; render(); }, 600); });
+OWA.on("orders-more", (el) => { el.outerHTML = '<span class="spin"></span>'; setTimeout(() => { ordersAll = true; render(); }, 600); });
+OWA.on("order", (el) => {
+  const p = PKGS.find((x) => x.id === el.dataset.id);
+  confirmBox({
+    title: `创建「${p.n}」订单？`,
+    body: `<p style="margin:0">${p.cr.toLocaleString()} 积分，¥${p.pr}（CNY），积分包 v${p.v}。</p><p class="muted" style="margin:8px 0 0">现在<b>不会扣款</b>。订单交给管理员人工处理，确认收款后积分发放到你的账户；没发放前可以随时取消。</p>`,
+    ok: "创建订单",
+    onOk() {
+      orders.unshift({ id: "ORD-20261111-0" + (108 + orders.length), p: `${p.n} v${p.v}`, cr: p.cr, pr: p.pr, at: "11-11 " + new Date().toTimeString().slice(0, 5), st: "pending" });
+      render(); toast("订单已创建，等待管理员处理");
+    },
+  });
+});
+OWA.on("cancel-order", (el) => {
+  const o = orders.find((x) => x.id === el.dataset.id);
+  confirmBox({ title: "取消这笔订单？", body: `<p style="margin:0">${o.id}（${o.p}，${o.cr.toLocaleString()} 积分）。如果已经转账，请先联系管理员。</p>`, ok: "取消订单", danger: true,
+    onOk() { o.st = "cancelled"; render(); toast("订单已取消"); } });
+});
+OWA.on("dim", (el) => { dim = el.dataset.k; drill = null; render(); });
+OWA.on("drill", (el) => { drill = el.dataset.n; render(); $("#ab-detail").scrollIntoView({ behavior: "smooth", block: "start" }); });
+OWA.on("drill-all", () => { drill = null; render(); });
+render();
+</script>
+</body>
+</html>

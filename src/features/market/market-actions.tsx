@@ -2,6 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { errorText, fetchJson } from "@/lib/fetch-json";
+import { agentHref } from "@/lib/nav/routes";
 import { Copy, Play, Terminal } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -24,7 +25,7 @@ export function MarketActions({ agentId }: { agentId: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ agentId, versionMode: "published" }),
       });
-      router.push(`/?session=${encodeURIComponent(result.session.id)}`);
+      router.push(`/chat?session=${encodeURIComponent(result.session.id)}`);
     } catch (error) {
       toast.error(`创建会话失败：${errorText(error)}`);
     } finally {
@@ -43,7 +44,7 @@ export function MarketActions({ agentId }: { agentId: string }) {
         { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
       );
       toast.success(`已克隆为「${result.agent.name}」`);
-      router.push(`/agents?id=${encodeURIComponent(result.agent.id)}`);
+      router.push(agentHref({ id: result.agent.id }));
     } catch (error) {
       toast.error(`克隆失败：${errorText(error)}`);
     } finally {
@@ -63,7 +64,7 @@ export function MarketActions({ agentId }: { agentId: string }) {
         克隆到我的智能体
       </Button>
       <Button size="sm" variant="outline" asChild>
-        <Link href={`/settings/keys?agent=${encodeURIComponent(agentId)}`}>
+        <Link href={agentHref({ id: agentId, stage: "access" })}>
           <Terminal className="size-4" />
           API 接入
         </Link>

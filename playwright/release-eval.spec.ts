@@ -27,7 +27,7 @@ test.describe("评测与发布", () => {
     const agentId = ((await created.json()) as { agent: { id: string } }).agent.id;
     page.on("dialog", (d) => void d.accept());
 
-    await page.goto(`${BASE}/agents?id=${agentId}`);
+    await page.goto(`${BASE}/agents/${agentId}`);
     await page.getByRole("tab", { name: "发布与分享", exact: true }).click();
     const draftEval = page.getByTestId("draft-eval");
     const publish = page.getByRole("button", { name: "发布为 v1" });

@@ -1,9 +1,6 @@
-import { MarketView } from "@/features/market/market-view";
-import { requireLogin } from "@/lib/server-guard";
+import { type PageSearchParams, redirectLegacy } from "@/lib/nav/legacy-page";
 
-export const dynamic = "force-dynamic";
-
-export default async function Page() {
-  await requireLogin();
-  return <MarketView />;
+/** 旧地址(见 src/lib/nav/routes.ts 的 legacyRedirect) */
+export default async function Page({ searchParams }: { searchParams: PageSearchParams }) {
+  return redirectLegacy("/market", searchParams);
 }
