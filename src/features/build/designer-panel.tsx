@@ -384,7 +384,7 @@ export function DesignerPanel({
         {/* 没有对话轮次(比如只勾了 Skills / MCP 来源)时改动没处挂,放在输入框上方 */}
         {g.pending.length > 0 && !inlinePending && <PendingChanges designer={g} wide={wide} />}
 
-        {next && g.pending.length === 0 && !g.running && (
+        {next && !g.running && (
           <NextStepBar step={next} wide={wide} onNext={onNext} onDismiss={onDismissNext} />
         )}
 
