@@ -11,8 +11,6 @@ const OUT = path.join(
 const shot = (page: Page, name: string) =>
   page.screenshot({ path: path.join(OUT, `${name}.png`), animations: "disabled" });
 
-const EMAIL = process.env.OWA_REVIEW_EMAIL ?? "design-review@example.test";
-const PASSWORD = process.env.OWA_REVIEW_PASSWORD ?? "design-review-123";
 
 const NOW = Date.now();
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -153,11 +151,16 @@ const previews: Record<string, string> = {
   "invoices/退回通知-1018.md": "# 退回通知\n\n发票 1018 抬头缺少公司全称。",
 };
 
+/** 每个用例注册一个新账号(接口都用 page.route 模拟,账号只用来过登录) */
 async function login(page: Page) {
   const res = await page.request.post("/api/auth", {
-    data: { action: "login", email: EMAIL, password: PASSWORD },
+    data: {
+      action: "register",
+      email: `pw-chat-fidelity-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.test`,
+      password: "e2e-password-123456",
+    },
   });
-  expect(res.ok()).toBeTruthy();
+  expect(res.ok(), `注册失败: ${res.status()}`).toBeTruthy();
 }
 
 interface Opts {
@@ -464,7 +467,10 @@ test("F5 F27:必填变量没填", async ({ page }) => {
   await page.goto("/chat?agent=expense-reviewer");
   // F14:新会话还没发消息,左栏有一行
   await expect(
-    page.getByRole("navigation", { name: "会话列表" }).getByText("新会话"),
+    page
+      .getByRole("navigation", { name: "会话列表" })
+      .getByRole("region", { name: "今天" })
+      .getByText("新会话"),
   ).toBeVisible();
   const box = page.getByRole("textbox", { name: "消息", exact: true });
   await box.fill("开始初审");

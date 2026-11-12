@@ -254,7 +254,8 @@ test("无效或空对象链接禁止发送，用户显式选择后恢复；有�
         name: id ? "找不到指定的智能体，或你没有访问权限。" : "链接缺少智能体 ID。",
       }),
     ).toBeVisible();
-    await expect(composer(page)).toBeDisabled();
+    // 没有可用的智能体时只留空态,不显示输入框
+    await expect(composer(page)).toHaveCount(0);
     await expect(stages(page)).toHaveCount(0);
     await expect(page).toHaveURL(new RegExp(`/chat\\?agent=${id}$`));
     await page.getByRole("button", { name: "新会话", exact: true }).click();
@@ -381,7 +382,7 @@ test("登出失败保留当前页面与账号，不显示成功", async ({ page 
   await page.getByRole("button", { name: "账号菜单", exact: true }).click();
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("menuitem", { name: "登出", exact: true }).click();
-  await expect(page.getByText("登出失败:登出服务不可用")).toBeVisible();
+  await expect(page.getByText("登出失败：登出服务不可用")).toBeVisible();
   await expect(page).toHaveURL(/\/agents\/review-a$/);
   await expect(page.getByText("已登出", { exact: true })).toHaveCount(0);
   await expect(prompt(page)).toHaveValue("登出失败也要保留的草稿");

@@ -54,8 +54,8 @@ test.describe("积分与计费界面", () => {
       await expect(page.getByText("结束后按实际用量扣除")).toBeVisible();
       await page.getByRole("tab", { name: "运行消耗", exact: true }).click();
       const row = page.getByTestId("run-charge").filter({ hasText: runId });
-      await expect(row.locator("td").nth(2)).toHaveText("57.75");
-      await expect(row.locator("td").nth(3)).toHaveText("57.75");
+      await expect(row.locator("td").nth(4)).toHaveText("57.75");
+      await expect(row.locator("td").nth(5)).toHaveText("57.75");
       await expect(row).toContainText("已结算");
       // 没有试算的概念
       await expect(page.getByText(/试算|预计消耗|本应拒绝/)).toHaveCount(0);
@@ -134,11 +134,11 @@ test.describe("积分与计费界面", () => {
       const row = (i: number) =>
         page.getByTestId("run-charge").filter({ hasText: rows[i]?.id ?? "" });
       await expect(row(0)).toContainText("欠额余额不足,欠 27.75 积分,充值后自动补扣");
-      await expect(row(0).locator("td").nth(3)).toHaveText("30.00");
+      await expect(row(0).locator("td").nth(5)).toHaveText("30.00");
       await expect(row(1)).toContainText("待核对用量待补记");
       await expect(row(1)).not.toContainText("退还");
-      await expect(row(1).locator("td").nth(2)).toHaveText("69.30");
-      await expect(row(1).locator("td").nth(3)).toHaveText("92.40");
+      await expect(row(1).locator("td").nth(4)).toHaveText("69.30");
+      await expect(row(1).locator("td").nth(5)).toHaveText("92.40");
       await expect(row(2)).toContainText("待核对用量待补记");
     } finally {
       for (const r of rows) await sql("DELETE FROM run_charges WHERE run_id = ?", [r.id]);
@@ -157,7 +157,7 @@ test.describe("积分与计费界面", () => {
       await page.getByRole("tab", { name: "运行消耗", exact: true }).click();
       const r = page.getByTestId("run-charge").filter({ hasText: refunded });
       await expect(r).toContainText("多扣已退还多扣的 23.10 积分已退还");
-      await expect(r.locator("td").nth(3)).toHaveText("69.30");
+      await expect(r.locator("td").nth(5)).toHaveText("69.30");
     } finally {
       await sql("DELETE FROM run_charges WHERE run_id = ?", [refunded]);
     }

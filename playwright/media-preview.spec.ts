@@ -118,8 +118,7 @@ test.describe("视频/PDF/音频预览", () => {
     await uploadBuffer(context, sessionId, fs.readFileSync(fixtures.mp4), "seek-test.mp4");
 
     await page.goto(`${BASE}/chat?session=${sessionId}`);
-    // coze-v3:工作区文件在右侧面板里,默认关着
-    await page.getByRole("button", { name: "工作区文件", exact: true }).click();
+    // 第一次进对话页(没有面板记忆)默认打开工作区文件
     await expect(page.getByText("seek-test.mp4")).toBeVisible({ timeout: 15_000 });
     await page.getByText("seek-test.mp4").click();
 
@@ -170,8 +169,7 @@ test.describe("视频/PDF/音频预览", () => {
     await uploadBuffer(context, sessionId, fs.readFileSync(fixtures.pdf), "render-test.pdf");
 
     await page.goto(`${BASE}/chat?session=${sessionId}`);
-    // coze-v3:工作区文件在右侧面板里,默认关着
-    await page.getByRole("button", { name: "工作区文件", exact: true }).click();
+    // 第一次进对话页(没有面板记忆)默认打开工作区文件
     await expect(page.getByText("render-test.pdf")).toBeVisible({ timeout: 15_000 });
     await page.getByText("render-test.pdf").click();
 
@@ -217,8 +215,7 @@ test.describe("视频/PDF/音频预览", () => {
 
     await uploadBuffer(context, sessionId, blankPdf, "blank-test.pdf");
     await page.goto(`${BASE}/chat?session=${sessionId}`);
-    // coze-v3:工作区文件在右侧面板里,默认关着
-    await page.getByRole("button", { name: "工作区文件", exact: true }).click();
+    // 第一次进对话页(没有面板记忆)默认打开工作区文件
     await expect(page.getByText("blank-test.pdf")).toBeVisible({ timeout: 15_000 });
     await page.getByText("blank-test.pdf").click();
 
@@ -245,8 +242,7 @@ test.describe("视频/PDF/音频预览", () => {
     await uploadBuffer(context, sessionId, fs.readFileSync(fixtures.wav), "dur-test.wav");
 
     await page.goto(`${BASE}/chat?session=${sessionId}`);
-    // coze-v3:工作区文件在右侧面板里,默认关着
-    await page.getByRole("button", { name: "工作区文件", exact: true }).click();
+    // 第一次进对话页(没有面板记忆)默认打开工作区文件
     await expect(page.getByText("dur-test.wav")).toBeVisible({ timeout: 15_000 });
     await page.getByText("dur-test.wav").click();
 
@@ -271,8 +267,7 @@ test.describe("视频/PDF/音频预览", () => {
     await uploadBuffer(context, sessionId, originalPdf, "dl-btn-test.pdf");
 
     await page.goto(`${BASE}/chat?session=${sessionId}`);
-    // coze-v3:工作区文件在右侧面板里,默认关着
-    await page.getByRole("button", { name: "工作区文件", exact: true }).click();
+    // 第一次进对话页(没有面板记忆)默认打开工作区文件
     await expect(page.getByText("dl-btn-test.pdf")).toBeVisible({ timeout: 15_000 });
     await page.getByText("dl-btn-test.pdf").click();
 
