@@ -32,6 +32,16 @@ describe("legacyRedirect:旧地址落到新位置并保留参数", () => {
     ["/usage", "", "/account/usage"],
     ["/settings/audit", "", "/account/audit"],
     ["/market", "", "/"],
+    ["/admin/providers", "", "/admin/models?tab=providers"],
+    ["/admin/providers", "tab=routing", "/admin/models?tab=routing"],
+    ["/admin/providers/p1", "", "/admin/models/providers/p1"],
+    ["/admin/providers/p1", "tab=image", "/admin/models/providers/p1?tab=image"],
+    ["/admin/providers/%E5%86%85%E7%BD%91", "", "/admin/models/providers/%E5%86%85%E7%BD%91"],
+    ["/admin/capabilities", "", "/admin/models?tab=providers"],
+    ["/admin/usage", "", "/admin/ops?tab=usage"],
+    ["/admin/runs", "", "/admin/ops?tab=runs"],
+    ["/admin/runs", "agent=x", "/admin/ops?agent=x&tab=runs"],
+    ["/admin/audit", "", "/admin/ops?tab=audit"],
   ])("%s?%s → %s", (path, query, target) => {
     expect(go(path, query)).toBe(target);
   });
@@ -41,6 +51,11 @@ describe("legacyRedirect:旧地址落到新位置并保留参数", () => {
     expect(go("/agents")).toBeNull();
     expect(go("/market/x")).toBeNull();
     expect(go("/chat", "session=s")).toBeNull();
+    expect(go("/admin/models")).toBeNull();
+    expect(go("/admin/models", "tab=routing")).toBeNull();
+    expect(go("/admin/models/providers/p1")).toBeNull();
+    expect(go("/admin/ops", "tab=runs")).toBeNull();
+    expect(go("/admin/accounts")).toBeNull();
   });
 
   it("参数里的特殊字符原样带过去", () => {
@@ -177,10 +192,16 @@ describe("paletteEntries:⌘K 里能跳的页面", () => {
     expect(h.some((x) => x.startsWith("/admin"))).toBe(false);
   });
 
-  it("管理员能跳到全部管理页", () => {
-    expect(hrefs(admin)).toEqual(
-      expect.arrayContaining(["/admin/accounts", "/admin/providers", "/admin/audit"]),
-    );
+  it("管理员能跳到全部管理页(阶段 7 合并后的六项)", () => {
+    const h = hrefs(admin).filter((x) => x.startsWith("/admin"));
+    expect(h).toEqual([
+      "/admin/accounts",
+      "/admin/models",
+      "/admin/market",
+      "/admin/packages",
+      "/admin/billing",
+      "/admin/ops",
+    ]);
   });
 
   it("侧栏页面名搜得到,空间名作为关键词也搜得到", () => {

@@ -57,9 +57,9 @@ describe("管理员区边界", () => {
     expect(me.body.user?.role).toBe("user");
   });
 
-  it("管理员能进 /admin/usage(对照组 —— 防止全靠拒绝拿满分)", async (ctx) => {
+  it("管理员能进 /admin/ops(对照组 —— 防止全靠拒绝拿满分)", async (ctx) => {
     if (!admin) ctx.skip();
-    const r = await landing(admin as Client, "/admin/usage");
+    const r = await landing(admin as Client, "/admin/ops");
     expect(r.status).toBe(200);
   });
 

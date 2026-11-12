@@ -54,3 +54,36 @@ describe("审批分级的审计文案", () => {
     );
   });
 });
+
+describe("上架申请与用户组的审计文案", () => {
+  it("申请、通过、驳回、删除组", () => {
+    expect(describeAudit(item("market.listing_request", { name: "报销审核", version: 3 }))).toBe(
+      "「报销审核」v3 申请上架",
+    );
+    expect(
+      describeAudit(
+        item("market.listing_request", { name: "报销审核", version: 3, note: "财务部在用" }),
+      ),
+    ).toBe("「报销审核」v3 申请上架:财务部在用");
+    expect(
+      describeAudit(item("market.listing_approve", { name: "报销审核", categoryName: "办公运营" })),
+    ).toBe("「报销审核」上架到「办公运营」");
+    expect(
+      describeAudit(item("market.listing_reject", { name: "报销审核", reason: "用途不清" })),
+    ).toBe("「报销审核」:用途不清");
+    expect(describeAudit(item("group.delete", { name: "财务部", members: 6 }))).toBe(
+      "「财务部」(6 位成员)",
+    );
+  });
+
+  it("新动作都在审计动作表里", () => {
+    for (const a of [
+      "market.listing_request",
+      "market.listing_approve",
+      "market.listing_reject",
+      "group.delete",
+    ]) {
+      expect(AUDIT_ACTIONS).toContain(a);
+    }
+  });
+});

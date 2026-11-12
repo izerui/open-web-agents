@@ -18,10 +18,11 @@ export const dynamic = "force-dynamic";
  * 非 admin 请求 scope=all 静默降级为 self(不报错),与 /api/usage 口径一致:
  * 越权请求不值得给出"你不是管理员"这种额外信息。
  *
- * 顺带回成员数 —— 列表页要显示,免得前端为每个组再发一次请求。
+ * 顺带回成员数、创建者邮箱、用在几条智能体授权上 —— 列表页(平台管理 · 用户组)要显示,
+ * 免得前端为每个组再发请求。
  */
 export async function GET(req: Request) {
-  const { groups, auth } = getContainer();
+  const { groups, auth, users, grants } = getContainer();
   try {
     const principal = await auth.resolveWeb(req);
     auth.assertCanManageAgents(principal);
@@ -30,8 +31,32 @@ export async function GET(req: Request) {
 
     const scope = resolveScope(new URL(req.url).searchParams.get("scope"), isAdmin);
     const list = await groups.list(ownerFilter(scope, userId));
+    const viaGroup = new Map<string, number>();
+    for (const g of await grants.listForType("agent")) {
+      if (g.principalType === "group") {
+        viaGroup.set(g.principalId, (viaGroup.get(g.principalId) ?? 0) + 1);
+      }
+    }
+    const emails = new Map<string, Promise<string | undefined>>();
+    const emailOf = (id: string) => {
+      if (!emails.has(id)) {
+        emails.set(
+          id,
+          users.get(id).then(
+            (u) => u?.email,
+            () => undefined,
+          ),
+        );
+      }
+      return emails.get(id);
+    };
     const withCounts = await Promise.all(
-      list.map(async (g) => ({ ...g, memberCount: (await groups.members(g.id)).length })),
+      list.map(async (g) => ({
+        ...g,
+        memberCount: (await groups.members(g.id)).length,
+        ownerEmail: await emailOf(g.ownerId),
+        grantCount: viaGroup.get(g.id) ?? 0,
+      })),
     );
     return Response.json({
       groups: withCounts,

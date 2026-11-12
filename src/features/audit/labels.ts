@@ -36,6 +36,7 @@ export const ACTION_LABEL: Record<AuditAction, string> = {
   "group.create": "创建用户组",
   "group.member_add": "添加组成员",
   "group.member_remove": "移除组成员",
+  "group.delete": "删除用户组",
   "webhook.test": "测试回调",
   "webhook.redeliver": "重发回调",
   "eval.run": "运行评测",
@@ -53,6 +54,9 @@ export const ACTION_LABEL: Record<AuditAction, string> = {
   "billing.order_create": "创建套餐订单",
   "billing.order_cancel": "取消套餐订单",
   "billing.order_confirm": "人工确认套餐入账",
+  "market.listing_request": "申请上架市场",
+  "market.listing_approve": "通过上架申请",
+  "market.listing_reject": "驳回上架申请",
 };
 
 /** 需要特别留意的动作:界面上用醒目颜色标出。 */
@@ -170,6 +174,14 @@ export function describeAudit(e: AuditItem): string {
       return `对 ${s(d.target) === "draft" ? "草稿" : `v${s(d.target)}`} 跑 ${s(d.cases)} 个用例`;
     case "group.member_remove":
       return `「${s(d.group)}」移除 ${s(d.memberId)}`;
+    case "group.delete":
+      return `「${s(d.name)}」${typeof d.members === "number" ? `(${d.members} 位成员)` : ""}`;
+    case "market.listing_request":
+      return `「${s(d.name)}」v${s(d.version)} 申请上架${d.note ? `:${s(d.note)}` : ""}`;
+    case "market.listing_approve":
+      return `「${s(d.name)}」上架到「${s(d.categoryName) || s(d.category)}」`;
+    case "market.listing_reject":
+      return `「${s(d.name)}」:${s(d.reason)}`;
     case "agent.clone":
       return `克隆自「${s(d.sourceAgentId)}」v${s(d.sourceVersion)}`;
     default:
