@@ -35,6 +35,15 @@ describe("resolveRunTarget", () => {
     ).toEqual({ agentId: "a1", url: "https://caller.example.com/cb", secret: "caller-s" });
   });
 
+  it("在线试调的会话(source=try):在对话里继续发的运行也不投,即便带着智能体默认地址的快照", async () => {
+    expect(
+      await resolveRunTarget(deps({}, "try"), {
+        sessionId: "s1",
+        callback: { source: "agent", url: A },
+      }),
+    ).toBeNull();
+  });
+
   it("受理时没有回调:不投 —— 即便之后智能体配上了地址", async () => {
     expect(
       await resolveRunTarget(deps(), { sessionId: "s1", callback: { source: "none" } }),

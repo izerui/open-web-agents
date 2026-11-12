@@ -110,6 +110,18 @@ if (!TEST_DB_URL) {
       expect(stats.get(id("a1"))?.useCount).toBe(57);
     });
 
+    it("只看近 90 天:窗口外的旧运行既不算使用次数,也不进平均实扣(查询按时间截断,不扫全部历史)", async () => {
+      await user("owner", `${tag}.c@x.test`);
+      await session("s1", "a1");
+      await run("s1", { ageMs: 120 * DAY, charged: "100000000" });
+      await run("s1", { ageMs: 1000, charged: "2000000" });
+      const stats = await new MysqlMarketStats(db).forAgents([
+        { id: id("a1"), ownerId: id("owner") },
+      ]);
+      expect(stats.get(id("a1"))?.useCount).toBe(1);
+      expect(stats.get(id("a1"))?.avgCredits).toBeCloseTo(2);
+    });
+
     it("空列表不查库", async () => {
       expect((await new MysqlMarketStats(db).forAgents([])).size).toBe(0);
     });

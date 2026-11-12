@@ -7,7 +7,8 @@ import type { ModelAlias } from "@/lib/shared";
  * 会话来源。trial = 构建页「试聊」:作者在构建页用草稿对话,交互语义同 web(能提问、审批、追加消息),
  * 但不出现在 /chat 的普通会话列表里。
  */
-export type SessionSource = "web" | "api" | "invoke" | "eval" | "design" | "trial";
+/** try = 构建页「接入」阶段的在线试调:和 invoke 同一套受理,但不投 webhook、不算市场使用次数 */
+export type SessionSource = "web" | "api" | "invoke" | "eval" | "design" | "trial" | "try";
 
 /** active 正常 / archived 归档(列表默认不显示) / deleted 已删除(视同不存在)。 */
 export type SessionStatus = "active" | "archived" | "deleted";

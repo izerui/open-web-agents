@@ -114,6 +114,8 @@ export interface ProfileProps {
   open: ReadonlySet<SectionKey>;
   onToggle: (k: SectionKey, open?: boolean) => void;
   takenIds: readonly string[];
+  /** 新建时 ID 输入框的焦点:有焦点时暂停自动保存(首次保存会把 ID 定死) */
+  onIdEditing?: (editing: boolean) => void;
   designer: Designer;
   sources: { id: string; name: string; icon?: string }[];
   goStage: (s: Stage) => void;
@@ -263,7 +265,7 @@ function SectionBody(props: ProfileProps & { k: SectionKey; ctx: SectionContext 
   }
 }
 
-function IdentityBody({ draft: d, set, agentId, takenIds }: ProfileProps) {
+function IdentityBody({ draft: d, set, agentId, takenIds, onIdEditing }: ProfileProps) {
   const style = avatarStyle(d.id || "new-agent", d.icon || null);
   const hint = startersHint(d.startersText);
   const creating = agentId === null;
@@ -334,6 +336,8 @@ function IdentityBody({ draft: d, set, agentId, takenIds }: ProfileProps) {
             value={creating ? d.id : (agentId ?? "")}
             disabled={!creating}
             onChange={(e) => set({ id: e.target.value })}
+            onFocus={() => creating && onIdEditing?.(true)}
+            onBlur={() => onIdEditing?.(false)}
             placeholder="例如 expense-audit"
           />
         </Field>

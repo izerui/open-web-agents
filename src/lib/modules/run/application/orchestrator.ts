@@ -211,7 +211,7 @@ export class RunOrchestrator {
       unattended: session.unattended === true,
       // 有没有人能审批取决于入口:接口调用与评测无人值守,按智能体对无人值守的配置走
       approvalPolicy:
-        session.source === "invoke" || session.source === "eval"
+        session.source === "invoke" || session.source === "try" || session.source === "eval"
           ? (config.unattendedApproval ?? "allow")
           : ("ask" as const),
       // 提问等人回答只在界面上有人看着提问卡片的入口:网页对话、构建页试聊与 AI 编辑。

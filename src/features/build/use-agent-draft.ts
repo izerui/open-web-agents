@@ -33,6 +33,11 @@ export function useAgentDraft(opts: {
   takenIds: readonly string[];
   /** 保存成功;created = 这次保存新建了智能体 */
   onSaved: (saved: SavedAgent, created: boolean) => void;
+  /**
+   * 暂停自动保存的原因(智能体设计器正在写入、正在载入某个版本):这段时间的表单内容
+   * 会被随后的结果覆盖,保存它只会把刚写进去的东西改回去。为空表示不暂停
+   */
+  paused?: string | null;
 }) {
   const cb = useRef(opts);
   cb.current = opts;
@@ -48,12 +53,24 @@ export function useAgentDraft(opts: {
   const autoRef = useRef(auto);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadedId = useRef<string | null>(opts.agent?.id ?? null);
+  /** 乐观锁:最近一次从服务端读到/存下的 revision */
+  const revisionRef = useRef<string | undefined>(opts.agent?.revision);
+  /** 库里已被别处改过(保存被 409 stale_draft 拒绝):停止自动保存,等用户载入最新版本 */
+  const [stale, setStale] = useState(false);
+  const staleRef = useRef(false);
+  /** 新建时 ID 输入框正有焦点 */
+  const idEditingRef = useRef(false);
 
-  const blockOf = useCallback(
-    (d: ProfileDraft) =>
-      saveBlock(d, { isNew: createdRef.current === null, takenIds: cb.current.takenIds }),
-    [],
-  );
+  const blockOf = useCallback((d: ProfileDraft) => {
+    if (cb.current.paused) return { reason: cb.current.paused, section: "identity" as const };
+    if (staleRef.current)
+      return { reason: "草稿已在别处修改,请先载入最新版本", section: "identity" as const };
+    return saveBlock(d, {
+      isNew: createdRef.current === null,
+      takenIds: cb.current.takenIds,
+      idEditing: idEditingRef.current,
+    });
+  }, []);
 
   const dispatchRef = useRef<(e: AutosaveEvent) => void>(() => {});
 
@@ -66,6 +83,7 @@ export function useAgentDraft(opts: {
         loadedConfig: loadedRef.current,
         canManageWebhook: cb.current.canManageWebhook,
         isNew: creating,
+        revision: revisionRef.current,
       });
       const res = await fetch("/api/agents", {
         method: "POST",
@@ -78,9 +96,15 @@ export function useAgentDraft(opts: {
         code?: string;
       };
       if (res.status === 409 && data.code === "id_taken") throw new Error("ID 已被占用");
+      if (res.status === 409 && data.code === "stale_draft") {
+        staleRef.current = true;
+        setStale(true);
+        throw new Error(data.error ?? "草稿已在别处修改,请载入最新版本后再改");
+      }
       if (!res.ok || !data.agent) throw new Error(data.error ?? `HTTP ${res.status}`);
       const saved = data.agent;
       loadedRef.current = saved.config;
+      revisionRef.current = saved.revision;
       if (creating) {
         createdRef.current = saved.id;
         loadedId.current = saved.id;
@@ -154,6 +178,9 @@ export function useAgentDraft(opts: {
     loadedRef.current = agent.config;
     createdRef.current = agent.id;
     loadedId.current = agent.id;
+    revisionRef.current = agent.revision;
+    staleRef.current = false;
+    setStale(false);
     savedJsonRef.current = JSON.stringify(next);
     setSavedJson(savedJsonRef.current);
     autoRef.current = { ...INITIAL_AUTOSAVE, savedAt: autoRef.current.savedAt };
@@ -181,8 +208,28 @@ export function useAgentDraft(opts: {
 
   const retry = useCallback(() => dispatch({ type: "retry" }), [dispatch]);
 
+  /** 新建时 ID 输入框的焦点:有焦点时暂停保存,离开后按当前内容重新排一次保存 */
+  const setIdEditing = useCallback(
+    (editing: boolean) => {
+      idEditingRef.current = editing;
+      if (!editing && JSON.stringify(draftRef.current) !== savedJsonRef.current) {
+        dispatch({ type: "edit", blocked: blockOf(draftRef.current) !== null });
+      }
+    },
+    [dispatch, blockOf],
+  );
+
+  // 暂停结束(设计器写完、版本载入完)后,若还有没落盘的修改,重新排一次保存
+  const pausedNow = opts.paused ?? null;
+  useEffect(() => {
+    if (!pausedNow && JSON.stringify(draftRef.current) !== savedJsonRef.current) {
+      dispatchRef.current({ type: "edit", blocked: blockOf(draftRef.current) !== null });
+    }
+  }, [pausedNow, blockOf]);
+
   const dirty = JSON.stringify(draft) !== savedJson;
-  const block = useMemo(() => blockOf(draft), [draft, blockOf]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 暂停原因与 stale 由 blockOf 从 ref 读取,这里列出来是为了它们变化时重算
+  const block = useMemo(() => blockOf(draft), [draft, blockOf, stale, pausedNow]);
 
   // 离开提醒:关闭标签、站内链接、程序化跳转都问一句(与原 Builder 一致)
   const allowNav = useRef(false);
@@ -238,6 +285,9 @@ export function useAgentDraft(opts: {
     flush,
     retry,
     resetFrom,
+    /** 库里已被别处改过,自动保存已停;用最新内容 resetFrom 后恢复 */
+    stale,
+    setIdEditing,
     createdId: createdRef.current,
     loadedConfig: loadedRef,
   };

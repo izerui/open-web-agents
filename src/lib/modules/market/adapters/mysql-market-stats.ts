@@ -1,8 +1,10 @@
-// 市场卡片上的作者、近 90 天使用次数、近 50 次成功运行的平均实扣(gaps.md A10 / A11)。
+// 市场卡片上的作者、近 90 天使用次数、近 90 天里最近 50 次成功运行的平均实扣(gaps.md A10 / A11)。
 //
 // 【为什么是一条聚合查询】市场一页几十张卡片,逐张查就是 N+1,列表会随上架数线性变慢。
 // 这里一条 SQL 把所有卡片的两个数字一起算出来(窗口函数给每个智能体的成功运行排名,取前 50),
 // 作者另用一条按 id 批量查用户。结果在进程内缓存 60 秒:这两个数字不需要实时。
+// 子查询按 runs.created_at 截在 90 天窗口内(走 idx_runs_created):这张表只增不减,
+// 不截断的话每次都要给上架智能体的全部历史运行排序,扫描量随时间无上限地增长。
 
 import type { Db } from "@/lib/db/client";
 import { sql } from "drizzle-orm";
@@ -58,11 +60,10 @@ export class MysqlMarketStats implements MarketStatsSource {
     const [usage, owners] = await Promise.all([
       this.db.execute(sql`
         SELECT agent_id,
-               SUM(created_ms >= ${since}) AS use_count,
+               COUNT(*) AS use_count,
                AVG(CASE WHEN ok_rank <= ${MARKET_AVG_SAMPLE} THEN charged_micro END) AS avg_micro
         FROM (
           SELECT s.agent_id,
-                 UNIX_TIMESTAMP(r.created_at) * 1000 AS created_ms,
                  c.charged_micro,
                  CASE WHEN r.status = 'success' AND c.charged_micro IS NOT NULL AND c.state <> 'open'
                       THEN ROW_NUMBER() OVER (
@@ -73,7 +74,8 @@ export class MysqlMarketStats implements MarketStatsSource {
           FROM runs r
           JOIN sessions s ON s.id = r.session_id
           LEFT JOIN run_charges c ON c.run_id = r.id
-          WHERE s.agent_id IN (${list(agentIds)})
+          WHERE r.created_at >= FROM_UNIXTIME(${Math.floor(since / 1000)})
+            AND s.agent_id IN (${list(agentIds)})
             AND s.source IN (${list(USE_SOURCES)})
         ) t
         GROUP BY agent_id`),

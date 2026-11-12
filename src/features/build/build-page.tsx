@@ -138,7 +138,11 @@ export function BuildPage({
   });
 
   const designerRef = useRef<ReturnType<typeof useDesigner> | null>(null);
+  /** 自动保存暂停的原因(设计器写入、载入版本期间);由下面的 effect 跟着设计器状态更新 */
+  const [pausedReason, setPausedReason] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState(false);
   const draft = useAgentDraft({
+    paused: pausedReason,
     agent: readOnly ? null : agent,
     canManageWebhook,
     takenIds,
@@ -194,6 +198,12 @@ export function BuildPage({
     },
   });
   designerRef.current = designer;
+
+  // 设计器写入、载入版本期间:表单锁住、自动保存暂停 —— 这段时间的输入会被随后的结果覆盖,
+  // 存下去又会把刚写进去的内容改回去
+  const pauseNow =
+    designer.working !== null ? "智能体设计器正在写入草稿" : restoring ? "正在载入所选版本" : null;
+  useEffect(() => setPausedReason(pauseNow), [pauseNow]);
 
   // 设计器应用之后:表单从服务端的最新内容重新开始
   useEffect(() => {
@@ -296,6 +306,24 @@ export function BuildPage({
         <span className="flex items-center gap-1.5 text-muted-foreground">
           <Loader2 className="size-3 animate-spin" />
           保存中…
+        </span>
+      );
+    if (draft.stale)
+      return (
+        <span className="flex min-w-0 items-center gap-1.5 text-destructive">
+          <TriangleAlert className="size-3.5 shrink-0" />
+          <span className="truncate">草稿已在别处修改，自动保存已停</span>
+          <button
+            type="button"
+            className="shrink-0 underline"
+            onClick={() => {
+              if (!currentId) return;
+              pendingReset.current = currentId;
+              void list.reload();
+            }}
+          >
+            载入最新版本
+          </button>
         </span>
       );
     if (draft.auto.phase === "error")
@@ -549,45 +577,49 @@ export function BuildPage({
   // ───────────── 主体 ─────────────
   const goStage = (s: Stage) => setStage(s);
   const profile = (
-    <ProfileCard
-      draft={d}
-      set={draft.set}
-      update={draft.update}
-      agentId={currentId}
-      canManageWebhook={canManageWebhook}
-      sharedWrite={Boolean(agent && !agent.isOwner && !BUILT_IN.includes(agent.id))}
-      publishedVersion={agent?.publishedVersion ?? null}
-      changeCount={meta.meta.changeCount}
-      catalog={catalog}
-      stdio={list.stdio}
-      knowledge={meta.meta.knowledge}
-      onKnowledgeChanged={() => void meta.loadKnowledge()}
-      fresh={fresh}
-      onEdited={(k) =>
-        setFresh((s) => {
-          if (!s.has(k)) return s;
-          const n = new Set(s);
-          n.delete(k);
-          return n;
-        })
-      }
-      open={open}
-      onToggle={(k, value) =>
-        setOpen((o) => {
-          const n = new Set(o);
-          const want = value ?? !n.has(k);
-          if (want) n.add(k);
-          else n.delete(k);
-          return n;
-        })
-      }
-      takenIds={takenIds}
-      designer={designer}
-      sources={list.agents
-        .filter((a) => a.canWrite !== false && a.id !== currentId && !BUILT_IN.includes(a.id))
-        .map((a) => ({ id: a.id, name: a.name, icon: a.icon }))}
-      goStage={goStage}
-    />
+    // 设计器写入、载入版本期间锁住表单(见 pauseNow)
+    <fieldset disabled={pauseNow !== null} className="min-w-0 disabled:opacity-70">
+      <ProfileCard
+        draft={d}
+        set={draft.set}
+        onIdEditing={draft.setIdEditing}
+        update={draft.update}
+        agentId={currentId}
+        canManageWebhook={canManageWebhook}
+        sharedWrite={Boolean(agent && !agent.isOwner && !BUILT_IN.includes(agent.id))}
+        publishedVersion={agent?.publishedVersion ?? null}
+        changeCount={meta.meta.changeCount}
+        catalog={catalog}
+        stdio={list.stdio}
+        knowledge={meta.meta.knowledge}
+        onKnowledgeChanged={() => void meta.loadKnowledge()}
+        fresh={fresh}
+        onEdited={(k) =>
+          setFresh((s) => {
+            if (!s.has(k)) return s;
+            const n = new Set(s);
+            n.delete(k);
+            return n;
+          })
+        }
+        open={open}
+        onToggle={(k, value) =>
+          setOpen((o) => {
+            const n = new Set(o);
+            const want = value ?? !n.has(k);
+            if (want) n.add(k);
+            else n.delete(k);
+            return n;
+          })
+        }
+        takenIds={takenIds}
+        designer={designer}
+        sources={list.agents
+          .filter((a) => a.canWrite !== false && a.id !== currentId && !BUILT_IN.includes(a.id))
+          .map((a) => ({ id: a.id, name: a.name, icon: a.icon }))}
+        goStage={goStage}
+      />
+    </fieldset>
   );
 
   const stageBody = (() => {
@@ -634,7 +666,8 @@ export function BuildPage({
             }}
             onRestored={() => {
               if (currentId) pendingReset.current = currentId;
-              void list.reload();
+              setRestoring(true);
+              void list.reload().finally(() => setRestoring(false));
               void meta.loadVersions();
               designer.notifyTargetChanged();
             }}

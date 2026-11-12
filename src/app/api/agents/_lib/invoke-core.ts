@@ -257,7 +257,8 @@ export async function acceptInvoke(
     workspaceDir,
     title: mode === "try" ? "在线试调" : "invoke",
     unattended: true,
-    source: "invoke",
+    // 在线试调单独记来源:之后在对话里继续发的运行也不会投到智能体的 webhook(投递只认 invoke / api)
+    source: mode === "try" ? "try" : "invoke",
     callerApiKeyId: principal.type === "apiKey" ? principal.keyId : undefined,
     ownerId: principal.type === "web" ? principal.userId : undefined,
     // 花费记在签发 key 的账号上:额度按它算,模型凭证也用它自带的

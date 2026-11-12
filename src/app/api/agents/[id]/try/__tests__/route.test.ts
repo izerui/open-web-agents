@@ -142,7 +142,7 @@ describe("POST /api/agents/[id]/try", () => {
     expect(state.enqueued).toHaveLength(0);
   });
 
-  it("成功 202:会话记为接口调用,归属与计费为本人,限流按 user:<id>,不投递 webhook", async () => {
+  it("成功 202:会话记为在线试调(source=try),归属与计费为本人,限流按 user:<id>,不投递 webhook", async () => {
     const res = await post({ input: { query: "hello" } });
     expect(res.status).toBe(202);
     const body = (await res.json()) as Record<string, unknown>;
@@ -151,7 +151,9 @@ describe("POST /api/agents/[id]/try", () => {
     const s = state.sessions.get(body.sessionId as string);
     expect(s).toMatchObject({
       agentId: "a1",
-      source: "invoke",
+      // 单独的来源:在对话里继续试调也不会推到智能体的 webhook(投递只认 invoke / api),
+      // 也不算进市场的使用次数
+      source: "try",
       ownerId: "me",
       billingUserId: "me",
       unattended: true,

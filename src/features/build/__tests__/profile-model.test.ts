@@ -273,3 +273,26 @@ describe("idError", () => {
     expect(idError("ok-id", ["ok-id"])).toBe("ID 已被占用");
   });
 });
+
+describe("自动保存的乐观锁与新建时的 ID", () => {
+  const d = { ...draftFromAgent(full, uid) };
+  it("已有智能体的保存带上读到的 revision;新建不带", () => {
+    const opts = { loadedConfig: full.config, canManageWebhook: true };
+    expect(saveBodyOf(d, { ...opts, isNew: false, revision: "r1" }).expectedRevision).toBe("r1");
+    expect(
+      saveBodyOf(d, { ...opts, isNew: true, revision: "r1" }).expectedRevision,
+    ).toBeUndefined();
+    expect(saveBodyOf(d, { ...opts, isNew: false }).expectedRevision).toBeUndefined();
+  });
+
+  it("新建时正在填 ID 就先别保存:首次保存会把 ID 定死,半截的 ID 改不回来", () => {
+    const fresh = { ...EMPTY_DRAFT, name: "a", systemPrompt: "p", id: "my-ag" };
+    expect(saveBlock(fresh, { isNew: true, takenIds: [], idEditing: true })).toEqual({
+      reason: "正在填写 ID",
+      section: "identity",
+    });
+    expect(saveBlock(fresh, { isNew: true, takenIds: [], idEditing: false })).toBeNull();
+    // 已建好的智能体 ID 不能改,焦点在不在都不影响保存
+    expect(saveBlock(d, { isNew: false, takenIds: [], idEditing: true })).toBeNull();
+  });
+});

@@ -165,3 +165,41 @@ describe("POST /api/agents —— createOnly", () => {
     expect(state.upserts).toHaveLength(1);
   });
 });
+
+describe("乐观锁:自动保存不能静默覆盖别处的修改", () => {
+  const save = (extra: Record<string, unknown>) =>
+    create({ id: "a1", name: "a1", config: { systemPrompt: "p" }, ...extra });
+
+  it("列表给每个可读的智能体带上 revision", async () => {
+    state.agents = [mk("a1", "me")];
+    const body = await list();
+    expect(typeof body.agents[0]?.revision).toBe("string");
+    expect(String(body.agents[0]?.revision).length).toBeGreaterThan(8);
+  });
+
+  it("expectedRevision 与库里当前版本一致才保存,并返回新的 revision", async () => {
+    state.agents = [mk("a1", "me")];
+    const rev = (await list()).agents[0]?.revision;
+    const r = await save({ expectedRevision: rev });
+    expect(r.status).toBe(201);
+    expect(state.upserts).toHaveLength(1);
+    expect(typeof (r.body.agent as Record<string, unknown>).revision).toBe("string");
+  });
+
+  it("库里已被别处改过(revision 对不上)时 409 stale_draft,不写库", async () => {
+    state.agents = [mk("a1", "me")];
+    const rev = (await list()).agents[0]?.revision;
+    // 另一个标签页 / 协作者 / 智能体设计器把提示词改了
+    state.agents = [mk("a1", "me", { config: { systemPrompt: "别处改的", model: "sonnet" } })];
+    const r = await save({ expectedRevision: rev });
+    expect(r.status).toBe(409);
+    expect(r.body.code).toBe("stale_draft");
+    expect(state.upserts).toHaveLength(0);
+  });
+
+  it("不带 expectedRevision 的调用方(脚本、旧客户端)行为不变", async () => {
+    state.agents = [mk("a1", "me", { config: { systemPrompt: "别处改的", model: "sonnet" } })];
+    const r = await save({});
+    expect(r.status).toBe(201);
+  });
+});

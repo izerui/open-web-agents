@@ -18,6 +18,7 @@ import {
   pickAgentConfig,
   redactAgentConfigForReader,
 } from "@/lib/modules/agent/domain/config";
+import { agentRevision } from "@/lib/modules/agent/domain/revision";
 import { isSystemAgent } from "@/lib/modules/agent/domain/system-agent";
 import { validateAgentConfig } from "@/lib/modules/agent/domain/validate-config";
 import type { Agent } from "@/lib/modules/agent/ports";
@@ -123,6 +124,8 @@ export async function GET(req: Request) {
             updatedAt: activity.get(a.id)?.updatedAt ?? null,
             canWrite,
             canManageWebhook: manage,
+            // 自动保存的乐观锁:保存时原样带回,库里已被别处改过就拒绝(只有能写的人会保存)
+            revision: canWrite ? agentRevision(a) : undefined,
           };
         }),
       capabilities: { stdioMcp: env.allowStdioMcp },
@@ -147,6 +150,8 @@ interface CreateBody {
    * 新建弹层与模板都带上它 —— 否则在新建框里填了一个自己有写权限的已有 ID,会悄悄改掉那个智能体。
    */
   createOnly?: boolean;
+  /** 自动保存的乐观锁:上次读到的 revision(见 agentRevision);对不上时 409 stale_draft */
+  expectedRevision?: string;
 }
 
 /**
@@ -228,6 +233,20 @@ export async function POST(req: Request) {
       if (!hasResourceAccess(subject, existing, "write", list)) {
         return Response.json({ error: "no write permission on this agent" }, { status: 403 });
       }
+      // 自动保存的乐观锁:读到的版本和库里当前的对不上,说明别处(另一个标签页、协作者、
+      // 智能体设计器)已经改过 —— 拒绝,而不是用这份旧表单把它们改回去。不带的调用方行为不变
+      if (
+        body.expectedRevision !== undefined &&
+        body.expectedRevision !== agentRevision(existing)
+      ) {
+        return Response.json(
+          {
+            error: "草稿已在别处修改(另一个标签页、协作者或智能体设计器),请载入最新版本后再改",
+            code: "stale_draft",
+          },
+          { status: 409 },
+        );
+      }
       // 改别人分享过来的智能体时不改变归属
       ownerId = existing.ownerId;
       if (!canManageWebhook(subject, existing)) {
@@ -287,5 +306,5 @@ export async function POST(req: Request) {
     req,
   });
 
-  return Response.json({ agent: saved }, { status: 201 });
+  return Response.json({ agent: { ...saved, revision: agentRevision(saved) } }, { status: 201 });
 }

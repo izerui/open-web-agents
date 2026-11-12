@@ -158,6 +158,8 @@ export interface LoadedAgent {
   icon?: string;
   webhookUrl?: string;
   config: Record<string, unknown>;
+  /** 乐观锁:读到时库里的版本(只有能写的人拿得到) */
+  revision?: string;
 }
 
 /** 表单逐字段管理的配置键;其余(除逃生舱与旧 skills)进「高级参数」 */
@@ -404,6 +406,7 @@ export interface SaveBody {
   webhookUrl?: string;
   config: Record<string, unknown>;
   createOnly?: boolean;
+  expectedRevision?: string;
 }
 
 /**
@@ -413,7 +416,13 @@ export interface SaveBody {
  */
 export function saveBodyOf(
   d: ProfileDraft,
-  opts: { loadedConfig: Record<string, unknown>; canManageWebhook: boolean; isNew: boolean },
+  opts: {
+    loadedConfig: Record<string, unknown>;
+    canManageWebhook: boolean;
+    isNew: boolean;
+    /** 读到的 revision(乐观锁);库里已被别处改过时服务端 409 stale_draft */
+    revision?: string;
+  },
 ): SaveBody {
   const base = opts.loadedConfig;
   const input = parseSchemaText(d.inputSchemaText);
@@ -497,6 +506,7 @@ export function saveBodyOf(
     webhookUrl: opts.canManageWebhook ? d.webhookUrl.trim() || undefined : undefined,
     config: overlayConfig(base, form),
     ...(opts.isNew ? { createOnly: true } : {}),
+    ...(!opts.isNew && opts.revision ? { expectedRevision: opts.revision } : {}),
   };
 }
 
@@ -508,10 +518,16 @@ export type SaveBlock = { reason: string; section: SectionKey } | null;
 /** 自动保存要暂停的原因(以及该去哪一节处理);可以保存返回 null */
 export function saveBlock(
   d: ProfileDraft,
-  ctx: { isNew: boolean; takenIds: readonly string[] },
+  ctx: {
+    isNew: boolean;
+    takenIds: readonly string[];
+    /** 新建时 ID 输入框正有焦点:首次保存会把 ID 定死,半截的 ID 一旦存进库就改不回来 */
+    idEditing?: boolean;
+  },
 ): SaveBlock {
   if (!d.name.trim()) return { reason: "名称为空", section: "identity" };
   if (!d.systemPrompt.trim()) return { reason: "提示词为空", section: "prompt" };
+  if (ctx.isNew && ctx.idEditing) return { reason: "正在填写 ID", section: "identity" };
   if (ctx.isNew && d.id.trim()) {
     if (!ID_PATTERN.test(d.id.trim())) return { reason: "ID 格式不对", section: "identity" };
     if (ctx.takenIds.includes(d.id.trim())) return { reason: "ID 已被占用", section: "identity" };

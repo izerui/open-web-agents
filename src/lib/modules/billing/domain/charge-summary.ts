@@ -33,6 +33,8 @@ export const SESSION_SOURCE_TO_CHARGE: Record<string, ChargeSource> = {
   trial: "web",
   api: "api",
   invoke: "api",
+  // 构建页的在线试调按接口调用归类展示
+  try: "api",
   design: "design",
   eval: "eval",
 };
