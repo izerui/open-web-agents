@@ -81,24 +81,24 @@ export function versionBadge({
     return {
       label: `v${session.agentVersion} 锁定`,
       tone: "outline",
-      title: `这个会话创建时锁定在 v${session.agentVersion},智能体之后的发布不影响它`,
+      title: `这个会话创建时锁定在 v${session.agentVersion}，智能体之后的发布不影响它`,
     };
   }
   if (!session && agent?.canWrite !== true && agent?.publishedVersion) {
     return {
       label: `已发布 v${agent.publishedVersion}`,
       tone: "success",
-      title: "你没有编辑权限,跑的是已发布版本",
+      title: "你没有编辑权限，跑的是已发布版本",
     };
   }
   return {
     label: "草稿",
     tone: "warning",
     title: agent?.canWrite
-      ? "你有编辑权限,跑的是草稿"
+      ? "你有编辑权限，跑的是草稿"
       : session
         ? "这个会话跟随草稿运行"
-        : "这个智能体还没有发布过,跑的是草稿",
+        : "这个智能体还没有发布过，跑的是草稿",
   };
 }
 

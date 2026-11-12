@@ -26,6 +26,8 @@ export type ProcessBlock =
   | { kind: "text"; text: string }
   | { kind: "status"; label: string; state?: string }
   | { kind: "tool-result"; text: string; isError: boolean }
+  /** 智能体的提问,按出现的位置渲染成提问卡片 */
+  | { kind: "question"; event: Extract<AgentEvent, { kind: "question" }> }
   /** 运行中途追加的消息,按交给模型的时刻出现在过程里 */
   | { kind: "steer"; text: string; outcome: "delivered" | "dropped" };
 
@@ -136,6 +138,9 @@ export function processBlocks(items: Rendered[]): ProcessBlock[] {
     ) {
       flushActivity();
       blocks.push({ kind: "status", label: item.event.label, state: item.event.state });
+    } else if (item.event.kind === "question") {
+      flushActivity();
+      blocks.push({ kind: "question", event: item.event });
     } else if (item.event.kind === "steer") {
       flushActivity();
       blocks.push({ kind: "steer", text: item.event.text, outcome: item.event.outcome });
@@ -226,4 +231,14 @@ export function contextTokens(turns: Turn[]): number {
     }
   }
   return 0;
+}
+
+/** 一轮在界面里的稳定标识(与对话流虚拟列表的 key 一致)。 */
+export function turnKeyOf(turn: Turn, index: number): string {
+  return turn.localId ?? turn.runId ?? `turn-${index}`;
+}
+
+/** 某一轮里某个工具调用的定位串:对话流点工具摘要 → 执行详情里定位到同一项。 */
+export function toolLocator(turnKey: string, callKey: string): string {
+  return `${turnKey}|${callKey}`;
 }

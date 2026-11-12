@@ -4,16 +4,17 @@ import type { AgentEvent } from "@/lib/shared";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { joinPromptAttachments, splitPromptAttachments } from "./chat-view.logic";
 import {
   type ProcessBlock,
   type ScrollMode,
   type ToolCall,
   foldEvents,
-  formatTokens,
   processBlocks,
   sumUsage,
-  totalUsageTokens,
+  toolLocator,
   transitionScrollMode,
+  turnKeyOf,
 } from "./conversation.logic";
 import {
   type AnswerEvent,
@@ -35,29 +36,41 @@ export {
   transitionScrollMode,
 } from "./conversation.logic";
 
+import { AgentAvatar } from "@/components/agent-avatar";
 import { MessageResponse } from "@/components/ai-elements/message";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import {
   AlertTriangle,
   ArrowDown,
   Bot,
-  Brain,
   Check,
-  ChevronDown,
   ChevronRight,
+  Clock,
+  Coins,
   CopyIcon,
   Eye,
-  HelpCircle,
+  File,
+  GitBranch,
+  Minus,
   RotateCcw,
   Search,
+  Sparkles,
+  Square,
   SquarePen,
   Terminal as TerminalIcon,
   Wrench,
   X,
 } from "lucide-react";
+import { CallStateIcon, Spin, callStateOf } from "./chat-bits";
 
 // ─────────────────────────── 工具函数 ───────────────────────────
 
@@ -91,14 +104,6 @@ export function toolIcon(toolName: string) {
   return Wrench;
 }
 
-function toolGroupSummary(calls: ToolCall[]): string {
-  const counts = new Map<string, number>();
-  for (const c of calls) counts.set(c.tool, (counts.get(c.tool) ?? 0) + 1);
-  const parts = [...counts.entries()].map(([tool, n]) => (n > 1 ? `${tool} ×${n}` : tool));
-  if (parts.length <= 3) return parts.join(", ");
-  return `${parts.slice(0, 2).join(", ")} +${parts.length - 2}`;
-}
-
 /**
  * 工作目录下的绝对路径在一行摘要里只剩开头可见,有用的却是结尾的文件名:
  * 超过三段的路径只留最后两段。完整参数在展开后的详情里。
@@ -122,27 +127,32 @@ export function summarizeToolInput(tool: string, input: unknown): string {
   return oneLine.length > 100 ? `${oneLine.slice(0, 100)}...` : oneLine;
 }
 
-function summarizeThinking(text: string): string {
-  // 模型的思考摘要常带 **标题** 这样的 markdown 记号,单行摘要里原样露出来就是一串星号
-  const oneLine = text.replace(/\*\*/g, " ").replace(/\s+/g, " ").trim();
-  return oneLine.length > 100 ? `${oneLine.slice(0, 100)}...` : oneLine;
-}
-
+/** 工具名的区分色(深一档,保证在白底上 ≥4.5:1)。 */
 export function toolNameClass(tool: string): string {
-  if (tool === "Bash") return "text-warning";
-  if (["Write", "Edit", "NotebookEdit"].includes(tool)) return "text-success";
-  if (["Read", "Glob", "Grep"].includes(tool)) return "text-info";
+  if (tool === "Bash") return "text-warning-text";
+  if (["Write", "Edit", "NotebookEdit"].includes(tool)) return "text-success-text";
   if (["Agent", "Task"].includes(tool)) return "text-ide-cyan";
   if (["EnterPlanMode", "ExitPlanMode"].includes(tool)) return "text-ide-purple";
-  if (tool === "AskUserQuestion") return "text-warning";
-  return "text-muted-foreground";
+  return "text-foreground";
 }
 
-function modeToolLabel(tool: string): string {
-  return tool;
+function pretty(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
-// ─────────────────────────── t3code 风格子组件 ───────────────────────────
+function clock(iso?: string): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+// ─────────────────────────── 过程块 ───────────────────────────
 
 function WorkingTimer({ createdAt }: { createdAt: string }) {
   const textRef = useRef<HTMLSpanElement>(null);
@@ -162,513 +172,184 @@ function WorkingTimer({ createdAt }: { createdAt: string }) {
   );
 }
 
-function ActivityShimmerOverlay({ children }: { children: React.ReactNode }) {
-  return (
-    <span
-      aria-hidden
-      className="live-activity-focus pointer-events-none absolute inset-y-0 select-none"
-    >
-      <span className="block text-foreground">{children}</span>
-    </span>
-  );
-}
-
-function LiveActivityRow({ label, icon: Icon }: { label: string; icon?: React.ElementType }) {
-  return (
-    <div className="relative min-h-6 w-fit max-w-full min-w-0 overflow-hidden rounded-md text-sm leading-relaxed">
-      <span className="flex min-h-6 min-w-0 items-center gap-1.5 px-0.5 py-0.5 text-muted-foreground/60">
-        {Icon && (
-          <span className="flex size-6 shrink-0 items-center justify-center opacity-70">
-            <Icon className="size-4 shrink-0 stroke-[1.8]" />
-          </span>
-        )}
-        <span className="min-w-0 flex-1 truncate">{label}</span>
-      </span>
-      <ActivityShimmerOverlay>
-        <span className="flex min-h-6 min-w-0 items-center gap-1.5 px-0.5 py-0.5 text-foreground">
-          {Icon && (
-            <span className="flex size-6 shrink-0 items-center justify-center">
-              <Icon className="size-4 shrink-0 stroke-[1.8]" />
-            </span>
-          )}
-          <span className="min-w-0 flex-1 truncate">{label}</span>
-        </span>
-      </ActivityShimmerOverlay>
-    </div>
-  );
-}
-
-const ThinkingSection = memo(function ThinkingSection({
-  label,
+/** 思考块:左侧细线,默认收起;正在思考的那一段显示转圈。 */
+const ThinkBlock = memo(function ThinkBlock({
   text,
-  running,
-  expanded,
-  onToggle,
+  subagent,
+  live,
 }: {
-  label: string;
   text: string;
-  running: boolean;
-  expanded: boolean;
-  onToggle(): void;
+  subagent?: string;
+  live: boolean;
 }) {
-  return (
-    <div className="pb-1.5">
-      <button
-        type="button"
-        className="group/thinking flex min-h-9 w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-1 text-left text-sm leading-relaxed transition-colors duration-150 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-        onClick={onToggle}
-        aria-expanded={expanded}
-      >
-        <span className="flex size-6 shrink-0 items-center justify-center text-muted-foreground/60">
-          {expanded ? (
-            <ChevronDown className="size-3.5 stroke-[1.8]" />
-          ) : (
-            <ChevronRight className="size-3.5 stroke-[1.8]" />
-          )}
-        </span>
-        <Brain className="size-4 shrink-0 stroke-[1.8] text-muted-foreground/60" />
-        <span
-          className={cn(
-            "relative min-w-0 flex-1 truncate text-muted-foreground",
-            running && "live-activity-focus",
-          )}
-        >
-          {label}
-        </span>
-      </button>
-      {expanded && (
-        <div className="ml-12 whitespace-pre-wrap border-l border-border/60 py-1 pl-3 text-xs leading-relaxed text-muted-foreground">
-          {text || (running ? "正在思考..." : "没有可显示的思考内容")}
-        </div>
-      )}
-    </div>
-  );
-});
-
-// ─────────────────────────── 工具分组 ───────────────────────────
-
-const ToolGroupSection = memo(function ToolGroupSection({
-  calls,
-  running,
-  expanded,
-  onToggle,
-}: {
-  calls: ToolCall[];
-  running: boolean;
-  expanded: boolean;
-  onToggle(): void;
-}) {
-  if (calls.length === 0) return null;
-
-  if (running) {
-    const completedCalls = calls.filter((c) => c.result);
-    const pendingCall = calls.find((c) => !c.result);
-    const summary = pendingCall
-      ? `Running ${pendingCall.tool}`
-      : `Ran ${calls.length} ${calls.length === 1 ? "tool" : "tools"}`;
-
+  const [open, setOpen] = useState(false);
+  const label = subagent ? `子代理 ${subagent} 的思考` : "思考过程";
+  if (live && !text.trim()) {
     return (
-      <div className="space-y-1 pb-1.5">
-        <button
-          type="button"
-          className="group/tool-group flex min-h-6 w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-sm leading-relaxed transition-colors duration-150 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-          onClick={onToggle}
-          aria-expanded={expanded}
-        >
-          <span className="flex size-6 shrink-0 items-center justify-center text-muted-foreground/60">
-            {expanded ? (
-              <ChevronDown className="size-3.5 stroke-[1.8]" />
-            ) : (
-              <ChevronRight className="size-3.5 stroke-[1.8]" />
-            )}
-          </span>
-          <Wrench className="size-4 shrink-0 stroke-[1.8] text-muted-foreground/60" />
-          <span className="min-w-0 flex-1 truncate text-muted-foreground">{summary}</span>
-        </button>
-        {!expanded && pendingCall && (
-          <LiveActivityRow
-            label={
-              SHELL_TOOLS.has(pendingCall.tool.toLowerCase()) &&
-              pendingCall.input &&
-              typeof pendingCall.input === "object" &&
-              "command" in pendingCall.input
-                ? `Running ${String((pendingCall.input as { command: unknown }).command).split(" ")[0] ?? pendingCall.tool}`
-                : `Running ${pendingCall.tool}`
-            }
-            icon={toolIcon(pendingCall.tool)}
-          />
-        )}
-        {expanded && (
-          <div className="space-y-1 pl-1">
-            {completedCalls.map((call, i) => (
-              <div
-                // biome-ignore lint/suspicious/noArrayIndexKey: tool calls append-only during streaming
-                key={`done-${i}`}
-                className="space-y-1"
-              >
-                <div className="flex min-h-6 items-center gap-1.5 px-0.5 text-sm text-muted-foreground">
-                  <span className="flex size-6 shrink-0 items-center justify-center">
-                    {(() => {
-                      const Icon = toolIcon(call.tool);
-                      return <Icon className="size-4 stroke-[1.8] opacity-70" />;
-                    })()}
-                  </span>
-                  <code className="min-w-0 truncate text-xs">
-                    {call.input && typeof call.input === "object" && "command" in call.input
-                      ? String((call.input as { command: unknown }).command)
-                      : call.tool}
-                  </code>
-                </div>
-                {call.result?.text && (
-                  <pre className="ml-7 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/30 p-2 font-mono text-[0.6875rem] leading-relaxed text-muted-foreground">
-                    {call.result.text.slice(0, 2000)}
-                  </pre>
-                )}
-              </div>
-            ))}
-            {pendingCall && (
-              <div className="ml-7 rounded bg-muted/20 p-2 text-xs text-muted-foreground">
-                Running {pendingCall.tool}...
-              </div>
-            )}
-          </div>
-        )}
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Spin />
+        正在思考…
       </div>
     );
   }
-
-  const summary =
-    calls.length === 1
-      ? `Ran ${calls[0]?.tool ?? "tool"}`
-      : `Ran ${calls.length} tools · ${toolGroupSummary(calls)}`;
-  const failed = calls.some((c) => c.result?.isError);
-  const Icon = calls.length === 1 ? toolIcon(calls[0]?.tool ?? "") : Wrench;
-
+  if (!text.trim()) {
+    return (
+      <div className="flex h-[26px] items-center gap-1.5 border-l-2 border-[#DAD6CC] pl-3 text-[13px] text-muted-foreground">
+        <Sparkles className="size-3.5" />
+        没有可显示的思考内容
+      </div>
+    );
+  }
   return (
-    <div className="pb-2">
+    <div className="border-l-2 border-[#DAD6CC] pl-3">
       <button
         type="button"
-        className="group/tool-group flex min-h-6 w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-sm leading-relaxed transition-colors duration-150 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-        onClick={onToggle}
-        aria-expanded={expanded}
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex min-h-[26px] items-center gap-1.5 text-[13px] text-muted-foreground hover:text-foreground"
       >
-        <span className="flex size-6 shrink-0 items-center justify-center text-muted-foreground/60">
-          {expanded ? (
-            <ChevronDown className="size-3.5 stroke-[1.8]" />
-          ) : (
-            <ChevronRight className="size-3.5 stroke-[1.8]" />
-          )}
-        </span>
-        <Icon className="size-4 shrink-0 stroke-[1.8] text-muted-foreground/60" />
-        <span
-          className={cn(
-            "min-w-0 flex-1 truncate",
-            failed ? "text-destructive/80" : "text-muted-foreground",
-          )}
-        >
-          {summary}
-        </span>
+        {live ? <Spin className="size-3.5 border-[1.5px]" /> : <Sparkles className="size-3.5" />}
+        {live ? "正在思考…" : label}
+        <ChevronRight className={cn("size-3.5 transition-transform", open && "rotate-90")} />
       </button>
+      {open && (
+        <div className="whitespace-pre-wrap break-words pt-0.5 pb-1 text-sm leading-[1.7] text-[#55524B]">
+          {text}
+        </div>
+      )}
+    </div>
+  );
+});
 
-      {expanded && (
-        <div className="mt-1 space-y-1 pl-1">
-          {calls.map((call, i) => {
-            const CallIcon = toolIcon(call.tool);
-            const callLabel = call.subagent ? `[${call.subagent}] ${call.tool}` : call.tool;
-            const isShell =
-              SHELL_TOOLS.has(call.tool.toLowerCase()) &&
-              call.input &&
-              typeof call.input === "object" &&
-              "command" in call.input;
-            const commandText = isShell
-              ? String((call.input as { command: unknown }).command)
-              : null;
+/** 一次调用的输入输出(没有执行详情面板时就地展开)。 */
+function CallDetail({ call, running }: { call: ToolCall; running: boolean }) {
+  return (
+    <div className="mx-2 mb-1.5 space-y-1 rounded-lg bg-[#F6F5F1] p-2.5 text-[13px]">
+      {call.subagent && <p className="text-muted-foreground">由子代理 {call.subagent} 发起</p>}
+      <p className="text-xs text-muted-foreground">输入</p>
+      <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all font-mono text-[13px]">
+        {pretty(call.input)}
+      </pre>
+      <p className="text-xs text-muted-foreground">输出</p>
+      <pre
+        className={cn(
+          "max-h-48 overflow-auto whitespace-pre-wrap break-all font-mono text-[13px]",
+          call.result?.isError && "text-destructive",
+        )}
+      >
+        {call.result
+          ? call.result.text.slice(0, 2000) || "（空）"
+          : running
+            ? "运行中…"
+            : "没有收到结果"}
+      </pre>
+    </div>
+  );
+}
 
+/**
+ * 工具调用卡:一行汇总(调用了几个、几个失败、几个进行中),展开后逐项列出。
+ * 有执行详情面板时点一项在面板里定位;没有时(智能体设计器)就地展开输入输出。
+ */
+const ToolsCard = memo(function ToolsCard({
+  calls,
+  turnKey,
+  running,
+  open,
+  onToggle,
+  onLocate,
+  selected,
+  awaiting,
+}: {
+  awaiting?: readonly string[];
+  calls: ToolCall[];
+  turnKey: string;
+  running: boolean;
+  open: boolean;
+  onToggle(): void;
+  onLocate?: (locator: string) => void;
+  selected?: string | null;
+}) {
+  const [inline, setInline] = useState<string | null>(null);
+  const failed = calls.filter((c) => c.result?.isError).length;
+  const live = running ? calls.filter((c) => !c.result).length : 0;
+  return (
+    <div className="rounded-xl border border-border bg-[#FBFAF7]">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={onToggle}
+        className="flex min-h-[38px] w-full items-center gap-2 px-3 py-2 text-left text-sm text-[#3C3A35]"
+      >
+        <Wrench className="size-[15px] shrink-0" />
+        <span className="min-w-0 flex-1">
+          调用了 {calls.length} 个工具
+          {failed > 0 ? (
+            <span className="text-destructive">，{failed} 个失败</span>
+          ) : live === 0 ? (
+            "，全部成功"
+          ) : null}
+          {live > 0 && <span className="text-warning-text">，{live} 个进行中</span>}
+        </span>
+        {onLocate && (
+          <span className="shrink-0 text-xs text-muted-foreground max-md:hidden">
+            点一项在执行详情里定位
+          </span>
+        )}
+        <ChevronRight
+          className={cn(
+            "size-3.5 shrink-0 text-muted-foreground transition-transform",
+            open && "rotate-90",
+          )}
+        />
+      </button>
+      {open && (
+        <ul className="border-t border-line-soft p-1" aria-label="本轮工具调用">
+          {calls.map((call) => {
+            const locator = toolLocator(turnKey, call.key);
+            const state = callStateOf(call, running);
+            const summary = shortenPaths(summarizeToolInput(call.tool, call.input));
+            const on = selected === locator || inline === locator;
             return (
-              // biome-ignore lint/suspicious/noArrayIndexKey: tool calls have no stable id
-              <div key={`tool-${i}`} className="space-y-1">
-                <div className="flex min-h-6 items-center gap-1.5 px-0.5 text-sm">
-                  <span className="flex size-6 shrink-0 items-center justify-center text-muted-foreground/60">
-                    <CallIcon className="size-4 stroke-[1.8] opacity-70" />
-                  </span>
+              <li key={call.key}>
+                <button
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => {
+                    if (onLocate) onLocate(locator);
+                    else setInline((cur) => (cur === locator ? null : locator));
+                  }}
+                  className={cn(
+                    "flex min-h-[34px] w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-[#F1EFE9]",
+                    on && "bg-[#EFEDE7] shadow-[inset_3px_0_0_var(--foreground)]",
+                  )}
+                >
+                  <CallStateIcon state={state} />
                   <span
                     className={cn(
-                      "min-w-0 flex-1 truncate",
-                      call.result?.isError ? "text-destructive/80" : "text-muted-foreground",
+                      "shrink-0 whitespace-nowrap font-mono text-[12.5px]",
+                      state === "error" ? "text-destructive" : toolNameClass(call.tool),
                     )}
                   >
-                    {commandText ? (
-                      <code className="font-mono text-xs">{commandText}</code>
-                    ) : (
-                      callLabel
-                    )}
+                    {call.tool}
                   </span>
-                </div>
-                {call.result?.text && (
-                  <div className="ml-7 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/30 p-2 font-mono text-[0.6875rem] leading-relaxed text-muted-foreground">
-                    {call.result.text.slice(0, 2000)}
-                  </div>
-                )}
-              </div>
+                  <span className="min-w-0 flex-1 truncate text-muted-foreground">{summary}</span>
+                  {call.subagent && (
+                    <span className="shrink-0 rounded-full border border-border px-2 text-xs leading-5 text-muted-foreground max-md:hidden">
+                      由子代理 {call.subagent} 发起
+                    </span>
+                  )}
+                  {state === "running" && awaiting?.includes(call.tool) && (
+                    <span className="shrink-0 rounded-full bg-warning-soft px-2 text-xs leading-5 text-warning-text">
+                      等你确认
+                    </span>
+                  )}
+                </button>
+                {!onLocate && inline === locator && <CallDetail call={call} running={running} />}
+              </li>
             );
           })}
-        </div>
-      )}
-    </div>
-  );
-});
-
-const ToolCallRow = memo(function ToolCallRow({
-  call,
-  running,
-}: {
-  call: ToolCall;
-  running: boolean;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const isModeTool = ["EnterPlanMode", "ExitPlanMode"].includes(call.tool);
-  const callLabel = call.subagent ? `[${call.subagent}] ${call.tool}` : call.tool;
-  const inputText = !isModeTool && call.input != null ? JSON.stringify(call.input, null, 2) : null;
-  const inputSummary = summarizeToolInput(call.tool, call.input);
-  const resultSummary = isModeTool ? summarizeThinking(call.result?.text ?? "") : "";
-  const CallIcon = toolIcon(call.tool);
-  const hasDetails = inputText != null || call.result?.text != null || !call.result;
-  const statusDotClass = call.result?.isError
-    ? "bg-destructive/70"
-    : !call.result && running
-      ? "border border-brand/70 bg-transparent activity-status-dot-running"
-      : call.result
-        ? "bg-muted-foreground/50"
-        : "border border-muted-foreground/40 bg-transparent";
-
-  return (
-    <div className="space-y-1">
-      <button
-        type="button"
-        className={cn(
-          "flex min-h-6 w-full items-center gap-1.5 rounded-md px-0.5 text-left text-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
-          hasDetails && "cursor-pointer transition-colors hover:bg-accent/40",
-        )}
-        onClick={() => {
-          if (hasDetails) setExpanded((current) => !current);
-        }}
-        aria-expanded={hasDetails ? expanded : undefined}
-      >
-        {/*
-          状态只在"有话要说"时出现:失败给红叉、运行中给转圈,成功不画。
-          曾经每行都有一个小圆点表示状态,一列看下去像无序列表的项目符号。
-        */}
-        <span className="flex size-6 shrink-0 items-center justify-center">
-          {call.result?.isError ? (
-            <X className="size-3.5 text-destructive" aria-label="失败" />
-          ) : !call.result && running ? (
-            <span aria-label="运行中" className={cn("size-1.5 rounded-full", statusDotClass)} />
-          ) : null}
-        </span>
-        <CallIcon className="size-4 shrink-0 stroke-[1.8] text-muted-foreground/60" />
-        <span
-          className={cn(
-            "min-w-0 flex-1 truncate",
-            call.result?.isError ? "text-destructive/80" : "text-muted-foreground",
-            running && !call.result && "live-activity-focus",
-          )}
-        >
-          <span
-            className={cn(
-              "font-medium",
-              call.result?.isError ? "text-destructive" : toolNameClass(call.tool),
-              running && !call.result && "live-activity-focus",
-            )}
-          >
-            {isModeTool ? modeToolLabel(call.tool) : callLabel}
-          </span>
-          {(inputSummary || resultSummary) && (
-            <code
-              className={cn(
-                "ml-2 font-mono text-xs text-muted-foreground/80",
-                running && !call.result && "live-activity-focus",
-              )}
-            >
-              {shortenPaths(inputSummary || resultSummary)}
-            </code>
-          )}
-          {call.result?.isError && <span className="ml-1 text-xs text-destructive">failed</span>}
-        </span>
-      </button>
-      {expanded && (
-        <div className="ml-7 space-y-1">
-          {inputText && (
-            <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/20 p-2 font-mono text-[0.6875rem] leading-relaxed text-muted-foreground">
-              {inputText}
-            </pre>
-          )}
-          {call.result?.text && (
-            <pre
-              className={cn(
-                "max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/30 p-2 font-mono text-[0.6875rem] leading-relaxed",
-                call.result.isError ? "text-destructive" : "text-muted-foreground",
-              )}
-            >
-              <span className="mr-1 text-muted-foreground/50">⎿</span>
-              {call.result.text.slice(0, 2000)}
-            </pre>
-          )}
-          {!call.result && (
-            <p className="rounded bg-muted/20 p-2 text-xs text-muted-foreground">Running...</p>
-          )}
-        </div>
-      )}
-    </div>
-  );
-});
-
-const ThinkingRow = memo(function ThinkingRow({
-  text,
-  running,
-}: {
-  text: string;
-  running: boolean;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const summary = summarizeThinking(text);
-
-  return (
-    <div className="space-y-1">
-      <button
-        type="button"
-        className="flex min-h-6 w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 text-left text-sm text-muted-foreground transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-        onClick={() => setExpanded((current) => !current)}
-        aria-expanded={expanded}
-      >
-        {/* 和工具行一样:只有进行中才画状态点,完成的不画 —— 否则一列看下去像项目符号 */}
-        <span className="flex size-6 shrink-0 items-center justify-center">
-          {running && (
-            <span
-              aria-hidden
-              className="size-1.5 rounded-full border border-brand/70 bg-transparent activity-status-dot-running"
-            />
-          )}
-        </span>
-        <Brain className="size-4 shrink-0 stroke-[1.8] text-muted-foreground/60" />
-        <span className={cn("min-w-0 flex-1 truncate", running && "live-activity-focus")}>
-          Thinking
-          {summary && (
-            // 思考摘要是一句话,不是代码:用正文字体,不加括号
-            <span className="ml-2 text-muted-foreground/70">{summary}</span>
-          )}
-        </span>
-      </button>
-      {expanded && (
-        <div className="ml-7 max-h-64 whitespace-pre-wrap break-words border-l border-border/60 pl-3 text-xs leading-relaxed text-muted-foreground">
-          {text || (running ? "正在思考..." : "没有可显示的思考内容")}
-        </div>
-      )}
-    </div>
-  );
-});
-
-const ActivitySection = memo(function ActivitySection({
-  items,
-  running,
-  expanded,
-  onToggle,
-}: {
-  items: Extract<ProcessBlock, { kind: "activity" }>["items"];
-  running: boolean;
-  expanded: boolean;
-  onToggle(): void;
-}) {
-  const calls = items.filter(
-    (item): item is Extract<(typeof items)[number], { kind: "tool" }> => item.kind === "tool",
-  );
-  const pendingCall = calls.findLast((item) => !item.call.result)?.call;
-  const failedCount = calls.filter((item) => item.call.result?.isError).length;
-  const latestItem = items.at(-1);
-  const latestThinking = latestItem?.kind === "thinking" ? latestItem.text : "";
-  const latestThinkingSummary = summarizeThinking(latestThinking);
-  const live =
-    running &&
-    (latestItem?.kind === "thinking" ||
-      (latestItem?.kind === "tool" && !latestItem.call.result) ||
-      pendingCall !== undefined);
-  const runningLabel =
-    latestItem?.kind === "thinking"
-      ? latestThinkingSummary
-        ? `Thinking (${latestThinkingSummary})`
-        : "Thinking"
-      : pendingCall
-        ? `Running ${pendingCall.tool}`
-        : null;
-  const summary = pendingCall
-    ? (runningLabel ?? `Running ${pendingCall.tool}`)
-    : calls.length > 0
-      ? calls.length === 1
-        ? `Ran ${calls[0]?.call.tool ?? "tool"}${failedCount > 0 ? " · failed" : ""}`
-        : `Ran ${calls.length} tools · ${toolGroupSummary(calls.map((item) => item.call))}${
-            failedCount > 0 ? ` · ${failedCount} failed` : ""
-          }`
-      : "Thinking";
-  // 跑完之后图标跟着"做了什么"走;只有进行中才跟着"正在做什么"(最后一项)走。
-  // 曾经一律看最后一项,于是"Ran 13 tools"前面挂着一个思考的大脑图标
-  const SummaryIcon = !live
-    ? calls.length === 1
-      ? toolIcon(calls[0]?.call.tool ?? "")
-      : calls.length > 1
-        ? Wrench
-        : Brain
-    : latestItem?.kind === "thinking"
-      ? Brain
-      : latestItem?.kind === "tool"
-        ? toolIcon(latestItem.call.tool)
-        : pendingCall
-          ? toolIcon(pendingCall.tool)
-          : calls.length === 1
-            ? toolIcon(calls[0]?.call.tool ?? "")
-            : calls.length > 1
-              ? Wrench
-              : Brain;
-
-  return (
-    <div className="pb-1.5">
-      <button
-        type="button"
-        className="group/activity flex min-h-6 w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 text-left text-sm transition-colors duration-150 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-        onClick={onToggle}
-        aria-expanded={expanded}
-      >
-        <span className="flex size-6 shrink-0 items-center justify-center text-muted-foreground/60">
-          {expanded ? (
-            <ChevronDown className="size-3.5 stroke-[1.8]" />
-          ) : (
-            <ChevronRight className="size-3.5 stroke-[1.8]" />
-          )}
-        </span>
-        <SummaryIcon className="size-4 shrink-0 stroke-[1.8] text-muted-foreground/60" />
-        <span className={cn("min-w-0 flex-1 truncate", live && "live-activity-focus")}>
-          {summary}
-        </span>
-      </button>
-
-      {expanded && (
-        <div className="mt-1 space-y-1 pl-1">
-          {items.map((item, index) => {
-            if (item.kind === "thinking") {
-              return (
-                // biome-ignore lint/suspicious/noArrayIndexKey: activity items are append-only during streaming
-                <div key={`thinking-${index}`}>
-                  <ThinkingRow text={item.text} running={live && item === latestItem} />
-                </div>
-              );
-            }
-
-            return (
-              // biome-ignore lint/suspicious/noArrayIndexKey: activity items are append-only during streaming
-              <div key={`tool-${index}`} className="space-y-1">
-                <ToolCallRow call={item.call} running={live && item.call === pendingCall} />
-              </div>
-            );
-          })}
-        </div>
+        </ul>
       )}
     </div>
   );
@@ -682,22 +363,36 @@ export type SubmitAnswer = (
 
 function formatLeft(ms: number): string {
   const total = Math.max(0, Math.round(ms / 1000));
-  if (total < 60) return `${total} 秒`;
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 }
 
-const STATE_BADGE: Record<
-  QuestionState["kind"],
-  { text: string; variant: "warning" | "success" | "secondary" | "outline" }
-> = {
-  pending: { text: "待回答", variant: "warning" },
-  waiting: { text: "等待中", variant: "outline" },
-  answered: { text: "已回答", variant: "success" },
-  declined: { text: "未回答(你选择了不回答)", variant: "secondary" },
-  invalid: { text: "提问无效", variant: "secondary" },
-  unanswered: { text: "未回答", variant: "secondary" },
-  legacy: { text: "历史提问", variant: "outline" },
+const STATE_TEXT: Record<QuestionState["kind"], string> = {
+  pending: "待回答",
+  waiting: "等待中",
+  answered: "已回答",
+  declined: "未回答（你选择了不回答）",
+  invalid: "提问无效",
+  unanswered: "未回答",
+  legacy: "历史提问",
 };
+
+/** 状态之后的一句说明 */
+function stateNote(kind: QuestionState["kind"]): string {
+  switch (kind) {
+    case "waiting":
+      return "已提交，智能体正在读取你的回答";
+    case "declined":
+      return "智能体按自己的判断继续";
+    case "invalid":
+      return "这次提问的格式不合规，没有送到你面前，智能体已继续";
+    case "unanswered":
+      return "没等到回答（超时或运行已停止），智能体已自行判断";
+    case "legacy":
+      return "来自更早的运行，只读";
+    default:
+      return "";
+  }
+}
 
 /**
  * 智能体的提问卡片。
@@ -722,6 +417,7 @@ function QuestionBlock({
 }) {
   const [picked, setPicked] = useState<Record<number, Set<string>>>({});
   const [other, setOther] = useState<Record<number, string>>({});
+  const [otherOpen, setOtherOpen] = useState<Record<number, boolean>>({});
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const pending = state.kind === "pending" ? state.request : null;
@@ -732,9 +428,10 @@ function QuestionBlock({
     return () => clearInterval(t);
   }, [pending]);
 
-  const interactive =
+  const interactive = Boolean(
     (pending && submitAnswer) ||
-    ((state.kind === "unanswered" || state.kind === "legacy") && canSendAsMessage && onAnswer);
+      ((state.kind === "unanswered" || state.kind === "legacy") && canSendAsMessage && onAnswer),
+  );
 
   const toggle = (qi: number, label: string, multi: boolean) => {
     setPicked((prev) => {
@@ -748,14 +445,15 @@ function QuestionBlock({
         if (!had) cur.add(label);
         // 单选:点了选项就不再用自己填写的
         setOther((o) => ({ ...o, [qi]: "" }));
+        setOtherOpen((o) => ({ ...o, [qi]: false }));
       }
       return { ...prev, [qi]: cur };
     });
   };
-  const typeOther = (qi: number, text: string, multi: boolean) => {
-    setOther((o) => ({ ...o, [qi]: text }));
-    // 单选:自己填写就取消选中的选项
-    if (!multi && text.trim()) setPicked((prev) => ({ ...prev, [qi]: new Set() }));
+  const toggleOther = (qi: number, multi: boolean) => {
+    setOtherOpen((o) => ({ ...o, [qi]: !o[qi] }));
+    if (otherOpen[qi]) setOther((o) => ({ ...o, [qi]: "" }));
+    else if (!multi) setPicked((prev) => ({ ...prev, [qi]: new Set() }));
   };
 
   const answers = e.questions.map((_, i) => answerText([...(picked[i] ?? [])], other[i] ?? ""));
@@ -794,178 +492,286 @@ function QuestionBlock({
     }
   };
 
-  const badge = STATE_BADGE[state.kind];
+  const tone =
+    state.kind === "pending"
+      ? "text-warning-text"
+      : state.kind === "answered"
+        ? "text-success-text"
+        : "text-muted-foreground";
+  const StateIcon =
+    state.kind === "pending"
+      ? Clock
+      : state.kind === "answered"
+        ? Check
+        : state.kind === "invalid"
+          ? X
+          : state.kind === "declined"
+            ? Minus
+            : Clock;
+
   return (
-    <Card className="gap-0 border-border bg-card py-0" data-testid="question-card">
-      <CardContent className="space-y-3 p-3">
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <HelpCircle className="h-3 w-3" />
-          <span>智能体的提问</span>
-          {/* 状态是一个带色点的词,不是胶囊:和运行组件、状态栏的状态写法一致 */}
-          <span
-            data-testid="question-state"
-            className={cn(
-              "inline-flex items-center gap-1.5",
-              badge.variant === "warning" && "text-warning",
-              badge.variant === "success" && "text-success",
-            )}
-          >
-            <span
-              aria-hidden
-              className={cn(
-                "size-1.5 rounded-full",
-                badge.variant === "warning"
-                  ? "bg-warning"
-                  : badge.variant === "success"
-                    ? "bg-success"
-                    : "bg-muted-foreground/60",
-              )}
-            />
-            {badge.text}
+    <div
+      data-testid="question-card"
+      className={cn(
+        "rounded-[14px] border p-3.5",
+        pending
+          ? "border-[#E7C78C] bg-card shadow-[0_0_0_3px_#FBF3E2]"
+          : "border-border bg-[#F8F7F3]",
+      )}
+    >
+      <div className={cn("flex flex-wrap items-center gap-1.5 text-[13px]", tone)}>
+        {state.kind === "waiting" ? (
+          <Spin className="size-3.5 border-[1.5px]" />
+        ) : (
+          <StateIcon className="size-3.5" />
+        )}
+        <span>
+          <span data-testid="question-state" className="font-medium">
+            {STATE_TEXT[state.kind]}
           </span>
-          {pending && (
+          {pending ? (
             <span className="tabular-nums">
-              剩余 {formatLeft(pending.expiresAt - now)},超时后智能体会自行判断
+              ，剩余 {formatLeft(pending.expiresAt - now)}，超时后由智能体自行判断
             </span>
-          )}
-        </div>
-        {e.questions.map((q, qi) => (
-          <div key={`${q.question}-${qi}`} className="space-y-2">
-            <p className="text-sm font-medium">
-              {q.question}
-              {q.multiSelect && (
-                <span className="ml-2 text-xs text-muted-foreground">(可多选)</span>
-              )}
-            </p>
-            {state.kind === "answered" ? (
-              <p className="whitespace-pre-wrap break-words text-sm" data-testid="question-answer">
-                <span className="text-muted-foreground">你的回答:</span>
-                {state.answers[qi] ?? state.raw}
-              </p>
-            ) : (
-              <>
-                <div className="flex flex-wrap gap-2">
-                  {q.options.map((o) => {
-                    const on = (picked[qi] ?? new Set()).has(o.label);
-                    return (
-                      <Button
-                        key={o.label}
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        aria-pressed={on}
-                        disabled={!interactive || busy}
-                        title={o.description}
-                        onClick={() => toggle(qi, o.label, q.multiSelect === true)}
-                        // 选中是"蓝框 + 选中底色",不是实心主按钮 —— 实心蓝色会和下面的"提交回答"抢主次
-                        className={cn(
-                          "font-normal dark:bg-background",
-                          on &&
-                            "border-primary bg-sidebar-active hover:bg-sidebar-active dark:bg-sidebar-active",
-                        )}
-                      >
-                        {o.label}
-                      </Button>
-                    );
-                  })}
-                </div>
-                {interactive && (
-                  <input
-                    type="text"
-                    className="h-8 w-full max-w-md rounded-md border border-input bg-background px-2.5 text-sm outline-none placeholder:text-muted-foreground focus:border-ring"
-                    placeholder={q.multiSelect ? "其他(可补充,自己填写)" : "其他(自己填写)"}
-                    aria-label={`其他回答:${q.question}`}
-                    maxLength={2000}
-                    disabled={busy}
-                    value={other[qi] ?? ""}
-                    onChange={(ev) => typeOther(qi, ev.target.value, q.multiSelect === true)}
-                  />
-                )}
-              </>
-            )}
-          </div>
-        ))}
-        {interactive ? (
-          <div className="flex flex-wrap items-center gap-2">
-            {/*
-              没答完时用虚线描边而不是半透明的主按钮 —— 半透明的蓝色按钮读起来像"能点,
-              只是颜色淡",人会去点;虚线框是 IDE 里"还不可用"的样子。
-            */}
-            <Button
-              type="button"
-              onClick={() => void submit()}
-              disabled={!complete || busy}
-              size="sm"
-              variant={complete ? "default" : "outline"}
-              className={cn(
-                !complete && "border-dashed text-muted-foreground disabled:opacity-100",
-              )}
-            >
-              {!complete ? "请先回答每个问题" : pending ? "提交回答" : "作为新消息发送"}
-            </Button>
-            {pending && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={busy}
-                onClick={() => void decline()}
-              >
-                不回答
-              </Button>
-            )}
-            {!pending && (
-              <span className="text-xs text-muted-foreground">
-                {state.kind === "unanswered"
-                  ? "这次没等到回答,智能体已自行判断;可以把回答作为新消息发出"
-                  : ""}
+          ) : stateNote(state.kind) ? (
+            <span>，{stateNote(state.kind)}</span>
+          ) : null}
+        </span>
+      </div>
+      {e.questions.map((q, qi) => (
+        <div key={`${q.question}-${qi}`} className="mt-2">
+          <p className="mb-2 flex flex-wrap items-center gap-2 text-sm font-semibold">
+            {q.question}
+            {q.multiSelect && (
+              <span className="rounded-full border border-border px-2 text-xs leading-5 font-normal text-muted-foreground">
+                可多选
               </span>
             )}
-          </div>
-        ) : (
-          state.kind !== "answered" && (
-            <p className="text-xs text-muted-foreground">
-              {state.kind === "waiting"
-                ? "正在等待…"
-                : state.kind === "unanswered"
-                  ? "没等到回答,智能体已自行判断"
-                  : state.kind === "declined"
-                    ? "智能体已按自己的判断继续"
-                    : state.kind === "invalid"
-                      ? "这次提问的格式不合规,没有送到你面前,智能体已继续"
-                      : "历史提问"}
+          </p>
+          {state.kind === "answered" ? (
+            <p className="whitespace-pre-wrap break-words text-sm" data-testid="question-answer">
+              <span className="text-muted-foreground">你的回答：</span>
+              {state.answers[qi] ?? state.raw}
             </p>
-          )
-        )}
-      </CardContent>
-    </Card>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-1.5">
+                {q.options.map((o) => {
+                  const on = (picked[qi] ?? new Set()).has(o.label);
+                  return (
+                    <button
+                      key={o.label}
+                      type="button"
+                      aria-pressed={on}
+                      disabled={!interactive || busy}
+                      title={o.description}
+                      onClick={() => toggle(qi, o.label, q.multiSelect === true)}
+                      className={cn(
+                        "min-h-[34px] rounded-[10px] border border-border bg-[#FBFAF7] px-3 py-1.5 text-left text-[13px] max-md:min-h-11 max-md:w-full max-md:text-[15px]",
+                        interactive && !busy ? "hover:border-[#BDB8AC]" : "cursor-default",
+                        on &&
+                          "border-foreground bg-card shadow-[inset_0_0_0_1px_var(--foreground)]",
+                      )}
+                    >
+                      {o.label}
+                    </button>
+                  );
+                })}
+                {interactive && (
+                  <button
+                    type="button"
+                    aria-pressed={otherOpen[qi] === true}
+                    disabled={busy}
+                    onClick={() => toggleOther(qi, q.multiSelect === true)}
+                    className={cn(
+                      "min-h-[34px] rounded-[10px] border border-border bg-[#FBFAF7] px-3 py-1.5 text-left text-[13px] hover:border-[#BDB8AC] max-md:min-h-11 max-md:w-full max-md:text-[15px]",
+                      otherOpen[qi] &&
+                        "border-foreground bg-card shadow-[inset_0_0_0_1px_var(--foreground)]",
+                    )}
+                  >
+                    其他（自己填写）
+                  </button>
+                )}
+              </div>
+              {interactive && otherOpen[qi] && (
+                <input
+                  type="text"
+                  // biome-ignore lint/a11y/noAutofocus: 点了「其他」就是要马上输入
+                  autoFocus
+                  className="mt-2 h-[34px] w-full rounded-[10px] border border-border bg-card px-3 text-sm outline-none placeholder:text-muted-foreground focus:border-[#9C978B] focus:ring-[3px] focus:ring-[#ECE9E1] max-md:h-11 max-md:text-base"
+                  placeholder={q.multiSelect ? "写下你的补充" : "写下你的答案"}
+                  aria-label={`其他回答:${q.question}`}
+                  maxLength={2000}
+                  disabled={busy}
+                  value={other[qi] ?? ""}
+                  onChange={(ev) => {
+                    const text = ev.target.value;
+                    setOther((o) => ({ ...o, [qi]: text }));
+                  }}
+                />
+              )}
+            </>
+          )}
+        </div>
+      ))}
+      {interactive && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => void submit()}
+            disabled={!complete || busy}
+            className="max-md:h-11 max-md:flex-1"
+          >
+            {!complete ? "请先回答每个问题" : pending ? "提交回答" : "作为新消息发送"}
+          </Button>
+          {pending ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() => void decline()}
+              className="max-md:h-11"
+            >
+              不回答
+            </Button>
+          ) : (
+            <span className="text-sm text-muted-foreground">把你的选择当成一条新消息发出去</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 失败 / 结局未知 / 已取消 / 结构化结果 */
+function ResultCard({ event }: { event: Extract<AgentEvent, { kind: "result" }> }) {
+  if (event.status === "success") {
+    const json = JSON.stringify(event.structured, null, 2);
+    return (
+      <div className="rounded-[14px] border border-[#D3E2D6] bg-[#F3F7F3] px-3.5 py-3">
+        <div className="flex items-center gap-1.5 text-sm font-semibold text-success-text">
+          <Check className="size-4" strokeWidth={2} />
+          结构化结果
+          <button
+            type="button"
+            className="ml-auto inline-flex h-[30px] items-center gap-1 rounded-full px-2.5 text-[13px] font-normal text-[#4D4A43] hover:bg-[#E6EDE7]"
+            onClick={() =>
+              void navigator.clipboard.writeText(json).then(
+                () => toast.success("已复制结构化结果"),
+                () => toast.error("复制失败，请手动选择文本"),
+              )
+            }
+          >
+            <CopyIcon className="size-3.5" />
+            复制 JSON
+          </button>
+        </div>
+        <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded-xl bg-[#1F1E1C] px-4 py-3 font-mono text-sm leading-[1.65] text-[#EAE6DC]">
+          {json}
+        </pre>
+      </div>
+    );
+  }
+  const look =
+    event.status === "cancelled"
+      ? {
+          box: "border-border bg-[#F6F5F1]",
+          title: "text-[#4D4A43]",
+          text: "已取消",
+          Icon: Square,
+        }
+      : event.status === "unknown"
+        ? {
+            box: "border-[#E7C78C] bg-[#FFF9EC]",
+            title: "text-warning-text",
+            text: "结局未知",
+            Icon: AlertTriangle,
+          }
+        : {
+            box: "border-[#EBC5BB] bg-[#FCF3F0]",
+            title: "text-destructive",
+            text: "这一轮失败了",
+            Icon: AlertTriangle,
+          };
+  return (
+    <div className={cn("rounded-[14px] border px-3.5 py-3", look.box)}>
+      <div className={cn("flex items-center gap-1.5 text-sm font-semibold", look.title)}>
+        <look.Icon className="size-4" />
+        {look.text}
+      </div>
+      {event.summary && (
+        <p className="mt-1 whitespace-pre-wrap break-words text-sm text-[#4A4740]">
+          {event.summary}
+        </p>
+      )}
+      {event.structured != null && (
+        <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded-lg bg-[#F6F5F1] p-2.5 font-mono text-[13px]">
+          {JSON.stringify(event.structured, null, 2)}
+        </pre>
+      )}
+    </div>
   );
 }
 
 // ─────────────────────────── 单轮渲染（memo 化） ───────────────────────────
 
+/** 把一个 activity 块拆成「思考」与「相邻工具调用」两类段落 */
+type Segment =
+  | { kind: "think"; text: string; subagent?: string }
+  | { kind: "tools"; calls: ToolCall[] };
+
+function segmentsOf(items: Extract<ProcessBlock, { kind: "activity" }>["items"]): Segment[] {
+  const out: Segment[] = [];
+  for (const item of items) {
+    if (item.kind === "thinking") {
+      out.push({ kind: "think", text: item.text, subagent: item.subagent });
+      continue;
+    }
+    const last = out.at(-1);
+    if (last?.kind === "tools") last.calls.push(item.call);
+    else out.push({ kind: "tools", calls: [item.call] });
+  }
+  return out;
+}
+
 const TurnView = memo(function TurnView({
   turn,
+  turnIndex,
   turnKey,
   isLastTurn,
-  expandedBlockIds,
+  openBlocks,
   onToggleBlock,
-  onRerunAction,
+  onRerun,
   onAnswerAction,
   pendingQuestions,
   submitAnswer,
+  agentId,
+  agentIcon,
   agentName,
+  onLocateToolAction,
+  selectedToolLocator,
+  readOnly,
+  awaitingTools,
 }: {
+  awaitingTools?: readonly string[];
   turn: Turn;
+  turnIndex: number;
   turnKey: string;
   isLastTurn: boolean;
-  expandedBlockIds: ReadonlySet<string>;
-  onToggleBlock(blockId: string): void;
-  onRerunAction?: (runId: string, prompt: string) => void;
+  openBlocks: ReadonlyMap<string, boolean>;
+  onToggleBlock(blockId: string, open: boolean): void;
+  onRerun?: (turnIndex: number) => void;
   onAnswerAction?: (text: string) => void;
   pendingQuestions?: readonly PendingAsk[];
   submitAnswer?: SubmitAnswer;
-  agentName?: string;
+  agentId: string;
+  agentIcon?: string | null;
+  agentName: string;
+  onLocateToolAction?: (locator: string) => void;
+  selectedToolLocator?: string | null;
+  readOnly?: boolean;
 }) {
   const { usage, blocks, questions, questionResults, questionAnswers, resultEvent, allText } =
     useMemo(() => {
@@ -1020,289 +826,221 @@ const TurnView = memo(function TurnView({
       };
     }, [turn.events]);
 
+  const { text: promptText, files } = useMemo(
+    () => splitPromptAttachments(turn.prompt),
+    [turn.prompt],
+  );
+  const lastBlock = blocks.at(-1);
+  const waitingOnQuestion = questions.some((q) =>
+    pendingQuestions?.some((p) => q.toolUseId && p.toolUseId === q.toolUseId),
+  );
+  const at = clock(turn.startedAt);
+  const waitingTool = turn.running
+    ? blocks
+        .flatMap((b) => (b.kind === "activity" ? b.items : []))
+        .find(
+          (i): i is Extract<typeof i, { kind: "tool" }> =>
+            i.kind === "tool" && !i.call.result && (awaitingTools?.includes(i.call.tool) ?? false),
+        )?.call.tool
+    : undefined;
+
   return (
-    <div className="space-y-1">
+    <div className="flex flex-col gap-2.5" data-turn={turnIndex + 1}>
       {turn.branchedFrom && (
-        <p className="pb-1 text-xs text-muted-foreground">⑂ 从上文某轮分叉重跑</p>
+        <p className="-mb-1 flex items-center gap-1.5 self-end text-[12.5px] text-muted-foreground">
+          <GitBranch className="size-3.5" />
+          从上文某轮分叉重跑
+        </p>
       )}
+      <div className="max-w-[78%] self-end whitespace-pre-wrap break-words rounded-[14px_14px_4px_14px] bg-[#E2E9E3] px-3.5 py-2 text-[14.5px] leading-[1.6] max-md:max-w-[88%] max-md:text-base">
+        {promptText}
+        {files.length > 0 && (
+          <span className="mt-1.5 flex flex-wrap gap-1.5">
+            {files.map((name) => (
+              <span
+                key={name}
+                className="inline-flex h-[22px] items-center gap-1 rounded-full border border-border bg-white/70 px-2 text-xs text-muted-foreground"
+              >
+                <File className="size-3" />
+                {name}
+              </span>
+            ))}
+          </span>
+        )}
+      </div>
 
-      {agentName ? (
-        <div>
-          <div className="mb-2 flex items-center gap-2 text-sm text-muted-foreground">
-            <span className="flex size-6 items-center justify-center rounded bg-accent text-xs text-foreground">
-              你
-            </span>
-            <span>你</span>
+      <div className="flex items-start gap-2.5">
+        <AgentAvatar id={agentId} icon={agentIcon} size={30} className="shrink-0" />
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <div className="text-xs text-muted-foreground">
+            {agentName}
+            {at ? `，${at}` : ""}
           </div>
-          <p className="whitespace-pre-wrap break-words pl-8 text-sm leading-[1.9] max-md:pl-0 max-md:text-base">
-            {turn.prompt}
-          </p>
-          <div className="mb-2 mt-6 flex items-center gap-2 text-sm text-muted-foreground">
-            <span className="flex size-6 items-center justify-center rounded bg-accent">
-              <Bot className="size-4" />
-            </span>
-            <span>{agentName}</span>
-          </div>
-        </div>
-      ) : (
-        <div className="flex justify-end pb-4">
-          <div className="max-w-[80%] whitespace-pre-wrap break-words rounded-lg bg-message px-3.5 py-2 text-[0.875rem] leading-[1.7] text-foreground">
-            {turn.prompt}
-          </div>
-        </div>
-      )}
 
-      {/* Working for Xs — t3code 风格分隔线 + 计时 */}
-      {turn.running && turn.startedAt && (
-        <div className="border-b border-border/60 pb-2 pt-1">
-          <div className="flex h-6 min-w-0 items-baseline px-1 text-sm leading-relaxed text-muted-foreground tabular-nums">
-            <span className="shrink-0 whitespace-nowrap">
-              Working for <WorkingTimer createdAt={turn.startedAt} />
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* 过程按事件顺序渲染；只把相邻工具调用折成一组。 */}
-      {blocks.map((block, blockIndex) => {
-        const blockId = `${turnKey}:${blockIndex}:${block.kind}`;
-        if (block.kind === "activity") {
-          if (agentName) {
+          {/* 过程按事件顺序渲染 */}
+          {blocks.map((block, blockIndex) => {
+            const blockId = `${turnKey}:${blockIndex}`;
+            const isLatest = turn.running && block === lastBlock;
+            if (block.kind === "activity") {
+              const segs = segmentsOf(block.items);
+              return segs.map((seg, si) => {
+                const segId = `${blockId}:${si}`;
+                if (seg.kind === "think") {
+                  return (
+                    <ThinkBlock
+                      key={segId}
+                      text={seg.text}
+                      subagent={seg.subagent}
+                      live={isLatest && si === segs.length - 1}
+                    />
+                  );
+                }
+                const live = turn.running && seg.calls.some((c) => !c.result);
+                const open = openBlocks.get(segId) ?? live;
+                return (
+                  <ToolsCard
+                    key={segId}
+                    calls={seg.calls}
+                    turnKey={turnKey}
+                    running={turn.running}
+                    open={open}
+                    onToggle={() => onToggleBlock(segId, !open)}
+                    onLocate={onLocateToolAction}
+                    selected={selectedToolLocator}
+                    awaiting={awaitingTools}
+                  />
+                );
+              });
+            }
+            if (block.kind === "status") {
+              return (
+                <p
+                  key={blockId}
+                  className="flex items-center gap-2 text-[13px] text-muted-foreground"
+                >
+                  <span className="size-1.5 shrink-0 rounded-full bg-current opacity-50" />
+                  {block.label}
+                </p>
+              );
+            }
+            if (block.kind === "steer") {
+              const delivered = block.outcome === "delivered";
+              return (
+                <div
+                  key={blockId}
+                  className="max-w-[72%] self-end rounded-[14px_14px_4px_14px] border border-dashed border-[#C9C4B8] bg-[#FAF9F5] px-3.5 py-2 text-sm max-md:max-w-[88%]"
+                >
+                  <div
+                    className={cn(
+                      "mb-0.5 flex items-center gap-1.5 text-xs",
+                      delivered ? "text-success-text" : "text-warning-text",
+                    )}
+                  >
+                    {delivered ? <Check className="size-3.5" /> : <Clock className="size-3.5" />}
+                    {delivered ? "运行中追加，已交给智能体" : "运行中追加，已改为本轮结束后发送"}
+                  </div>
+                  <span className="whitespace-pre-wrap break-words">{block.text}</span>
+                </div>
+              );
+            }
+            if (block.kind === "question") {
+              const q = block.event;
+              return (
+                <QuestionBlock
+                  key={blockId}
+                  e={q}
+                  state={questionState(
+                    q,
+                    q.toolUseId ? questionResults.get(q.toolUseId) : undefined,
+                    pendingQuestions?.find((p) => q.toolUseId && p.toolUseId === q.toolUseId),
+                    turn.running,
+                    q.toolUseId ? questionAnswers.get(q.toolUseId) : undefined,
+                  )}
+                  canSendAsMessage={isLastTurn && !turn.running && !!onAnswerAction}
+                  onAnswer={onAnswerAction}
+                  submitAnswer={submitAnswer}
+                />
+              );
+            }
+            if (block.kind === "tool-result") {
+              return (
+                <pre
+                  key={blockId}
+                  className={cn(
+                    "max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-[#F6F5F1] p-2.5 font-mono text-[13px]",
+                    block.isError ? "text-destructive" : "text-muted-foreground",
+                  )}
+                >
+                  {block.text.slice(0, 2000)}
+                </pre>
+              );
+            }
             return (
               <div
                 key={blockId}
-                className="workspace-activity mb-4 ml-8 divide-y divide-border border-y border-border max-md:ml-0"
-              >
-                {block.items.map((item, index) => (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: activity items append in stream order
-                  <div key={index}>
-                    {item.kind === "thinking" ? (
-                      <ThinkingRow text={item.text} running={turn.running} />
-                    ) : (
-                      <ToolCallRow call={item.call} running={turn.running} />
-                    )}
-                  </div>
-                ))}
-              </div>
-            );
-          }
-          if (block.items.length === 1) {
-            const item = block.items[0];
-            if (item?.kind === "thinking") {
-              return (
-                // biome-ignore lint/suspicious/noArrayIndexKey: process blocks append in event order
-                <div key={`thinking-${blockIndex}`} className="pb-1.5">
-                  <ThinkingRow text={item.text} running={turn.running} />
-                </div>
-              );
-            }
-            if (item?.kind === "tool") {
-              return (
-                // biome-ignore lint/suspicious/noArrayIndexKey: process blocks append in event order
-                <div key={`tool-${blockIndex}`} className="pb-1.5">
-                  <ToolCallRow call={item.call} running={turn.running} />
-                </div>
-              );
-            }
-          }
-          return (
-            // biome-ignore lint/suspicious/noArrayIndexKey: process blocks append in event order
-            <div key={`activity-${blockIndex}`}>
-              <ActivitySection
-                items={block.items}
-                running={turn.running}
-                expanded={expandedBlockIds.has(blockId)}
-                onToggle={() => onToggleBlock(blockId)}
-              />
-            </div>
-          );
-        }
-        if (block.kind === "status") {
-          return (
-            <div
-              // biome-ignore lint/suspicious/noArrayIndexKey: process blocks append in event order
-              key={`status-${blockIndex}`}
-              className="flex min-h-7 items-center gap-2 px-1 pb-1 text-xs text-muted-foreground"
-            >
-              <span className="size-1.5 shrink-0 rounded-full bg-current opacity-50" />
-              <span>{block.label}</span>
-            </div>
-          );
-        }
-        if (block.kind === "steer") {
-          return (
-            <div
-              // biome-ignore lint/suspicious/noArrayIndexKey: process blocks append in event order
-              key={`steer-${blockIndex}`}
-              className="flex flex-col items-end gap-1 pb-3"
-            >
-              <span className="px-1 text-[0.6875rem] text-muted-foreground">
-                {block.outcome === "delivered"
-                  ? "运行中追加"
-                  : "运行中追加 · 没来得及交给智能体,已改为本轮结束后发送"}
-              </span>
-              <div
-                className={cn(
-                  "max-w-[80%] whitespace-pre-wrap break-words rounded-lg px-3.5 py-2 text-sm",
-                  block.outcome === "delivered"
-                    ? "bg-message text-foreground"
-                    : "border border-dashed border-border text-muted-foreground",
-                )}
-              >
-                {block.text}
-              </div>
-            </div>
-          );
-        }
-        if (block.kind === "tool-result") {
-          return (
-            <pre
-              // biome-ignore lint/suspicious/noArrayIndexKey: process blocks append in event order
-              key={`orphan-tool-result-${blockIndex}`}
-              className={cn(
-                "mb-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/30 p-2 font-mono text-[0.6875rem] leading-relaxed",
-                block.isError ? "text-destructive" : "text-muted-foreground",
-              )}
-            >
-              {block.text.slice(0, 2000)}
-            </pre>
-          );
-        }
-        return (
-          // biome-ignore lint/suspicious/noArrayIndexKey: process blocks append in event order
-          <div key={`text-${blockIndex}`} className="group/assistant pb-4">
-            <div className="flex min-w-0 items-start gap-1.5 px-0.5">
-              {/* 留出和工具行图标同宽的空位,正文与工具名左缘对齐 */}
-              <span aria-hidden className="w-6 shrink-0" />
-              {/* 正文比界面大一号、行距放宽:界面是扫的,回答是读的 */}
-              <div
-                className={cn(
-                  "chat-md relative min-w-0 flex-1 py-0.5 text-[0.875rem] leading-[1.7]",
-                  agentName && "max-md:text-base",
-                )}
+                className="chat-md min-w-0 text-[14.5px] leading-[1.75] max-md:text-base"
               >
                 <MessageResponse isAnimating={turn.running}>{block.text}</MessageResponse>
               </div>
-            </div>
-          </div>
-        );
-      })}
+            );
+          })}
 
-      {!turn.running && (allText || (turn.runId && onRerunAction)) && (
-        <div className="-mt-3 flex items-center gap-2 px-1 pb-3 text-xs opacity-100 transition-opacity duration-200 sm:opacity-0 sm:focus-within:opacity-100 sm:hover:opacity-100">
-          {allText && (
-            <button
-              type="button"
-              className="flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-              onClick={() => {
-                void navigator.clipboard.writeText(allText).then(
-                  () => toast.success("回复已复制"),
-                  () => toast.error("复制失败，请手动选择文本"),
-                );
-              }}
-            >
-              <CopyIcon className="size-3" />
-              <span>复制</span>
-            </button>
-          )}
-          {turn.runId && onRerunAction && (
-            <button
-              type="button"
-              className="flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-              onClick={() => {
-                const next = window.prompt(
-                  "从这一轮重来(之前的对话保留,这一轮及之后的不算),换个说法:",
-                  turn.prompt,
-                );
-                if (next?.trim() && turn.runId) onRerunAction(turn.runId, next.trim());
-              }}
-            >
-              <RotateCcw className="size-3" />
-              <span>重跑</span>
-            </button>
-          )}
-        </div>
-      )}
+          {resultEvent && <ResultCard event={resultEvent} />}
 
-      {/* 提问卡片 */}
-      {questions.map((q, qi) => (
-        <div key={q.toolUseId ?? `q-${qi}`} className="pb-4">
-          <QuestionBlock
-            e={q}
-            state={questionState(
-              q,
-              q.toolUseId ? questionResults.get(q.toolUseId) : undefined,
-              pendingQuestions?.find((p) => q.toolUseId && p.toolUseId === q.toolUseId),
-              turn.running,
-              q.toolUseId ? questionAnswers.get(q.toolUseId) : undefined,
-            )}
-            canSendAsMessage={isLastTurn && !turn.running && !!onAnswerAction}
-            onAnswer={onAnswerAction}
-            submitAnswer={submitAnswer}
-          />
-        </div>
-      ))}
-
-      {/* 终态(仅失败/未知/结构化) */}
-      {resultEvent && (
-        <div className="pb-4">
-          <Card className="gap-0 overflow-hidden py-0">
-            <CardContent className="flex items-start gap-2 p-2 text-sm">
-              <Badge
-                variant={
-                  resultEvent.status === "success"
-                    ? "success"
-                    : resultEvent.status === "unknown"
-                      ? "warning"
-                      : resultEvent.status === "cancelled"
-                        ? "secondary"
-                        : "destructive"
-                }
-              >
-                {resultEvent.status === "success" ? (
-                  <>
-                    <Check className="mr-1 inline-block h-3 w-3" /> 完成
-                  </>
-                ) : resultEvent.status === "unknown" ? (
-                  <>
-                    <AlertTriangle className="mr-1 inline-block h-3 w-3" /> 结局未知
-                  </>
-                ) : resultEvent.status === "cancelled" ? (
-                  <>
-                    <X className="mr-1 inline-block h-3 w-3" /> 已取消
-                  </>
-                ) : (
-                  <>
-                    <X className="mr-1 inline-block h-3 w-3" /> 失败
-                  </>
-                )}
-              </Badge>
-              {resultEvent.summary && resultEvent.status !== "success" && (
-                <span className="opacity-80">{resultEvent.summary}</span>
+          {turn.running && !waitingOnQuestion && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Spin />
+              {waitingTool ? (
+                <span>等你确认 {waitingTool} 后继续</span>
+              ) : (
+                <span>
+                  正在处理
+                  {turn.startedAt && (
+                    <>
+                      ，已用 <WorkingTimer createdAt={turn.startedAt} />
+                    </>
+                  )}
+                </span>
               )}
-            </CardContent>
-            {resultEvent.structured != null && (
-              <CardContent className="p-2 pt-0">
-                <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-muted p-2 font-mono text-xs">
-                  {JSON.stringify(resultEvent.structured, null, 2)}
-                </pre>
-              </CardContent>
-            )}
-          </Card>
-        </div>
-      )}
+            </div>
+          )}
 
-      {/* 用量页脚:一行灰色等宽小字,和正文左缘对齐 */}
-      {!turn.running && (usage.input > 0 || usage.output > 0) && (
-        <div className="pb-2">
-          <span
-            className="pl-1.5 font-mono text-[11px] tabular-nums text-muted-foreground/70"
-            title="本轮输入 / 输出 token"
-          >
-            ↑{formatTokens(usage.input)} ↓{formatTokens(usage.output)}
-          </span>
+          {!turn.running && (usage.input > 0 || usage.output > 0 || allText || turn.runId) && (
+            <div className="flex flex-wrap items-center gap-1 text-[12.5px] text-muted-foreground">
+              {(usage.input > 0 || usage.output > 0) && (
+                <span className="mr-1.5 tabular-nums" title="这一轮的输入 / 输出 token">
+                  ↑ {usage.input.toLocaleString()}　↓ {usage.output.toLocaleString()} token
+                </span>
+              )}
+              {allText && (
+                <button
+                  type="button"
+                  className="inline-flex h-[30px] items-center gap-1 rounded-full px-2.5 text-[13px] text-[#4D4A43] hover:bg-accent max-md:h-11"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(allText).then(
+                      () => toast.success("回复已复制"),
+                      () => toast.error("复制失败，请手动选择文本"),
+                    );
+                  }}
+                >
+                  <CopyIcon className="size-3.5" />
+                  复制
+                </button>
+              )}
+              {turn.runId && onRerun && !readOnly && (
+                <button
+                  type="button"
+                  className="inline-flex h-[30px] items-center gap-1 rounded-full px-2.5 text-[13px] text-[#4D4A43] hover:bg-accent max-md:h-11"
+                  onClick={() => onRerun(turnIndex)}
+                >
+                  <RotateCcw className="size-3.5" />
+                  重跑
+                </button>
+              )}
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 });
@@ -1315,6 +1053,78 @@ export function scrollModeForDistance(distanceFromEnd: number): ScrollMode {
   return "free";
 }
 
+/** 重跑弹窗:可以改写这一轮的消息,回到这一轮之前的状态重来。 */
+function RerunDialog({
+  target,
+  laterTurns,
+  onCancel,
+  onConfirm,
+}: {
+  target: { index: number; runId: string; prompt: string } | null;
+  laterTurns: number;
+  onCancel(): void;
+  onConfirm(runId: string, prompt: string): void;
+}) {
+  const [text, setText] = useState("");
+  const files = useMemo(
+    () => (target ? splitPromptAttachments(target.prompt).files : []),
+    [target],
+  );
+  useEffect(() => {
+    if (target) setText(splitPromptAttachments(target.prompt).text);
+  }, [target]);
+  return (
+    <Dialog open={target !== null} onOpenChange={(o) => !o && onCancel()}>
+      <DialogContent className="sm:max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle>重跑第 {(target?.index ?? 0) + 1} 轮</DialogTitle>
+          <DialogDescription>
+            回到这一轮之前的状态，用下面的内容重新跑：之前的对话保留，
+            {laterTurns > 0 ? `这一轮及之后的 ${laterTurns + 1} 轮` : "这一轮"}
+            不再算进上下文，已有记录原样保留。较早的记录定位不到那一轮之前的状态时，改用干净上下文重跑并提示你。
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          className="space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (target && text.trim())
+              onConfirm(target.runId, joinPromptAttachments(text.trim(), files));
+          }}
+        >
+          <label className="block space-y-1.5">
+            <span className="text-[13px] text-muted-foreground">这一轮的消息（可改写）</span>
+            <textarea
+              rows={4}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              className="w-full resize-y rounded-[10px] border border-border bg-card px-3 py-2.5 text-sm leading-[1.6] outline-none focus:border-[#9C978B] focus:ring-[3px] focus:ring-[#ECE9E1]"
+            />
+          </label>
+          {files.length > 0 && (
+            <p className="text-sm text-muted-foreground">
+              这一轮的附件照样带上：{files.join("、")}
+            </p>
+          )}
+          <p className="flex items-center gap-2 rounded-[10px] bg-[#F4F2EC] px-3 py-2 text-sm text-[#3C3A35]">
+            <Coins className="size-4 shrink-0" />
+            重跑会重新调用模型并计费
+          </p>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onCancel}>
+              取消
+            </Button>
+            <Button type="submit" disabled={!text.trim()}>
+              <RotateCcw />
+              重跑
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function ChatThread({
   turns,
   onRerunAction,
@@ -1322,6 +1132,12 @@ export function ChatThread({
   pendingQuestions,
   submitAnswerAction,
   agentName,
+  agentId,
+  agentIcon,
+  onLocateToolAction,
+  selectedToolLocator,
+  readOnly,
+  awaitingTools,
 }: {
   turns: Turn[];
   onRerunAction?: (runId: string, prompt: string) => void;
@@ -1329,11 +1145,23 @@ export function ChatThread({
   /** 运行在等回答的提问(按 toolUseId 对到卡片上) */
   pendingQuestions?: readonly PendingAsk[];
   submitAnswerAction?: SubmitAnswer;
+  /** 回答者的名字与头像;不传时按智能体设计器显示 */
   agentName?: string;
+  agentId?: string;
+  agentIcon?: string | null;
+  /** 点工具调用:交给外面的执行详情面板定位(locator 见 toolLocator);不传则就地展开 */
+  onLocateToolAction?: (locator: string) => void;
+  selectedToolLocator?: string | null;
+  /** 只读(已归档的会话):不给重跑 */
+  readOnly?: boolean;
+  /** 正在等你确认的工具名(对应的调用标「等你确认」) */
+  awaitingTools?: readonly string[];
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollMode, setScrollMode] = useState<ScrollMode>("following");
-  const [expandedBlockIds, setExpandedBlockIds] = useState<Set<string>>(() => new Set());
+  const [openBlocks, setOpenBlocks] = useState<Map<string, boolean>>(() => new Map());
+  const [rerunIndex, setRerunIndex] = useState<number | null>(null);
+  const [currentTurn, setCurrentTurn] = useState(0);
   const previousTurnCountRef = useRef(turns.length);
   const previousLastRunningRef = useRef(turns.at(-1)?.running === true);
   const appendedTurn = turns.length > previousTurnCountRef.current;
@@ -1349,12 +1177,15 @@ export function ChatThread({
     estimateSize: () => 280,
     overscan: 4,
     scrollPaddingStart: 24,
-    paddingEnd: agentName ? 24 : 176,
-    scrollPaddingEnd: agentName ? 24 : 176,
+    paddingEnd: 28,
+    scrollPaddingEnd: 28,
     anchorTo: "end",
     followOnAppend: scrollMode === "following" && !anchorAppendedTurn ? "auto" : false,
     scrollEndThreshold: 48,
-    getItemKey: (index) => turns[index]?.localId ?? turns[index]?.runId ?? `turn-${index}`,
+    getItemKey: (index) => {
+      const turn = turns[index];
+      return turn ? turnKeyOf(turn, index) : `turn-${index}`;
+    },
   });
 
   const scrollToEnd = useCallback(
@@ -1369,13 +1200,8 @@ export function ChatThread({
     [turns.length, virtualizer],
   );
 
-  const onToggleBlock = useCallback((blockId: string) => {
-    setExpandedBlockIds((current) => {
-      const next = new Set(current);
-      if (next.has(blockId)) next.delete(blockId);
-      else next.add(blockId);
-      return next;
-    });
+  const onToggleBlock = useCallback((blockId: string, open: boolean) => {
+    setOpenBlocks((current) => new Map(current).set(blockId, open));
   }, []);
 
   useLayoutEffect(() => {
@@ -1406,9 +1232,10 @@ export function ChatThread({
     });
   }, [lastRunning]);
 
-  const minimapIndexes = useMemo(() => {
-    if (turns.length <= 80) return turns.map((_, index) => index);
-    const step = Math.ceil(turns.length / 80);
+  /** 轮次很多时导航条按步长取样,首尾一定在 */
+  const railIndexes = useMemo(() => {
+    if (turns.length <= 40) return turns.map((_, index) => index);
+    const step = Math.ceil(turns.length / 40);
     const indexes = turns.flatMap((_, index) => (index % step === 0 ? [index] : []));
     if (indexes.at(-1) !== turns.length - 1) indexes.push(turns.length - 1);
     return indexes;
@@ -1428,15 +1255,26 @@ export function ChatThread({
     setScrollMode((current) =>
       transitionScrollMode(current, { kind: "distance-change", distanceFromEnd: distance }),
     );
-  }, []);
+    // 导航条高亮「视口上部 40% 处」所在的那一轮
+    const probe = element.scrollTop + element.clientHeight * 0.4;
+    const hit = virtualizer
+      .getVirtualItems()
+      .find((item) => item.start <= probe && item.end > probe);
+    if (hit) setCurrentTurn(hit.index);
+  }, [virtualizer]);
 
   const enterFreeScrolling = useCallback(() => {
     setScrollMode((current) => transitionScrollMode(current, { kind: "user-navigation" }));
   }, []);
 
+  const openRerun = useCallback((index: number) => setRerunIndex(index), []);
+
   if (turns.length === 0) return null;
 
   const virtualItems = virtualizer.getVirtualItems();
+  const rerunTurn = rerunIndex !== null ? turns[rerunIndex] : undefined;
+  const name = agentName ?? "智能体设计器";
+  const avatarId = agentId ?? "agent-architect";
 
   return (
     <div className="relative h-full min-h-0">
@@ -1454,10 +1292,13 @@ export function ChatThread({
         onKeyDown={(event) => {
           if (["ArrowUp", "PageUp", "Home"].includes(event.key)) enterFreeScrolling();
         }}
-        className="h-full min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
+        className={cn(
+          "h-full min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain px-3 sm:pl-9",
+          turns.length > 1 ? "sm:pr-16" : "sm:pr-9",
+        )}
       >
         <div
-          className={cn("relative mx-auto w-full", agentName ? "max-w-[850px]" : "max-w-[760px]")}
+          className="relative mx-auto w-full max-w-[780px]"
           style={{ height: `${virtualizer.getTotalSize()}px` }}
         >
           {virtualItems.map((virtualRow) => {
@@ -1469,68 +1310,97 @@ export function ChatThread({
                 key={virtualRow.key}
                 ref={virtualizer.measureElement}
                 data-index={virtualRow.index}
-                className="absolute left-0 top-0 w-full pb-2 pt-6"
+                className={cn(
+                  "absolute left-0 top-0 w-full pt-[22px]",
+                  virtualRow.index > 0 && "border-t border-dashed border-border",
+                )}
                 style={{ transform: `translateY(${virtualRow.start}px)` }}
               >
-                <TurnView
-                  turn={turn}
-                  turnKey={turnKey}
-                  isLastTurn={virtualRow.index === turns.length - 1}
-                  expandedBlockIds={expandedBlockIds}
-                  onToggleBlock={onToggleBlock}
-                  onRerunAction={onRerunAction}
-                  onAnswerAction={onAnswerAction}
-                  pendingQuestions={pendingQuestions}
-                  submitAnswer={submitAnswerAction}
-                  agentName={agentName}
-                />
+                <div className="pb-[18px]">
+                  <TurnView
+                    turn={turn}
+                    turnIndex={virtualRow.index}
+                    turnKey={turnKey}
+                    isLastTurn={virtualRow.index === turns.length - 1}
+                    openBlocks={openBlocks}
+                    onToggleBlock={onToggleBlock}
+                    onRerun={onRerunAction ? openRerun : undefined}
+                    onAnswerAction={onAnswerAction}
+                    pendingQuestions={pendingQuestions}
+                    submitAnswer={submitAnswerAction}
+                    agentId={avatarId}
+                    agentIcon={agentIcon}
+                    agentName={name}
+                    onLocateToolAction={onLocateToolAction}
+                    selectedToolLocator={selectedToolLocator}
+                    readOnly={readOnly}
+                    awaitingTools={awaitingTools}
+                  />
+                </div>
               </div>
             );
           })}
         </div>
       </div>
 
-      {turns.length > 3 && (
+      {turns.length > 1 && (
         <nav
-          aria-label="对话轮次导航"
-          className="absolute left-1 top-1/2 z-10 hidden max-h-48 -translate-y-1/2 flex-col gap-1 overflow-y-auto rounded bg-background/80 p-1 backdrop-blur-sm md:flex"
+          aria-label="轮次导航"
+          className="absolute top-1/2 right-3 z-10 hidden max-h-[60%] -translate-y-1/2 flex-col gap-1 overflow-y-auto rounded-[14px] border border-border bg-card p-[5px] sm:flex"
         >
-          {minimapIndexes.map((index) => {
+          {railIndexes.map((index) => {
             const turn = turns[index];
             if (!turn) return null;
             return (
               <button
-                key={turn.runId ?? `turn-${index}`}
+                key={turnKeyOf(turn, index)}
                 type="button"
                 className={cn(
-                  "size-1.5 shrink-0 rounded-full bg-muted-foreground/30 transition-[transform,background-color] hover:scale-150 hover:bg-foreground/70",
-                  turn.running && "bg-brand",
+                  "h-[26px] w-7 shrink-0 rounded-lg text-xs text-muted-foreground tabular-nums hover:bg-[#F1EFE9] hover:text-foreground",
+                  index === currentTurn &&
+                    "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground",
                 )}
                 title={`第 ${index + 1} 轮: ${turn.prompt.slice(0, 40)}`}
                 aria-label={`跳到第 ${index + 1} 轮`}
+                aria-current={index === currentTurn ? "true" : undefined}
                 onClick={() => {
                   enterFreeScrolling();
+                  setCurrentTurn(index);
                   virtualizer.scrollToIndex(index, { align: "start", behavior: "smooth" });
                 }}
-              />
+              >
+                {index + 1}
+              </button>
             );
           })}
         </nav>
       )}
 
       {scrollMode !== "following" && (
-        <Button
+        <button
           type="button"
-          size="icon"
-          variant="secondary"
-          className="absolute bottom-36 right-5 z-20 size-8 rounded-md shadow-md"
-          title="回到最新消息"
+          className="absolute bottom-3 left-1/2 z-20 flex h-[34px] -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-card px-3.5 text-[13px] shadow-[0_6px_18px_rgb(40_35_25/12%)] hover:bg-[#F4F2EC]"
           aria-label="回到最新消息"
           onClick={() => scrollToEnd(true)}
         >
-          <ArrowDown className="size-4" />
-        </Button>
+          <ArrowDown className="size-[15px]" />
+          回到最新
+        </button>
       )}
+
+      <RerunDialog
+        target={
+          rerunTurn?.runId && rerunIndex !== null
+            ? { index: rerunIndex, runId: rerunTurn.runId, prompt: rerunTurn.prompt }
+            : null
+        }
+        laterTurns={rerunIndex !== null ? turns.length - 1 - rerunIndex : 0}
+        onCancel={() => setRerunIndex(null)}
+        onConfirm={(runId, prompt) => {
+          setRerunIndex(null);
+          onRerunAction?.(runId, prompt);
+        }}
+      />
     </div>
   );
 }

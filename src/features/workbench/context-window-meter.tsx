@@ -1,6 +1,5 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 export function formatContextWindowTokens(value: number | null): string {
@@ -29,12 +28,10 @@ export function ContextWindowMeter({
   const usedPercentage =
     maxTokens !== null && maxTokens > 0 ? Math.min(100, (usedTokens / maxTokens) * 100) : null;
   const percentageStr = formatPercentage(usedPercentage);
-  const isUnknown = usedPercentage === null;
   const normalizedPercentage = Math.max(0, Math.min(100, usedPercentage ?? 0));
-  const radius = 9.75;
-  const circumference = 2 * Math.PI * radius;
-  const dashOffset = isUnknown ? 0 : circumference * (1 - normalizedPercentage / 100);
   const isOverloaded = normalizedPercentage > 90;
+  const ringColor =
+    normalizedPercentage > 80 ? "#B4442F" : normalizedPercentage > 60 ? "#B7791F" : "#3F7A57";
   const usageColor = isOverloaded
     ? "var(--destructive)"
     : "color-mix(in oklab, var(--color-muted-foreground) 72%, transparent)";
@@ -46,46 +43,34 @@ export function ContextWindowMeter({
           环旁边写上百分比。只有一个细环时,它和"加载中"的转圈长得一模一样,
           人会以为输入框还没准备好。
         */}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 shrink-0 gap-1.5 px-1.5 font-mono text-xs font-normal text-muted-foreground hover:text-foreground"
-          aria-label={
-            percentageStr
-              ? `上下文窗口已用 ${percentageStr}`
-              : `上下文 ${formatContextWindowTokens(usedTokens)} tokens`
-          }
+        <button
+          type="button"
+          className="inline-flex h-[30px] shrink-0 items-center gap-1.5 rounded-full px-1.5 text-[12.5px] whitespace-nowrap text-muted-foreground hover:bg-[#F1EFE9] max-md:h-11"
+          aria-label={`上下文已用 ${percentageStr ?? formatContextWindowTokens(usedTokens)}${
+            totalProcessed ? `,累计 ${formatContextWindowTokens(totalProcessed)} token` : ""
+          }`}
+          title="上下文用量:上限按 200k 计"
         >
-          <span className="relative flex size-3.5 items-center justify-center">
-            <svg
-              viewBox="0 0 24 24"
-              className="absolute inset-0 size-full -rotate-90 transform-gpu"
-              aria-hidden="true"
-            >
-              <circle
-                cx="12"
-                cy="12"
-                r={radius}
-                fill="none"
-                stroke="color-mix(in oklab, var(--color-muted-foreground) 24%, transparent)"
-                strokeWidth="3"
-              />
-              <circle
-                cx="12"
-                cy="12"
-                r={radius}
-                fill="none"
-                stroke={usageColor}
-                strokeWidth="3"
-                strokeLinecap="round"
-                strokeDasharray={isUnknown ? "2 3" : circumference}
-                strokeDashoffset={dashOffset}
-                className="transition-[stroke-dashoffset,stroke] duration-500 ease-out motion-reduce:transition-none"
-              />
-            </svg>
+          <svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true" className="shrink-0">
+            <circle cx="10" cy="10" r="8" fill="none" stroke="#E2DFD7" strokeWidth="3" />
+            <circle
+              cx="10"
+              cy="10"
+              r="8"
+              fill="none"
+              stroke={ringColor}
+              strokeWidth="3"
+              strokeDasharray={`${Math.max(1.5, (normalizedPercentage / 100) * 50.3)} 60`}
+              transform="rotate(-90 10 10)"
+              className="transition-[stroke-dasharray] duration-500 motion-reduce:transition-none"
+            />
+          </svg>
+          <span className="max-md:hidden">
+            上下文 {percentageStr ?? "0%"}
+            {totalProcessed ? `,累计 ${formatContextWindowTokens(totalProcessed)} token` : ""}
           </span>
-          {percentageStr ?? formatContextWindowTokens(usedTokens)}
-        </Button>
+          <span className="md:hidden">{percentageStr ?? "0%"}</span>
+        </button>
       </PopoverTrigger>
       <PopoverContent side="top" align="end" className="w-64 max-w-none p-0">
         <div className="flex flex-col gap-2 p-3">
@@ -94,12 +79,12 @@ export function ContextWindowMeter({
               {maxTokens !== null ? "上下文窗口" : "当前处理量"}
             </div>
             {maxTokens !== null && percentageStr ? (
-              <div className="text-[11px] tabular-nums text-muted-foreground">
+              <div className="text-xs tabular-nums text-muted-foreground">
                 {percentageStr} · {formatContextWindowTokens(usedTokens)}/
                 {formatContextWindowTokens(maxTokens)}
               </div>
             ) : (
-              <div className="text-[11px] tabular-nums text-muted-foreground">
+              <div className="text-xs tabular-nums text-muted-foreground">
                 {formatContextWindowTokens(usedTokens)}
               </div>
             )}
@@ -116,7 +101,7 @@ export function ContextWindowMeter({
             </div>
           )}
           {totalProcessed != null && totalProcessed > 0 && (
-            <div className="flex items-center justify-between gap-3 text-[11px] leading-4">
+            <div className="flex items-center justify-between gap-3 text-xs leading-4">
               <span className="text-muted-foreground">累计处理</span>
               <span className="font-medium tabular-nums text-muted-foreground">
                 {formatContextWindowTokens(totalProcessed)}
