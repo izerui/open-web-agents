@@ -19,11 +19,13 @@ function Toaster() {
       offset={{ bottom: "28px" }}
       mobileOffset={{ bottom: "calc(env(safe-area-inset-bottom) + 80px)", left: "16px", right: "16px" }}
       gap={8}
+      // sonner 在 ≤600px 时把列表设成 width:100%(再加左右偏移会溢出)、提示设成整行宽;改回随文字收窄居中
+      className="max-[600px]:!w-auto"
       toastOptions={{
         unstyled: true,
         classNames: {
           toast:
-            "inset-x-0 mx-auto flex w-fit max-w-[min(560px,calc(100vw-32px))] items-center gap-2 rounded-[22px] bg-[#1C1C1C] px-[18px] py-2.5 text-sm leading-snug text-white shadow-[0_8px_24px_rgb(28_28_28/22%)]",
+            "inset-x-0 mx-auto flex w-fit max-[600px]:!w-fit max-w-[min(560px,calc(100vw-32px))] items-center gap-2 rounded-[22px] bg-[#1C1C1C] px-[18px] py-2.5 text-sm leading-snug text-white shadow-[0_8px_24px_rgb(28_28_28/22%)]",
           content: "min-w-0 flex flex-col gap-0.5",
           title: "font-normal break-words",
           description: "text-[13px] text-white/75 break-words",
