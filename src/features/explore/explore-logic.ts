@@ -14,6 +14,12 @@ export function chatHref(sessionId: string, question?: string): string {
   return question ? `${base}&q=${encodeURIComponent(question)}` : base;
 }
 
+/** 「立即使用」建好会话后的提示:已用「X」vN 新建会话。 */
+export function startedText(name?: string | null, version?: number | null): string {
+  if (!name) return "已新建会话";
+  return `已用「${name}」${version ? `v${version} ` : ""}新建会话`;
+}
+
 export interface MarketListItem {
   id: string;
   name: string;

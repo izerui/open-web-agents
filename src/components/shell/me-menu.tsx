@@ -9,15 +9,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
-import { requestClientNavigation } from "@/lib/client-navigation";
-import { errorText, fetchJson } from "@/lib/fetch-json";
 import { meMenuItems } from "@/lib/nav/routes";
-import { clearMe, initialsOf, isAdminView, useMe } from "@/lib/use-me";
+import { initialsOf, isAdminView, useMe } from "@/lib/use-me";
 import { Coins, Lock, LogIn, LogOut, ScrollText, ShieldCheck } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useRef } from "react";
-import { toast } from "sonner";
+import type { Balance } from "./use-balance";
+import { useLogout } from "./use-logout";
 
 const ICONS: Record<string, typeof Coins> = {
   积分与套餐: Coins,
@@ -27,34 +24,17 @@ const ICONS: Record<string, typeof Coins> = {
 };
 
 /** 顶栏右端的头像菜单:我是谁、积分、账号安全、操作日志、登出(菜单项由 meMenuItems 决定) */
-export function MeMenu() {
+export function MeMenu({ balance }: { balance: Balance }) {
   const { me, loading } = useMe();
-  const router = useRouter();
-  const loggingOutRef = useRef(false);
-
-  async function logout() {
-    if (loggingOutRef.current || !requestClientNavigation("/login", true)) return;
-    loggingOutRef.current = true;
-    try {
-      await fetchJson("/api/auth", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "logout" }),
-      });
-      clearMe();
-      toast.success("已登出");
-      router.replace("/login");
-      router.refresh();
-    } catch (error) {
-      toast.error(`登出失败:${errorText(error)}`);
-    } finally {
-      loggingOutRef.current = false;
-    }
-  }
+  const logout = useLogout();
 
   if (loading) return <Skeleton className="size-[34px] rounded-full" />;
 
-  const items = meMenuItems(me);
+  const local = me?.authRequired === false && !me.user;
+  // 本地模式的匿名管理员没有积分账户:隐藏积分入口,免得点进去报「账号不存在」
+  const items = meMenuItems(me, {
+    credits: local && balance.status === "none" ? false : undefined,
+  });
   if (items.length === 1 && items[0]?.href === "/login") {
     return (
       <Link
@@ -67,10 +47,9 @@ export function MeMenu() {
     );
   }
 
-  const local = me?.authRequired === false && !me.user;
-  const email = me?.user?.email ?? (local ? "本地模式" : "账号信息未读取到");
-  const name = me?.user ? (email.split("@")[0] ?? email) : email;
-  const role = local ? "本地模式" : isAdminView(me) ? "管理员" : me?.user ? "普通账号" : "—";
+  const email = me?.user?.email ?? "账号信息未读取到";
+  const name = me?.user ? (email.split("@")[0] ?? email) : local ? "本地模式" : email;
+  const role = isAdminView(me) ? "管理员" : me?.user ? "普通账号" : "—";
 
   return (
     <DropdownMenu>
@@ -85,11 +64,18 @@ export function MeMenu() {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-60">
         <DropdownMenuLabel className="font-normal">
-          <div className="truncate font-semibold text-foreground">{name}</div>
-          <div className="truncate text-xs text-muted-foreground">{email}</div>
-          <span className="mt-1.5 inline-flex h-[22px] items-center rounded-full bg-muted px-2 text-xs text-[#4D4A43]">
-            {role}
-          </span>
+          {local ? (
+            // 本地模式没有姓名、邮箱可显示:一行说明就够,不要三行都写「本地模式」
+            <div className="font-semibold text-foreground">本地模式（匿名管理员）</div>
+          ) : (
+            <>
+              <div className="truncate font-semibold text-foreground">{name}</div>
+              <div className="truncate text-xs text-muted-foreground">{email}</div>
+              <span className="mt-1.5 inline-flex h-[22px] items-center rounded-full bg-muted px-2 text-xs text-[#4D4A43]">
+                {role}
+              </span>
+            </>
+          )}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         {items.map((item) => {
@@ -110,6 +96,11 @@ export function MeMenu() {
               <Link href={item.href ?? "/"}>
                 <Icon />
                 {item.label}
+                {item.href === "/account/billing" && balance.status === "ok" && (
+                  <span className="ml-auto text-xs text-muted-foreground tabular-nums">
+                    {balance.available}
+                  </span>
+                )}
               </Link>
             </DropdownMenuItem>
           );

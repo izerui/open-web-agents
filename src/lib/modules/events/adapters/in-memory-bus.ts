@@ -25,6 +25,10 @@ export class InMemoryBus implements BusPort {
     return id;
   }
 
+  async recent(topic: string, count: number): Promise<AgentEvent[]> {
+    return (this.events.get(topic) ?? []).slice(-Math.max(0, count)).map((item) => item.event);
+  }
+
   subscribe(
     topic: string,
     cb: (e: AgentEvent, id: string) => void,

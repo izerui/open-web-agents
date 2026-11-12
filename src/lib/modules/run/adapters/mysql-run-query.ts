@@ -128,6 +128,8 @@ function toItem(r: Row): RunListItem {
 /** 每个会话最近一次运行的摘要(探索首页「你的 AI 同事正在工作」用)。 */
 export interface LatestRun {
   sessionId: string;
+  /** 运行 id(取运行中的事件流用);旧调用方可能不给 */
+  runId?: string;
   status: RunState;
   /** 本轮输入的前 300 字 */
   promptPreview: string;
@@ -149,8 +151,8 @@ export class MysqlRunQuery {
     const ids = [...new Set(sessionIds)];
     if (ids.length === 0) return out;
     const res = await this.db.execute(sql`
-      SELECT session_id, status, prompt_preview, reply_preview, created_ms, started_ms FROM (
-        SELECT r.session_id, r.status,
+      SELECT id, session_id, status, prompt_preview, reply_preview, created_ms, started_ms FROM (
+        SELECT r.id, r.session_id, r.status,
                LEFT(r.prompt, 300) AS prompt_preview,
                LEFT(r.final_text, 400) AS reply_preview,
                UNIX_TIMESTAMP(r.created_at) * 1000 AS created_ms,
@@ -163,6 +165,7 @@ export class MysqlRunQuery {
         )})
       ) t WHERE rn = 1`);
     const rows = ((res as unknown as [unknown[]])[0] ?? []) as {
+      id: string;
       session_id: string;
       status: string;
       prompt_preview: string | null;
@@ -174,6 +177,7 @@ export class MysqlRunQuery {
       const started = r.started_ms === null ? undefined : Number(r.started_ms);
       out.set(r.session_id, {
         sessionId: r.session_id,
+        runId: r.id,
         status: r.status as RunState,
         promptPreview: r.prompt_preview ?? "",
         replyPreview: r.reply_preview ?? undefined,

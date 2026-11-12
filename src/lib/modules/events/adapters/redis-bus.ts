@@ -104,6 +104,18 @@ export class RedisBus implements BusPort {
     return first[1];
   }
 
+  async recent(topic: string, count: number): Promise<AgentEvent[]> {
+    if (count <= 0) return [];
+    const rows = (await withTimeout(
+      this.command.call("XREVRANGE", topic, "+", "-", "COUNT", count),
+      "redis stream range timeout",
+    )) as [string, string[]][] | null;
+    return (rows ?? [])
+      .map(([, fields]) => decodeEvent(fields))
+      .filter((e): e is AgentEvent => e !== null)
+      .reverse();
+  }
+
   subscribe(
     topic: string,
     cb: (event: AgentEvent, id: string) => void,

@@ -8,7 +8,10 @@ import { modelOf, useModelCatalog } from "@/features/builder/model-select";
 import { creditsText, perStandard } from "@/features/models/model-shared";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { creditsBalance } from "@/lib/modules/billing/domain/credits-display";
-import { MARKET_CATEGORIES, type MarketAgent } from "@/lib/modules/market/domain/catalog";
+import {
+  MARKET_CATEGORIES,
+  type MarketAgentDetail as MarketAgent,
+} from "@/lib/modules/market/domain/catalog";
 import { formatPerRun, formatUseCount } from "@/lib/modules/market/domain/display";
 import { cn } from "@/lib/utils";
 import { Braces, ChevronLeft, ChevronRight, Copy, MessageSquare, RefreshCw } from "lucide-react";
@@ -128,6 +131,16 @@ function Skeleton() {
           <div className={cn(bar, "h-4 w-52 max-w-full")} />
           <div className={cn(bar, "h-[22px] w-80 max-w-full")} />
         </div>
+      </div>
+      {/* 与正文同样的两栏:左边几行说明和示例问题卡,右边价格卡 */}
+      <div className="grid grid-cols-[minmax(0,1fr)_340px] gap-10 pt-[30px] max-lg:grid-cols-1">
+        <div>
+          <div className={cn(bar, "h-[18px] w-[90%]")} />
+          <div className={cn(bar, "mt-2.5 h-[18px] w-[80%]")} />
+          <div className={cn(bar, "mt-[30px] h-[52px] rounded-[14px]")} />
+          <div className={cn(bar, "mt-2 h-[52px] rounded-[14px]")} />
+        </div>
+        <div className={cn(bar, "h-[220px] rounded-2xl")} />
       </div>
       <p className="mt-6 flex items-center justify-center gap-2 text-sm text-muted-foreground">
         <span className="size-4 animate-spin rounded-full border-2 border-[#D9D5CB] border-t-foreground" />
@@ -252,16 +265,7 @@ function Detail({ agent }: { agent: MarketAgent }) {
           <PriceCard agent={agent} price={price} />
           <div className="rounded-2xl border border-border bg-card px-[22px] py-5">
             <h3 className="mb-3 text-[15px] font-semibold">版本说明</h3>
-            <div className="flex items-center gap-2 text-sm">
-              <b className="font-display text-base">v{agent.publishedVersion}</b>
-              {published && <span className="text-muted-foreground">{published}</span>}
-              <Badge variant="success" className="ml-auto">
-                当前版本
-              </Badge>
-            </div>
-            <p className="mt-1.5 text-sm break-words text-[#3C3A35]">
-              {agent.versionNote || "作者没有写这一版的说明。"}
-            </p>
+            <VersionNotes agent={agent} published={published} />
             <p className="mt-2.5 text-xs text-muted-foreground">
               立即使用跑的是当前发布版；API 调用可以传 version 锁定某一版。
             </p>
@@ -281,6 +285,39 @@ function Detail({ agent }: { agent: MarketAgent }) {
         </aside>
       </div>
     </>
+  );
+}
+
+/** 当前发布版及之前最近 3 版;接口没给(旧服务端)时只列当前版。 */
+function VersionNotes({ agent, published }: { agent: MarketAgent; published: string | null }) {
+  const list = agent.recentVersions?.length
+    ? agent.recentVersions.map((v) => ({ ...v, date: dateText(v.createdAt) }))
+    : [
+        {
+          version: agent.publishedVersion ?? 0,
+          date: published,
+          note: agent.versionNote,
+        },
+      ];
+  return (
+    <ol className="space-y-3">
+      {list.map((v) => (
+        <li key={v.version} className="border-b border-line-soft pb-3 last:border-b-0 last:pb-0">
+          <div className="flex items-center gap-2 text-sm">
+            <b className="font-display text-base">v{v.version}</b>
+            {v.date && <span className="text-muted-foreground">{v.date}</span>}
+            {v.version === agent.publishedVersion && (
+              <Badge variant="success" className="ml-auto">
+                当前版本
+              </Badge>
+            )}
+          </div>
+          <p className="mt-1.5 text-sm break-words whitespace-pre-line text-[#3C3A35]">
+            {v.note || "作者没有写这一版的说明。"}
+          </p>
+        </li>
+      ))}
+    </ol>
   );
 }
 

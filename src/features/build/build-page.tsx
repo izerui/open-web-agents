@@ -56,6 +56,7 @@ import {
   sectionSummary,
 } from "./profile-model";
 import { PublishStage } from "./publish-stage";
+import { READONLY_ACCESS_BADGE, READONLY_STAGES, ReadonlyAccess } from "./readonly-access";
 import { ReadonlyView, useClone } from "./readonly-view";
 import { RunsStage } from "./runs-stage";
 import { TrialPanel } from "./trial-panel";
@@ -454,8 +455,8 @@ export function BuildPage({
       aria-label="构建阶段"
       className="flex shrink-0 items-center gap-0.5 rounded-3xl bg-[#ECEAE3] p-1 max-md:w-max"
     >
-      {(readOnly ? STAGES.slice(0, 1) : STAGES).map((s) => {
-        const b = badges[s.key];
+      {(readOnly ? READONLY_STAGES : STAGES).map((s) => {
+        const b = readOnly && s.key === "access" ? READONLY_ACCESS_BADGE : badges[s.key];
         const on = stage === s.key;
         return (
           <button
@@ -855,7 +856,7 @@ export function BuildPage({
       </div>
     );
   } else if (readOnly && agent) {
-    body = <ReadonlyView agent={agent} />;
+    body = stage === "access" ? <ReadonlyAccess agent={agent} /> : <ReadonlyView agent={agent} />;
   } else {
     const isWide = stage === "orch" && wide && designerVisible;
     body = (

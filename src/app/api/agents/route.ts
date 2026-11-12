@@ -69,6 +69,7 @@ export async function GET(req: Request) {
       const extra = principal.type === "web" && subject.role === "admin" ? await agents.list() : [];
       all = [...new Map([...scoped, ...extra].map((a) => [a.id, a])).values()];
     }
+    const localMode = env.authRequired === false && principal.type === "web";
     const levels = new Map(
       all.map((a) => [a.id, agentAccessLevel(principal, a, subject, allGrants)] as const),
     );
@@ -118,8 +119,12 @@ export async function GET(req: Request) {
             // 回调地址可能带着接收方的令牌,非所有者不该看到
             webhookUrl: manage ? a.webhookUrl : undefined,
             isPublic: isPublic(a.id, allGrants),
-            // 工作室按它分「我建的 / 分享给我的」;前端拿不到可靠的本人 id(本地模式是匿名管理员)
-            isOwner: a.ownerId === subject.userId,
+            /*
+             * 工作室按它分「我建的 / 分享给我的」;前端拿不到可靠的本人 id。
+             * 本地模式(不要求登录)只有一个匿名管理员在用,库里的智能体都当作他的 ——
+             * 否则「我建的」永远是空的,全部算成「分享给我的」。
+             */
+            isOwner: localMode || a.ownerId === subject.userId,
             runs7d: activity.get(a.id)?.runs ?? 0,
             updatedAt: activity.get(a.id)?.updatedAt ?? null,
             canWrite,

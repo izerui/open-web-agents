@@ -52,3 +52,12 @@ export function marketSummary(
 }
 
 export type MarketAgent = ReturnType<typeof marketSummary>;
+
+/** 详情页的版本说明:当前发布版及之前最近 3 版(只有版本号、发布时间、说明)。 */
+export interface MarketVersionNote {
+  version: number;
+  createdAt: number;
+  note: string | null;
+}
+
+export type MarketAgentDetail = MarketAgent & { recentVersions?: MarketVersionNote[] };

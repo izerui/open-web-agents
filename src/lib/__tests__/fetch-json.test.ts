@@ -55,3 +55,33 @@ describe("errorText", () => {
     expect(errorText(404)).toBe("404");
   });
 });
+
+describe("errorText · 网络错误", () => {
+  it("浏览器断网时的 TypeError 统一成中文", () => {
+    expect(errorText(new TypeError("Failed to fetch"))).toBe("网络异常，连不上服务");
+    // Firefox / Safari 的说法不同
+    expect(errorText(new TypeError("NetworkError when attempting to fetch resource."))).toBe(
+      "网络异常，连不上服务",
+    );
+    expect(errorText(new TypeError("Load failed"))).toBe("网络异常，连不上服务");
+  });
+
+  it("包了一层的 Failed to fetch 也认得出", () => {
+    expect(errorText(new Error("Failed to fetch"))).toBe("网络异常，连不上服务");
+  });
+
+  it("代码错误的 TypeError 不当成网络错误", () => {
+    expect(errorText(new TypeError("x.map is not a function"))).toBe("x.map is not a function");
+  });
+
+  it("fetchJson 断网时 errorText 给中文", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("Failed to fetch");
+      }),
+    );
+    const e = await fetchJson("/x").catch((err: unknown) => err);
+    expect(errorText(e)).toBe("网络异常，连不上服务");
+  });
+});

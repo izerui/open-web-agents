@@ -2,10 +2,13 @@ import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { canAccessSession } from "@/lib/modules/access/domain/principal";
 import type { LatestRun } from "@/lib/modules/run/adapters/mysql-run-query";
+import { topicOf } from "@/lib/modules/run/application/orchestrator";
 import {
   type DeliveredFile,
+  type WorkStep,
   latestFile,
   workStatus,
+  workSteps,
 } from "@/lib/modules/session/domain/recent-work";
 import type { SessionListFilter } from "@/lib/modules/session/ports";
 
@@ -13,6 +16,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const LIMIT = 5;
+/** 从运行的事件流末尾往回读多少条找步骤(文本增量已合并,几百条够覆盖最近的工具调用) */
+const STEP_EVENTS = 300;
 
 /**
  * 探索首页「你的 AI 同事正在工作」(gaps.md A2):本人最近 5 个会话(跨智能体),
@@ -22,7 +27,7 @@ const LIMIT = 5;
  * API Key 只看自己发起的。查询已收窄,canAccessSession 再兜一道。
  */
 export async function GET(req: Request) {
-  const { sessions, auth, runs, runQuery, agents, releases, storage } = getContainer();
+  const { sessions, auth, runs, runQuery, agents, releases, storage, bus } = getContainer();
   try {
     const principal = await auth.resolveWeb(req);
     const filter: SessionListFilter =
@@ -68,6 +73,20 @@ export async function GET(req: Request) {
       }),
     );
 
+    /*
+     * 正在工作的会话:最近 3 条工具调用或计划步骤(原型的步骤清单)。
+     * 过程事件只在运行的事件流里(结束后才落 transcript),读不到(过期、Redis 不可用)就不带步骤。
+     */
+    const steps = await Promise.all(
+      top.map(async (s): Promise<WorkStep[] | undefined> => {
+        const run = latest.get(s.id);
+        if (!run?.runId || (run.status !== "running" && run.status !== "pending")) return undefined;
+        if (!bus.recent) return [];
+        const events = await bus.recent(topicOf(s.id, run.runId), STEP_EVENTS).catch(() => []);
+        return workSteps(events);
+      }),
+    );
+
     return Response.json(
       {
         sessions: top.map((s, i) => {
@@ -91,6 +110,7 @@ export async function GET(req: Request) {
                   prompt: run.promptPreview,
                   reply: run.replyPreview ?? null,
                   at: run.createdAt,
+                  ...(steps[i] ? { steps: steps[i] } : {}),
                 }
               : null,
             file: file ? { name: file.name, path: file.path, size: file.size ?? null } : null,

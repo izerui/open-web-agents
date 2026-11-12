@@ -27,7 +27,8 @@ export class MarketError extends BrandedError {
 export class AgentMarket {
   constructor(
     private readonly agents: AgentRepo,
-    private readonly releases: Pick<AgentReleases, "publishedOf">,
+    private readonly releases: Pick<AgentReleases, "publishedOf"> &
+      Partial<Pick<AgentReleases, "list">>,
     private readonly stats?: MarketStatsSource,
   ) {}
 
@@ -99,8 +100,29 @@ export class AgentMarket {
     }
     const published = (await this.releases.publishedOf([agent])).get(id);
     if (!published) throw new MarketError(404, "not_found", "已发布版本不存在");
-    const stats = (await this.statsFor([agent])).get(id) ?? EMPTY_MARKET_STATS;
-    return marketSummary(agent, published, stats);
+    const [stats, recentVersions] = await Promise.all([
+      this.statsFor([agent]).then((m) => m.get(id) ?? EMPTY_MARKET_STATS),
+      this.recentVersions(agent),
+    ]);
+    return { ...marketSummary(agent, published, stats), recentVersions };
+  }
+
+  /**
+   * 详情页「版本说明」:当前发布版及之前最近 3 个版本的日期与说明。
+   * 回滚后发布指针之后的版本没对外发布过,不列出。只给版本号、时间、说明 —— 不给发布人。
+   * 取不到不报错:版本说明只是附加信息。
+   */
+  private async recentVersions(
+    agent: Agent,
+  ): Promise<{ version: number; createdAt: number; note: string | null }[]> {
+    const current = agent.publishedVersion;
+    if (current === undefined || !this.releases.list) return [];
+    const all = await this.releases.list(agent.id).catch(() => []);
+    return all
+      .filter((v) => v.version <= current)
+      .sort((a, b) => b.version - a.version)
+      .slice(0, 3)
+      .map((v) => ({ version: v.version, createdAt: v.createdAt, note: v.note ?? null }));
   }
 
   async setListing(principal: Principal, id: string, raw: unknown) {
