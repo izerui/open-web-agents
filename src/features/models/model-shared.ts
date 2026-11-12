@@ -6,7 +6,14 @@ import type {
   Meter,
 } from "@/lib/modules/capabilities/domain/catalog";
 import { formatCredits } from "@/lib/modules/capabilities/domain/catalog";
-import { STANDARD_METERS, formatYuan } from "@/lib/modules/capabilities/domain/pricing";
+import {
+  MAX_RECHARGE_BONUS_BP,
+  STANDARD_METERS,
+  formatMarkupPercent,
+  formatYuan,
+  markupMarginWarning,
+  parseMarkupPercent,
+} from "@/lib/modules/capabilities/domain/pricing";
 
 export const KIND_LABEL: Record<CapabilityKind, string> = {
   llm: "文本",
@@ -93,4 +100,34 @@ export function priceRows(m: Pick<Capability, "kind" | "rates" | "costRates">) {
       exact: (cost?.exact ?? true) && (sale?.exact ?? true),
     };
   });
+}
+
+/** 价目表下面的算价举例:一次读 1 万 tokens、写 1,500 tokens 约多少积分(四舍五入到 0.01) */
+export function llmPriceExample(model: string, rates: readonly CreditRate[]): string | null {
+  const cost = (meter: Meter, tokens: bigint) => {
+    const r = rates.find((x) => x.meter === meter);
+    if (!r) return null;
+    const micro = (BigInt(r.microCredits) * tokens) / BigInt(r.units);
+    return ((micro + 5_000n) / 10_000n) * 10_000n;
+  };
+  const input = cost("input_token", 10_000n);
+  const output = cost("output_token", 1_500n);
+  if (input === null || output === null) return null;
+  const t = (v: bigint) => creditsText(v.toString());
+  return `例：用 ${model}，一次读 1 万 tokens、写 1,500 tokens，约 ${t(input)} + ${t(output)} = ${t(input + output)} 积分。`;
+}
+
+/** 模型弹窗里加价比例的实时提示:越界或格式不对是错误;不高于充值赠送比例是警告;正常为 null */
+export function markupHint(text: string): { tone: "bad" | "warn"; text: string } | null {
+  let bp: number;
+  try {
+    bp = parseMarkupPercent(text.trim());
+  } catch (err) {
+    return { tone: "bad", text: err instanceof Error ? err.message : "加价比例格式不对" };
+  }
+  if (!markupMarginWarning(bp)) return null;
+  return {
+    tone: "warn",
+    text: `加价 ${formatMarkupPercent(bp)}% 不高于充值赠送比例（最高 ${formatMarkupPercent(MAX_RECHARGE_BONUS_BP)}%）：用户用赠送积分调用这个模型时，平台可能没有成本余量甚至亏本。`,
+  };
 }

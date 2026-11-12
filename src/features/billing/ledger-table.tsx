@@ -3,7 +3,12 @@
 import { Badge } from "@/components/ui/badge";
 import { tb } from "@/features/settings/space-page";
 import { shortTime } from "@/features/settings/time-format";
-import { creditsExact } from "@/lib/modules/billing/domain/credits-display";
+import { formatTime } from "@/lib/format-time";
+import {
+  creditsAmount,
+  creditsBalance,
+  creditsExact,
+} from "@/lib/modules/billing/domain/credits-display";
 import type { LedgerEntry } from "@/lib/modules/billing/ports";
 import { cn } from "@/lib/utils";
 import { ledgerKind } from "./billing-display";
@@ -46,9 +51,7 @@ export function LedgerTable({
             return (
               <tr key={entry.id}>
                 <td className={cn(tb.td, tb.first, tb.num)}>
-                  <span title={new Date(entry.createdAt).toLocaleString()}>
-                    {shortTime(entry.createdAt)}
-                  </span>
+                  <span title={formatTime(entry.createdAt)}>{shortTime(entry.createdAt)}</span>
                 </td>
                 <td className={tb.td}>
                   <Badge variant={k.tone}>{k.label}</Badge>
@@ -62,14 +65,21 @@ export function LedgerTable({
                     k.sign === "+" && "text-success-text",
                   )}
                 >
-                  {k.sign}
-                  {creditsExact(entry.amountMicroCredits)}
+                  <span title={`${k.sign}${creditsExact(entry.amountMicroCredits)} 积分`}>
+                    {k.sign}
+                    {creditsAmount(entry.amountMicroCredits)}
+                  </span>
                 </td>
                 <td className={cn(tb.td, tb.num, tb.right, "font-mono")}>
-                  {creditsExact(entry.availableAfter)}
+                  <span title={`${creditsExact(entry.availableAfter)} 积分`}>
+                    {creditsBalance(entry.availableAfter)}
+                  </span>
                   {!compact && (
-                    <div className="text-xs text-muted-foreground">
-                      冻结 {creditsExact(entry.reservedAfter)}
+                    <div
+                      className="text-xs text-muted-foreground"
+                      title={`${creditsExact(entry.reservedAfter)} 积分`}
+                    >
+                      冻结 {creditsAmount(entry.reservedAfter)}
                     </div>
                   )}
                 </td>

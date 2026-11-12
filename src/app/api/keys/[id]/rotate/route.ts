@@ -3,6 +3,7 @@ import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { canInvokeAgent } from "@/lib/modules/access/domain/principal";
 import {
+  apiKeyHint,
   generateApiKey,
   hashApiKey,
   isKeyExpired,
@@ -78,6 +79,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     monthlyLimitMicroCredits: old.monthlyLimitMicroCredits,
     ...(plan.newExpiresAt ? { expiresAt: plan.newExpiresAt } : {}),
     hashedKey: hashApiKey(plain),
+    keyHint: apiKeyHint(plain),
   });
   // 新 Key 先建好,再给旧 Key 定到期:中途失败最多多出一把新 Key,不会两把都不能用
   await apiKeys.setExpiry(old.id, plan.oldExpiresAt);

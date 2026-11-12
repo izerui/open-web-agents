@@ -16,13 +16,16 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { orderStats } from "@/features/billing/billing-display";
 import { formatPrice, parsePrice } from "@/features/billing/money";
 import { creditsText } from "@/features/models/model-shared";
 import { errorText, fetchJson } from "@/lib/fetch-json";
+import { formatTime } from "@/lib/format-time";
+import { creditsAmount } from "@/lib/modules/billing/domain/credits-display";
 import type { CreditOrder, CreditPackage } from "@/lib/modules/billing/package-ports";
 import { formatCredits, parseCredits } from "@/lib/modules/capabilities/domain/catalog";
 import { cn } from "@/lib/utils";
-import { Check, Pencil, Plus, RefreshCw } from "lucide-react";
+import { AlertTriangle, Check, Pencil, Plus, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -31,6 +34,7 @@ import {
   AdminTabs,
   EmptyState,
   Segmented,
+  Stat,
   TD,
   TH,
   TableCard,
@@ -76,10 +80,7 @@ const ORDER_FILTERS = [
 ] as const;
 type OrderFilter = (typeof ORDER_FILTERS)[number]["value"];
 
-function when(ms: number): string {
-  const d = new Date(ms);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
+const when = (ms: number) => formatTime(ms);
 
 /** 价格只做展示：「¥ 100」后面跟币种小字 */
 function Price({ minor, currency }: { minor: string; currency: "CNY" | "USD" }) {
@@ -109,6 +110,9 @@ export function PackagesAdmin() {
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [confirming, setConfirming] = useState<Order | null>(null);
+  /** 管理员取消别人待处理的订单(重复下单、没收到款等),要写原因 */
+  const [cancelling, setCancelling] = useState<Order | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
   const [reason, setReason] = useState("");
   const [orderFilter, setOrderFilter] = useState<OrderFilter>("all");
   const catalogSeq = useRef(0);
@@ -226,7 +230,25 @@ export function PackagesAdmin() {
     });
   }
 
+  async function cancelOrder() {
+    if (!cancelling) return;
+    await act(async () => {
+      await fetchJson(`/api/billing/orders/${encodeURIComponent(cancelling.id)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "admin_cancel", reason: cancelReason.trim() }),
+      });
+      toast.success("订单已取消");
+      setCancelling(null);
+      setCancelReason("");
+      await loadOrders();
+    });
+  }
+
   const pendingCount = orders?.items.filter((o) => o.status === "pending").length ?? 0;
+  const stats = orders ? orderStats(orders.items, Date.now()) : null;
+  /** 还有没载入的更早订单:统计只覆盖已载入的部分,数字后面加「+」并说明 */
+  const partial = Boolean(orders?.nextCursor);
   const shownOrders =
     orders?.items.filter((o) => orderFilter === "all" || o.status === orderFilter) ?? [];
 
@@ -360,6 +382,28 @@ export function PackagesAdmin() {
         </>
       ) : (
         <>
+          {stats && (
+            <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <Stat
+                label="待人工处理"
+                value={`${stats.pending}${partial ? "+" : ""}`}
+                className={cn(stats.pending > 0 && "border-warning/50")}
+              />
+              <Stat
+                label="本月已发放（积分）"
+                value={creditsAmount(stats.creditedMicro)}
+                hint={partial ? "按已载入的订单统计" : undefined}
+              />
+              <Stat
+                label="本月收款（人民币）"
+                value={<Price minor={stats.cnyMinor} currency="CNY" />}
+              />
+              <Stat
+                label="本月收款（美元）"
+                value={<Price minor={stats.usdMinor} currency="USD" />}
+              />
+            </div>
+          )}
           <div className="mb-3 flex flex-wrap items-center gap-3">
             <Segmented
               label="按订单状态筛选"
@@ -414,7 +458,12 @@ export function PackagesAdmin() {
                 <tbody>
                   {shownOrders.map((order) => (
                     <tr key={order.id}>
-                      <td className={cn(TD, "max-w-48 font-mono text-xs break-all")}>{order.id}</td>
+                      <td
+                        className={cn(TD, "font-mono text-xs whitespace-nowrap")}
+                        title={order.id}
+                      >
+                        {order.id.slice(0, 8).toUpperCase()}
+                      </td>
                       <td className={cn(TD, "max-w-56 break-all")}>
                         {order.accountEmail ?? order.accountId}
                       </td>
@@ -443,18 +492,32 @@ export function PackagesAdmin() {
                       </td>
                       <td className={cn(TD, "text-right whitespace-nowrap")}>
                         {order.status === "pending" ? (
-                          <Button
-                            size="sm"
-                            disabled={busy}
-                            onClick={() => {
-                              setActionError("");
-                              setReason("");
-                              setConfirming(order);
-                            }}
-                          >
-                            <Check className="size-3.5" />
-                            人工确认
-                          </Button>
+                          <span className="inline-flex gap-1.5">
+                            <Button
+                              size="sm"
+                              disabled={busy}
+                              onClick={() => {
+                                setActionError("");
+                                setReason("");
+                                setConfirming(order);
+                              }}
+                            >
+                              <Check className="size-3.5" />
+                              人工确认
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={busy}
+                              onClick={() => {
+                                setActionError("");
+                                setCancelReason("");
+                                setCancelling(order);
+                              }}
+                            >
+                              取消
+                            </Button>
+                          </span>
                         ) : (
                           <span className="text-xs text-muted-foreground">—</span>
                         )}
@@ -640,6 +703,10 @@ export function PackagesAdmin() {
               请先核对账号、订单和线下款项。这不是支付渠道的自动到账确认。
             </DialogDescription>
           </DialogHeader>
+          <p className="flex items-start gap-2 rounded-xl border border-[#EBCB91] bg-[#FFFBF2] px-3 py-2.5 text-sm text-warning-text">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            确认后立即给对方发放积分，无法撤回。请先核对线下已收款。
+          </p>
           {confirming && (
             <dl className="grid grid-cols-[64px_minmax(0,1fr)] gap-x-3 gap-y-2 rounded-xl bg-band px-4 py-3 text-sm">
               <dt className="text-muted-foreground">订单</dt>
@@ -687,6 +754,72 @@ export function PackagesAdmin() {
               {busy ? "处理中…" : "确认发放"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={cancelling !== null}
+        onOpenChange={(open) => !open && !busy && setCancelling(null)}
+      >
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>取消这笔订单？</DialogTitle>
+            <DialogDescription>
+              {cancelling
+                ? `${cancelling.id.slice(0, 8).toUpperCase()}（${cancelling.accountEmail ?? cancelling.accountId}，${cancelling.packageName}）会标为已取消，不发放积分。对方可以重新下单。`
+                : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            noValidate
+            className="grid gap-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!cancelReason.trim()) {
+                setActionError("请填写取消原因，会记进操作日志");
+                return;
+              }
+              void cancelOrder();
+            }}
+          >
+            <label
+              className="grid gap-1.5 text-[13px] text-muted-foreground"
+              htmlFor="order-cancel-reason"
+            >
+              <span>
+                取消原因 <span className="text-destructive">*</span>
+              </span>
+              <Textarea
+                id="order-cancel-reason"
+                maxLength={200}
+                placeholder="例如：重复下单 / 线下没有收到款"
+                value={cancelReason}
+                disabled={busy}
+                aria-invalid={Boolean(actionError) || undefined}
+                onChange={(e) => {
+                  setCancelReason(e.target.value);
+                  setActionError("");
+                }}
+              />
+            </label>
+            {actionError && (
+              <p aria-live="assertive" className="text-sm text-destructive">
+                {actionError}
+              </p>
+            )}
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy}
+                onClick={() => setCancelling(null)}
+              >
+                返回
+              </Button>
+              <Button type="submit" variant="destructive" disabled={busy}>
+                {busy ? "处理中…" : "取消订单"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </AdminPage>

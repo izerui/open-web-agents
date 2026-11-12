@@ -8,6 +8,7 @@ const run = {
   status: "success",
   prompt: "hi",
   ownership: { ownerId: "alice" },
+  account: { id: "alice", email: "alice@example.test" },
 };
 
 vi.mock("@/lib/container", () => ({
@@ -36,6 +37,7 @@ describe("GET /api/runs/[id]:能否打开对应会话", () => {
     const body = await res.json();
     expect(body.run.canOpenSession).toBe(true);
     expect(body.run.ownership).toBeUndefined();
+    expect(body.run.account).toBeUndefined();
   });
 
   it("管理员看别人的运行:能看运行详情,但会话是私有的,canOpenSession = false", async () => {
@@ -43,7 +45,10 @@ describe("GET /api/runs/[id]:能否打开对应会话", () => {
     state.role = "admin";
     const res = await get();
     expect(res.status).toBe(200);
-    expect((await res.json()).run.canOpenSession).toBe(false);
+    const body = await res.json();
+    expect(body.run.canOpenSession).toBe(false);
+    // 平台运行要看得出是谁的运行
+    expect(body.run.account).toEqual({ id: "alice", email: "alice@example.test" });
   });
 
   it("别人(非管理员)看不到:404", async () => {

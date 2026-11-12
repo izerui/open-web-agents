@@ -55,6 +55,8 @@ export async function GET(req: Request) {
   const filter: AuditFilter = {
     visibleTo: scopeAll ? undefined : userId,
     action,
+    // 按操作者筛:和 visibleTo 取交集,普通用户也只能在与自己相关的范围里筛
+    actorId: q.get("actorId") || undefined,
     resourceType: q.get("resourceType") || undefined,
     resourceId: q.get("resourceId") || undefined,
     since,

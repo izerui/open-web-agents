@@ -40,9 +40,13 @@ if (!url) {
       { id: agentB, ownerId: account, name: "汇总乙", config: {} },
     ]);
     const key = id();
-    await db
-      .insert(apiKeys)
-      .values({ id: key, ownerId: account, hashedKey: `h-${key}`, name: "对接 Key" });
+    await db.insert(apiKeys).values({
+      id: key,
+      ownerId: account,
+      hashedKey: `h-${key}`,
+      name: "对接 Key",
+      keyHint: "owa_••••7Q2c",
+    });
 
     const now = Date.now();
     const month = monthWindowUtc(now);
@@ -191,6 +195,24 @@ if (!url) {
       // 不带窗口时含上个月的那条
       const all = await query.listByAccount(w.account, { limit: 50, filter: { source: "web" } });
       expect(all.items).toHaveLength(3);
+    });
+
+    it("明细每条带来源与 API Key(名称、尾号),网页发起的没有 Key", async () => {
+      const w = await world();
+      const { items } = await query.listByAccount(w.account, { limit: 50, filter: w.month });
+      const by = new Map(items.map((i) => [i.runId, i]));
+      expect(by.get(w.ids.invoke)).toMatchObject({
+        source: "invoke",
+        apiKeyId: w.key,
+        apiKeyName: "对接 Key",
+        apiKeyHint: "owa_••••7Q2c",
+      });
+      expect(by.get(w.ids.web)).toMatchObject({
+        source: "web",
+        apiKeyId: null,
+        apiKeyName: null,
+        apiKeyHint: null,
+      });
     });
   });
 }

@@ -16,6 +16,7 @@ import {
 import { EmptyState, SpacePage, tb } from "@/features/settings/space-page";
 import { shortTime } from "@/features/settings/time-format";
 import { errorText, fetchJson } from "@/lib/fetch-json";
+import { formatTime } from "@/lib/format-time";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -68,6 +69,20 @@ function ActorFace({ actor }: { actor: AuditItem["actor"] }) {
 
 function AuditContent({ platform }: { platform: boolean }) {
   const [action, setAction] = useState("");
+  /** 平台审计按操作者筛;空 = 全部操作者 */
+  const [actorId, setActorId] = useState("");
+  const [people, setPeople] = useState<{ id: string; email: string }[]>([]);
+  useEffect(() => {
+    if (!platform) return;
+    let alive = true;
+    fetchJson<{ accounts?: { id: string; email: string }[] }>("/api/admin/accounts")
+      .then((d) => alive && setPeople(d.accounts ?? []))
+      // 账号列表没拉到只影响这个筛选
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [platform]);
   const [items, setItems] = useState<AuditItem[]>([]);
   const [cursor, setCursor] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
@@ -81,6 +96,7 @@ function AuditContent({ platform }: { platform: boolean }) {
       setError(null);
       const q = new URLSearchParams({ limit: "50" });
       if (action) q.set("action", action);
+      if (actorId) q.set("actorId", actorId);
       if (platform) q.set("scope", "all");
       if (append) q.set("cursor", append);
       try {
@@ -94,7 +110,7 @@ function AuditContent({ platform }: { platform: boolean }) {
         if (seq === seqRef.current) setLoading(false);
       }
     },
-    [action, platform],
+    [action, actorId, platform],
   );
 
   useEffect(() => {
@@ -123,6 +139,22 @@ function AuditContent({ platform }: { platform: boolean }) {
             </optgroup>
           ))}
         </NativeSelect>
+        {platform && (
+          <NativeSelect
+            className="w-[240px] max-sm:w-full"
+            aria-label="按操作者筛选"
+            value={actorId}
+            disabled={people.length === 0}
+            onChange={(e) => setActorId(e.target.value)}
+          >
+            <option value="">全部操作者</option>
+            {people.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.email}
+              </option>
+            ))}
+          </NativeSelect>
+        )}
         {!loading && !error && (
           <span className="text-xs text-muted-foreground">
             {items.length} 条{cursor ? "，还有更早的" : ""}
@@ -164,16 +196,26 @@ function AuditContent({ platform }: { platform: boolean }) {
           </div>
         ) : items.length === 0 ? (
           <EmptyState
-            title={label ? `没有「${label}」的记录` : "还没有操作记录"}
+            title={
+              label || actorId
+                ? `没有符合条件的记录${label ? `（${label}）` : ""}`
+                : "还没有操作记录"
+            }
             action={
-              label ? (
-                <Button variant="outline" onClick={() => setAction("")}>
-                  看全部类型
+              label || actorId ? (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setAction("");
+                    setActorId("");
+                  }}
+                >
+                  清除筛选
                 </Button>
               ) : undefined
             }
           >
-            {label ? "换一个操作类型试试。" : undefined}
+            {label || actorId ? "换一个操作类型或操作者试试。" : undefined}
           </EmptyState>
         ) : (
           <div className={tb.wrap}>
@@ -205,7 +247,7 @@ function AuditContent({ platform }: { platform: boolean }) {
                   return (
                     <tr key={e.id}>
                       <td className={cn(tb.td, tb.first, tb.num)}>
-                        <span title={new Date(e.at).toLocaleString()}>{shortTime(e.at)}</span>
+                        <span title={formatTime(e.at)}>{shortTime(e.at)}</span>
                       </td>
                       <td className={tb.td}>
                         <span className="flex max-w-56 items-center gap-2" title={e.actor.id}>

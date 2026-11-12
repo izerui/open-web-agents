@@ -29,14 +29,24 @@ import { Banner, CardHead, EmptyState, SpacePage, tb } from "@/features/settings
 import { shortTime } from "@/features/settings/time-format";
 import type { AgentSummary } from "@/features/workbench/types";
 import { errorText, fetchJson } from "@/lib/fetch-json";
+import { formatTime } from "@/lib/format-time";
 import { agentHref } from "@/lib/nav/routes";
 import { isAdminView, useMe } from "@/lib/use-me";
 import { cn } from "@/lib/utils";
-import { accessStatusText, keyExpiry, parseRpmDraft } from "./key-display";
+import {
+  accessStatusText,
+  keyExpiry,
+  keyLabel,
+  parseRpmDraft,
+  rotatedOldKeys,
+  rpmRangeText,
+} from "./key-display";
 
 interface KeyRecord {
   id: string;
   name?: string;
+  /** 认 Key 用的尾号;加列之前签发的没有 */
+  keyHint?: string;
   agentId?: string;
   rateLimitPerMinute?: number;
   /** 本月积分上限(微积分);没有 = 不单独限额 */
@@ -49,7 +59,10 @@ interface KeyRecord {
   lastUsedAt?: number;
 }
 
-type Issued = { id: string; plaintext: string; name: string; agentId?: string };
+type Issued = { id: string; plaintext: string; name: string; agentId?: string; hint: string };
+
+/** 轮换的重叠期(小时) */
+const GRACE_HOURS = 24;
 
 /**
  * 开发者 · API Key 与签名密钥(原 /settings/keys 的账号级部分)。
@@ -77,6 +90,10 @@ export function DeveloperKeysView() {
   const [keyDays, setKeyDays] = useState("");
   const [keyAgent, setKeyAgent] = useState("");
   const [formError, setFormError] = useState("");
+  /** 报错对应的输入框,标红并把焦点放过去 */
+  const [errField, setErrField] = useState<"name" | "rpm" | null>(null);
+  const rpmRef = useRef<HTMLInputElement>(null);
+  const rpmMax = isAdminView(me) ? 0 : limits.perKeyPerMinute;
   /** 新签发的明文,只在本次会话内显示一次 */
   const [issued, setIssued] = useState<Issued | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -118,28 +135,41 @@ export function DeveloperKeysView() {
   async function issueKey() {
     if (busy) return;
     const name = keyName.trim();
-    if (!name) return setFormError("请填写用途备注,方便以后认出这个 Key");
+    if (!name) {
+      setErrField("name");
+      nameRef.current?.focus();
+      return setFormError("请填写用途备注，方便以后认出这个 Key");
+    }
     if (keyLimit.trim()) {
-      const r = parseRpmDraft(keyLimit, isAdminView(me) ? 0 : limits.perKeyPerMinute);
-      if (!r.ok) return setFormError(`每分钟上限${r.error.replace(/^填/, "要填")},留空用默认`);
+      const r = parseRpmDraft(keyLimit, rpmMax);
+      if (!r.ok) {
+        setErrField("rpm");
+        rpmRef.current?.focus();
+        return setFormError(`每分钟上限${r.error.replace(/^填/, "要填")}，留空用默认`);
+      }
     }
     setFormError("");
+    setErrField(null);
     setBusy("issue");
     try {
-      const data = await fetchJson<{ plaintext?: string; key?: { id?: string } }>("/api/keys", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name,
-          agentId: keyAgent || undefined,
-          rateLimitPerMinute: keyLimit.trim() ? Number(keyLimit) : undefined,
-          expiresInDays: keyDays ? Number(keyDays) : undefined,
-        }),
-      });
+      const data = await fetchJson<{ plaintext?: string; key?: { id?: string; keyHint?: string } }>(
+        "/api/keys",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name,
+            agentId: keyAgent || undefined,
+            rateLimitPerMinute: keyLimit.trim() ? Number(keyLimit) : undefined,
+            expiresInDays: keyDays ? Number(keyDays) : undefined,
+          }),
+        },
+      );
       if (!data.plaintext || !data.key?.id) throw new Error("接口没有返回新密钥");
       setIssued({
         id: data.key.id,
         plaintext: data.plaintext,
+        hint: data.key.keyHint ?? keyLabel({ id: data.key.id }),
         name,
         agentId: keyAgent || undefined,
       });
@@ -159,23 +189,24 @@ export function DeveloperKeysView() {
   async function rotateKey(k: KeyRecord) {
     setBusy(k.id);
     try {
-      const data = await fetchJson<{ plaintext?: string; key?: { id?: string } }>(
+      const data = await fetchJson<{ plaintext?: string; key?: { id?: string; keyHint?: string } }>(
         `/api/keys/${encodeURIComponent(k.id)}/rotate`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ graceHours: 24 }),
+          body: JSON.stringify({ graceHours: GRACE_HOURS }),
         },
       );
       if (!data.plaintext || !data.key?.id) throw new Error("接口没有返回新密钥");
       setIssued({
         id: data.key.id,
         plaintext: data.plaintext,
+        hint: data.key.keyHint ?? keyLabel({ id: data.key.id }),
         name: k.name || "未命名",
         agentId: k.agentId,
       });
       await reload();
-      toast.success("新 Key 已签发,旧 Key 24 小时后失效");
+      toast.success(`新 Key 已签发,旧 Key ${GRACE_HOURS} 小时后失效`);
       document
         .getElementById("issued-key")
         ?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -211,6 +242,7 @@ export function DeveloperKeysView() {
   }
 
   const now = Date.now();
+  const oldKeys = rotatedOldKeys(keys);
   const issuedAgent = issued?.agentId ? agentById.get(issued.agentId) : undefined;
 
   return (
@@ -241,6 +273,7 @@ export function DeveloperKeysView() {
       <section aria-label="签发新 Key" className="rounded-2xl border border-border bg-card">
         <CardHead title="签发新 Key" meta="签发后可随时改限额、轮换或吊销" />
         <form
+          noValidate
           className="px-[22px] pb-5 max-md:px-4"
           onSubmit={(e) => {
             e.preventDefault();
@@ -253,18 +286,28 @@ export function DeveloperKeysView() {
               <Input
                 ref={nameRef}
                 value={keyName}
-                onChange={(e) => setKeyName(e.target.value)}
+                onChange={(e) => {
+                  setKeyName(e.target.value);
+                  if (errField === "name") setErrField(null);
+                }}
                 placeholder="例如：报销系统对接（生产）"
                 aria-label="用途备注"
+                aria-invalid={errField === "name" || undefined}
+                aria-describedby="issue-key-msg"
               />
             </label>
             <label className="flex flex-col gap-1.5">
               <span className="text-[13px] text-muted-foreground">每分钟上限</span>
               <Input
-                type="number"
-                min={1}
+                ref={rpmRef}
+                inputMode="numeric"
                 value={keyLimit}
-                onChange={(e) => setKeyLimit(e.target.value)}
+                onChange={(e) => {
+                  setKeyLimit(e.target.value);
+                  if (errField === "rpm") setErrField(null);
+                }}
+                aria-invalid={errField === "rpm" || undefined}
+                aria-describedby="issue-key-msg"
                 placeholder={
                   limits.perKeyPerMinute > 0 ? `默认 ${limits.perKeyPerMinute}` : "默认不限"
                 }
@@ -309,8 +352,15 @@ export function DeveloperKeysView() {
               {busy === "issue" ? "签发中…" : "签发 Key"}
             </Button>
           </div>
-          <p aria-live="polite" className="mt-2 min-h-[18px] text-xs text-destructive">
-            {formError}
+          <p
+            id="issue-key-msg"
+            aria-live="polite"
+            className={cn(
+              "mt-2 min-h-[18px] text-xs",
+              formError ? "text-destructive" : "text-muted-foreground",
+            )}
+          >
+            {formError || `每分钟上限填 ${rpmRangeText(rpmMax)}，留空用平台默认。`}
           </p>
         </form>
         {issued && (
@@ -323,7 +373,8 @@ export function DeveloperKeysView() {
               已签发「{issued.name}」
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
-              这是唯一一次显示完整 Key。复制后放进你的服务端配置，关掉后就再也看不到了。
+              这是唯一一次显示完整 Key。复制后放进你的服务端配置，关掉后只能看到末尾 4
+              位（列表里显示为 <code className="font-mono text-foreground">{issued.hint}</code>）。
             </p>
             <div className="my-2.5 flex flex-wrap items-center gap-3 rounded-xl bg-[#1F1E1C] px-4 py-3 font-mono text-sm text-[#F2EFE7]">
               <code className="min-w-0 flex-1 basis-60 break-all">{issued.plaintext}</code>
@@ -333,7 +384,13 @@ export function DeveloperKeysView() {
               </Button>
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              <Button size="sm" onClick={() => setIssued(null)}>
+              <Button
+                size="sm"
+                onClick={() => {
+                  setIssued(null);
+                  toast.success("明文已隐藏，之后只显示末尾 4 位");
+                }}
+              >
                 我已保存
               </Button>
               {issued.agentId && (
@@ -424,13 +481,20 @@ export function DeveloperKeysView() {
               <tbody>
                 {keys.map((k) => {
                   const exp = keyExpiry(k.expiresAt, now);
+                  const isOld = oldKeys.has(k.id);
                   const agent = k.agentId ? agentById.get(k.agentId) : undefined;
                   return (
                     <tr key={k.id} className={cn(issued?.id === k.id && "[&>td]:bg-fresh")}>
                       <td className={cn(tb.td, tb.first)}>
-                        <div className="font-semibold">{k.name || "（未命名）"}</div>
-                        <div className="font-mono text-xs text-muted-foreground" title={k.id}>
-                          ID {k.id.slice(0, 12)}
+                        <div className="font-semibold">
+                          {k.name || "（未命名）"}
+                          {isOld && <span className="text-muted-foreground">（旧）</span>}
+                        </div>
+                        <div
+                          className="font-mono text-xs text-muted-foreground"
+                          title={`ID ${k.id}`}
+                        >
+                          {keyLabel(k)}
                         </div>
                       </td>
                       <td className={tb.td}>
@@ -451,7 +515,7 @@ export function DeveloperKeysView() {
                         ) : exp.kind === "soon" ? (
                           <Badge variant="warning">
                             <Clock />
-                            {exp.text}
+                            {isOld ? `轮换后旧 Key，${exp.text.replace("过期", "失效")}` : exp.text}
                           </Badge>
                         ) : (
                           exp.text
@@ -459,7 +523,7 @@ export function DeveloperKeysView() {
                       </td>
                       <td className={cn(tb.td, tb.num)}>
                         {k.lastUsedAt ? (
-                          <span title={new Date(k.lastUsedAt).toLocaleString()}>
+                          <span title={formatTime(k.lastUsedAt, now)}>
                             {shortTime(k.lastUsedAt, now)}
                           </span>
                         ) : (
@@ -491,7 +555,7 @@ export function DeveloperKeysView() {
                             onClick={() =>
                               confirm.ask({
                                 title: "轮换这个 Key？",
-                                description: `会立即签发一个新 Key 给「${k.name || "未命名"}」，新 Key 沿用备注、限定智能体和限额。旧 Key 在 24 小时后失效，请在这之前把调用方换成新 Key。`,
+                                description: `会立即签发一个新 Key 给「${k.name || "未命名"}」，新 Key 沿用备注、限定智能体和限额。旧 Key ${keyLabel(k)} 在 ${GRACE_HOURS} 小时后失效，请在这之前把调用方换成新 Key。`,
                                 confirmLabel: "立即轮换",
                                 onConfirm: () => rotateKey(k),
                               })
@@ -509,7 +573,7 @@ export function DeveloperKeysView() {
                           onClick={() =>
                             confirm.ask({
                               title: "吊销这个 Key？",
-                              description: `「${k.name || "未命名"}」会立即失效，正在用它的调用方马上会收到 401，不能撤销。`,
+                              description: `「${k.name || "未命名"}」（${keyLabel(k)}）会立即失效，正在用它的调用方马上会收到 401，不能撤销。`,
                               confirmLabel: "吊销",
                               destructive: true,
                               onConfirm: () => revokeKey(k.id),

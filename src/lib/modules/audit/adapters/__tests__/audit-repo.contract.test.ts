@@ -30,6 +30,19 @@ function contract(name: string, make: () => AuditRepo) {
       expect((await repo.list({ visibleTo: stranger })).items).toHaveLength(0);
     });
 
+    it("按操作者筛选:只留这个人做的操作(平台审计「全部操作者」)", async () => {
+      const repo = make();
+      const owner = `o-${tag()}`;
+      const a = `a-${tag()}`;
+      const b = `b-${tag()}`;
+      await repo.append(ev({ at: 1, ownerId: owner, actor: { type: "user", id: a } }));
+      await repo.append(ev({ at: 2, ownerId: owner, actor: { type: "user", id: b } }));
+      await repo.append(ev({ at: 3, ownerId: owner, actor: { type: "user", id: a } }));
+      const byA = (await repo.list({ visibleTo: owner, actorId: a })).items;
+      expect(byA.map((e) => e.at)).toEqual([3, 1]);
+      expect((await repo.list({ visibleTo: owner, actorId: b })).items).toHaveLength(1);
+    });
+
     it("同一 id 重复追加:只留第一条,不报错、不改写", async () => {
       const repo = make();
       const owner = `o-${tag()}`;

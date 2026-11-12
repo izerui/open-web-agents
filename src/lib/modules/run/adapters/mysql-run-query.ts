@@ -4,7 +4,7 @@
 // 而列表要连 sessions 拿归属与来源、连 agents 拿名称。
 
 import type { Db } from "@/lib/db/client";
-import { agents, runs, sessions } from "@/lib/db/schema";
+import { agents, runCharges, runs, sessions, users } from "@/lib/db/schema";
 import type { SessionSource } from "@/lib/modules/session/ports";
 import type { RunState } from "@/lib/shared";
 import { and, desc, eq, gte, inArray, lt, lte, or, sql } from "drizzle-orm";
@@ -23,6 +23,14 @@ export interface RunQueryFilter {
   /** 上一页最后一条的游标(见 encodeCursor)。 */
   cursor?: string;
   limit: number;
+  /** 平台视角:每条带上计费账号(id 与邮箱)。只给管理员的 scope=all 用,个人运行记录不带 */
+  withAccount?: boolean;
+}
+
+/** 这次运行的扣费:settled/provisional 是实际扣除,open 是冻结中的积分 */
+export interface RunCredits {
+  micro: string;
+  state: string;
 }
 
 export interface RunListItem {
@@ -42,6 +50,10 @@ export interface RunListItem {
   cost?: PublicRunCost;
   error?: { kind?: string; message?: string };
   parentRunId?: string;
+  /** 扣费积分;没有扣费记录(如不计费的运行)为 undefined */
+  credits?: RunCredits;
+  /** 计费账号;只在平台视角下有 */
+  account?: { id: string; email?: string };
 }
 
 export interface RunDetail extends RunListItem {
@@ -84,7 +96,13 @@ const COLUMNS = {
   cost: runs.cost,
   error: runs.errorInfo,
   parentRunId: runs.parentRunId,
+  chargeState: runCharges.state,
+  chargedMicro: runCharges.chargedMicro,
+  reservedMicro: runCharges.reservedMicro,
+  estimatedMicro: runCharges.estimatedMicro,
 };
+
+const ACCOUNT_COLUMNS = { billingUserId: sessions.billingUserId, accountEmail: users.email };
 
 type Row = {
   id: string;
@@ -101,7 +119,22 @@ type Row = {
   cost: unknown;
   error: unknown;
   parentRunId: string | null;
+  chargeState: string | null;
+  chargedMicro: string | null;
+  reservedMicro: string | null;
+  estimatedMicro: string | null;
+  billingUserId?: string | null;
+  accountEmail?: string | null;
 };
+
+function creditsOf(r: Row): RunCredits | undefined {
+  if (!r.chargeState) return undefined;
+  const micro =
+    r.chargeState === "open"
+      ? r.reservedMicro
+      : (r.chargedMicro ?? r.estimatedMicro ?? r.reservedMicro);
+  return micro === null ? undefined : { micro, state: r.chargeState };
+}
 
 function toItem(r: Row): RunListItem {
   const startedAt = r.startedAt?.getTime();
@@ -122,6 +155,10 @@ function toItem(r: Row): RunListItem {
     cost: publicCost(r.cost) ?? undefined,
     error: (r.error ?? undefined) as RunListItem["error"],
     parentRunId: r.parentRunId ?? undefined,
+    credits: creditsOf(r),
+    account: r.billingUserId
+      ? { id: r.billingUserId, email: r.accountEmail ?? undefined }
+      : undefined,
   };
 }
 
@@ -204,11 +241,18 @@ export class MysqlRunQuery {
       conds.push(or(lt(runs.createdAt, at), and(eq(runs.createdAt, at), lt(runs.id, cursor.id))));
     }
     const where = conds.filter((c) => c !== undefined);
-    const rows = (await this.db
-      .select(COLUMNS)
+    // 账号只在平台视角下取:个人视角既不选这两列也不 join users,不可能把别人的信息带出去
+    const base = this.db
+      .select(f.withAccount ? { ...COLUMNS, ...ACCOUNT_COLUMNS } : COLUMNS)
       .from(runs)
       .innerJoin(sessions, eq(runs.sessionId, sessions.id))
       .leftJoin(agents, eq(sessions.agentId, agents.id))
+      .leftJoin(runCharges, eq(runCharges.runId, runs.id))
+      .$dynamic();
+    const joined = f.withAccount
+      ? base.leftJoin(users, eq(users.id, sessions.billingUserId))
+      : base;
+    const rows = (await joined
       .where(where.length ? and(...where) : sql`1=1`)
       .orderBy(desc(runs.createdAt), desc(runs.id))
       .limit(f.limit + 1)) as Row[];
@@ -225,6 +269,7 @@ export class MysqlRunQuery {
     const rows = (await this.db
       .select({
         ...COLUMNS,
+        accountEmail: users.email,
         finalText: runs.finalText,
         structured: runs.structuredResult,
         ownerId: sessions.ownerId,
@@ -234,6 +279,8 @@ export class MysqlRunQuery {
       .from(runs)
       .innerJoin(sessions, eq(runs.sessionId, sessions.id))
       .leftJoin(agents, eq(sessions.agentId, agents.id))
+      .leftJoin(runCharges, eq(runCharges.runId, runs.id))
+      .leftJoin(users, eq(users.id, sessions.billingUserId))
       .where(eq(runs.id, id))
       .limit(1)) as (Row & {
       finalText: string | null;

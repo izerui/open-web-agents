@@ -1,6 +1,7 @@
 // 运行记录的展示判断:纯函数,便于测试。
 
 import { compactCount } from "@/features/usage/usage-display";
+import { creditsAmount } from "@/lib/modules/billing/domain/credits-display";
 
 export type RunStatus = "pending" | "running" | "success" | "failed" | "cancelled";
 
@@ -38,4 +39,16 @@ export function prettyInput(text: string): string {
   } catch {
     return text;
   }
+}
+
+/** 运行花费:一律显示积分(实际扣除;还在冻结的写明冻结)。没有扣费记录返回 null,不退回显示美元 */
+export function runCreditsText(credits?: { micro: string; state: string }): string | null {
+  if (!credits) return null;
+  const amount = `${creditsAmount(credits.micro)} 积分`;
+  return credits.state === "open" ? `冻结 ${amount}` : amount;
+}
+
+/** 接口调用和评测不产生可在对话里查看的会话,其余来源都能在对话里打开 */
+export function hasChatTranscript(source: string): boolean {
+  return source !== "invoke" && source !== "eval";
 }

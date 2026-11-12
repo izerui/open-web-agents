@@ -45,3 +45,13 @@ export function compactCount(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`;
   return String(n);
 }
+
+/** 平台用量「队列（实时）」卡:排队超过 10 个黄色提醒 */
+export function queueStatus(q: { pending: number; running: number }): {
+  warn: boolean;
+  text: string;
+} {
+  return q.pending > 10
+    ? { warn: true, text: "排队超过 10 个，考虑加 worker" }
+    : { warn: false, text: "队列正常" };
+}

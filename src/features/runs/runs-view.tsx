@@ -13,7 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, SpacePage, tb } from "@/features/settings/space-page";
 import { shortTime } from "@/features/settings/time-format";
 import { errorText, fetchJson } from "@/lib/fetch-json";
-import { formatUsd, toMicroUsd } from "@/lib/modules/usage/domain/aggregate";
+import { formatTime } from "@/lib/format-time";
 import { cn } from "@/lib/utils";
 import { Copy, ExternalLink, Loader2, MessageSquare, RefreshCw, Square, X } from "lucide-react";
 import Link from "next/link";
@@ -24,8 +24,10 @@ import {
   type RunStatus,
   canCancelRun,
   formatDuration,
+  hasChatTranscript,
   looksLikeJson,
   prettyInput,
+  runCreditsText,
   tokensText,
   versionLabel,
 } from "./run-format";
@@ -43,6 +45,10 @@ interface RunItem {
   createdAt: number;
   durationMs?: number;
   cost?: { usd?: number; input?: number; output?: number; partial?: boolean };
+  /** 扣费积分(settled 实扣 / open 冻结中);不计费的运行没有 */
+  credits?: { micro: string; state: string };
+  /** 计费账号:只有平台运行(管理员 scope=all)带 */
+  account?: { id: string; email?: string };
   error?: { kind?: string; message?: string };
 }
 
@@ -141,6 +147,25 @@ function useAgentList(): AgentList {
   return { agents, loaded, error, reload };
 }
 
+/** 平台运行的「全部账号」筛选用的账号列表;个人运行记录不拉 */
+function usePlatformAccounts(platform: boolean): { id: string; email: string }[] {
+  const [accounts, setAccounts] = useState<{ id: string; email: string }[]>([]);
+  useEffect(() => {
+    if (!platform) return;
+    let alive = true;
+    fetchJson<{ accounts?: { id: string; email: string }[] }>("/api/admin/accounts")
+      .then((d) => {
+        if (alive) setAccounts(d.accounts ?? []);
+      })
+      // 账号列表没拉到只影响筛选,列表本身照常显示
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [platform]);
+  return accounts;
+}
+
 export type AgentList = {
   agents: AgentLite[];
   loaded: boolean;
@@ -209,6 +234,9 @@ export function RunsPanel({
   const [agentId, setAgentId] = useState("");
   const [status, setStatus] = useState("");
   const [source, setSource] = useState("");
+  /** 平台运行按账号筛选;空 = 全部账号 */
+  const [accountId, setAccountId] = useState("");
+  const accounts = usePlatformAccounts(platform);
   const [items, setItems] = useState<RunItem[]>([]);
   const [cursor, setCursor] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
@@ -230,8 +258,8 @@ export function RunsPanel({
       : null;
 
   const load = useCallback(
-    async (append?: string) => {
-      if (!canLoad) return;
+    async (append?: string): Promise<boolean> => {
+      if (!canLoad) return false;
       const seq = ++seqRef.current;
       setLoading(true);
       setError(null);
@@ -241,22 +269,25 @@ export function RunsPanel({
       }
       const q = new URLSearchParams({ limit: "30" });
       if (platform) q.set("scope", "all");
+      if (platform && accountId) q.set("accountId", accountId);
       if (effectiveAgentId) q.set("agentId", effectiveAgentId);
       if (status) q.set("status", status);
       if (source) q.set("source", source);
       if (append) q.set("cursor", append);
       try {
         const d = await fetchJson<{ items: RunItem[]; nextCursor?: string }>(`/api/runs?${q}`);
-        if (seq !== seqRef.current) return;
+        if (seq !== seqRef.current) return false;
         setItems((cur) => (append ? [...cur, ...d.items] : d.items));
         setCursor(d.nextCursor);
+        return true;
       } catch (e) {
         if (seq === seqRef.current) setError(errorText(e));
+        return false;
       } finally {
         if (seq === seqRef.current) setLoading(false);
       }
     },
-    [canLoad, effectiveAgentId, status, source, platform],
+    [canLoad, effectiveAgentId, status, source, platform, accountId],
   );
 
   useEffect(() => {
@@ -304,7 +335,7 @@ export function RunsPanel({
     }
   }
 
-  const filtered = Boolean(agentId || status || source);
+  const filtered = Boolean(agentId || status || source || accountId);
   const detailAgent = detail ? agentById.get(detail.agentId) : undefined;
 
   return (
@@ -341,6 +372,22 @@ export function RunsPanel({
       {canLoad && (
         <>
           <div className="mb-3.5 flex flex-wrap items-center gap-2.5">
+            {platform && (
+              <NativeSelect
+                className="w-auto max-w-60 min-w-[150px] max-sm:w-full max-sm:max-w-none"
+                aria-label="按账号筛选"
+                value={accountId}
+                disabled={accounts.length === 0}
+                onChange={(e) => setAccountId(e.target.value)}
+              >
+                <option value="">全部账号</option>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.email}
+                  </option>
+                ))}
+              </NativeSelect>
+            )}
             {!objectMode && (
               <NativeSelect
                 className="w-auto max-w-60 min-w-[150px] max-sm:w-full max-sm:max-w-none"
@@ -392,7 +439,7 @@ export function RunsPanel({
               size="sm"
               variant="outline"
               className="ml-auto"
-              onClick={() => void load()}
+              onClick={() => void load().then((ok) => ok && toast.success("已刷新"))}
               disabled={loading}
             >
               <RefreshCw className={cn("size-[15px]", loading && "animate-spin")} />
@@ -434,6 +481,7 @@ export function RunsPanel({
                         setAgentId("");
                         setStatus("");
                         setSource("");
+                        setAccountId("");
                       }}
                     >
                       清除筛选
@@ -444,108 +492,167 @@ export function RunsPanel({
                 {filtered ? "换个筛选条件试试。" : "去对话里用一次智能体，运行就会出现在这里。"}
               </EmptyState>
             ) : (
-              <div className={tb.wrap}>
-                <table className={cn(tb.table, "min-w-[880px]")}>
-                  <caption className="sr-only">运行列表,按回车查看详情</caption>
-                  <thead>
-                    <tr>
-                      <th scope="col" className={cn(tb.th, tb.first)}>
-                        时间
-                      </th>
-                      <th scope="col" className={tb.th}>
-                        智能体
-                      </th>
-                      <th scope="col" className={tb.th}>
-                        来源
-                      </th>
-                      <th scope="col" className={tb.th}>
-                        状态
-                      </th>
-                      <th scope="col" className={tb.th}>
-                        输入
-                      </th>
-                      <th scope="col" className={tb.th}>
-                        耗时
-                      </th>
-                      <th scope="col" className={cn(tb.th, tb.last, tb.right)}>
-                        花费
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {items.map((r) => {
-                      const tokens = tokensText(r.cost);
-                      return (
-                        <tr
-                          key={r.id}
-                          tabIndex={0}
-                          className={cn(tb.clickRow, detail?.id === r.id && tb.selRow)}
+              <>
+                {/* 窄屏:卡片列表,状态与花费不会被挤到屏幕外 */}
+                <ul className="divide-y divide-line-soft sm:hidden" aria-label="运行列表">
+                  {items.map((r) => {
+                    const credits = runCreditsText(r.credits);
+                    return (
+                      <li key={r.id}>
+                        <button
+                          type="button"
+                          className={cn(
+                            "flex w-full flex-col gap-1.5 px-4 py-3 text-left",
+                            detail?.id === r.id && "bg-accent",
+                          )}
                           onClick={() => void openDetail(r.id)}
-                          onKeyDown={(e) => e.key === "Enter" && void openDetail(r.id)}
                         >
-                          <td className={cn(tb.td, tb.first, tb.num)}>
-                            <span title={new Date(r.createdAt).toLocaleString()}>
-                              {shortTime(r.createdAt)}
+                          <span className="flex w-full items-center gap-2">
+                            <AgentAvatar
+                              id={r.agentId}
+                              icon={agentById.get(r.agentId)?.icon}
+                              size={24}
+                            />
+                            <span className="min-w-0 flex-1 truncate font-semibold">
+                              {r.agentName ?? r.agentId}
                             </span>
-                          </td>
-                          <td className={tb.td}>
-                            <span className="flex items-center gap-2 whitespace-nowrap">
-                              <AgentAvatar
-                                id={r.agentId}
-                                icon={agentById.get(r.agentId)?.icon}
-                                size={24}
-                              />
-                              <span className="max-w-40 truncate">{r.agentName ?? r.agentId}</span>
-                              <VersionBadge version={r.agentVersion} />
-                            </span>
-                          </td>
-                          <td className={cn(tb.td, "whitespace-nowrap")}>
-                            {SOURCE_LABEL[r.source]}
-                          </td>
-                          <td className={tb.td}>
                             <StatusBadge status={r.status} />
-                          </td>
-                          <td className={tb.td}>
-                            <div
-                              className={cn(
-                                "max-w-[300px] truncate",
-                                looksLikeJson(r.promptPreview) && "font-mono text-[13px]",
-                              )}
-                              title={r.promptPreview}
-                            >
-                              {r.promptPreview}
-                            </div>
-                          </td>
-                          <td className={cn(tb.td, tb.num)}>{formatDuration(r.durationMs)}</td>
-                          <td className={cn(tb.td, tb.last, tb.num, tb.right)}>
-                            {tokens ? (
-                              <>
-                                {tokens}
-                                {r.cost?.partial && (
-                                  <Badge
-                                    variant="warning"
-                                    className="ml-1"
-                                    title="有模型调用没回报用量,统计不完整"
-                                  >
-                                    部分
-                                  </Badge>
-                                )}
-                                {r.cost?.usd ? (
-                                  <div className="text-xs text-muted-foreground">
-                                    {formatUsd(toMicroUsd(r.cost.usd))}
-                                  </div>
-                                ) : null}
-                              </>
-                            ) : (
-                              <span className="text-muted-foreground">—</span>
+                          </span>
+                          <span className="line-clamp-2 text-sm">{r.promptPreview}</span>
+                          <span className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
+                            <span className="tabular-nums">{shortTime(r.createdAt)}</span>
+                            <span>{SOURCE_LABEL[r.source]}</span>
+                            {platform && r.account && (
+                              <span className="max-w-full truncate">
+                                {r.account.email ?? r.account.id}
+                              </span>
                             )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                            {credits && <span className="tabular-nums">{credits}</span>}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <div className={cn(tb.wrap, "max-sm:hidden")}>
+                  <table className={cn(tb.table, platform ? "min-w-[1040px]" : "min-w-[880px]")}>
+                    <caption className="sr-only">运行列表,按回车查看详情</caption>
+                    <thead>
+                      <tr>
+                        <th scope="col" className={cn(tb.th, tb.first)}>
+                          时间
+                        </th>
+                        {platform && (
+                          <th scope="col" className={tb.th}>
+                            账号
+                          </th>
+                        )}
+                        <th scope="col" className={tb.th}>
+                          智能体
+                        </th>
+                        <th scope="col" className={tb.th}>
+                          来源
+                        </th>
+                        <th scope="col" className={tb.th}>
+                          状态
+                        </th>
+                        <th scope="col" className={tb.th}>
+                          输入
+                        </th>
+                        <th scope="col" className={tb.th}>
+                          耗时
+                        </th>
+                        <th scope="col" className={cn(tb.th, tb.last, tb.right)}>
+                          花费
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {items.map((r) => {
+                        const tokens = tokensText(r.cost);
+                        const credits = runCreditsText(r.credits);
+                        return (
+                          <tr
+                            key={r.id}
+                            tabIndex={0}
+                            className={cn(tb.clickRow, detail?.id === r.id && tb.selRow)}
+                            onClick={() => void openDetail(r.id)}
+                            onKeyDown={(e) => e.key === "Enter" && void openDetail(r.id)}
+                          >
+                            <td className={cn(tb.td, tb.first, tb.num)}>
+                              <span title={formatTime(r.createdAt)}>{shortTime(r.createdAt)}</span>
+                            </td>
+                            {platform && (
+                              <td className={tb.td}>
+                                <span
+                                  className="block max-w-48 truncate"
+                                  title={r.account?.email ?? r.account?.id}
+                                >
+                                  {r.account?.email ?? r.account?.id ?? (
+                                    <span className="text-muted-foreground">—</span>
+                                  )}
+                                </span>
+                              </td>
+                            )}
+                            <td className={tb.td}>
+                              <span className="flex items-center gap-2 whitespace-nowrap">
+                                <AgentAvatar
+                                  id={r.agentId}
+                                  icon={agentById.get(r.agentId)?.icon}
+                                  size={24}
+                                />
+                                <span className="max-w-40 truncate">
+                                  {r.agentName ?? r.agentId}
+                                </span>
+                                <VersionBadge version={r.agentVersion} />
+                              </span>
+                            </td>
+                            <td className={cn(tb.td, "whitespace-nowrap")}>
+                              {SOURCE_LABEL[r.source]}
+                            </td>
+                            <td className={tb.td}>
+                              <StatusBadge status={r.status} />
+                            </td>
+                            <td className={tb.td}>
+                              <div
+                                className={cn(
+                                  "max-w-[300px] truncate",
+                                  looksLikeJson(r.promptPreview) && "font-mono text-[13px]",
+                                )}
+                                title={r.promptPreview}
+                              >
+                                {r.promptPreview}
+                              </div>
+                            </td>
+                            <td className={cn(tb.td, tb.num)}>{formatDuration(r.durationMs)}</td>
+                            <td className={cn(tb.td, tb.last, tb.num, tb.right)}>
+                              {tokens || credits ? (
+                                <>
+                                  {tokens}
+                                  {r.cost?.partial && (
+                                    <Badge
+                                      variant="warning"
+                                      className="ml-1"
+                                      title="有模型调用没回报用量,统计不完整"
+                                    >
+                                      部分
+                                    </Badge>
+                                  )}
+                                  {credits && (
+                                    <div className="text-xs text-muted-foreground">{credits}</div>
+                                  )}
+                                </>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
             {!error && items.length > 0 && (
               <div className="flex items-center justify-center gap-2.5 p-3.5">
@@ -579,7 +686,10 @@ export function RunsPanel({
                     <VersionBadge version={detail.agentVersion} />
                   </SheetTitle>
                   <SheetDescription className="text-xs">
-                    {new Date(detail.createdAt).toLocaleString()}，{SOURCE_LABEL[detail.source]}，
+                    {platform && detail.account
+                      ? `${detail.account.email ?? detail.account.id}，`
+                      : ""}
+                    {formatTime(detail.createdAt)}，{SOURCE_LABEL[detail.source]}，
                     {formatDuration(detail.durationMs)}
                   </SheetDescription>
                 </div>
@@ -598,7 +708,7 @@ export function RunsPanel({
                   <StatusBadge status={detail.status} />
                   <span className="text-xs text-muted-foreground">
                     {tokensText(detail.cost) ?? "没有用量记录"}
-                    {detail.cost?.usd ? `，${formatUsd(toMicroUsd(detail.cost.usd))}` : ""}
+                    {runCreditsText(detail.credits) ? `，${runCreditsText(detail.credits)}` : ""}
                     {detail.cost?.partial ? "（部分，统计不完整）" : ""}
                   </span>
                   {canCancelRun(detail.status) && (
@@ -626,9 +736,15 @@ export function RunsPanel({
                   )}
                 </div>
                 <DetailSection title="输入">
-                  <pre className="mt-1.5 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-[10px] bg-[#F6F5F1] px-3 py-2.5 font-mono text-[13px]">
-                    {prettyInput(detail.prompt)}
-                  </pre>
+                  {looksLikeJson(detail.prompt) ? (
+                    <pre className="mt-1.5 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-[10px] bg-[#F6F5F1] px-3 py-2.5 font-mono text-[13px]">
+                      {prettyInput(detail.prompt)}
+                    </pre>
+                  ) : (
+                    <p className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words">
+                      {detail.prompt}
+                    </p>
+                  )}
                 </DetailSection>
                 {detail.error?.message && (
                   <DetailSection title="错误">
@@ -655,7 +771,9 @@ export function RunsPanel({
                   </DetailSection>
                 ) : canCancelRun(detail.status) ? (
                   <DetailSection title="最终回答">
-                    <p className="mt-1 text-muted-foreground">运行结束后显示。</p>
+                    <p className="mt-1 text-muted-foreground">
+                      {detail.status === "pending" ? "还在排队，" : ""}运行结束后显示。
+                    </p>
                   </DetailSection>
                 ) : detail.status === "cancelled" ? (
                   <DetailSection title="最终回答">
@@ -682,7 +800,18 @@ export function RunsPanel({
                     <dd className="font-mono text-[13px] break-all">{detail.sessionId}</dd>
                   </dl>
                 </DetailSection>
-                {platform && detail.canOpenSession === false ? (
+                {platform && detail.account && (
+                  <DetailSection title="账号">
+                    <p className="mt-1 break-all">{detail.account.email ?? detail.account.id}</p>
+                  </DetailSection>
+                )}
+                {!hasChatTranscript(detail.source) ? (
+                  <p className="text-xs text-muted-foreground">
+                    接口调用和评测不产生可查看的对话；完整过程可用{" "}
+                    <code className="font-mono">GET /api/sessions/{"{id}"}/events</code>{" "}
+                    读取事件流。
+                  </p>
+                ) : platform && detail.canOpenSession === false ? (
                   // 平台运行:别人的会话是私有的,管理员也打不开 —— 按钮留着但禁用,说明原因
                   <div className="space-y-1.5">
                     <Button variant="outline" className="w-full" disabled>
@@ -690,7 +819,10 @@ export function RunsPanel({
                       在对话里查看完整过程
                     </Button>
                     <p className="text-xs text-muted-foreground">
-                      会话是私有的:这次运行属于别的账号,管理员也不能打开它的对话。
+                      会话是私有的，管理员也不能查看别人的对话过程。
+                      {detail.account?.email
+                        ? `需要排查时，请联系 ${detail.account.email} 本人分享。`
+                        : ""}
                     </p>
                   </div>
                 ) : (

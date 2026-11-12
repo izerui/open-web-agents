@@ -396,6 +396,43 @@ function AliasCard({
   const [targets, setTargets] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  /** 每个别名有几个智能体在用;没读到为 null(只是少了这行说明,不挡保存) */
+  const [usage, setUsage] = useState<Record<string, number> | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetchJson<{ usage: Record<string, number> }>("/api/admin/model-aliases")
+      .then((r) => alive && setUsage(r.usage))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const usageText = (alias: string) =>
+    usage ? `${usage[alias] ?? 0} 个智能体在用` : "正在统计在用的智能体…";
+  async function save() {
+    setSaving(true);
+    setError("");
+    try {
+      await fetchJson("/api/admin/model-aliases", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          providerId,
+          ...targets,
+          expectedVersion: aliases?.version ?? null,
+        }),
+      });
+      toast.success("别名映射已保存");
+      setConfirming(false);
+      onSaved();
+    } catch (err) {
+      setError(errorText(err));
+      setConfirming(false);
+    } finally {
+      setSaving(false);
+    }
+  }
   useEffect(() => {
     setProviderId(aliases?.providerId ?? providers[0]?.id ?? "");
     setTargets(
@@ -449,8 +486,9 @@ function AliasCard({
               key={alias}
               className="grid items-center gap-x-4 gap-y-1.5 border-b border-line-soft py-3 sm:grid-cols-[110px_minmax(0,1fr)_200px]"
             >
-              <label htmlFor={`alias-${alias}`} className="font-mono text-sm font-bold">
-                {alias}
+              <label htmlFor={`alias-${alias}`}>
+                <span className="block font-mono text-sm font-bold">{alias}</span>
+                <span className="block text-xs text-muted-foreground">{usageText(alias)}</span>
               </label>
               <NativeSelect
                 id={`alias-${alias}`}
@@ -503,31 +541,53 @@ function AliasCard({
         </div>
         <Button
           disabled={saving || MODEL_ALIASES.some((a) => !targets[a])}
-          onClick={async () => {
-            setSaving(true);
+          onClick={() => {
             setError("");
-            try {
-              await fetchJson("/api/admin/model-aliases", {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  providerId,
-                  ...targets,
-                  expectedVersion: aliases?.version ?? null,
-                }),
-              });
-              toast.success("别名映射已保存");
-              onSaved();
-            } catch (err) {
-              setError(errorText(err));
-            } finally {
-              setSaving(false);
-            }
+            setConfirming(true);
           }}
         >
-          {saving ? "保存中…" : "保存别名映射"}
+          保存别名映射
         </Button>
       </div>
+      <Dialog open={confirming} onOpenChange={(o) => !o && !saving && setConfirming(false)}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>保存别名映射？</DialogTitle>
+            <DialogDescription>
+              保存后，用别名的智能体在新运行里改用「
+              {providers.find((p) => p.id === providerId)?.name ?? providerId}
+              」的模型；进行中的运行不受影响。
+            </DialogDescription>
+          </DialogHeader>
+          <ul className="divide-y divide-line-soft rounded-xl border border-border text-sm">
+            {MODEL_ALIASES.map((a) => {
+              const m = byId.get(targets[a] ?? "");
+              const changed = aliases ? aliases[a] !== targets[a] : true;
+              return (
+                <li key={a} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-3 py-2.5">
+                  <span className="w-16 font-mono font-semibold">{a}</span>
+                  <ChevronRight className="size-3.5 text-muted-foreground" />
+                  <span className="min-w-0 break-all font-mono text-[13px]">
+                    {m?.modelId ?? targets[a]}
+                  </span>
+                  {changed && <Badge variant="warning">改动</Badge>}
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {usage ? `${usage[a] ?? 0} 个智能体` : "—"}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+          <DialogFooter>
+            <Button variant="outline" disabled={saving} onClick={() => setConfirming(false)}>
+              取消
+            </Button>
+            <Button disabled={saving} onClick={() => void save()}>
+              {saving ? "保存中…" : "保存"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

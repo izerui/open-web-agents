@@ -17,6 +17,7 @@ import { creditsAmount, creditsExact } from "@/lib/modules/billing/domain/credit
 import { cn } from "@/lib/utils";
 import { ChevronRight, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { creditsToYuan } from "./billing-display";
 
 export const WINDOW_LABEL: Record<SummaryWindow, string> = {
   this_month: "本月",
@@ -72,7 +73,16 @@ export function ChargeSummary({
   onDrill,
   onSelectAccount,
   initialRange = "this_month",
+  activeDrill,
+  defaultBy,
+  onShowPending,
 }: {
+  /** 全平台:欠额统计卡上的「看待核对」 */
+  onShowPending?: () => void;
+  /** 当前明细正在看的那一项:汇总里对应的行高亮 */
+  activeDrill?: ChargeDrill | null;
+  /** 默认维度(全平台默认按账号) */
+  defaultBy?: SummaryDimension;
   accountId?: string;
   platform?: boolean;
   onDrill?: (drill: ChargeDrill) => void;
@@ -82,9 +92,9 @@ export function ChargeSummary({
   initialRange?: SummaryWindow;
 }) {
   const dimensions: SummaryDimension[] = platform
-    ? ["source", "agent", "account"]
+    ? ["account", "source", "agent"]
     : ["source", "agent", "key"];
-  const [by, setBy] = useState<SummaryDimension>("source");
+  const [by, setBy] = useState<SummaryDimension>(defaultBy ?? "source");
   const [range, setRange] = useState<SummaryWindow>(initialRange);
   const [rows, setRows] = useState<ChargeSummaryRow[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -114,6 +124,17 @@ export function ChargeSummary({
   }, [load]);
 
   const total = rows ? totalOf(rows) : null;
+  /** 这一行是不是明细正在看的那一项(维度取值与时间范围都对得上) */
+  const isActive = (r: ChargeSummaryRow) => {
+    const p = drillParams(by, r);
+    if (!activeDrill || !p) return false;
+    const want: Record<string, string> = { ...p, window: range };
+    const got = activeDrill.params;
+    return (
+      Object.keys(want).length === Object.keys(got).length &&
+      Object.entries(want).every(([k, v]) => got[k] === v)
+    );
+  };
   const clickable = (r: ChargeSummaryRow) =>
     by === "account" ? Boolean(r.key && onSelectAccount) : Boolean(onDrill);
   const open = (r: ChargeSummaryRow) => {
@@ -129,170 +150,237 @@ export function ChargeSummary({
       });
   };
 
-  return (
-    <section
-      className="mb-4 rounded-2xl border border-border bg-card"
-      aria-label={platform ? "全平台消耗汇总" : "消耗汇总"}
-    >
-      <CardHead
-        title={platform ? "全平台消耗汇总" : "消耗汇总"}
-        meta="合计 = 实际扣除 + 欠额 + 冻结中"
-        actions={
-          <>
-            <fieldset
-              className="inline-flex rounded-full bg-secondary p-[3px]"
-              aria-label="汇总维度"
+  const stats = platform && total && (
+    <dl className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="platform-billing-stats">
+      <SummaryStat label="实际扣除（积分）" hint={`约 ¥ ${creditsToYuan(total.chargedMicro)}`}>
+        {amount(total.chargedMicro)}
+      </SummaryStat>
+      <SummaryStat label="运行次数" hint={WINDOW_LABEL[range]}>
+        {total.runs.toLocaleString("zh-CN")}
+      </SummaryStat>
+      <SummaryStat
+        label="欠额（积分）"
+        tone={total.owedMicro !== "0" ? "bad" : undefined}
+        hint={
+          onShowPending ? (
+            <button
+              type="button"
+              className="min-h-8 underline underline-offset-2"
+              onClick={onShowPending}
             >
-              {dimensions.map((d) => (
-                <button
-                  key={d}
-                  type="button"
-                  aria-pressed={by === d}
-                  className={cn(
-                    "h-[30px] rounded-full px-3.5 text-[13px] text-muted-foreground max-md:h-10",
-                    by === d && "bg-card font-semibold text-foreground shadow-xs",
-                  )}
-                  onClick={() => setBy(d)}
-                >
-                  {DIMENSION_LABEL[d]}
-                </button>
-              ))}
-            </fieldset>
-            <NativeSelect
-              aria-label="时间范围"
-              value={range}
-              onChange={(e) => setRange(e.target.value as SummaryWindow)}
-              className="w-auto min-w-28"
-            >
-              {(Object.keys(WINDOW_LABEL) as SummaryWindow[]).map((w) => (
-                <option key={w} value={w}>
-                  {WINDOW_LABEL[w]}
-                </option>
-              ))}
-            </NativeSelect>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              title="刷新消耗汇总"
-              aria-label="刷新消耗汇总"
-              disabled={loading}
-              onClick={() => void load()}
-            >
-              <RefreshCw className={cn("size-4", loading && "animate-spin")} />
-            </Button>
-          </>
+              看待核对
+            </button>
+          ) : undefined
         }
-      />
-      {error && (
-        <div className="px-[22px] pb-4">
-          <LoadError compact what="消耗汇总" message={error} onRetryAction={() => void load()} />
-        </div>
-      )}
-      {!rows || rows.length === 0 ? (
-        error ? null : (
-          <p className="px-[22px] pb-5 text-sm text-muted-foreground">
-            {loading || !rows ? "载入中…" : "这段时间没有运行"}
-          </p>
-        )
-      ) : (
-        <div className={tb.wrap}>
-          <table className={cn(tb.table, "min-w-[640px]")} data-testid="charge-summary">
-            <caption className="sr-only">消耗汇总</caption>
-            <thead>
-              <tr>
-                {[
-                  DIMENSION_LABEL[by].replace("按", "").trim(),
-                  "次数",
-                  "实际扣除",
-                  "欠额",
-                  "冻结中",
-                  "合计",
-                ].map((t, i) => (
-                  <th
-                    scope="col"
-                    key={t}
-                    className={cn(tb.th, i === 0 ? tb.first : tb.right, i === 5 && tb.last)}
-                  >
-                    {t}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr
-                  key={r.key ?? "none"}
-                  data-testid="charge-summary-row"
-                  className={cn(clickable(r) && "hover:[&>td]:bg-[#FAF9F6]")}
-                >
-                  <td className={cn(tb.td, tb.first, "min-w-32 max-w-xs break-words")}>
-                    {clickable(r) ? (
-                      <button
-                        type="button"
-                        className="inline-flex min-h-8 items-center gap-1.5 text-left hover:underline"
-                        title="查看这部分的运行明细"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          open(r);
-                        }}
-                      >
-                        {rowLabel(by, r)}
-                        <ChevronRight className="size-3.5 text-muted-foreground" />
-                      </button>
-                    ) : (
-                      rowLabel(by, r)
-                    )}
-                  </td>
-                  <td className={cn(tb.td, tb.num, tb.right, "font-mono")}>{r.runs}</td>
-                  <td className={cn(tb.td, tb.num, tb.right, "font-mono")}>
-                    {amount(r.chargedMicro)}
-                  </td>
-                  <td
+      >
+        {amount(total.owedMicro)}
+      </SummaryStat>
+      <SummaryStat label="冻结中（积分）" hint="运行结束后按实际用量结算">
+        {amount(total.reservedMicro)}
+      </SummaryStat>
+    </dl>
+  );
+
+  return (
+    <>
+      {stats}
+      <section
+        className="mb-4 rounded-2xl border border-border bg-card"
+        aria-label={platform ? "全平台消耗汇总" : "消耗汇总"}
+      >
+        <CardHead
+          title={platform ? "全平台消耗汇总" : "消耗汇总"}
+          meta="合计 = 实际扣除 + 欠额 + 冻结中"
+          actions={
+            <>
+              <fieldset
+                className="inline-flex rounded-full bg-secondary p-[3px]"
+                aria-label="汇总维度"
+              >
+                {dimensions.map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    aria-pressed={by === d}
                     className={cn(
-                      tb.td,
-                      tb.num,
-                      tb.right,
-                      "font-mono",
-                      r.owedMicro !== "0" && "text-destructive",
+                      "h-[30px] rounded-full px-3.5 text-[13px] text-muted-foreground max-md:h-10",
+                      by === d && "bg-card font-semibold text-foreground shadow-xs",
                     )}
+                    onClick={() => setBy(d)}
                   >
-                    {amount(r.owedMicro)}
-                  </td>
-                  <td className={cn(tb.td, tb.num, tb.right, "font-mono")}>
-                    {amount(r.reservedMicro)}
-                  </td>
-                  <td className={cn(tb.td, tb.num, tb.right, tb.last, "font-mono font-semibold")}>
-                    {amount(r.usedMicro)}
-                  </td>
+                    {DIMENSION_LABEL[d]}
+                  </button>
+                ))}
+              </fieldset>
+              <NativeSelect
+                aria-label="时间范围"
+                value={range}
+                onChange={(e) => setRange(e.target.value as SummaryWindow)}
+                className="w-auto min-w-28"
+              >
+                {(Object.keys(WINDOW_LABEL) as SummaryWindow[]).map((w) => (
+                  <option key={w} value={w}>
+                    {WINDOW_LABEL[w]}
+                  </option>
+                ))}
+              </NativeSelect>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                title="刷新消耗汇总"
+                aria-label="刷新消耗汇总"
+                disabled={loading}
+                onClick={() => void load()}
+              >
+                <RefreshCw className={cn("size-4", loading && "animate-spin")} />
+              </Button>
+            </>
+          }
+        />
+        {error && (
+          <div className="px-[22px] pb-4">
+            <LoadError compact what="消耗汇总" message={error} onRetryAction={() => void load()} />
+          </div>
+        )}
+        {!rows || rows.length === 0 ? (
+          error ? null : (
+            <p className="px-[22px] pb-5 text-sm text-muted-foreground">
+              {loading || !rows ? "载入中…" : "这段时间没有运行"}
+            </p>
+          )
+        ) : (
+          <div className={tb.wrap}>
+            <table className={cn(tb.table, "min-w-[640px]")} data-testid="charge-summary">
+              <caption className="sr-only">消耗汇总</caption>
+              <thead>
+                <tr>
+                  {[
+                    DIMENSION_LABEL[by].replace("按", "").trim(),
+                    "次数",
+                    "实际扣除",
+                    "欠额",
+                    "冻结中",
+                    "合计",
+                  ].map((t, i) => (
+                    <th
+                      scope="col"
+                      key={t}
+                      className={cn(tb.th, i === 0 ? tb.first : tb.right, i === 5 && tb.last)}
+                    >
+                      {t}
+                    </th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-            {total && (
-              <tfoot>
-                <tr
-                  className="font-semibold [&>td]:bg-[#FAF9F6]"
-                  data-testid="charge-summary-total"
-                >
-                  <td className={cn(tb.td, tb.first)}>合计（{WINDOW_LABEL[range]}）</td>
-                  <td className={cn(tb.td, tb.num, tb.right, "font-mono")}>{total.runs}</td>
-                  <td className={cn(tb.td, tb.num, tb.right, "font-mono")}>
-                    {amount(total.chargedMicro)}
-                  </td>
-                  <td className={cn(tb.td, tb.num, tb.right, "font-mono")}>
-                    {amount(total.owedMicro)}
-                  </td>
-                  <td className={cn(tb.td, tb.num, tb.right, "font-mono")}>
-                    {amount(total.reservedMicro)}
-                  </td>
-                  <td className={cn(tb.td, tb.num, tb.right, tb.last, "font-mono")}>
-                    {amount(total.usedMicro)}
-                  </td>
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-      )}
-    </section>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr
+                    key={r.key ?? "none"}
+                    data-testid="charge-summary-row"
+                    aria-selected={isActive(r) || undefined}
+                    className={cn(
+                      clickable(r) && "cursor-pointer hover:[&>td]:bg-[#FAF9F6]",
+                      isActive(r) && tb.selRow,
+                    )}
+                    onClick={clickable(r) ? () => open(r) : undefined}
+                    onKeyDown={clickable(r) ? (e) => e.key === "Enter" && open(r) : undefined}
+                  >
+                    <td className={cn(tb.td, tb.first, "min-w-32 max-w-xs break-words")}>
+                      {clickable(r) ? (
+                        <button
+                          type="button"
+                          className="inline-flex min-h-8 items-center gap-1.5 text-left hover:underline"
+                          title="查看这部分的运行明细"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            open(r);
+                          }}
+                        >
+                          {rowLabel(by, r)}
+                          <ChevronRight className="size-3.5 text-muted-foreground" />
+                        </button>
+                      ) : (
+                        rowLabel(by, r)
+                      )}
+                    </td>
+                    <td className={cn(tb.td, tb.num, tb.right, "font-mono")}>{r.runs}</td>
+                    <td className={cn(tb.td, tb.num, tb.right, "font-mono")}>
+                      {amount(r.chargedMicro)}
+                    </td>
+                    <td
+                      className={cn(
+                        tb.td,
+                        tb.num,
+                        tb.right,
+                        "font-mono",
+                        r.owedMicro !== "0" && "text-destructive",
+                      )}
+                    >
+                      {amount(r.owedMicro)}
+                    </td>
+                    <td className={cn(tb.td, tb.num, tb.right, "font-mono")}>
+                      {amount(r.reservedMicro)}
+                    </td>
+                    <td className={cn(tb.td, tb.num, tb.right, tb.last, "font-mono font-semibold")}>
+                      {amount(r.usedMicro)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              {total && (
+                <tfoot>
+                  <tr
+                    className="font-semibold [&>td]:bg-[#FAF9F6]"
+                    data-testid="charge-summary-total"
+                  >
+                    <td className={cn(tb.td, tb.first)}>合计（{WINDOW_LABEL[range]}）</td>
+                    <td className={cn(tb.td, tb.num, tb.right, "font-mono")}>{total.runs}</td>
+                    <td className={cn(tb.td, tb.num, tb.right, "font-mono")}>
+                      {amount(total.chargedMicro)}
+                    </td>
+                    <td className={cn(tb.td, tb.num, tb.right, "font-mono")}>
+                      {amount(total.owedMicro)}
+                    </td>
+                    <td className={cn(tb.td, tb.num, tb.right, "font-mono")}>
+                      {amount(total.reservedMicro)}
+                    </td>
+                    <td className={cn(tb.td, tb.num, tb.right, tb.last, "font-mono")}>
+                      {amount(total.usedMicro)}
+                    </td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        )}
+      </section>
+    </>
+  );
+}
+
+function SummaryStat({
+  label,
+  hint,
+  tone,
+  children,
+}: {
+  label: string;
+  hint?: React.ReactNode;
+  tone?: "bad";
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="min-w-0 rounded-2xl border border-border bg-card px-[18px] py-4">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd
+        className={cn(
+          "mt-1 break-all font-display text-2xl font-semibold",
+          tone === "bad" && "text-destructive",
+        )}
+      >
+        {children}
+      </dd>
+      {hint && <dd className="mt-0.5 text-xs text-muted-foreground">{hint}</dd>}
+    </div>
   );
 }

@@ -36,6 +36,8 @@ function parseTime(raw: string | null): number | undefined | null {
  * - API Key:这把 key 发起的运行
  * - 管理员:scope=all 看全平台
  *
+ * 管理员 scope=all 时每条带 account(计费账号 id 与邮箱),并可用 accountId 按账号筛选。
+ *
  * 查询参数:agentId、status(逗号分隔)、source(web/api/invoke)、since、until、cursor、limit(≤100)
  */
 export async function GET(req: Request) {
@@ -63,7 +65,11 @@ export async function GET(req: Request) {
       limit,
     };
     if (principal.type === "apiKey") filter.callerApiKeyId = principal.keyId;
-    else if (!(q.get("scope") === "all" && principal.role === "admin")) {
+    else if (q.get("scope") === "all" && principal.role === "admin") {
+      // 平台运行:要看得出是谁的运行,每条带计费账号;可按账号筛选
+      filter.withAccount = true;
+      filter.billingUserId = q.get("accountId") || undefined;
+    } else {
       filter.billingUserId = principal.userId;
     }
 

@@ -212,6 +212,10 @@ describe("market HTTP integration (memory repositories)", () => {
       params: Promise.resolve({ id: issued.key.id }),
     });
     expect(rotated.status).toBe(201);
+    // 签发与轮换都存下尾号,列表靠它对上明文
+    expect(issued.key.keyHint).toBe(`owa_••••${issued.plaintext.slice(-4)}`);
+    const fresh = await rotated.json();
+    expect(fresh.key.keyHint).toBe(`owa_••••${fresh.plaintext.slice(-4)}`);
     await setListing(false);
     await expect(
       container.auth.assertCanInvoke(principal, publishedAgent.id),

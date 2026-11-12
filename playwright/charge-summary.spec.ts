@@ -107,7 +107,7 @@ test.describe("消耗汇总", () => {
       );
 
       // 账号汇总沿用"上月":只有那 100
-      await page.getByRole("tab", { name: "账户概览", exact: true }).click();
+      await page.getByRole("tab", { name: "概览", exact: true }).click();
       const own = page.getByRole("region", { name: "消耗汇总", exact: true });
       await expect(own.getByLabel("时间范围")).toHaveValue("last_month");
       await expect(own.getByTestId("charge-summary-total")).toContainText("100.00");
@@ -166,7 +166,7 @@ test.describe("消耗汇总", () => {
       const row = platform.getByTestId("charge-summary-row").filter({ hasText: target.email });
       // 第一次:本月点 A
       await row.getByRole("button", { name: target.email }).click();
-      await page.getByRole("tab", { name: "账户概览", exact: true }).click();
+      await page.getByRole("tab", { name: "概览", exact: true }).click();
       const own = page.getByRole("region", { name: "消耗汇总", exact: true });
       // 账号区域先载入余额流水再载入汇总:全量跑时会超过默认的 5 秒
       await expect(own.getByTestId("charge-summary-total")).toContainText("7.00", {
@@ -189,7 +189,7 @@ test.describe("消耗汇总", () => {
         "aria-selected",
         "true",
       );
-      await page.getByRole("tab", { name: "账户概览", exact: true }).click();
+      await page.getByRole("tab", { name: "概览", exact: true }).click();
       await expect(page.getByTestId("balance-available")).toBeVisible();
       await expect(own.getByLabel("时间范围")).toHaveValue("last_month");
       await expect(own.getByTestId("charge-summary-total")).toContainText("100.00", {
@@ -200,7 +200,7 @@ test.describe("消耗汇总", () => {
       const charges = page.getByTestId("run-charge");
       await expect(charges).toHaveCount(1);
       await expect(charges.first()).toContainText(lastMonth);
-      await page.getByRole("tab", { name: "账户流水", exact: true }).click();
+      await page.getByRole("tab", { name: "流水", exact: true }).click();
       await expect(page.getByRole("heading", { name: "账户流水" })).toBeVisible();
     } finally {
       if (promoted) await sql("UPDATE users SET role = 'user' WHERE id = ?", [admin.id]);
@@ -297,7 +297,7 @@ test.describe("消耗汇总", () => {
       await row.getByRole("button", { name: target.email }).click();
       // 选中该账号:账号下拉切过去,该账号自己的汇总只有评测
       await expect(page.locator("#billing-account")).toHaveValue(target.id);
-      await page.getByRole("tab", { name: "账户概览", exact: true }).click();
+      await page.getByRole("tab", { name: "概览", exact: true }).click();
       const own = page.getByRole("region", { name: "消耗汇总", exact: true });
       await expect(own.getByTestId("charge-summary-row")).toHaveCount(1);
       await expect(own.getByTestId("charge-summary-row").first()).toContainText("评测");

@@ -246,6 +246,15 @@ describe("ModelAdmin", () => {
     await rejects(admin.impact({ capabilityId: "ghost" }), 404);
   });
 
+  it("别名用量:每个别名有几个智能体在用(保存默认路由前给管理员看)", async () => {
+    const { admin } = setup([
+      { agentId: "a", refs: ["sonnet", "haiku"] },
+      { agentId: "b", refs: ["sonnet", "sonnet"] },
+      { agentId: "c", refs: ["some-cap"] },
+    ]);
+    expect(await admin.aliasUsage()).toEqual({ fable: 0, opus: 0, sonnet: 2, haiku: 1 });
+  });
+
   it("启用模型须填全该类型的价格:缺项 400,明确填 0 可以,停用的草稿可以暂缺", async () => {
     const { admin } = setup();
     const a = await admin.createProvider({ definition: { name: "A", enabled: true } }, "a");

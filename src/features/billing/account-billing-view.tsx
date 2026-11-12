@@ -150,7 +150,9 @@ export function AccountBillingView() {
           )}
         </TabsContent>
         <TabsContent value="packages" forceMount className="data-[state=inactive]:hidden">
-          {visited.includes("packages") && <PackagesPanel />}
+          {visited.includes("packages") && (
+            <PackagesPanel onOpenAccount={() => openTab("overview")} />
+          )}
         </TabsContent>
         <TabsContent value="ledger" forceMount className="data-[state=inactive]:hidden">
           {visited.includes("ledger") && (
@@ -207,6 +209,7 @@ export function AccountBillingView() {
           {visited.includes("runs") && (
             <>
               <ChargeSummary
+                activeDrill={drill}
                 onDrill={(d) => {
                   setDrill(d);
                   requestAnimationFrame(() =>
@@ -236,11 +239,13 @@ function Overview({
   onOpenTab: (tab: BillingTab) => void;
   onDrill: (drill: ChargeDrill) => void;
 }) {
+  const liveRuns = useLiveRunCount();
   if (!statement) {
     return loading ? <p className="py-5 text-sm text-muted-foreground">载入中…</p> : null;
   }
   const month = statement.month;
   const pct = monthShare(month);
+  const live = liveRuns;
   return (
     <>
       {month?.limitPending && (
@@ -268,7 +273,11 @@ function Overview({
               {creditsAmount(statement.balance.reservedMicroCredits)}
             </span>
           }
-          hint="进行中的运行结束后按实际用量结算"
+          hint={
+            live && live.count > 0
+              ? `${live.count}${live.more ? "+" : ""} 个运行进行中，结束后按实际用量结算`
+              : "进行中的运行结束后按实际用量结算"
+          }
         />
         <StatCard
           label="本月已用 / 月度上限"
@@ -360,7 +369,8 @@ function MonthBySource({ onDrill }: { onDrill: (drill: ChargeDrill) => void }) {
   if (!rows) return <p className="mb-2 text-sm text-muted-foreground">载入中…</p>;
   if (rows.length === 0)
     return <p className="mb-2 text-sm text-muted-foreground">本月还没有运行</p>;
-  const max = rows.reduce((m, r) => (BigInt(r.chargedMicro) > m ? BigInt(r.chargedMicro) : m), 0n);
+  // 条形按占本月合计的比例,和原型一致(不是按最大的一项归一)
+  const total = rows.reduce((sum, r) => sum + BigInt(r.chargedMicro), 0n);
   return (
     <ul className="mb-2 space-y-2.5">
       {rows.map((r) => {
@@ -385,7 +395,7 @@ function MonthBySource({ onDrill }: { onDrill: (drill: ChargeDrill) => void }) {
               <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-[#ECEAE3]">
                 <span
                   className="block h-full bg-[#8A857A]"
-                  style={{ width: `${shareOf(r.chargedMicro, max.toString())}%` }}
+                  style={{ width: `${shareOf(r.chargedMicro, total.toString())}%` }}
                 />
               </span>
             </button>
@@ -394,4 +404,21 @@ function MonthBySource({ onDrill }: { onDrill: (drill: ChargeDrill) => void }) {
       })}
     </ul>
   );
+}
+
+/** 计费在自己名下、还没结束(排队或在跑)的运行数,写在「冻结中」下面;没读到就不写 */
+function useLiveRunCount(): { count: number; more: boolean } | null {
+  const [live, setLive] = useState<{ count: number; more: boolean } | null>(null);
+  useEffect(() => {
+    let active = true;
+    fetchJson<{ items: unknown[]; nextCursor?: string }>(
+      "/api/runs?status=pending,running&limit=100",
+    )
+      .then((r) => active && setLive({ count: r.items.length, more: Boolean(r.nextCursor) }))
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+  return live;
 }

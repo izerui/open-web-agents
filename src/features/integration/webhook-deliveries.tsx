@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { errorText, fetchJson } from "@/lib/fetch-json";
+import { formatTime } from "@/lib/format-time";
 import { cn } from "@/lib/utils";
 
 interface Delivery {
@@ -119,9 +120,7 @@ export function WebhookDeliveries({
         {items?.length === 0 && <p className="p-3 text-muted-foreground">还没有投递记录</p>}
         {items?.map((d) => (
           <div key={d.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 p-2">
-            <span className="w-36 shrink-0 text-muted-foreground">
-              {new Date(d.at).toLocaleString()}
-            </span>
+            <span className="w-36 shrink-0 text-muted-foreground">{formatTime(d.at)}</span>
             <Badge variant={d.ok ? "success" : "warning"} className="text-[11px]">
               {d.ok ? "成功" : "失败"}
               {d.httpStatus ? ` · ${d.httpStatus}` : ""}

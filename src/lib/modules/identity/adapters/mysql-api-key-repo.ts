@@ -8,6 +8,7 @@ interface Row {
   ownerId: string;
   agentId: string | null;
   name: string | null;
+  keyHint: string | null;
   rateLimitPerMinute: number | null;
   monthlyLimitMicroCredits: string | null;
   expiresAt: Date | null;
@@ -20,6 +21,7 @@ const COLUMNS = {
   ownerId: apiKeys.ownerId,
   agentId: apiKeys.agentId,
   name: apiKeys.name,
+  keyHint: apiKeys.keyHint,
   rateLimitPerMinute: apiKeys.rateLimitPerMinute,
   monthlyLimitMicroCredits: apiKeys.monthlyLimitMicroCredits,
   expiresAt: apiKeys.expiresAt,
@@ -33,6 +35,7 @@ function toRecord(r: Row): ApiKeyRecord {
     ownerId: r.ownerId,
     agentId: r.agentId ?? undefined,
     name: r.name ?? undefined,
+    keyHint: r.keyHint ?? undefined,
     rateLimitPerMinute: r.rateLimitPerMinute ?? undefined,
     monthlyLimitMicroCredits: r.monthlyLimitMicroCredits ?? undefined,
     expiresAt: r.expiresAt?.getTime(),
@@ -54,6 +57,7 @@ export class MysqlApiKeyRepo implements ApiKeyRepo {
       monthlyLimitMicroCredits: k.monthlyLimitMicroCredits ?? null,
       expiresAt: k.expiresAt ? new Date(k.expiresAt) : null,
       hashedKey: k.hashedKey,
+      keyHint: k.keyHint ?? null,
     });
     const rows = await this.db.select(COLUMNS).from(apiKeys).where(eq(apiKeys.id, k.id)).limit(1);
     const row = rows[0];

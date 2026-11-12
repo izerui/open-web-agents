@@ -3,7 +3,13 @@
 import { LoadError } from "@/components/load-error";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { KIND_LABEL, KIND_ORDER, creditsText, perStandard } from "@/features/models/model-shared";
+import {
+  KIND_LABEL,
+  KIND_ORDER,
+  creditsText,
+  llmPriceExample,
+  perStandard,
+} from "@/features/models/model-shared";
 import { EmptyState, tb } from "@/features/settings/space-page";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import type { Capability, CapabilityKind } from "@/lib/modules/capabilities/domain/catalog";
@@ -65,6 +71,10 @@ export function PriceList({ configured = true }: { configured?: boolean }) {
           .filter(([, v]) => v === id)
           .map(([k]) => k)
       : [];
+
+  // 举例用第一个可用的文本模型
+  const sample = kind === "llm" ? list.find((i) => i.available) : undefined;
+  const example = sample ? llmPriceExample(sample.id, sample.rates) : null;
 
   return (
     <>
@@ -139,12 +149,15 @@ export function PriceList({ configured = true }: { configured?: boolean }) {
               )}
             </div>
             <div className={tb.wrap}>
-              <table className={cn(tb.table, "min-w-[640px]")}>
+              <table className={cn(tb.table, "min-w-[780px]")}>
                 <caption className="sr-only">{KIND_LABEL[kind]}模型价目</caption>
                 <thead>
                   <tr>
                     <th scope="col" className={cn(tb.th, tb.first)}>
                       模型
+                    </th>
+                    <th scope="col" className={tb.th}>
+                      标识
                     </th>
                     {meters.map((m) => (
                       <th scope="col" key={m.meter} className={cn(tb.th, tb.right)}>
@@ -180,6 +193,9 @@ export function PriceList({ configured = true }: { configured?: boolean }) {
                         >
                           {item.name}
                         </td>
+                        <td className={cn(tb.td, "font-mono text-[12.5px] whitespace-nowrap")}>
+                          {item.id}
+                        </td>
                         {meters.map((m) => {
                           const price = perStandard(item.rates, m.meter, m.units);
                           return (
@@ -212,6 +228,7 @@ export function PriceList({ configured = true }: { configured?: boolean }) {
             </div>
             {kind === "llm" && (
               <p className="px-[22px] pt-3 pb-4 text-xs text-muted-foreground max-md:px-4">
+                {example ? `${example}` : ""}
                 按实际用量与使用时的价格计算。运行开始时会按模型先冻结一部分积分，结束后按实际用量多退少补。
               </p>
             )}

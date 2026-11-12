@@ -14,8 +14,8 @@ import {
   type CapabilityRepo,
   DuplicateModelId,
 } from "@/lib/modules/capabilities/ports";
-import { BrandedError, MODEL_ALIASES } from "@/lib/shared";
-import { type Impact, type ImpactTarget, countImpact } from "../domain/impact";
+import { BrandedError, MODEL_ALIASES, type ModelAlias } from "@/lib/shared";
+import { type Impact, type ImpactTarget, countAliasUsage, countImpact } from "../domain/impact";
 import {
   type ModelAliases,
   type Provider,
@@ -268,6 +268,11 @@ export class ModelAdmin {
     return conflicts(() =>
       this.deps.aliases.save(map, versionOf(input.expectedVersion ?? null), actor),
     );
+  }
+
+  /** 每个别名有几个智能体在用(草稿或当前发布版本),改默认路由前给管理员看 */
+  async aliasUsage(): Promise<Record<ModelAlias, number>> {
+    return countAliasUsage(await this.deps.agentRefs.list());
   }
 
   async impact(target: ImpactTarget): Promise<Impact> {

@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { accessStatusText, keyExpiry, monthlyShare, parseRpmDraft } from "../key-display";
+import {
+  accessStatusText,
+  keyExpiry,
+  keyLabel,
+  monthlyShare,
+  parseRpmDraft,
+  rotatedOldKeys,
+  rpmRangeText,
+} from "../key-display";
 
 const NOW = Date.UTC(2026, 10, 12, 8, 0, 0);
 const H = 3_600_000;
@@ -69,5 +77,47 @@ describe("accessStatusText:智能体对调用方的状态", () => {
   it("从未发布", () => {
     expect(accessStatusText({ published: null })).toBe("未发布，调用使用草稿");
     expect(accessStatusText({})).toBe("未发布，调用使用草稿");
+  });
+});
+
+describe("keyLabel:认 Key 用的标识", () => {
+  it("有尾号显示尾号", () => {
+    expect(keyLabel({ id: "9d5d30bbfe56aaaa", keyHint: "owa_••••7Q2c" })).toBe("owa_••••7Q2c");
+  });
+  it("加列之前签发的旧 Key 退回显示 ID 前 12 位", () => {
+    expect(keyLabel({ id: "9d5d30bbfe56aaaa" })).toBe("ID 9d5d30bbfe56");
+  });
+});
+
+describe("rotatedOldKeys:轮换后留下的旧 Key", () => {
+  const base = { name: "报销", agentId: "a1" };
+  it("同名同绑定、之后又签了一把、自己在重叠期内到期 → 旧", () => {
+    const old = { ...base, id: "old", createdAt: NOW - 100 * H, expiresAt: NOW + 24 * H };
+    const fresh = { ...base, id: "new", createdAt: NOW };
+    expect(rotatedOldKeys([fresh, old])).toEqual(new Set(["old"]));
+  });
+  it("没有到期时间的不是旧 Key", () => {
+    const a = { ...base, id: "a", createdAt: NOW - H };
+    const b = { ...base, id: "b", createdAt: NOW };
+    expect(rotatedOldKeys([a, b]).size).toBe(0);
+  });
+  it("绑定不同的同名 Key 不算", () => {
+    const old = { ...base, id: "old", createdAt: NOW - H, expiresAt: NOW + 24 * H };
+    const other = { name: "报销", id: "x", createdAt: NOW };
+    expect(rotatedOldKeys([old, other]).size).toBe(0);
+  });
+  it("本来就有长有效期(远超重叠期)的不算", () => {
+    const old = { ...base, id: "old", createdAt: NOW - H, expiresAt: NOW + 30 * 24 * H };
+    const fresh = { ...base, id: "new", createdAt: NOW };
+    expect(rotatedOldKeys([old, fresh]).size).toBe(0);
+  });
+});
+
+describe("rpmRangeText:签发表单里写明每分钟上限的取值范围", () => {
+  it("普通账号受平台默认约束", () => {
+    expect(rpmRangeText(60)).toBe("1 到 60 次，不能高于平台默认");
+  });
+  it("管理员或平台不限时只要求正整数", () => {
+    expect(rpmRangeText(0)).toBe("正整数");
   });
 });

@@ -4,6 +4,8 @@ export interface ApiKeyRecord {
   /** 绑定到具体智能体则只能调该智能体;为空是账户级 key。 */
   agentId?: string;
   name?: string;
+  /** 认 Key 用的尾号(`owa_••••7Q2c`);旧 Key 没有 */
+  keyHint?: string;
   /** 每分钟新调用上限;undefined = 平台默认。 */
   rateLimitPerMinute?: number;
   /** 本月积分上限(微积分,十进制字符串);undefined = 不单独限制,只受账号余额与上限约束 */
@@ -24,6 +26,8 @@ export interface NewApiKey {
   expiresAt?: number;
   /** 已哈希;明文绝不入库。 */
   hashedKey: string;
+  /** 尾号,见 apiKeyHint */
+  keyHint?: string;
 }
 
 export interface ApiKeyRepo {

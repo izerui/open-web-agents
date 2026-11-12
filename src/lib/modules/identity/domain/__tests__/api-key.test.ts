@@ -1,5 +1,6 @@
 import {
   KEY_PREFIX,
+  apiKeyHint,
   extractApiKey,
   generateApiKey,
   hashApiKey,
@@ -138,5 +139,17 @@ describe("Key 到期与轮换", () => {
     expect(rotationPlan({ createdAt: 0, expiresAt: 102 * H }, 100 * H, 24).oldExpiresAt).toBe(
       102 * H,
     );
+  });
+});
+
+describe("apiKeyHint:列表里认 Key 用的尾号", () => {
+  it("前缀 + 掩码 + 末 4 位,不暴露中间部分", () => {
+    expect(apiKeyHint("owa_abcdefghijklmnopqrstuvwxyz7Q2c")).toBe("owa_••••7Q2c");
+  });
+
+  it("真实签发的 Key 也只留末 4 位", () => {
+    const plain = generateApiKey();
+    const hint = apiKeyHint(plain);
+    expect(hint).toBe(`${KEY_PREFIX}••••${plain.slice(-4)}`);
   });
 });

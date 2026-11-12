@@ -1,5 +1,6 @@
 "use client";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { errorText, fetchJson } from "@/lib/fetch-json";
@@ -8,6 +9,7 @@ import type { ReconCategory, ReconLine } from "@/lib/modules/billing/domain/reco
 import { formatYuan } from "@/lib/modules/capabilities/domain/pricing";
 import { Download, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { reconTotals } from "./billing-display";
 
 type Line = ReconLine & { providerName: string | null };
 
@@ -27,6 +29,24 @@ const fmt = (n: number) => n.toLocaleString();
 function ymd(d: Date): string {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** 不完整的数据:每类一个标签(只计条数,不代表已核实为零) */
+function GapTags({ line: l }: { line: Line }) {
+  const u = l.unpricedTokens;
+  const unpriced = u.input + u.output + u.cacheRead + u.cacheWrite;
+  const tags = GAPS.filter((g) => l.counts[g.key] > 0);
+  if (tags.length === 0 && unpriced === 0) return <span className="text-muted-foreground">—</span>;
+  return (
+    <span className="flex flex-wrap gap-1">
+      {tags.map((g) => (
+        <Badge key={g.key} variant={g.key === "open" ? "outline" : "warning"}>
+          {g.label} {l.counts[g.key]}
+        </Badge>
+      ))}
+      {unpriced > 0 && <Badge variant="warning">无法计价 token {fmt(unpriced)}</Badge>}
+    </span>
+  );
 }
 
 function gapsText(l: Line): string {
@@ -209,13 +229,46 @@ export function ReconciliationView() {
                   <td className="whitespace-nowrap px-2 py-2 font-mono">
                     {creditsAmount(l.chargedMicro)}
                   </td>
-                  <td className="min-w-48 px-2 py-2">{gapsText(l)}</td>
+                  <td className="min-w-48 px-2 py-2" title={gapsText(l)}>
+                    <GapTags line={l} />
+                  </td>
                 </tr>
               ))}
             </tbody>
+            <ReconTotalRow lines={lines} />
           </table>
         </div>
       )}
     </section>
+  );
+}
+
+function ReconTotalRow({ lines }: { lines: Line[] }) {
+  const t = reconTotals(lines);
+  return (
+    <tfoot>
+      <tr className="font-semibold" data-testid="recon-total">
+        <td className="px-2 py-2" colSpan={2}>
+          合计
+        </td>
+        <td className="px-2 py-2 font-mono">{fmt(t.runs)}</td>
+        <td className="whitespace-nowrap px-2 py-2 font-mono">
+          {fmt(t.tokens.input)} / {fmt(t.tokens.output)}
+        </td>
+        <td className="whitespace-nowrap px-2 py-2 font-mono">
+          {fmt(t.tokens.cacheRead)} / {fmt(t.tokens.cacheWrite)}
+        </td>
+        <td className="whitespace-nowrap px-2 py-2 font-mono">{formatYuan(t.costMicro)}</td>
+        <td className="whitespace-nowrap px-2 py-2 font-mono">{creditsAmount(t.estimatedMicro)}</td>
+        <td className="whitespace-nowrap px-2 py-2 font-mono">{creditsAmount(t.chargedMicro)}</td>
+        <td className="px-2 py-2">
+          {t.incomplete > 0 ? (
+            <Badge variant="warning">{t.incomplete} 次不完整</Badge>
+          ) : (
+            <span className="font-normal text-muted-foreground">—</span>
+          )}
+        </td>
+      </tr>
+    </tfoot>
   );
 }

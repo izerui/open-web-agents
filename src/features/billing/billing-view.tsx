@@ -24,10 +24,12 @@ import {
 import type { LedgerEntry, WalletBalance } from "@/lib/modules/billing/ports";
 import { formatCredits, parseCredits } from "@/lib/modules/capabilities/domain/catalog";
 import { cn } from "@/lib/utils";
-import { ArrowDownToLine, RefreshCw, Wallet } from "lucide-react";
+import { AlertTriangle, ArrowDownToLine, RefreshCw, Users, Wallet } from "lucide-react";
+import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { BatchCreditForm } from "./batch-credit-form";
+import { BatchCreditDialog } from "./batch-credit-form";
 import { type ChargeDrill, ChargeSummary, WINDOW_LABEL } from "./charge-summary";
 import { LedgerTable } from "./ledger-table";
 import { PendingCharges } from "./pending-charges";
@@ -57,14 +59,23 @@ export function BillingView({
   /** 平台管理 /admin/billing?tab= 指定的初始分区(仅 admin) */
   initialAdminView?: AdminView;
 }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [adminView, setAdminView] = useState<AdminView>(initialAdminView);
   const [visitedAdmin, setVisitedAdmin] = useState<AdminView[]>([initialAdminView]);
   const [accountView, setAccountView] = useState<AccountView>("overview");
-  const [visitedAccount, setVisitedAccount] = useState<AccountView[]>(admin ? [] : ["overview"]);
+  const [visitedAccount, setVisitedAccount] = useState<AccountView[]>(["overview"]);
   const [batchOpen, setBatchOpen] = useState(false);
-  const [batchVisited, setBatchVisited] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [accountId, setAccountId] = useState("");
+  // 选中的账号记在地址 ?account= 里:刷新、分享都还在这个账号
+  const [accountId, setAccountId] = useState(() =>
+    admin ? (searchParams.get("account") ?? "") : "",
+  );
+  /** 发放表单没过校验的那一栏 */
+  const [creditErr, setCreditErr] = useState<{ field: "credits" | "reason"; text: string } | null>(
+    null,
+  );
   const [statement, setStatement] = useState<Statement | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -81,8 +92,23 @@ export function BillingView({
   /** 账号汇总的初始时间范围:从全平台汇总点账号进来时沿用那边的,其余默认本月 */
   const [accountRange, setAccountRange] = useState<SummaryWindow>("this_month");
 
-  function openAdminView(view: AdminView) {
+  /** 把分区与账号写进地址(不新增历史记录) */
+  const syncUrl = useCallback(
+    (view: AdminView, account: string) => {
+      if (!admin) return;
+      const q = new URLSearchParams(searchParams.toString());
+      if (view === "overview") q.delete("tab");
+      else q.set("tab", view);
+      if (account) q.set("account", account);
+      else q.delete("account");
+      router.replace(`${pathname}${q.size ? `?${q}` : ""}`, { scroll: false });
+    },
+    [admin, pathname, router, searchParams],
+  );
+
+  function openAdminView(view: AdminView, account = accountId) {
     setAdminView(view);
+    syncUrl(view, account);
     setVisitedAdmin((previous) => (previous.includes(view) ? previous : [...previous, view]));
   }
 
@@ -95,6 +121,11 @@ export function BillingView({
     try {
       const result = await fetchJson<{ accounts: Account[] }>("/api/admin/accounts");
       setAccounts(result.accounts);
+      // 没指定账号时默认选第一个启用中的账号,打开「账户」就有内容
+      setAccountId(
+        (current) =>
+          current || (result.accounts.find((a) => !a.disabled) ?? result.accounts[0])?.id || "",
+      );
     } catch (err) {
       setError(errorText(err));
     }
@@ -141,14 +172,15 @@ export function BillingView({
 
   function reviewCredit() {
     setError("");
+    setCreditErr(null);
+    if (!accountId) return setError("请选择账号");
     try {
-      if (!accountId) throw new Error("请选择账号");
-      if (BigInt(parseCredits(credits.trim())) <= 0n) throw new Error("发放积分必须大于零");
-      if (!reason.trim()) throw new Error("请填写入账说明");
-      setConfirm(true);
-    } catch (err) {
-      setError(errorText(err));
+      if (BigInt(parseCredits(credits.trim())) <= 0n) throw new Error();
+    } catch {
+      return setCreditErr({ field: "credits", text: "填大于零的积分数" });
     }
+    if (!reason.trim()) return setCreditErr({ field: "reason", text: "请填写说明，会记入流水" });
+    setConfirm(true);
   }
 
   async function credit() {
@@ -210,10 +242,11 @@ export function BillingView({
       setStatement(null);
       setAccountId(id);
       setVisitedAccount([]);
+      setCreditErr(null);
     }
     setAccountRange(range);
     setDrill(next);
-    openAdminView("accounts");
+    openAdminView("accounts", id);
     openAccountView(next ? "runs" : "overview");
     setReceipt("");
     creditAttempt.current = null;
@@ -262,6 +295,8 @@ export function BillingView({
         <div id="billing-overview" hidden={adminView !== "overview"}>
           <ChargeSummary
             platform
+            defaultBy="account"
+            onShowPending={() => openAdminView("reconciliation")}
             onSelectAccount={(id, range) =>
               // 明细也只看这段时间,和刚才那笔汇总对得上
               selectAccount(id, range, {
@@ -284,97 +319,186 @@ export function BillingView({
       )}
       <div id="billing-accounts" hidden={admin && adminView !== "accounts"}>
         {admin && (
-          <div className="mb-5 flex flex-wrap items-end gap-3">
-            <label className="min-w-0 flex-1 space-y-1 text-sm" htmlFor="billing-account">
-              <span>账号</span>
-              <NativeSelect
-                id="billing-account"
-                value={accountId}
-                disabled={busy}
-                onChange={(event) => selectAccount(event.target.value)}
-              >
-                <option value="">选择账号</option>
-                {accounts.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.email}
-                    {account.disabled ? "（已停用）" : ""}
-                  </option>
-                ))}
-              </NativeSelect>
+          <div className="mb-4 flex flex-wrap items-center gap-2.5">
+            <label className="text-[13px] text-muted-foreground" htmlFor="billing-account">
+              账号
             </label>
-            <Button
-              variant="ghost"
-              size="icon"
-              title="刷新账号列表"
-              aria-label="刷新账号列表"
-              onClick={() => void loadAccounts()}
+            <NativeSelect
+              id="billing-account"
+              className="w-[320px] max-w-full"
+              value={accountId}
               disabled={busy}
+              onChange={(event) => selectAccount(event.target.value)}
             >
+              <option value="">选择账号</option>
+              {accounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.email}
+                  {account.disabled ? "（已停用）" : ""}
+                </option>
+              ))}
+            </NativeSelect>
+            <Button variant="outline" size="sm" onClick={() => void loadAccounts()} disabled={busy}>
               <RefreshCw className="size-4" />
+              刷新
             </Button>
-            <Button
-              variant="outline"
-              aria-expanded={batchOpen}
-              aria-controls="billing-batch-credit"
-              onClick={() => {
-                setBatchVisited(true);
-                setBatchOpen((open) => !open);
-              }}
-            >
-              <ArrowDownToLine className="size-4" />
+            <Button size="sm" className="ml-auto" onClick={() => setBatchOpen(true)}>
+              <Users className="size-4" />
               批量发放积分
             </Button>
           </div>
         )}
         {admin && (
-          <div id="billing-batch-credit" hidden={!batchOpen}>
-            {batchVisited && <BatchCreditForm onDone={() => load()} />}
-          </div>
+          <BatchCreditDialog open={batchOpen} onOpenChange={setBatchOpen} onDone={() => load()} />
         )}
-        <Tabs value={accountView} onValueChange={(view) => openAccountView(view as AccountView)}>
-          <TabsList aria-label="账户明细" className="mb-5 max-w-full">
-            <TabsTrigger value="overview">账户概览</TabsTrigger>
-            <TabsTrigger value="runs">运行消耗</TabsTrigger>
-            <TabsTrigger value="ledger">账户流水</TabsTrigger>
-          </TabsList>
-          {/* 首次访问才挂载；保留已访问面板的游标、筛选、错误和重试状态。 */}
-          <TabsContent value="overview" forceMount className="data-[state=inactive]:hidden">
-            {statement && (
-              <div className="mb-4 text-sm text-muted-foreground">
-                每次运行发起时先冻结积分,结束后按实际用量扣除,多余的退回可用余额。
-              </div>
-            )}
-            {statement ? (
-              <dl className="mb-6 grid grid-cols-2 gap-6 border-y py-5">
+        {admin && selected?.disabled && (
+          <p className="mb-4 flex items-start gap-2 rounded-xl border border-[#EBCB91] bg-[#FFFBF2] px-3.5 py-2.5 text-sm text-warning-text">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            这个账号已停用。发放的积分会留在账户里，恢复账号后才能使用。
+          </p>
+        )}
+        {admin && accountId && (
+          <div className="mb-4 grid gap-4 lg:grid-cols-2">
+            <section
+              aria-label="账号信息"
+              className="min-w-0 rounded-2xl border border-border bg-card px-[22px] py-5"
+            >
+              <h2 className="break-all text-base font-semibold">{selected?.email ?? accountId}</h2>
+              <p className="mt-1 mb-3 text-xs text-muted-foreground">
+                {selected?.disabled ? "已停用" : "启用中"}，
+                <Link className="underline underline-offset-2" href="/admin/accounts">
+                  在账号页修改上限或状态
+                </Link>
+              </p>
+              <dl className="grid grid-cols-2 gap-4">
                 <div className="min-w-0">
                   <dt className="text-xs text-muted-foreground">可用</dt>
                   <dd
                     data-testid="balance-available"
-                    className="mt-2 break-all font-mono text-2xl"
-                    title={`${creditsExact(statement.balance.availableMicroCredits)} 积分`}
+                    className="mt-1 break-all font-display text-2xl font-semibold"
+                    title={
+                      statement
+                        ? `${creditsExact(statement.balance.availableMicroCredits)} 积分`
+                        : undefined
+                    }
                   >
-                    {creditsBalance(statement.balance.availableMicroCredits)}
+                    {statement ? creditsBalance(statement.balance.availableMicroCredits) : "—"}
                   </dd>
                 </div>
                 <div className="min-w-0">
                   <dt className="text-xs text-muted-foreground">冻结中</dt>
                   <dd
                     data-testid="balance-reserved"
-                    className="mt-2 break-all font-mono text-2xl"
-                    title={`${creditsExact(statement.balance.reservedMicroCredits)} 积分`}
+                    className="mt-1 break-all font-display text-2xl font-semibold"
+                    title={
+                      statement
+                        ? `${creditsExact(statement.balance.reservedMicroCredits)} 积分`
+                        : undefined
+                    }
                   >
-                    {creditsAmount(statement.balance.reservedMicroCredits)}
+                    {statement ? creditsAmount(statement.balance.reservedMicroCredits) : "—"}
                   </dd>
                 </div>
-                {statement.month && (
-                  <p className="col-span-2 text-xs text-muted-foreground">
-                    本月已用 {creditsAmount(statement.month.usedMicroCredits)} 积分
-                    {statement.month.limitMicroCredits !== null &&
-                      ` / 月度上限 ${creditsAmount(statement.month.limitMicroCredits)} 积分`}
-                    {statement.month.limitPending &&
-                      " · 原月度上限待管理员按积分重新设置,设置前不能发起运行"}
-                  </p>
-                )}
+              </dl>
+            </section>
+            <section
+              aria-label="人工发放积分"
+              className="min-w-0 rounded-2xl border border-border bg-card px-[22px] py-5"
+            >
+              <h2 className="text-base font-semibold">人工发放积分</h2>
+              <p className="mt-1 mb-3 text-xs text-muted-foreground">
+                给这个账号直接加积分，记入流水「人工入账」。
+              </p>
+              <form
+                noValidate
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  reviewCredit();
+                }}
+              >
+                <fieldset
+                  disabled={busy}
+                  className="grid items-start gap-2.5 sm:grid-cols-[9rem_minmax(0,1fr)_auto]"
+                >
+                  <div className="grid gap-1">
+                    <Input
+                      id="credit-amount"
+                      aria-label="积分数量"
+                      placeholder="积分数量"
+                      inputMode="decimal"
+                      aria-invalid={creditErr?.field === "credits" || undefined}
+                      value={credits}
+                      onChange={(event) => {
+                        setCredits(event.target.value);
+                        setCreditErr(null);
+                      }}
+                    />
+                    {creditErr?.field === "credits" && (
+                      <span className="text-xs text-destructive">{creditErr.text}</span>
+                    )}
+                  </div>
+                  <div className="grid gap-1">
+                    <Input
+                      id="credit-reason"
+                      aria-label="入账说明"
+                      placeholder="说明，例如 部门预算 11 月"
+                      maxLength={500}
+                      aria-invalid={creditErr?.field === "reason" || undefined}
+                      value={reason}
+                      onChange={(event) => {
+                        setReason(event.target.value);
+                        setCreditErr(null);
+                      }}
+                    />
+                    {creditErr?.field === "reason" && (
+                      <span className="text-xs text-destructive">{creditErr.text}</span>
+                    )}
+                  </div>
+                  <Button type="submit" disabled={busy}>
+                    <ArrowDownToLine className="size-4" />
+                    发放
+                  </Button>
+                </fieldset>
+              </form>
+            </section>
+          </div>
+        )}
+        <Tabs value={accountView} onValueChange={(view) => openAccountView(view as AccountView)}>
+          <TabsList aria-label="账户明细" className="mb-5 max-w-full">
+            <TabsTrigger value="overview">概览</TabsTrigger>
+            <TabsTrigger value="runs">运行消耗</TabsTrigger>
+            <TabsTrigger value="ledger">流水</TabsTrigger>
+          </TabsList>
+          {/* 首次访问才挂载；保留已访问面板的游标、筛选、错误和重试状态。 */}
+          <TabsContent value="overview" forceMount className="data-[state=inactive]:hidden">
+            {statement ? (
+              <dl className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                <StatBox
+                  label="可用"
+                  title={`${creditsExact(statement.balance.availableMicroCredits)} 积分`}
+                >
+                  {creditsBalance(statement.balance.availableMicroCredits)}
+                </StatBox>
+                <StatBox
+                  label="冻结中"
+                  title={`${creditsExact(statement.balance.reservedMicroCredits)} 积分`}
+                >
+                  {creditsAmount(statement.balance.reservedMicroCredits)}
+                </StatBox>
+                <StatBox label="本月已用">
+                  {statement.month ? creditsAmount(statement.month.usedMicroCredits) : "—"}
+                </StatBox>
+                <StatBox label="月度上限">
+                  {statement.month?.limitPending ? (
+                    <span className="text-warning-text">待按积分重设</span>
+                  ) : statement.month?.limitMicroCredits == null ? (
+                    "不限"
+                  ) : statement.month.limitMicroCredits === "0" ? (
+                    "禁止消费"
+                  ) : (
+                    creditsAmount(statement.month.limitMicroCredits)
+                  )}
+                </StatBox>
               </dl>
             ) : loading ? (
               <p className="py-5 text-sm text-muted-foreground">载入中…</p>
@@ -384,53 +508,18 @@ export function BillingView({
                 选择账号查看余额与流水
               </div>
             ) : null}
-
-            {admin && accountId && (
-              <form
-                className="mb-6 space-y-3 border-b pb-5"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  reviewCredit();
-                }}
-              >
-                <h2 className="text-sm font-semibold">人工发放积分</h2>
-                <fieldset
-                  disabled={busy}
-                  className="grid gap-3 sm:grid-cols-[12rem_1fr_auto] sm:items-end"
-                >
-                  <label className="space-y-1 text-sm" htmlFor="credit-amount">
-                    <span>积分数量</span>
-                    <Input
-                      id="credit-amount"
-                      required
-                      inputMode="decimal"
-                      value={credits}
-                      onChange={(event) => setCredits(event.target.value)}
-                    />
-                  </label>
-                  <label className="space-y-1 text-sm" htmlFor="credit-reason">
-                    <span>入账说明</span>
-                    <Textarea
-                      id="credit-reason"
-                      required
-                      maxLength={500}
-                      className="min-h-9 resize-y"
-                      value={reason}
-                      onChange={(event) => setReason(event.target.value)}
-                    />
-                  </label>
-                  <Button type="submit" disabled={busy}>
-                    <ArrowDownToLine className="size-4" />
-                    发放积分
-                  </Button>
-                </fieldset>
-              </form>
+            {statement?.month?.limitPending && (
+              <p className="mb-4 flex items-start gap-2 rounded-xl border border-[#EBCB91] bg-[#FFFBF2] px-3.5 py-2.5 text-sm text-warning-text">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                旧上限还没按积分重设，设置前这个账号不能发起运行。
+              </p>
             )}
             {statement && visitedAccount.includes("overview") && (
               <ChargeSummary
                 key={admin ? `${accountId}:${accountRange}` : "self"}
                 accountId={admin ? accountId : undefined}
                 initialRange={accountRange}
+                activeDrill={drill}
                 onDrill={(next) => {
                   setDrill(next);
                   openAccountView("runs");
@@ -548,5 +637,24 @@ export function BillingView({
         </DialogContent>
       </Dialog>
     </SpaceShell>
+  );
+}
+
+function StatBox({
+  label,
+  title,
+  children,
+}: {
+  label: string;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="min-w-0 rounded-2xl border border-border bg-card px-[18px] py-4">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="mt-1 break-all font-display text-2xl font-semibold" title={title}>
+        {children}
+      </dd>
+    </div>
   );
 }

@@ -91,6 +91,7 @@ export function KeyMonthlyLimit({
 
   return (
     <form
+      noValidate
       className="flex min-w-[200px] flex-col gap-1.5"
       onSubmit={(e) => {
         e.preventDefault();
@@ -109,7 +110,11 @@ export function KeyMonthlyLimit({
         <Input
           inputMode="decimal"
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            setError("");
+          }}
+          aria-invalid={Boolean(error) || undefined}
           className="h-8 w-[110px]"
           aria-label="本月积分上限"
           placeholder="不限额"
