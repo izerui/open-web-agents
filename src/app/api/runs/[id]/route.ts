@@ -14,14 +14,15 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     const principal = await auth.resolveWeb(req);
     const run = await runQuery.detail(id);
     // 不存在与无权同回 404:运行 id 不该能被探测
-    const allowed =
-      run &&
-      (canAccessSession(principal, { id: run.sessionId, agentId: run.agentId, ...run.ownership })
-        .allowed ||
-        (principal.type === "web" && principal.role === "admin"));
+    // 会话是私有的:管理员能看全平台运行的记录,但打不开别人的会话(界面据此禁用「在对话里查看」)
+    const canOpenSession =
+      !!run &&
+      canAccessSession(principal, { id: run.sessionId, agentId: run.agentId, ...run.ownership })
+        .allowed;
+    const allowed = canOpenSession || (principal.type === "web" && principal.role === "admin");
     if (!run || !allowed) return apiError(404, "not_found", "run not found");
     const { ownership: _o, ...visible } = run;
-    return Response.json({ run: visible });
+    return Response.json({ run: { ...visible, canOpenSession } });
   } catch (err) {
     const res = authErrorResponse(err);
     if (res) return res;

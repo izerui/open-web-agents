@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { DEFAULT_RESERVE_MICRO } from "@/lib/modules/billing/domain/run-charge";
 import {
@@ -156,7 +157,7 @@ export function ModelDialog({ providerId, kind, model, onClose, onSaved }: Props
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>
-            {model ? `编辑模型 · ${model.name}` : `添加${KIND_LABEL[kind]}模型`}
+            {model ? `编辑模型「${model.name}」` : `添加${KIND_LABEL[kind]}模型`}
           </DialogTitle>
           <DialogDescription>
             按成本单价(人民币)录入,系统按 1 元 = 100
@@ -203,20 +204,22 @@ export function ModelDialog({ providerId, kind, model, onClose, onSaved }: Props
             </label>
           )}
           <div className="flex flex-col justify-end gap-2 pb-1 text-sm">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
+            <label htmlFor="model-enabled" className="flex min-h-10 items-center gap-2.5">
+              <Switch
+                id="model-enabled"
                 checked={enabled}
-                onChange={(e) => setEnabled(e.target.checked)}
+                onCheckedChange={setEnabled}
+                className="data-[state=checked]:bg-success"
               />
               启用
             </label>
             {kind === "llm" && (
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
+              <label htmlFor="model-images" className="flex min-h-10 items-center gap-2.5">
+                <Switch
+                  id="model-images"
                   checked={acceptsImages}
-                  onChange={(e) => setAcceptsImages(e.target.checked)}
+                  onCheckedChange={setAcceptsImages}
+                  className="data-[state=checked]:bg-success"
                 />
                 支持图片输入
               </label>
@@ -294,12 +297,12 @@ export function ModelDialog({ providerId, kind, model, onClose, onSaved }: Props
           </p>
         )}
         <DialogFooter>
-          <Button variant="ghost" disabled={saving} onClick={onClose}>
+          <Button variant="outline" disabled={saving} onClick={onClose}>
             取消
           </Button>
           <Button disabled={saving} onClick={() => void save()}>
             <Save className="size-4" />
-            {saving ? "保存中…" : "保存"}
+            {saving ? "保存中…" : model ? `保存为 v${model.version + 1}` : "保存为 v1"}
           </Button>
         </DialogFooter>
       </DialogContent>

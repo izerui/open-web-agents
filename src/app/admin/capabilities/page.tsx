@@ -1,6 +1,10 @@
-import { redirect } from "next/navigation";
+import { type PageSearchParams, redirectLegacy } from "@/lib/nav/legacy-page";
+import { requireAdmin } from "@/lib/server-guard";
 
-/** 旧地址:模型管理已改为按提供者维护 */
-export default function Page() {
-  redirect("/admin/providers");
+export const dynamic = "force-dynamic";
+
+/** 旧地址,已并入 /admin/models?tab=providers(见 src/lib/nav/routes.ts);先守卫,普通账号直接被挡回 */
+export default async function Page({ searchParams }: { searchParams: PageSearchParams }) {
+  await requireAdmin();
+  return redirectLegacy("/admin/capabilities", searchParams);
 }

@@ -23,6 +23,7 @@ import {
 } from "@/lib/modules/billing/domain/credits-display";
 import type { LedgerEntry, WalletBalance } from "@/lib/modules/billing/ports";
 import { formatCredits, parseCredits } from "@/lib/modules/capabilities/domain/catalog";
+import { cn } from "@/lib/utils";
 import { ArrowDownToLine, RefreshCw, Wallet } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -46,11 +47,18 @@ type Statement = {
 };
 type Account = { id: string; email: string; disabled?: boolean };
 type AccountView = "overview" | "runs" | "ledger";
-type AdminView = "overview" | "accounts" | "reconciliation";
+export type AdminView = "overview" | "accounts" | "reconciliation";
 
-export function BillingView({ admin = false }: { admin?: boolean }) {
-  const [adminView, setAdminView] = useState<AdminView>("overview");
-  const [visitedAdmin, setVisitedAdmin] = useState<AdminView[]>(["overview"]);
+export function BillingView({
+  admin = false,
+  initialAdminView = "overview",
+}: {
+  admin?: boolean;
+  /** 平台管理 /admin/billing?tab= 指定的初始分区(仅 admin) */
+  initialAdminView?: AdminView;
+}) {
+  const [adminView, setAdminView] = useState<AdminView>(initialAdminView);
+  const [visitedAdmin, setVisitedAdmin] = useState<AdminView[]>([initialAdminView]);
   const [accountView, setAccountView] = useState<AccountView>("overview");
   const [visitedAccount, setVisitedAccount] = useState<AccountView[]>(admin ? [] : ["overview"]);
   const [batchOpen, setBatchOpen] = useState(false);
@@ -213,9 +221,12 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
 
   const selected = accounts.find((account) => account.id === accountId);
   return (
-    <SpaceShell area={admin ? "admin" : "personal"} title={admin ? "计费管理" : "用量与费用"}>
+    <SpaceShell area={admin ? "admin" : "personal"} title={admin ? "计费" : "用量与费用"}>
       {admin && (
-        <nav aria-label="计费管理分区" className="mb-6 flex flex-wrap gap-2 border-b pb-3">
+        <nav
+          aria-label="计费管理分区"
+          className="mb-5 flex gap-0.5 overflow-x-auto overflow-y-hidden border-b border-border"
+        >
           {(
             [
               ["overview", "概览"],
@@ -223,15 +234,19 @@ export function BillingView({ admin = false }: { admin?: boolean }) {
               ["reconciliation", "对账"],
             ] as const
           ).map(([view, label]) => (
-            <Button
+            <button
               key={view}
-              variant={adminView === view ? "secondary" : "ghost"}
-              aria-pressed={adminView === view}
+              type="button"
+              aria-current={adminView === view ? "page" : undefined}
               aria-controls={`billing-${view}`}
               onClick={() => openAdminView(view)}
+              className={cn(
+                "-mb-px flex h-11 shrink-0 items-center border-b-2 border-transparent px-3.5 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:bg-accent",
+                adminView === view && "border-foreground font-semibold text-foreground",
+              )}
             >
               {label}
-            </Button>
+            </button>
           ))}
         </nav>
       )}

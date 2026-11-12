@@ -48,6 +48,8 @@ interface RunItem {
 
 interface RunDetail extends RunItem {
   prompt: string;
+  /** 会话是私有的:管理员看别人的运行时为 false(见 /api/runs/[id]) */
+  canOpenSession?: boolean;
   finalText?: string;
   structured?: unknown;
 }
@@ -324,7 +326,7 @@ export function RunsPanel({
           <Link href="/agents" className="underline">
             选择智能体
           </Link>
-          <Link href={platform ? "/admin/runs" : "/developer/runs"} className="underline">
+          <Link href={platform ? "/admin/ops?tab=runs" : "/developer/runs"} className="underline">
             {platform ? "查看全部平台运行" : "查看我的全部运行"}
           </Link>
         </div>
@@ -678,17 +680,30 @@ export function RunsPanel({
                     <dd className="font-mono text-[13px] break-all">{detail.sessionId}</dd>
                   </dl>
                 </DetailSection>
-                <Button variant="outline" className="w-full" asChild>
-                  <a
-                    href={`/chat?session=${encodeURIComponent(detail.sessionId)}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <MessageSquare />
-                    在对话里查看完整过程
-                    <ExternalLink className="size-3.5" />
-                  </a>
-                </Button>
+                {platform && detail.canOpenSession === false ? (
+                  // 平台运行:别人的会话是私有的,管理员也打不开 —— 按钮留着但禁用,说明原因
+                  <div className="space-y-1.5">
+                    <Button variant="outline" className="w-full" disabled>
+                      <MessageSquare />
+                      在对话里查看完整过程
+                    </Button>
+                    <p className="text-xs text-muted-foreground">
+                      会话是私有的:这次运行属于别的账号,管理员也不能打开它的对话。
+                    </p>
+                  </div>
+                ) : (
+                  <Button variant="outline" className="w-full" asChild>
+                    <a
+                      href={`/chat?session=${encodeURIComponent(detail.sessionId)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <MessageSquare />
+                      在对话里查看完整过程
+                      <ExternalLink className="size-3.5" />
+                    </a>
+                  </Button>
+                )}
               </div>
             </>
           )}

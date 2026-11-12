@@ -7,8 +7,20 @@ import type { SideKind } from "@/components/shell/side-nav";
 import { spaceOf } from "@/lib/nav/routes";
 import { cn } from "@/lib/utils";
 import { usePathname } from "next/navigation";
+import { createContext, useContext } from "react";
 
 export type SpaceArea = "agents" | "personal" | "admin" | "market";
+
+const EmbeddedContext = createContext(false);
+
+/**
+ * 嵌入模式:外层页面已经有外壳与标题(如平台管理 /admin/ops 的三个页签分别装着
+ * UsageView / RunsView / AuditView),里面视图自带的 SpaceShell 只保留说明与操作条,
+ * 不再套一层 AppShell、不再出大标题。共享视图本身不用为此改代码。
+ */
+export function SpaceShellEmbed({ children }: { children: React.ReactNode }) {
+  return <EmbeddedContext.Provider value>{children}</EmbeddedContext.Provider>;
+}
 
 /**
  * 普通页面的外壳:AppShell + 页头(衬线标题、说明、操作)+ 内容宽度。
@@ -38,9 +50,25 @@ export function SpaceShell({
   footer?: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const embedded = useContext(EmbeddedContext);
   const space = spaceOf(pathname);
   const side: SideKind | undefined =
     space === "developer" || space === "account" || space === "admin" ? space : undefined;
+
+  if (embedded) {
+    return (
+      <div className="flex min-w-0 flex-col gap-4">
+        {(subtitle || actions) && (
+          <div className="flex flex-wrap items-center gap-3">
+            {subtitle && <p className="min-w-0 flex-1 text-sm text-muted-foreground">{subtitle}</p>}
+            {actions && <div className="ml-auto flex flex-wrap items-center gap-2">{actions}</div>}
+          </div>
+        )}
+        {children}
+        {footer}
+      </div>
+    );
+  }
 
   const body =
     width === "flush" ? (
