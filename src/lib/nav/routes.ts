@@ -139,6 +139,15 @@ export function legacyRedirect(pathname: string, search: URLSearchParams): strin
     const id = q.get("id");
     if (id) {
       q.delete("id");
+      // 旧 Builder 的分区页签换成构建页的阶段
+      const tab = q.get("tab");
+      if (tab !== null) {
+        const stage = stageOfLegacyTab(tab);
+        if (stage !== undefined) {
+          q.delete("tab");
+          if (stage) q.set("stage", stage);
+        }
+      }
       return withQuery(`/agents/${encodeURIComponent(id)}`, q);
     }
     if (q.get("new") === "1") {
@@ -183,13 +192,31 @@ export function agentRoute(pathname: string): AgentRoute {
   }
 }
 
-export function agentHref(opts: { id?: string; isNew?: boolean; stage?: AgentStage } = {}): string {
+export function agentHref(
+  opts: { id?: string; isNew?: boolean; stage?: AgentStage; designer?: string } = {},
+): string {
   const path = opts.id
     ? `/agents/${encodeURIComponent(opts.id)}`
     : opts.isNew
       ? "/agents/new"
       : "/agents";
-  return opts.stage ? `${path}?stage=${opts.stage}` : path;
+  const q = new URLSearchParams();
+  if (opts.stage) q.set("stage", opts.stage);
+  if (opts.designer) q.set("designer", opts.designer);
+  const s = q.toString().replace(/\+/g, "%20");
+  return s ? `${path}?${s}` : path;
+}
+
+/**
+ * 旧 Builder(/agents?id=x&tab=…)的分区页签 → 构建页阶段。
+ * 评测、发布各有阶段;配置、能力、知识、安全与契约都在编排里(null = 编排,去掉 stage);
+ * 不认识的页签(如接入中心的 keys / docs / webhook)返回 undefined,阶段不变。
+ */
+export function stageOfLegacyTab(tab: string): AgentStage | null | undefined {
+  if (tab === "eval") return "eval";
+  if (tab === "release") return "publish";
+  if (["config", "capabilities", "knowledge", "security"].includes(tab)) return null;
+  return undefined;
 }
 
 export type MeMenuItem = { label: string; href?: string; action?: "logout" };

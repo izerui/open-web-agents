@@ -3,6 +3,7 @@ import {
   agentHref,
   agentRoute,
   legacyRedirect,
+  stageOfLegacyTab,
   meMenuItems,
   navFor,
   paletteEntries,
@@ -17,7 +18,11 @@ describe("legacyRedirect:旧地址落到新位置并保留参数", () => {
     ["/", "agent=a&session=s", "/chat?agent=a&session=s"],
     ["/", "agent=a", "/chat?agent=a"],
     ["/agents", "id=x", "/agents/x"],
-    ["/agents", "id=x&tab=eval", "/agents/x?tab=eval"],
+    // 旧 Builder 的分区页签:评测、发布落到对应阶段,其余分区都在编排里
+    ["/agents", "id=x&tab=eval", "/agents/x?stage=eval"],
+    ["/agents", "id=x&tab=release", "/agents/x?stage=publish"],
+    ["/agents", "id=x&tab=security", "/agents/x"],
+    ["/agents", "id=x&tab=knowledge&foo=1", "/agents/x?foo=1"],
     ["/agents", "new=1", "/agents/new"],
     ["/settings/keys", "agent=x", "/agents/x?stage=access"],
     ["/settings/keys", "", "/developer/keys"],
@@ -111,6 +116,28 @@ describe("agentRoute / agentHref:构建页的地址", () => {
     expect(agentHref({ id: "报销 a/b" })).toBe("/agents/%E6%8A%A5%E9%94%80%20a%2Fb");
     expect(agentRoute(agentHref({ id: "报销 a/b" }))).toEqual({ kind: "agent", id: "报销 a/b" });
     expect(agentHref({ id: "x", stage: "access" })).toBe("/agents/x?stage=access");
+    expect(agentHref({ id: "x", designer: "s 1" })).toBe("/agents/x?designer=s%201");
+    expect(agentHref({ isNew: true, designer: "s" })).toBe("/agents/new?designer=s");
+    expect(agentHref({ id: "x", stage: "eval", designer: "s" })).toBe(
+      "/agents/x?stage=eval&designer=s",
+    );
+  });
+
+  it.each([
+    ["eval", "eval"],
+    ["release", "publish"],
+    ["config", null],
+    ["capabilities", null],
+    ["knowledge", null],
+    ["security", null],
+    // 接入中心的页签:阶段由 stage 决定,tab 不再有意义
+    ["keys", undefined],
+    ["docs", undefined],
+    ["webhook", undefined],
+    ["", undefined],
+  ])("stageOfLegacyTab(%s) = %s", (tab, stage) => {
+    // null = 编排(去掉 stage);undefined = 不认识的页签,不改阶段
+    expect(stageOfLegacyTab(tab)).toBe(stage);
   });
 });
 
