@@ -186,7 +186,7 @@ export function ProviderDetail({ id, initialTab }: { id: string; initialTab?: st
         <KeyCard provider={provider} onReplaced={load} />
       </div>
 
-      <fieldset aria-label="模型类型" className="mt-[18px] mb-3.5 flex flex-wrap gap-2">
+      <fieldset aria-label="模型类型" className="mt-[18px] mb-3.5 flex min-w-0 flex-wrap gap-2">
         {KIND_ORDER.map((k) => {
           const on = k === tab;
           return (
@@ -641,7 +641,7 @@ function ModelTable({
                     <td className={cn(TD, "text-[13px] leading-6 whitespace-nowrap")}>
                       {rows.map((r) => (
                         <div key={r.meter}>
-                          {r.label} {r.costYuan ?? "—"}
+                          {r.label}：{r.costYuan ?? "—"}
                         </div>
                       ))}
                     </td>
@@ -649,7 +649,7 @@ function ModelTable({
                     <td className={cn(TD, "text-[13px] leading-6 whitespace-nowrap")}>
                       {rows.map((r) => (
                         <div key={r.meter}>
-                          {r.label} <span className="font-medium">{r.saleCredits ?? "—"}</span>
+                          {r.label}：<span className="font-medium">{r.saleCredits ?? "—"}</span>
                         </div>
                       ))}
                     </td>

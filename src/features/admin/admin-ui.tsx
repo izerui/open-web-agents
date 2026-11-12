@@ -120,7 +120,7 @@ export function Segmented<T extends string>({
     <fieldset
       aria-label={label}
       className={cn(
-        "inline-flex max-w-full overflow-x-auto rounded-full bg-secondary p-[3px]",
+        "inline-flex max-w-full min-w-0 overflow-x-auto rounded-full bg-secondary p-[3px] [scrollbar-width:none]",
         className,
       )}
     >
@@ -148,8 +148,11 @@ export function Segmented<T extends string>({
 /** 表格外框:白卡片,窄屏时表格在卡片内部横向滚动(页面本身不溢出) */
 export function TableCard({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className={cn("overflow-hidden rounded-2xl border border-border bg-card", className)}>
-      <div className="overflow-x-auto">{children}</div>
+    <div
+      className={cn("relative overflow-hidden rounded-2xl border border-border bg-card", className)}
+    >
+      {/* relative:表格里的 sr-only(绝对定位)以滚动容器为包含块,不会撑出页面横向滚动 */}
+      <div className="relative overflow-x-auto">{children}</div>
     </div>
   );
 }
@@ -211,7 +214,9 @@ export function AdminDrawer({
   head,
   onClose,
   children,
+  testId,
 }: {
+  testId?: string;
   label: string;
   head: ReactNode;
   onClose: () => void;
@@ -231,6 +236,7 @@ export function AdminDrawer({
       ref={ref}
       tabIndex={-1}
       aria-label={label}
+      data-testid={testId}
       className="fixed top-[60px] right-0 bottom-0 z-30 flex w-[440px] max-w-full flex-col border-l border-border bg-card shadow-[-20px_0_50px_rgb(40_35_25/8%)] outline-none"
     >
       <div className="flex items-center gap-3 border-b border-line-soft px-[22px] py-[18px]">

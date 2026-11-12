@@ -539,9 +539,10 @@ function AccountDrawer({
   return (
     <AdminDrawer
       label={`${a.email} 的详情`}
+      testId="account-detail"
       onClose={onClose}
       head={
-        <div className="flex items-center gap-3" data-testid="account-detail">
+        <div className="flex items-center gap-3">
           <Initial text={a.email} size={44} />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2 text-base font-semibold">

@@ -362,7 +362,7 @@ function ModelsTab({ models }: { models: AdminModel[] }) {
                   <td className={cn(TD, "text-[13px] leading-6 whitespace-nowrap")}>
                     {priceRows(m).map((r) => (
                       <div key={r.meter}>
-                        {r.label} <span className="font-medium">{r.saleCredits ?? "—"}</span>
+                        {r.label}：<span className="font-medium">{r.saleCredits ?? "—"}</span>
                       </div>
                     ))}
                   </td>
@@ -469,10 +469,12 @@ function AliasCard({
                 {picked
                   ? priceRows(picked)
                       .slice(0, 2)
-                      .map((r) => `${r.label} ${r.saleCredits ?? "—"}`)
-                      .join("，")
-                  : ""}
-                {picked && <div>积分 / 百万 tokens</div>}
+                      .map((r) => (
+                        <div key={r.meter}>
+                          {r.label}：{r.saleCredits ?? "—"} 积分
+                        </div>
+                      ))
+                  : null}
               </div>
             </div>
           );
