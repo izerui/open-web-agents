@@ -223,8 +223,11 @@ test.describe("模型提供者管理", () => {
       });
       expect(reg.ok()).toBeTruthy();
       await user.goto(`${BASE}/market/${agentId}`);
-      await expect(user.getByTestId("agent-model-price")).toHaveText(expected);
-      await user.goto(`${BASE}/market`);
+      // 详情页的价格卡把模型名与单价分成两行(模型 / 模型单价)
+      await expect(user.getByTestId("market-model-unit")).toHaveText(
+        "输入 2,310／输出 11,550 积分每百万 token",
+      );
+      await user.goto(`${BASE}/`);
       const card = user.locator("li", { hasText: `PW展示智能体-${tag}` });
       await expect(card.getByTestId("agent-model-price")).toHaveText(expected);
       for (const html of [await user.content()]) {
