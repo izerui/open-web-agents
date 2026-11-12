@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { billingTab, chargeStatus, ledgerKind, monthShare, shareOf } from "../billing-display";
+import {
+  billingTab,
+  chargeStatus,
+  ledgerKind,
+  monthShare,
+  shareOf,
+  sortByCredits,
+} from "../billing-display";
 
 describe("billingTab:地址里的 ?tab= → 页签", () => {
   it.each([
@@ -106,5 +113,17 @@ describe("shareOf:条形宽度", () => {
     expect(shareOf("1", "1000")).toBe(2);
     expect(shareOf("0", "1000")).toBe(0);
     expect(shareOf("5", "0")).toBe(0);
+  });
+});
+
+describe("sortByCredits:积分包按积分数从少到多", () => {
+  it("按数值而不是 id 字符串排序", () => {
+    const list = [
+      { id: "b", creditsMicro: "10500000000" },
+      { id: "a", creditsMicro: "1000000000" },
+      { id: "c", creditsMicro: "3090000000" },
+      { id: "d", creditsMicro: "32400000000" },
+    ];
+    expect(sortByCredits(list).map((p) => p.id)).toEqual(["a", "c", "b", "d"]);
   });
 });

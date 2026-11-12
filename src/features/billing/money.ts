@@ -12,3 +12,19 @@ export function formatPrice(value: string, currency: "CNY" | "USD"): string {
   const amount = BigInt(value);
   return `${amount / 100n}.${(amount % 100n).toString().padStart(2, "0")} ${currency}`;
 }
+
+/** 套餐卡片与订单里的价格:「¥」+ 金额(整元不带小数,带千分位)+ 币种小字 */
+export function priceParts(
+  value: string,
+  currency: "CNY" | "USD",
+): { symbol: string; amount: string; currency: "CNY" | "USD" } {
+  const [whole = "0", cents = "00"] = (formatPrice(value, currency).split(" ")[0] ?? "0").split(
+    ".",
+  );
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return {
+    symbol: currency === "CNY" ? "¥" : "$",
+    amount: cents === "00" ? grouped : `${grouped}.${cents}`,
+    currency,
+  };
+}

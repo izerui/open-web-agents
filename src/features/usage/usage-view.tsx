@@ -19,7 +19,14 @@ import { cn } from "@/lib/utils";
 import { ChevronRight, Info } from "lucide-react";
 import Link from "next/link";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { barWidths, compactCount, dayTicks, fillDays, successRate } from "./usage-display";
+import {
+  barWidths,
+  compactCount,
+  dayTicks,
+  fillDays,
+  queueStatus,
+  successRate,
+} from "./usage-display";
 
 interface RunDetail {
   runId: string;
@@ -174,7 +181,12 @@ function UsageContent({ scope, days }: { scope: "self" | "all"; days: number }) 
 
       {t && data && (
         <>
-          <dl className="mb-4 grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
+          <dl
+            className={cn(
+              "mb-4 grid grid-cols-2 gap-3.5 max-sm:gap-2.5",
+              scope === "all" ? "lg:grid-cols-5" : "lg:grid-cols-4",
+            )}
+          >
             <StatCard
               label="总花费（估算）"
               value={formatUsd(t.costMicroUsd)}
@@ -190,8 +202,12 @@ function UsageContent({ scope, days }: { scope: "self" | "all"; days: number }) 
                       成功率 <b className="text-success-text">{rate}%</b>
                     </>
                   )}
-                  {rate !== null && "，"}现在排队 {data.queue.pending}、在跑 {data.queue.running}
-                  {data.queue.pending > 10 && "，积压偏高，考虑加 worker"}
+                  {scope !== "all" && (
+                    <>
+                      {rate !== null && "，"}现在排队 {data.queue.pending}、在跑{" "}
+                      {data.queue.running}
+                    </>
+                  )}
                 </>
               }
             />
@@ -209,6 +225,7 @@ function UsageContent({ scope, days }: { scope: "self" | "all"; days: number }) 
               }
               hint={`最近 ${shown} 天`}
             />
+            {scope === "all" && <QueueCard queue={data.queue} />}
           </dl>
 
           <div className="mb-4 grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
@@ -219,6 +236,31 @@ function UsageContent({ scope, days }: { scope: "self" | "all"; days: number }) 
           <RunDetailSection runs={data.runs ?? []} scope={scope} />
         </>
       )}
+    </div>
+  );
+}
+
+/** 平台用量:队列(实时);排队超过 10 个整张卡变黄提醒 */
+function QueueCard({ queue }: { queue: { pending: number; running: number } }) {
+  const st = queueStatus(queue);
+  return (
+    <div
+      data-testid="usage-queue"
+      className={cn(
+        "min-w-0 rounded-2xl border px-[18px] py-4 max-sm:col-span-2",
+        st.warn ? "border-[#EBCB91] bg-[#FFFBF2]" : "border-border bg-card",
+      )}
+    >
+      <dt className="text-[13px] text-muted-foreground">队列（实时）</dt>
+      <dd className="mt-1 mb-0.5 font-display text-[26px] leading-tight font-semibold">
+        {queue.pending}{" "}
+        <span className="font-sans text-sm font-normal text-muted-foreground">排队</span>，
+        {queue.running}{" "}
+        <span className="font-sans text-sm font-normal text-muted-foreground">在跑</span>
+      </dd>
+      <dd className={cn("mt-1 text-xs", st.warn ? "text-warning-text" : "text-muted-foreground")}>
+        {st.text}
+      </dd>
     </div>
   );
 }
@@ -333,9 +375,18 @@ function ByDay({ buckets, days }: { buckets: UsageBucket[]; days: number }) {
             {series.map((d) => (
               <div
                 key={d.key}
-                className="group flex h-full min-w-0 flex-1 flex-col justify-end"
-                title={`${d.key}:${d.runs} 次,失败 ${d.failed}`}
+                // biome-ignore lint/a11y/noNoninteractiveTabindex: 键盘聚焦也能看到当天的数字
+                tabIndex={0}
+                aria-label={`${d.key}:${d.runs} 次,失败 ${d.failed}`}
+                className="group relative flex h-full min-w-0 flex-1 flex-col justify-end outline-none"
               >
+                {/* 悬停或聚焦立即出现的提示(原生 title 要停一会儿才出) */}
+                <span
+                  role="tooltip"
+                  className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden -translate-x-1/2 whitespace-nowrap rounded-lg bg-[#1F1E1C] px-2.5 py-1.5 text-xs text-[#F2EFE7] shadow-md group-hover:block group-focus-visible:block"
+                >
+                  {d.key.slice(5)}：{d.runs} 次{d.failed > 0 ? `，失败 ${d.failed}` : ""}
+                </span>
                 <i
                   className="block rounded-t-[3px] group-hover:opacity-80"
                   style={{ height: `${(d.failed / max) * 100}%`, background: BAD_COLOR }}
@@ -365,7 +416,11 @@ function ByDay({ buckets, days }: { buckets: UsageBucket[]; days: number }) {
 }
 
 function RunDetailSection({ runs, scope }: { runs: RunDetail[]; scope: "self" | "all" }) {
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // 第一行默认展开,一眼看到「展开后是什么」
+  const [expanded, setExpanded] = useState<Set<string>>(() => {
+    const first = runs[0];
+    return new Set(first && first.estimatedCredits.models.length > 0 ? [first.runId] : []);
+  });
   const toggle = (id: string) =>
     setExpanded((prev) => {
       const next = new Set(prev);

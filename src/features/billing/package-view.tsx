@@ -28,7 +28,8 @@ import { Check, Info, Package, Pencil, Plus, RefreshCw, Save, ShoppingCart, X } 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { formatPrice, parsePrice } from "./money";
+import { sortByCredits } from "./billing-display";
+import { formatPrice, parsePrice, priceParts } from "./money";
 
 type Order = CreditOrder & { accountEmail?: string };
 type OrderPage = { items: Order[]; nextCursor?: string };
@@ -55,8 +56,19 @@ const fresh = (): Draft => ({
 });
 
 /** 个人「积分与套餐」的「充值与订单」页签:积分包卡片 + 我的订单(不带外壳) */
-export function PackagesPanel() {
-  return <PackageView embedded />;
+export function PackagesPanel({ onOpenAccount }: { onOpenAccount?: () => void } = {}) {
+  return <PackageView embedded onOpenAccount={onOpenAccount} />;
+}
+
+/** 价格:「¥10」+ 币种小字 */
+function PriceText({ minor, currency }: { minor: string; currency: "CNY" | "USD" }) {
+  const p = priceParts(minor, currency);
+  return (
+    <span className="whitespace-nowrap">
+      {p.symbol}
+      {p.amount} <span className="text-xs text-muted-foreground">{p.currency}</span>
+    </span>
+  );
 }
 
 /**
@@ -66,7 +78,8 @@ export function PackagesPanel() {
 export function PackageView({
   admin = false,
   embedded = false,
-}: { admin?: boolean; embedded?: boolean }) {
+  onOpenAccount,
+}: { admin?: boolean; embedded?: boolean; onOpenAccount?: () => void }) {
   const [view, setView] = useState("catalog");
   const [packages, setPackages] = useState<CreditPackage[] | null>(null);
   const [orders, setOrders] = useState<OrderPage | null>(null);
@@ -91,7 +104,7 @@ export function PackageView({
       const data = await fetchJson<{
         packages: CreditPackage[];
       }>(`/api/billing/packages${admin ? "?manage=1" : ""}`);
-      if (seq === catalogSeq.current) setPackages(data.packages);
+      if (seq === catalogSeq.current) setPackages(sortByCredits(data.packages));
     } catch (err) {
       if (seq === catalogSeq.current) setCatalogError(errorText(err));
     }
@@ -382,23 +395,29 @@ export function PackageView({
                 ? "确认创建订单"
                 : action?.kind === "confirm"
                   ? "人工确认并发放积分"
-                  : "取消套餐订单"}
+                  : "取消这笔订单？"}
             </DialogTitle>
             <DialogDescription>
               {purchase
                 ? "创建订单不会扣款或立即发放积分。当前由管理员人工核对并处理。"
                 : action?.kind === "confirm"
                   ? "请先核对账号、订单和线下款项。这不是支付渠道的自动到账确认。"
-                  : "仅可取消尚未发放积分的订单。"}
+                  : "只能取消还没发放积分的订单。如果已经转账，请先联系管理员。"}
             </DialogDescription>
           </DialogHeader>
           <div className="min-h-0 space-y-3 overflow-y-auto">
             <dl className="space-y-2 text-sm">
+              {action && (
+                <div>
+                  <dt className="text-muted-foreground">订单号</dt>
+                  <dd className="break-all font-mono text-[13px]">{action.order.id}</dd>
+                </div>
+              )}
               <div>
                 <dt className="text-muted-foreground">套餐</dt>
                 <dd>{purchase?.name ?? action?.order.packageName}</dd>
               </div>
-              {action && (
+              {action && admin && (
                 <div>
                   <dt className="text-muted-foreground">账号</dt>
                   <dd className="break-all">
@@ -415,10 +434,10 @@ export function PackageView({
               <div>
                 <dt className="text-muted-foreground">金额</dt>
                 <dd>
-                  {formatPrice(
-                    purchase?.priceMinor ?? action?.order.priceMinor ?? "0",
-                    purchase?.currency ?? action?.order.currency ?? "CNY",
-                  )}
+                  <PriceText
+                    minor={purchase?.priceMinor ?? action?.order.priceMinor ?? "0"}
+                    currency={purchase?.currency ?? action?.order.currency ?? "CNY"}
+                  />
                 </dd>
               </div>
             </dl>
@@ -452,6 +471,7 @@ export function PackageView({
               返回
             </Button>
             <Button
+              variant={action?.kind === "cancel" ? "destructive" : "default"}
               disabled={busy || (action?.kind === "confirm" && !reason.trim())}
               onClick={() => void (purchase ? createOrder() : changeOrder())}
             >
@@ -461,7 +481,7 @@ export function PackageView({
                   ? "创建订单"
                   : action?.kind === "confirm"
                     ? "确认发放"
-                    : "确认取消"}
+                    : "取消订单"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -480,6 +500,7 @@ export function PackageView({
           busy={busy}
           loadingOrders={loadingOrders}
           onRetryCatalog={() => void loadCatalog()}
+          onOpenAccount={onOpenAccount}
           onReloadOrders={(cursor) => void loadOrders(cursor)}
           onBuy={(pack) => {
             setActionError("");
@@ -718,7 +739,9 @@ function UserPackages({
   onReloadOrders,
   onBuy,
   onCancel,
+  onOpenAccount,
 }: {
+  onOpenAccount?: () => void;
   packages: CreditPackage[] | null;
   orders: OrderPage | null;
   catalogError: string;
@@ -735,6 +758,15 @@ function UserPackages({
       <Banner icon={<Info />}>
         积分包是固定额度，买到就长期有效。下单后由管理员人工确认收款并发放积分；
         <b>在线支付和自动扣费都没有启用</b>，创建订单不会扣款。
+        {onOpenAccount && (
+          <button
+            type="button"
+            className="ml-1 underline decoration-[#C9C4B8] underline-offset-[3px]"
+            onClick={onOpenAccount}
+          >
+            查看积分账户
+          </button>
+        )}
       </Banner>
       {catalogError ? (
         <div className="mb-4 rounded-2xl border border-border bg-card">
@@ -777,7 +809,9 @@ function UserPackages({
                 {creditsText(pack.creditsMicro)}{" "}
                 <span className="font-sans text-sm font-normal text-muted-foreground">积分</span>
               </p>
-              <p className="text-[15px]">{formatPrice(pack.priceMinor, pack.currency)}</p>
+              <p className="text-[15px]">
+                <PriceText minor={pack.priceMinor} currency={pack.currency} />
+              </p>
               {pack.description && (
                 <p className="break-words text-xs text-muted-foreground">{pack.description}</p>
               )}
@@ -874,7 +908,7 @@ function UserPackages({
                       {creditsText(order.creditsMicro)}
                     </td>
                     <td className={cn(tb.td, tb.num, tb.right)}>
-                      {formatPrice(order.priceMinor, order.currency)}
+                      <PriceText minor={order.priceMinor} currency={order.currency} />
                     </td>
                     <td className={cn(tb.td, tb.num)}>
                       <span title={formatTime(order.createdAt)}>{shortTime(order.createdAt)}</span>

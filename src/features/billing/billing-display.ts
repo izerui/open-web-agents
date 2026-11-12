@@ -96,3 +96,11 @@ export function shareOf(value: string, max: string): number {
   if (v <= 0n || m <= 0n) return 0;
   return Math.max(2, Number((v * 100n) / m));
 }
+
+/** 积分包按积分数从少到多(库里按 id 字符串排,1000、10500、3090 这样会乱) */
+export function sortByCredits<T extends { id: string; creditsMicro: string }>(list: T[]): T[] {
+  return [...list].sort((a, b) => {
+    const d = BigInt(a.creditsMicro) - BigInt(b.creditsMicro);
+    return d === 0n ? a.id.localeCompare(b.id) : d < 0n ? -1 : 1;
+  });
+}

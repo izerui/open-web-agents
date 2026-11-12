@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { barWidths, compactCount, dayTicks, fillDays, successRate } from "../usage-display";
+import {
+  barWidths,
+  compactCount,
+  dayTicks,
+  fillDays,
+  queueStatus,
+  successRate,
+} from "../usage-display";
 
 describe("barWidths:按智能体的横条", () => {
   it("总长按最大值,内部按成功/失败分段", () => {
@@ -55,5 +62,17 @@ describe("compactCount", () => {
     [2_000_000, "2M"],
   ])("%s → %s", (n, s) => {
     expect(compactCount(n)).toBe(s);
+  });
+});
+
+describe("queueStatus:平台用量的「队列（实时）」卡", () => {
+  it("排队不超过 10 个算正常", () => {
+    expect(queueStatus({ pending: 10, running: 3 })).toEqual({ warn: false, text: "队列正常" });
+  });
+  it("排队超过 10 个黄色提醒", () => {
+    expect(queueStatus({ pending: 14, running: 6 })).toEqual({
+      warn: true,
+      text: "排队超过 10 个，考虑加 worker",
+    });
   });
 });

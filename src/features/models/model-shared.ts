@@ -94,3 +94,18 @@ export function priceRows(m: Pick<Capability, "kind" | "rates" | "costRates">) {
     };
   });
 }
+
+/** 价目表下面的算价举例:一次读 1 万 tokens、写 1,500 tokens 约多少积分(四舍五入到 0.01) */
+export function llmPriceExample(model: string, rates: readonly CreditRate[]): string | null {
+  const cost = (meter: Meter, tokens: bigint) => {
+    const r = rates.find((x) => x.meter === meter);
+    if (!r) return null;
+    const micro = (BigInt(r.microCredits) * tokens) / BigInt(r.units);
+    return ((micro + 5_000n) / 10_000n) * 10_000n;
+  };
+  const input = cost("input_token", 10_000n);
+  const output = cost("output_token", 1_500n);
+  if (input === null || output === null) return null;
+  const t = (v: bigint) => creditsText(v.toString());
+  return `例：用 ${model}，一次读 1 万 tokens、写 1,500 tokens，约 ${t(input)} + ${t(output)} = ${t(input + output)} 积分。`;
+}
