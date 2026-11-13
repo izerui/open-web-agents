@@ -21,6 +21,7 @@ export function CaseForm({
   title,
   note,
   footnote,
+  source,
   onSaved,
   onCancel,
   className,
@@ -33,6 +34,8 @@ export function CaseForm({
   title: ReactNode;
   note?: ReactNode;
   footnote?: ReactNode;
+  /** 新建用例的来源(试聊里存的传 trial);只在新建时发给服务端 */
+  source?: "manual" | "trial";
   /** 新建时带上新用例的 id */
   onSaved: (id?: string) => void;
   onCancel: () => void;
@@ -55,7 +58,7 @@ export function CaseForm({
       const r = await fetchJson<{ case?: { id?: string } }>(caseId ? `${base}/${caseId}` : base, {
         method: caseId ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(built.body),
+        body: JSON.stringify(caseId || !source ? built.body : { ...built.body, source }),
       });
       onSaved(r?.case?.id);
     } catch (e) {

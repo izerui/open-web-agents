@@ -20,13 +20,7 @@ import { Check, Plus, RotateCcw } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 import { CaseForm } from "./case-form";
-import {
-  caseFormFromTrial,
-  markTrialCase,
-  trialCaseNote,
-  turnAnswer,
-  turnDurationText,
-} from "./trial-model";
+import { caseFormFromTrial, trialCaseNote, turnAnswer, turnDurationText } from "./trial-model";
 import { Tag, TextButton } from "./ui";
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -352,9 +346,9 @@ export function TrialPanel({
           title="存为评测用例"
           note={trialCaseNote({ structured: ans.structured })}
           footnote="每个用例运行时会真实调用一次模型并计费"
+          source="trial"
           onCancel={() => setFormFor(null)}
-          onSaved={(caseId) => {
-            if (caseId) markTrialCase(agentId, caseId);
+          onSaved={() => {
             setSaved((s) => new Set(s).add(k));
             setFormFor(null);
             toast.success("已存为评测用例");

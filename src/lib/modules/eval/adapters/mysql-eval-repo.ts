@@ -1,7 +1,13 @@
 import type { Db } from "@/lib/db/client";
 import { evalCases, evalResults, evalRuns } from "@/lib/db/schema";
 import type { EvalAssertions, EvalOutput } from "@/lib/modules/eval/domain/assertions";
-import type { EvalCase, EvalRepo, EvalResult, EvalRun } from "@/lib/modules/eval/ports";
+import type {
+  EvalCase,
+  EvalRepo,
+  EvalResult,
+  EvalRun,
+  NewEvalCase,
+} from "@/lib/modules/eval/ports";
 import { and, asc, desc, eq } from "drizzle-orm";
 
 type CaseRow = typeof evalCases.$inferSelect;
@@ -14,6 +20,7 @@ const toCase = (r: CaseRow): EvalCase => ({
   name: r.name,
   input: r.input,
   assertions: (r.assertions ?? {}) as EvalAssertions,
+  source: r.source === "trial" ? "trial" : "manual",
   createdBy: r.createdBy ?? undefined,
   createdAt: r.createdAt.getTime(),
   updatedAt: r.updatedAt.getTime(),
@@ -68,13 +75,14 @@ export class MysqlEvalRepo implements EvalRepo {
     return rows[0] ? toCase(rows[0]) : null;
   }
 
-  async createCase(c: Omit<EvalCase, "createdAt" | "updatedAt">): Promise<EvalCase> {
+  async createCase(c: NewEvalCase): Promise<EvalCase> {
     await this.db.insert(evalCases).values({
       id: c.id,
       agentId: c.agentId,
       name: c.name,
       input: c.input,
       assertions: c.assertions,
+      source: c.source ?? "manual",
       createdBy: c.createdBy ?? null,
       // 显式写毫秒时刻:列默认值 now() 只到秒,同一秒建的用例会按随机 id 排序
       createdAt: new Date(),

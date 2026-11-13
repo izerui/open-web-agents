@@ -38,7 +38,6 @@ import { toast } from "sonner";
 import { type EvalSummary, type Stage, assertionText } from "./build-model";
 import { CaseForm } from "./case-form";
 import { type EvalOutputLite, evalFixPrompt } from "./design-sections";
-import { trialCaseIds } from "./trial-model";
 import { Banner, StageTitle, SubHead, Tag, TextButton } from "./ui";
 import type { VersionMeta } from "./use-build-data";
 
@@ -47,6 +46,8 @@ export interface EvalCase {
   name: string;
   input: unknown;
   assertions: EvalAssertionsBody;
+  /** 来源:trial = 构建页试聊里存进来的 */
+  source?: "manual" | "trial";
 }
 
 interface EvalRun {
@@ -132,10 +133,6 @@ export function EvalStage({
 }) {
   const confirmDialog = useConfirm();
   const [history, setHistory] = useState<{ run: EvalRun; results: EvalResult[] } | null>(null);
-  const [fromTrial, setFromTrial] = useState<Set<string>>(() => new Set());
-  useEffect(() => {
-    if (agentId) setFromTrial(trialCaseIds(agentId));
-  }, [agentId]);
   const base = agentId ? `/api/agents/${encodeURIComponent(agentId)}/evals` : "";
   const [cases, setCases] = useState<EvalCase[] | null>(null);
   const [runs, setRuns] = useState<EvalRun[]>([]);
@@ -519,7 +516,7 @@ export function EvalStage({
               >
                 <div className="flex flex-wrap items-center gap-2 font-semibold">
                   {c.name}
-                  {fromTrial.has(c.id) && (
+                  {c.source === "trial" && (
                     <Tag line className="font-normal">
                       来自试聊
                     </Tag>

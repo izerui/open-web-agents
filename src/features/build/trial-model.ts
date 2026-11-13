@@ -73,26 +73,3 @@ export function trialCaseNote(t: { structured?: unknown }): string {
     ? "已按这次的提问和结构化结果预填，可以再改"
     : "已按这次的提问预填；回答是自由文本，请在「正文须包含」里填几个必须出现的关键词";
 }
-
-// 「来自试聊」标记:用例接口没有来源字段,在本机记下从试聊存进来的用例 id(换设备看不到标记,不影响评测)
-const trialKey = (agentId: string) => `owa.trial-cases.${agentId}`;
-
-export function trialCaseIds(agentId: string): Set<string> {
-  if (typeof window === "undefined") return new Set();
-  try {
-    const v = JSON.parse(window.localStorage.getItem(trialKey(agentId)) ?? "[]") as unknown;
-    return new Set(Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
-  } catch {
-    return new Set();
-  }
-}
-
-export function markTrialCase(agentId: string, caseId: string): void {
-  if (typeof window === "undefined") return;
-  try {
-    const ids = [...trialCaseIds(agentId), caseId].slice(-500);
-    window.localStorage.setItem(trialKey(agentId), JSON.stringify(ids));
-  } catch {
-    // 存不了就不显示标记
-  }
-}

@@ -1,7 +1,13 @@
 // EvalRepo 的内存实现:单测用,语义与 MySQL 实现一致。
 
 import type { EvalAssertions, EvalOutput } from "@/lib/modules/eval/domain/assertions";
-import type { EvalCase, EvalRepo, EvalResult, EvalRun } from "@/lib/modules/eval/ports";
+import type {
+  EvalCase,
+  EvalRepo,
+  EvalResult,
+  EvalRun,
+  NewEvalCase,
+} from "@/lib/modules/eval/ports";
 
 export class InMemoryEvalRepo implements EvalRepo {
   private readonly cases = new Map<string, EvalCase>();
@@ -18,9 +24,14 @@ export class InMemoryEvalRepo implements EvalRepo {
     const c = this.cases.get(id);
     return c ? structuredClone(c) : null;
   }
-  async createCase(c: Omit<EvalCase, "createdAt" | "updatedAt">) {
+  async createCase(c: NewEvalCase) {
     const now = ++this.clock;
-    const saved = { ...structuredClone(c), createdAt: now, updatedAt: now };
+    const saved: EvalCase = {
+      ...structuredClone(c),
+      source: c.source ?? "manual",
+      createdAt: now,
+      updatedAt: now,
+    };
     this.cases.set(c.id, saved);
     return structuredClone(saved);
   }

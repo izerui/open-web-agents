@@ -30,6 +30,31 @@ if (!TEST_DB_URL) {
   });
 
   describe("MysqlEvalRepo(真实 MySQL)", () => {
+    it("用例来源:不给默认 manual,trial 原样往返,改用例不动来源", async () => {
+      const manual = await repo.createCase({
+        id: randomUUID(),
+        agentId,
+        name: "手写",
+        input: "a",
+        assertions: {},
+      });
+      expect(manual.source).toBe("manual");
+      const trialId = randomUUID();
+      const trial = await repo.createCase({
+        id: trialId,
+        agentId,
+        name: "试聊",
+        input: "b",
+        assertions: {},
+        source: "trial",
+      });
+      expect(trial.source).toBe("trial");
+      await repo.updateCase(trialId, { name: "试聊2", input: "c", assertions: {} });
+      expect((await repo.getCase(trialId))?.source).toBe("trial");
+      await repo.deleteCase(manual.id);
+      await repo.deleteCase(trialId);
+    });
+
     it("用例增删改查;输入与断言原样往返(含对象输入)", async () => {
       const id = randomUUID();
       await repo.createCase({

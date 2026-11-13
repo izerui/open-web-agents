@@ -1,5 +1,9 @@
 import type { EvalAssertions, EvalOutput } from "./domain/assertions";
 
+/** 用例来源:manual = 手写;trial = 构建页试聊里「存为评测用例」 */
+export type EvalCaseSource = "manual" | "trial";
+export const EVAL_CASE_SOURCES: readonly EvalCaseSource[] = ["manual", "trial"];
+
 export interface EvalCase {
   id: string;
   agentId: string;
@@ -7,10 +11,15 @@ export interface EvalCase {
   /** 字符串 = 文本输入;对象 = 按 inputSchema 的结构化输入 */
   input: unknown;
   assertions: EvalAssertions;
+  source: EvalCaseSource;
   createdBy?: string;
   createdAt: number;
   updatedAt: number;
 }
+
+export type NewEvalCase = Omit<EvalCase, "createdAt" | "updatedAt" | "source"> & {
+  source?: EvalCaseSource;
+};
 
 export type EvalResultStatus = "pending" | "passed" | "failed" | "error";
 
@@ -52,7 +61,8 @@ export interface EvalRun {
 export interface EvalRepo {
   listCases(agentId: string): Promise<EvalCase[]>;
   getCase(id: string): Promise<EvalCase | null>;
-  createCase(c: Omit<EvalCase, "createdAt" | "updatedAt">): Promise<EvalCase>;
+  /** 不给 source 记为 manual;来源建好后不再改 */
+  createCase(c: NewEvalCase): Promise<EvalCase>;
   updateCase(
     id: string,
     patch: { name: string; input: unknown; assertions: EvalAssertions },

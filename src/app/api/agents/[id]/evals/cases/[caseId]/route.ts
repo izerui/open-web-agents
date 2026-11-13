@@ -21,7 +21,9 @@ export async function PUT(req: Request, { params }: Ctx) {
   if (!(await ownCase(id, caseId))) return apiError(404, "not_found", "case not found");
   const parsed = parseCaseBody(await req.json().catch(() => null));
   if (!parsed.ok) return apiError(400, "invalid_request", parsed.reason);
-  await getContainer().evals.updateCase(caseId, parsed.value);
+  // 来源建好后不改(试聊存进来的用例改过之后仍算来自试聊)
+  const { name, input, assertions } = parsed.value;
+  await getContainer().evals.updateCase(caseId, { name, input, assertions });
   return Response.json({ case: await getContainer().evals.getCase(caseId) });
 }
 
