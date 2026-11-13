@@ -74,8 +74,9 @@ export function ReadonlyDrawer({
                 <SheetTitle className="truncate font-sans text-base font-semibold">
                   {agent.name}
                 </SheetTitle>
-                <SheetDescription className="truncate font-mono text-xs">
-                  {agent.id}
+                <SheetDescription className="truncate text-xs">
+                  <span className="font-mono">{agent.id}</span>
+                  {agent.ownerName ? `，${agent.ownerName} 分享` : ""}
                 </SheetDescription>
               </div>
               <Badge variant="outline" className="ml-auto">
@@ -87,7 +88,8 @@ export function ReadonlyDrawer({
               <div className="mb-4 flex gap-2.5 rounded-xl bg-[#F2F1EC] px-3.5 py-3 text-sm text-[#3C3A35]">
                 <Lock className="mt-0.5 size-[18px] shrink-0" aria-hidden="true" />
                 <p>
-                  这是只读智能体：所有者给了你只读权限。你可以查看配置和知识清单、直接对话使用发布版，不能修改。需要修改请联系所有者
+                  这是只读智能体：{agent.ownerName ?? "所有者"}
+                  给了你只读权限。你可以查看配置和知识清单、直接对话使用发布版，不能修改。需要修改请联系所有者
                   {cloneable ? "，或者克隆一份来改" : ""}。
                 </p>
               </div>

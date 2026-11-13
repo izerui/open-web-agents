@@ -36,12 +36,19 @@ export function studioKind(a: StudioAgent): StudioKind {
   return a.isOwner ? "mine" : "shared";
 }
 
-/** 列表视图「来源」列;所有者是谁不在接口里(不向别人暴露账号),只说明怎么来的 */
+/** 列表视图「来源」列;分享来的写分享人(接口只给所有者邮箱前缀) */
 export function studioSource(a: StudioAgent): string {
   const kind = studioKind(a);
   if (kind === "builtin") return "平台内置";
   if (kind === "mine") return "我建的";
-  return a.isPublic ? "公开" : "分享给我的";
+  if (a.isPublic) return "公开";
+  return sharedByText(a) ?? "分享给我的";
+}
+
+/** 卡片 ID 后面的分享人(原型「id，X 分享」);不是分享来的或接口没给就不显示 */
+export function sharedByText(a: StudioAgent): string | null {
+  if (studioKind(a) !== "shared" || !a.ownerName) return null;
+  return `${a.ownerName} ${a.isPublic ? "公开" : "分享"}`;
 }
 
 /** 只有市场使用权的条目不是「我的」智能体(Builder 列表同样排除) */

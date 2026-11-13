@@ -106,6 +106,8 @@ export interface ProfileProps {
   canManageWebhook: boolean;
   /** 分享给我、可编辑(非所有者) */
   sharedWrite: boolean;
+  /** 分享人(所有者邮箱前缀);接口没给为空 */
+  ownerName?: string | null;
   publishedVersion: number | null;
   changeCount: number | null;
   catalog: ModelCatalog | null;
@@ -178,7 +180,9 @@ export function ProfileCard(p: ProfileProps) {
               <Tag tone="warn">{p.changeCount} 处未发布修改</Tag>
             )}
             <Tag tone={filled === 9 ? "ok" : ""}>{filled}/9 节已填</Tag>
-            {p.sharedWrite && <Tag line>分享给我，可编辑</Tag>}
+            {p.sharedWrite && (
+              <Tag line>{p.ownerName ? `${p.ownerName} 分享，可编辑` : "分享给我，可编辑"}</Tag>
+            )}
           </div>
         </div>
         <TextButton

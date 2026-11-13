@@ -1,6 +1,8 @@
 // 智能体设计器栏的纯逻辑:带描述进来时自动开始(取舍 1)、待确认改动挂在哪一轮、
 // 处理结果留在对话里、各阶段之后的「下一步」提示(前端生成,不调模型)、积分不足、复制进来的资源来源。
 
+import type { DesignOutcome } from "@/lib/modules/agent/domain/design";
+
 /** 新建页带 ?desc= 进来:会话已载入、还没有任何轮次、这次还没试过 —— 自动把描述发给设计器 */
 export function shouldAutoSend(i: {
   desc: string | undefined;
@@ -28,30 +30,10 @@ export function pendingAnchor(turns: readonly { running?: boolean }[]): number {
   return -1;
 }
 
-/** 某一轮里某一节改动的处理结果 */
-export interface Outcome {
-  section: string;
-  count: number;
-  applied: boolean;
-}
+/** 某一轮里某一节改动的处理结果(存在设计会话的服务端状态里,见 POST /api/agents/design/[id]/outcomes) */
+export type Outcome = DesignOutcome;
+/** 轮次(运行 ID)→ 处理结果 */
 export type Outcomes = Record<string, Outcome[]>;
-
-export function addOutcome(m: Outcomes, turnKey: string, o: Outcome): Outcomes {
-  const rest = (m[turnKey] ?? []).filter((x) => x.section !== o.section);
-  return { ...m, [turnKey]: [...rest, o] };
-}
-
-export function parseOutcomes(raw: string | null): Outcomes {
-  if (!raw) return {};
-  try {
-    const v = JSON.parse(raw) as unknown;
-    return v && typeof v === "object" && !Array.isArray(v) ? (v as Outcomes) : {};
-  } catch {
-    return {};
-  }
-}
-
-export const outcomesKey = (sessionId: string) => `owa.designer-outcomes.${sessionId}`;
 
 export type NextTarget = "trial" | "eval" | "publish" | "access" | "fix";
 export interface NextAction {
@@ -131,4 +113,40 @@ export function copiedFrom(view: RefView): {
     else if (r.kind === "mcp") out.mcp[r.name] = r.agentName;
   }
   return out;
+}
+
+/** 单个附件上限与一次最多几个(与对话页、上传接口一致) */
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+export const MAX_ATTACHMENTS = 20;
+/** 设计草稿文件名保留给设计器(见 domain/design 的 DRAFT_FILE;这里不引那个模块,免得带进前端包) */
+const RESERVED_NAME = "design-draft.json";
+
+/** 往设计器输入框加附件:同名替换,过大、超量、保留名不加并给出原因 */
+export function addAttachments<T extends { name: string; size: number }>(
+  current: readonly T[],
+  incoming: readonly T[],
+): { files: T[]; rejected: string[] } {
+  const files = [...current];
+  const rejected: string[] = [];
+  for (const file of incoming) {
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      rejected.push(`${file.name} 超过 10MB`);
+      continue;
+    }
+    if (file.name === RESERVED_NAME) {
+      rejected.push(`${file.name} 是设计草稿专用的文件名，改个名字再添加`);
+      continue;
+    }
+    const same = files.findIndex((f) => f.name === file.name);
+    if (same >= 0) {
+      files[same] = file;
+      continue;
+    }
+    if (files.length >= MAX_ATTACHMENTS) {
+      rejected.push(`一次最多 ${MAX_ATTACHMENTS} 个附件，${file.name} 没有添加`);
+      continue;
+    }
+    files.push(file);
+  }
+  return { files, rejected };
 }

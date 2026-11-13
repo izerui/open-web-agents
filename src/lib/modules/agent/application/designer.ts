@@ -13,11 +13,16 @@ import {
   type DesignState,
   designHash,
   designResources,
+  designRevision,
   designSnapshot,
   draftOf,
   mcpBaselineOf,
+  mergeOutcomes,
+  outcomesView,
   parseDesign,
+  parseOutcomeInput,
   resolveDesign,
+  stateForToken,
 } from "../domain/design";
 import { contentHash, snapshotOf } from "../domain/release";
 import { diffSnapshots } from "../domain/snapshot-diff";
@@ -164,14 +169,15 @@ export class AgentDesigner {
       base: draftOf(target),
       resourceAgentIds: state.resourceAgentIds,
       resources: designResources(resources),
-      revision: designHash(state),
+      revision: designRevision(state),
+      outcomes: outcomesView(state.outcomes),
       conflict,
       issues,
       aiIssue: state.aiIssue,
       changes: candidate ? diffSnapshots(designSnapshot(before), designSnapshot(candidate)) : [],
       // 绑定用户实际预览的配置(含服务端解析的资源),资源改变后也必须重新预览。
       previewToken: designHash({
-        state,
+        state: stateForToken(state),
         candidate,
         current: target ? contentHash(snapshotOf(target)) : null,
       }),
@@ -243,7 +249,7 @@ export class AgentDesigner {
           throw new DesignError(400, "invalid_request", "bindTarget 须为智能体 ID");
         if (!state) throw new DesignError(409, "design_legacy", "旧设计须先载入当前草稿");
       }
-      if (state && input.revision !== designHash(state)) {
+      if (state && input.revision !== designRevision(state)) {
         throw new DesignError(409, "design_changed", "设计草稿已变化,请刷新后重试");
       }
       if (state && typeof input.bindTarget === "string") {
@@ -276,6 +282,7 @@ export class AgentDesigner {
           resourceAgentIds: target ? [target.id] : [],
           draft: draftOf(target),
           mcpBaseline: mcpBaselineOf(target),
+          outcomes: state?.outcomes,
         };
       } else {
         if (!state) throw new DesignError(409, "design_legacy", "旧设计须先载入当前草稿");
@@ -333,7 +340,7 @@ export class AgentDesigner {
       // 资源在预览到应用之间改变时不能静默使用另一个版本。
       if (
         designHash({
-          state,
+          state: stateForToken(state),
           candidate,
           current: target ? contentHash(snapshotOf(target)) : null,
         }) !== token
@@ -370,13 +377,42 @@ export class AgentDesigner {
     });
   }
 
+  /** 附件上传用:确认是本人的设计会话(目标仍可编辑),给出它的工作目录 */
+  workspaceOf(subject: Subject, id: string) {
+    return this.deps.inSession(id, async (tx) => {
+      const { session } = await this.context(tx, subject, id);
+      return { sessionId: session.id, workspaceDir: session.workspaceDir };
+    });
+  }
+
+  /**
+   * 记下某一轮设计器提议的处理结果(已应用到草稿 / 没有应用)。只动处理记录,不碰草稿,
+   * 所以不要求空闲、不核对 revision,也不让 revision 与 previewToken 变化。
+   */
+  recordOutcomes(subject: Subject, id: string, input: { turnKey?: unknown; outcomes?: unknown }) {
+    return this.deps.inSession(id, async (tx) => {
+      const { session } = await this.context(tx, subject, id);
+      let next: ReturnType<typeof parseOutcomeInput>;
+      try {
+        next = parseOutcomeInput(input);
+      } catch (err) {
+        throw new DesignError(400, "invalid_request", (err as Error).message);
+      }
+      const state = session.designState;
+      if (!state) throw new DesignError(409, "design_legacy", "请先载入当前草稿");
+      const outcomes = mergeOutcomes(state.outcomes, next);
+      await tx.sessions.update(id, { designState: { ...state, outcomes } });
+      return outcomesView(outcomes);
+    });
+  }
+
   enqueue(subject: Subject, id: string, runId: string, prompt: string, revision?: string) {
     return this.deps.inSession(id, async (tx) => {
       const { session } = await this.context(tx, subject, id);
       await this.idle(tx);
       const state = await this.sync(tx, session);
       if (!state) throw new DesignError(409, "design_legacy", "请先载入当前草稿");
-      if (revision !== designHash(state))
+      if (revision !== designRevision(state))
         throw new DesignError(409, "design_changed", "设计草稿已变化,请刷新后再发送");
       const resources = await Promise.all(
         state.resourceAgentIds.map((sourceId) => this.target(tx, subject, sourceId)),

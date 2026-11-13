@@ -3,6 +3,7 @@ import {
   type MarketListItem,
   chatHref,
   designerHref,
+  designerSessionHref,
   filterMarket,
   sortMarket,
   startedText,
@@ -27,6 +28,14 @@ describe("designerHref", () => {
   });
   it("没有描述时不带参数", () => {
     expect(designerHref("  ")).toBe("/agents/new");
+  });
+});
+
+describe("designerSessionHref", () => {
+  it("带附件时直接进构建页新建态:设计会话、描述、已上传的文件名", () => {
+    expect(designerSessionHref("d1", " 做个助手 ", ["报销 制度.pdf", "a&b.md"])).toBe(
+      `/agents/new?designer=d1&desc=${encodeURIComponent("做个助手")}&file=${encodeURIComponent("报销 制度.pdf")}&file=${encodeURIComponent("a&b.md")}`,
+    );
   });
 });
 

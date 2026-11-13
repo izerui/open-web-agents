@@ -6,8 +6,11 @@ import {
   canCloneAgent,
   draftEvalText,
   launchChecklist,
+  ownerLabel,
   railStatus,
+  readonlyHeaderText,
   runStats,
+  shareModeText,
   stageBadges,
   stageFromParam,
   stageParam,
@@ -258,8 +261,38 @@ describe("railStatus:左栏每个智能体的状态", () => {
     [{ id: "default", isOwner: false, publishedVersion: null, canWrite: false }, "内置，只读", ""],
     [{ id: "a", isOwner: false, canWrite: false, isPublic: true }, "公开，只读", ""],
     [{ id: "default", isOwner: true, publishedVersion: 1 }, "内置，已发布 v1", "ok"],
+    [{ id: "a", isOwner: false, canWrite: false, ownerName: "luojing" }, "luojing 分享，只读", ""],
+    [{ id: "a", isOwner: false, canWrite: true, ownerName: "luojing" }, "luojing 分享，可编辑", ""],
+    [
+      { id: "a", isOwner: false, canWrite: false, isPublic: true, ownerName: "luojing" },
+      "公开，只读",
+      "",
+    ],
   ])("%j", (a, text, tone) => {
     expect(railStatus(a)).toEqual({ text, tone });
+  });
+});
+
+describe("分享人:只读视图、页头用的文案", () => {
+  it("shareModeText:有分享人时写明谁分享的", () => {
+    expect(shareModeText({ id: "a", ownerName: "luojing" })).toBe("luojing 分享给你");
+    expect(shareModeText({ id: "a" })).toBe("分享给你");
+    expect(shareModeText({ id: "a", isPublic: true, ownerName: "luojing" })).toBe(
+      "luojing 公开给所有账号",
+    );
+    expect(shareModeText({ id: "a", isPublic: true })).toBe("公开给所有账号");
+    expect(shareModeText({ id: "default", ownerName: "x" })).toBe("平台内置");
+  });
+  it("ownerLabel:所有者一栏", () => {
+    expect(ownerLabel({ id: "a", ownerName: "luojing" })).toBe("luojing");
+    expect(ownerLabel({ id: "a", ownerName: null })).toBe("另一个账号");
+    expect(ownerLabel({ id: "agent-architect" })).toBe("平台");
+  });
+  it("readonlyHeaderText:页头「只读，X 所有」", () => {
+    expect(readonlyHeaderText({ id: "a", ownerName: "luojing" })).toBe("只读，luojing 所有");
+    expect(readonlyHeaderText({ id: "a" })).toBe("只读，分享给你");
+    expect(readonlyHeaderText({ id: "default" })).toBe("只读，平台内置");
+    expect(readonlyHeaderText(null)).toBe("只读，所有者管理");
   });
 });
 

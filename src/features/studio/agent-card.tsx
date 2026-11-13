@@ -31,6 +31,7 @@ import {
   type StudioAgent,
   deleteBlock,
   formatUpdated,
+  sharedByText,
   studioBadges,
   studioSource,
 } from "./studio-model";
@@ -167,7 +168,10 @@ export function AgentCard({
         <AgentAvatar id={agent.id} icon={agent.icon} size={48} />
         <div className="min-w-0 flex-1">
           <h2 className="truncate font-display text-lg leading-snug font-bold">{agent.name}</h2>
-          <p className="truncate font-mono text-xs text-muted-foreground">{agent.id}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            <span className="font-mono">{agent.id}</span>
+            {sharedByText(agent) && `，${sharedByText(agent)}`}
+          </p>
         </div>
         <AgentMoreMenu agent={agent} onDeleteAction={onDeleteAction} className="-mt-1 -mr-1" />
       </div>

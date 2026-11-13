@@ -7,6 +7,7 @@
 
 import { followRun } from "@/features/chat/follow-run";
 import type { PendingQuestion } from "@/features/workbench/approval-bar";
+import { joinPromptAttachments } from "@/features/workbench/chat-view.logic";
 import type { SubmitAnswer } from "@/features/workbench/conversation";
 import { createEventBatcher } from "@/features/workbench/event-batcher";
 import type { Turn } from "@/features/workbench/types";
@@ -14,6 +15,7 @@ import { errorText, fetchJson } from "@/lib/fetch-json";
 import type { DesignDraft, DesignResource } from "@/lib/modules/agent/domain/design";
 import type { SnapshotChange } from "@/lib/modules/agent/domain/snapshot-diff";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { uploadDesignFiles } from "./design-files";
 import {
   type DesignSection,
   changedSections,
@@ -24,9 +26,7 @@ import {
 import {
   type Outcome,
   type Outcomes,
-  addOutcome,
-  outcomesKey,
-  parseOutcomes,
+  addAttachments,
   pendingAnchor,
   shouldAutoSend,
 } from "./designer-model";
@@ -48,6 +48,8 @@ export interface DesignView {
   aiIssue?: string;
   issues?: { field: string; message: string }[];
   changes?: SnapshotChange[];
+  /** 每一轮改动的处理结果(已应用 / 没有应用),服务端按设计会话保存 */
+  outcomes?: Outcomes;
 }
 
 export type DesignRecord = {
@@ -73,6 +75,8 @@ export interface Applied {
   sections: DesignSection[];
 }
 
+const EMPTY_OUTCOMES: Outcomes = {};
+
 const json = (body: unknown): RequestInit => ({
   method: "PATCH",
   headers: { "Content-Type": "application/json" },
@@ -88,6 +92,8 @@ export function useDesigner(opts: {
    * 用户在弹层里已经明确点了「用设计器创建」),发完调 onAutoSent(页面从地址里去掉 desc,刷新不会重发)
    */
   initialPrompt?: string;
+  /** 和描述一起带来的附件:已经传进这个设计会话的工作区(探索首页「用设计器创建」),自动发送时列进提示词 */
+  initialFiles?: string[];
   onAutoSent?: () => void;
   /** 只读视图不加载设计器 */
   enabled: boolean;
@@ -105,6 +111,25 @@ export function useDesigner(opts: {
   const [view, setView] = useState<DesignView | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [prompt, setPrompt] = useState(opts.initialPrompt ?? "");
+  /** 输入框里待发送的附件:发送时先传进设计会话的工作区,再把文件名列在提示词末尾(与对话页一致) */
+  const [files, setFiles] = useState<File[]>([]);
+  /**
+   * 已经传进工作区、但这一轮没发出去的附件(运行被拒,比如积分不足;或探索首页带来的附件自动发送失败)。
+   * 下次发送时照样列进提示词,不用再传一次(再传会撞同名文件)
+   */
+  const [carried, setCarried] = useState<string[]>([]);
+  const filesRef = useRef<File[]>([]);
+  filesRef.current = files;
+  const addFiles = useCallback((incoming: File[]) => {
+    if (!incoming.length) return;
+    const r = addAttachments(filesRef.current, incoming);
+    filesRef.current = r.files;
+    setFiles(r.files);
+    if (r.rejected.length) setError(r.rejected.join("；"));
+  }, []);
+  const removeFile = useCallback((name: string) => {
+    setFiles((cur) => cur.filter((f) => f.name !== name));
+  }, []);
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -128,31 +153,34 @@ export function useDesigner(opts: {
   const turnsRef = useRef<Turn[]>([]);
   turnsRef.current = turns;
 
-  /** 每一轮里改动的处理结果(已应用 / 没有应用),按设计会话存在本机,留在对话历史里 */
-  const [outcomes, setOutcomes] = useState<Outcomes>({});
-  useEffect(() => {
-    setOutcomes(
-      sessionId && typeof window !== "undefined"
-        ? parseOutcomes(window.localStorage.getItem(outcomesKey(sessionId)))
-        : {},
-    );
-  }, [sessionId]);
-  const recordOutcomes = useCallback((list: Outcome[]) => {
+  /**
+   * 每一轮里改动的处理结果(已应用 / 没有应用),存在设计会话的服务端状态里,留在对话历史里。
+   * 写完用返回的全部记录更新当前预览;写失败只影响这条留痕,不打断应用 / 先不改。
+   */
+  const recordOutcomes = useCallback(async (list: Outcome[]) => {
     const sid = sessionRef.current;
     const all = turnsRef.current;
     const i = pendingAnchor(all);
     if (!sid || i < 0 || list.length === 0) return;
-    const key = all[i]?.runId ?? `turn-${i}`;
-    setOutcomes((m) => {
-      let next = m;
-      for (const o of list) next = addOutcome(next, key, o);
-      try {
-        window.localStorage.setItem(outcomesKey(sid), JSON.stringify(next));
-      } catch {
-        // 存不了只影响刷新后的显示
-      }
-      return next;
-    });
+    const turnKey = all[i]?.runId ?? `turn-${i}`;
+    try {
+      const res = await fetchJson<{ outcomes: Outcomes }>(
+        `/api/agents/design/${encodeURIComponent(sid)}/outcomes`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ turnKey, outcomes: list }),
+        },
+      );
+      if (sessionRef.current !== sid) return;
+      setView((v) => {
+        const next = v ? { ...v, outcomes: res.outcomes } : v;
+        viewRef.current = next;
+        return next;
+      });
+    } catch {
+      // 记不下只影响对话里的留痕
+    }
   }, []);
 
   const loadHistory = useCallback(async () => {
@@ -280,6 +308,8 @@ export function useDesigner(opts: {
     viewRef.current = null;
     setError("");
     setPendingQuestions([]);
+    // 换了设计会话:上一个会话工作区里的附件不能带到这里
+    setCarried((cur) => (cur.length ? [] : cur));
     if (!enabled || !sessionId) return;
     const abort = new AbortController();
     streamRef.current = abort;
@@ -355,8 +385,11 @@ export function useDesigner(opts: {
   const create = useCallback(() => act(createSession), [act, createSession]);
 
   const send = useCallback(
-    async (text = prompt) => {
-      const content = text.trim();
+    async (text = prompt, opts: { attach?: File[]; uploaded?: string[] } = {}) => {
+      const attach = opts.attach ?? [];
+      const uploaded = opts.uploaded ?? [];
+      const content =
+        text.trim() || (attach.length || uploaded.length ? "请根据附件设计这个智能体。" : "");
       if (!content || blocked) return false;
       return act(async () => {
         let id = sessionRef.current;
@@ -368,12 +401,20 @@ export function useDesigner(opts: {
         }
         if (!current || current.legacy) throw new Error("旧设计没有保存基线，先载入当前草稿");
         current = await rebaseIfNeeded(current);
+        const names = [...new Set([...uploaded, ...(await uploadDesignFiles(id, attach))])];
+        if (attach.length) {
+          const sent = new Set(attach);
+          setFiles((cur) => cur.filter((f) => !sent.has(f)));
+          filesRef.current = filesRef.current.filter((f) => !sent.has(f));
+        }
+        setCarried(names);
+        const runPrompt = joinPromptAttachments(content, names);
         const abort = new AbortController();
         streamRef.current = abort;
         const response = await fetch(`/api/agents/design/${id}/run`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt: content, revision: current.revision }),
+          body: JSON.stringify({ prompt: runPrompt, revision: current.revision }),
           signal: abort.signal,
         });
         if (!response.ok) {
@@ -387,13 +428,14 @@ export function useDesigner(opts: {
           ...all,
           {
             runId,
-            prompt: content,
+            prompt: runPrompt,
             events: [],
             running: true,
             startedAt: new Date().toISOString(),
           },
         ]);
-        setPrompt((p) => (p.trim() === content ? "" : p));
+        setPrompt((p) => (p.trim() === text.trim() ? "" : p));
+        setCarried([]);
         setRunning(true);
         void watch(id, runId, abort, response.body).catch((err) => setError(errorText(err)));
       });
@@ -487,7 +529,7 @@ export function useDesigner(opts: {
           throw new Error("设计器的改动刚刚变了，请重新查看后再应用");
         }
         const result = await postApply(target.previewToken);
-        recordOutcomes(
+        await recordOutcomes(
           groupChanges(shown)
             .filter((g) => applied.has(g.section))
             .map((g) => ({ section: g.section, count: g.changes.length, applied: true })),
@@ -524,7 +566,7 @@ export function useDesigner(opts: {
         if (!(await cb.current.beforeApply()))
           throw new Error("档案里还有没保存的修改（或暂停了保存），先处理好再保存");
         const result = await postApply(previewToken);
-        recordOutcomes(
+        await recordOutcomes(
           groupChanges(cur?.changes ?? []).map((g) => ({
             section: g.section,
             count: g.changes.length,
@@ -554,7 +596,7 @@ export function useDesigner(opts: {
           revision: cur.revision,
           draft: mergeDesignSections(cur.draft, cur.base, [section]),
         });
-        recordOutcomes([{ section, count: count ?? 0, applied: false }]);
+        await recordOutcomes([{ section, count: count ?? 0, applied: false }]);
       });
       setWorking(null);
     },
@@ -680,7 +722,9 @@ export function useDesigner(opts: {
     )
       return;
     autoTried.current = true;
-    void send(autoPrompt).finally(() => cb.current.onAutoSent?.());
+    void send(autoPrompt, { uploaded: cb.current.initialFiles }).finally(() =>
+      cb.current.onAutoSent?.(),
+    );
   }, [enabled, autoPrompt, sessionId, loading, view, turns.length, blocked, send]);
 
   const pending = useMemo(() => groupChanges(view?.changes ?? []), [view?.changes]);
@@ -709,6 +753,14 @@ export function useDesigner(opts: {
     setError,
     prompt,
     setPrompt,
+    files,
+    addFiles,
+    removeFile,
+    /** 发送输入框里的文字与附件 */
+    /** 已传进工作区、还没随消息发出去的附件 */
+    carried,
+    dropCarried: (name: string) => setCarried((cur) => cur.filter((n) => n !== name)),
+    sendInput: () => send(prompt, { attach: files, uploaded: carried }),
     pendingQuestions,
     setPendingQuestions,
     approvalRefresh,
@@ -718,7 +770,7 @@ export function useDesigner(opts: {
     create,
     send,
     retry,
-    outcomes,
+    outcomes: view?.outcomes ?? EMPTY_OUTCOMES,
     stop,
     refresh: () => act(refresh),
     applySection,

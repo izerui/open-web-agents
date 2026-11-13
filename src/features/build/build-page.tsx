@@ -49,6 +49,7 @@ import {
   STAGES,
   type Stage,
   railStatus,
+  readonlyHeaderText,
   stageBadges,
   stageParam,
 } from "./build-model";
@@ -68,7 +69,7 @@ import {
 } from "./profile-model";
 import { PublishStage } from "./publish-stage";
 import { READONLY_ACCESS_BADGE, READONLY_STAGES, ReadonlyAccess } from "./readonly-access";
-import { ReadonlyView, shareModeText, useClone } from "./readonly-view";
+import { ReadonlyView, useClone } from "./readonly-view";
 import { RunsStage } from "./runs-stage";
 import { TrialPanel } from "./trial-panel";
 import { Seg, TextButton } from "./ui";
@@ -94,12 +95,15 @@ export function BuildPage({
   agentId: routeId,
   designerSession,
   initialDesc,
+  initialFiles,
   initialStage,
 }: {
   /** 地址里的智能体;新建态为 undefined */
   agentId?: string;
   designerSession?: string;
   initialDesc?: string;
+  /** 已传进设计会话工作区的附件(探索首页带来),随描述一起自动发给设计器 */
+  initialFiles?: string[];
   initialStage: Stage;
 }) {
   const router = useRouter();
@@ -205,6 +209,7 @@ export function BuildPage({
     agentId: currentId,
     initialSession: designerSession,
     initialPrompt: initialDesc,
+    initialFiles,
     // 自动发过一次之后从地址里去掉 desc:刷新不会再发
     onAutoSent: () => replaceUrl(currentIdRef.current, stageRef.current, sessionRef.current),
     enabled: !readOnly && !notFound && (!routeId || Boolean(agent)),
@@ -365,7 +370,7 @@ export function BuildPage({
       return (
         <span className="flex items-center gap-1.5 text-muted-foreground">
           <Lock className="size-3.5" />
-          只读，{agent ? shareModeText(agent) : "所有者管理"}
+          {readonlyHeaderText(agent ?? null)}
         </span>
       );
     if (designer.working !== null)
@@ -710,6 +715,7 @@ export function BuildPage({
         agentId={currentId}
         canManageWebhook={canManageWebhook}
         sharedWrite={Boolean(agent && !agent.isOwner && !BUILT_IN.includes(agent.id))}
+        ownerName={agent?.ownerName}
         publishedVersion={agent?.publishedVersion ?? null}
         changeCount={meta.meta.changeCount}
         catalog={catalog}

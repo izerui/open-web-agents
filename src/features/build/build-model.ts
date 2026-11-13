@@ -270,14 +270,15 @@ export function railStatus(a: {
   publishedVersion?: number | null;
   hasUnpublishedChanges?: boolean;
   isPublic?: boolean;
+  ownerName?: string | null;
 }): Badge {
   const builtin = a.id === "default" || a.id === "agent-architect";
   // 只读者看不到草稿,「草稿，未发布」对他没有意义
   if (builtin && a.canWrite === false) return { text: "内置，只读", tone: "" };
   if (!builtin && !a.isOwner) {
-    if (a.canWrite === false)
-      return { text: a.isPublic ? "公开，只读" : "分享给我，只读", tone: "" };
-    return { text: "分享给我，可编辑", tone: "" };
+    const by = a.ownerName ? `${a.ownerName} 分享` : "分享给我";
+    if (a.canWrite === false) return { text: a.isPublic ? "公开，只读" : `${by}，只读`, tone: "" };
+    return { text: `${by}，可编辑`, tone: "" };
   }
   const v = a.publishedVersion;
   const prefix = builtin ? "内置，" : "";
@@ -329,4 +330,27 @@ export function canCloneAgent(a: {
   return a.marketListed && a.publishedVersion
     ? { ok: true }
     : { ok: false, reason: "只有已上架市场的智能体可以克隆" };
+}
+
+type OwnerInfo = { id: string; isPublic?: boolean; ownerName?: string | null };
+const isBuiltinId = (id: string) => id === "default" || id === "agent-architect";
+
+/** 只读的智能体是怎么到你这里的;有分享人(所有者邮箱前缀)时写明是谁 */
+export function shareModeText(a: OwnerInfo): string {
+  if (isBuiltinId(a.id)) return "平台内置";
+  const by = a.ownerName ? `${a.ownerName} ` : "";
+  return a.isPublic ? `${by}公开给所有账号` : `${by}分享给你`;
+}
+
+/** 只读视图「所有者」一栏:内置写平台;接口给了分享人就显示它 */
+export function ownerLabel(a: OwnerInfo): string {
+  if (isBuiltinId(a.id)) return "平台";
+  return a.ownerName || "另一个账号";
+}
+
+/** 页头的只读说明(原型「只读，X 所有」) */
+export function readonlyHeaderText(a: OwnerInfo | null): string {
+  if (!a) return "只读，所有者管理";
+  if (!isBuiltinId(a.id) && a.ownerName) return `只读，${a.ownerName} 所有`;
+  return `只读，${shareModeText(a)}`;
 }

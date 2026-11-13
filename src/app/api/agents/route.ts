@@ -24,6 +24,7 @@ import { validateAgentConfig } from "@/lib/modules/agent/domain/validate-config"
 import type { Agent } from "@/lib/modules/agent/ports";
 import { validateWebhookUrl } from "@/lib/modules/integration/domain/webhook-policy";
 import { marketSummary } from "@/lib/modules/market/domain/catalog";
+import { authorOf } from "@/lib/modules/market/domain/stats";
 
 /**
  * 能否查看和修改智能体的 webhook:只有所有者(与平台管理员)。
@@ -44,7 +45,7 @@ const ACTIVITY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** 列出调用方可见的智能体:自己的 + 被分享的 + 公开的(admin 看全部)。 */
 export async function GET(req: Request) {
-  const { agents, grants, auth, env, releases, agentActivity } = getContainer();
+  const { agents, grants, auth, env, releases, agentActivity, users } = getContainer();
   try {
     // 保留 principal:API Key 只能看到它绑定的智能体,且永远按只读者对待(见 agentAccessLevel)
     const principal = await auth.resolveWeb(req);
@@ -81,6 +82,24 @@ export async function GET(req: Request) {
     const activity = readable.length
       ? await agentActivity.of(readable, Date.now() - ACTIVITY_WINDOW_MS)
       : new Map<string, { runs: number; updatedAt: number }>();
+    /*
+     * 分享来的智能体显示分享人:只给邮箱 @ 前那段(与市场作者同一口径,authorOf),
+     * 不给完整邮箱。所有者本人与本地模式不需要;同一所有者只查一次。
+     */
+    const ownerIds = localMode
+      ? []
+      : [
+          ...new Set(
+            visible
+              .filter((a) => levels.get(a.id) !== "none" && a.ownerId !== subject.userId)
+              .map((a) => a.ownerId),
+          ),
+        ];
+    const ownerNames = new Map(
+      await Promise.all(
+        ownerIds.map(async (id) => [id, authorOf((await users.get(id))?.email)] as const),
+      ),
+    );
 
     return Response.json({
       agents: visible
@@ -125,6 +144,7 @@ export async function GET(req: Request) {
              * 否则「我建的」永远是空的,全部算成「分享给我的」。
              */
             isOwner: localMode || a.ownerId === subject.userId,
+            ...(ownerNames.has(a.ownerId) ? { ownerName: ownerNames.get(a.ownerId) ?? null } : {}),
             runs7d: activity.get(a.id)?.runs ?? 0,
             updatedAt: activity.get(a.id)?.updatedAt ?? null,
             canWrite,

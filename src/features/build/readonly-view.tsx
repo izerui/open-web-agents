@@ -15,7 +15,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
-import { canCloneAgent } from "./build-model";
+import { canCloneAgent, ownerLabel, shareModeText } from "./build-model";
 import { Banner, CodeBlock, Seg } from "./ui";
 import type { BuildAgent } from "./use-build-data";
 
@@ -61,12 +61,6 @@ export function useClone(
   };
 }
 
-/** 只读的智能体是怎么到你这里的(接口不暴露所有者账号,只说明来源) */
-export function shareModeText(a: { id: string; isPublic?: boolean }): string {
-  if (a.id === "default" || a.id === "agent-architect") return "平台内置";
-  return a.isPublic ? "公开给所有账号" : "分享给你";
-}
-
 export function ReadonlyView({ agent }: { agent: BuildAgent }) {
   const [tab, setTab] = useState<"json" | "kb">("json");
   const clone = useClone(agent);
@@ -87,17 +81,13 @@ export function ReadonlyView({ agent }: { agent: BuildAgent }) {
           )}
           <dl className="m-0 mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[13px]">
             <dt className="text-muted-foreground">所有者</dt>
-            <dd className="m-0">
-              {agent.id === "default" || agent.id === "agent-architect"
-                ? "平台"
-                : "另一个账号（不对你显示账号）"}
-            </dd>
+            <dd className="m-0">{ownerLabel(agent)}</dd>
             <dt className="text-muted-foreground">分享方式</dt>
-            <dd className="m-0">{shareModeText(agent)}，只读</dd>
+            <dd className="m-0">{shareModeText({ ...agent, ownerName: null })}，只读</dd>
           </dl>
           <Banner icon={<Lock />} className="mt-3 mb-3 text-[13px]">
             这是只读智能体，你可以查看配置和资料清单、直接使用，但不能修改。
-            {clone.can ? "要改请联系所有者，或克隆一份来改。" : "要改请联系所有者。"}
+            {`要改请联系所有者${agent.ownerName ? ` ${agent.ownerName}` : ""}${clone.can ? "，或克隆一份来改。" : "。"}`}
           </Banner>
           <div className="flex flex-wrap gap-2">
             <Button

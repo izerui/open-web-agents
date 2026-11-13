@@ -1,8 +1,8 @@
-import fs from "node:fs/promises";
+import { uploadToWorkspace } from "@/app/api/_lib/workspace-upload";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { canRenderInline, mimeOf } from "@/lib/modules/artifacts/domain/mime";
-import { PathEscapeError, resolveInWorkspace } from "@/lib/modules/artifacts/domain/safe-path";
+import { PathEscapeError } from "@/lib/modules/artifacts/domain/safe-path";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,61 +36,18 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const session = await sessions.get(id);
   if (!session) return Response.json({ error: "session not found" }, { status: 404 });
   if (session.source === "design") {
+    // 设计会话的附件走 /api/agents/design/[id]/files(保护设计草稿文件)
     return Response.json({ error: "请通过 AI 编辑页面更新设计草稿" }, { status: 403 });
   }
 
-  const form = await req.formData().catch(() => null);
-  const files = form?.getAll("files").filter((value): value is File => value instanceof File) ?? [];
-  if (files.length === 0) return Response.json({ error: "files are required" }, { status: 400 });
-  if (files.length > 20) return Response.json({ error: "too many files" }, { status: 413 });
-
   // 显式 ?overwrite=1 才覆盖同名文件(例如手改后重新上传智能体定义);默认只新建,保护已有附件
   const overwrite = new URL(req.url).searchParams.get("overwrite") === "1";
-  const names = new Set<string>();
-  try {
-    // 先把整批可预见错误验完，再开始写。否则第 1 个文件已经落盘，
-    // 第 2 个才因过大、重名或越界失败，用户重试时又会撞上残留文件。
-    for (const file of files) {
-      if (file.size > 10 * 1024 * 1024) {
-        return Response.json({ error: `file too large: ${file.name}` }, { status: 413 });
-      }
-      if (names.has(file.name)) {
-        return Response.json({ error: `duplicate file name: ${file.name}` }, { status: 409 });
-      }
-      names.add(file.name);
-      resolveInWorkspace(session.workspaceDir, file.name);
-    }
-
-    const prepared = await Promise.all(
-      files.map(async (file) => ({ file, bytes: Buffer.from(await file.arrayBuffer()) })),
-    );
-    /*
-     * 写之前先走工作目录协议:在会话行锁内记下"刚用过"并确保目录存在。
-     * 上传不产生运行 —— 不记这一笔,GC 只看运行时间,长期未活动的会话里刚上传的文件
-     * 可能马上被清掉;GC 正在改名挪走目录时,这里会等它挪完再建新目录。
-     */
-    await sessions.prepareWorkspace(id, { nowMs: Date.now() }, async () => {
-      await fs.mkdir(session.workspaceDir, { recursive: true });
-    });
-    const uploaded: string[] = [];
-    for (const { file, bytes } of prepared) {
-      await storage.write(session.workspaceDir, file.name, bytes, { overwrite });
-      uploaded.push(file.name);
-    }
-    return Response.json({ files: uploaded }, { headers: NO_STORE_HEADERS });
-  } catch (err) {
-    const code = (err as { code?: string }).code;
-    if (code === "EEXIST") {
-      return Response.json({ error: "a file with the same name already exists" }, { status: 409 });
-    }
-    if (err instanceof PathEscapeError) {
-      return Response.json({ error: "invalid file name" }, { status: 400 });
-    }
-    return Response.json(
-      { error: err instanceof Error ? err.message : String(err) },
-      { status: 500 },
-    );
-  }
+  return uploadToWorkspace(
+    req,
+    { sessionId: id, workspaceDir: session.workspaceDir },
+    { sessions, storage },
+    { overwrite },
+  );
 }
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
