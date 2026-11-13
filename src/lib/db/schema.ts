@@ -485,6 +485,8 @@ export const evalCases = mysqlTable(
     /** 字符串 = 文本输入;对象 = 按 inputSchema 的结构化输入 */
     input: json("input").notNull(),
     assertions: json("assertions").notNull(),
+    /** 来源:manual = 手写,trial = 构建页试聊里「存为评测用例」 */
+    source: varchar("source", { length: 16 }).notNull().default("manual"),
     createdBy: varchar("created_by", { length: 36 }),
     createdAt: timestamp("created_at", { fsp: 3 }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { fsp: 3 }).defaultNow().notNull(),
@@ -700,6 +702,8 @@ export const creditPackages = mysqlTable("credit_packages", {
   id: varchar("id", { length: 64 }).primaryKey(),
   definition: json("definition").notNull(),
   enabled: int("enabled").notNull(),
+  /** 充值页的主推卡;同一时刻最多一个为 1。不进套餐定义与版本(只是陈列,不影响订单快照) */
+  recommended: int("recommended").notNull().default(0),
   version: int("version").notNull(),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
 });
@@ -775,6 +779,9 @@ export const marketListingRequests = mysqlTable(
     note: varchar("note", { length: 1024 }),
     status: varchar("status", { length: 16 }).notNull(),
     reason: varchar("reason", { length: 1024 }),
+    /** 所有者申请时选的类别;旧申请为空 */
+    requestedCategory: varchar("requested_category", { length: 32 }),
+    /** 通过时实际上架到的类别 */
     category: varchar("category", { length: 32 }),
     pendingAgentId: varchar("pending_agent_id", { length: 36 }),
     createdAt: bigint("created_at", { mode: "number" }).notNull(),

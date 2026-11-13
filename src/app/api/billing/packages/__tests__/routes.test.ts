@@ -98,6 +98,32 @@ describe("package order HTTP contracts", () => {
     expect((await listOrders(new Request("http://test/api/billing/orders"))).status).toBe(403);
     expect((await action("unknown", { action: "confirm", reason: "test" })).status).toBe(403);
   });
+  it("管理员保存套餐可带 recommended(布尔);设推荐会取消其他推荐,审计带上推荐;非布尔 400", async () => {
+    state.admin = true;
+    await packages.save({ ...definition, id: "pro", name: "专业包" }, null, "staff", {
+      recommended: true,
+    });
+    const bad = await savePackage(
+      json("/api/billing/packages", { definition, expectedVersion: 1, recommended: "yes" }),
+    );
+    expect(bad.status).toBe(400);
+    const res = await savePackage(
+      json("/api/billing/packages", { definition, expectedVersion: 1, recommended: true }),
+    );
+    expect(res.status).toBe(201);
+    expect((await res.json()).package).toMatchObject({ id: "basic", recommended: true });
+    expect(state.audits.at(-1)).toMatchObject({ details: { recommended: true } });
+    state.admin = false;
+    const list = (await (
+      await catalog(new Request("http://test/api/billing/packages"))
+    ).json()) as {
+      packages: { id: string; recommended: boolean }[];
+    };
+    expect(list.packages.map((p) => [p.id, p.recommended])).toEqual([
+      ["basic", true],
+      ["pro", false],
+    ]);
+  });
   it("creates a pending order, never lets the client set price, account or paid status", async () => {
     for (const extra of [{ priceMinor: "1" }, { accountId: "bob" }, { status: "credited" }]) {
       expect((await order("tamper", extra)).status).toBe(400);

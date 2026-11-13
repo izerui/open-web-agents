@@ -83,17 +83,38 @@ export function validatePackageDefinition(raw: unknown): PackageDefinition {
   };
 }
 
+/**
+ * 保存后的推荐标记:显式给了就用(停用的套餐不能设为推荐 —— 用户看不到它),
+ * 没给就沿用原状;停用一个推荐中的套餐时推荐随之取消。
+ */
+export function recommendedOf(
+  definition: PackageDefinition,
+  current: CreditPackage | null,
+  requested: unknown,
+): boolean {
+  if (requested !== undefined && typeof requested !== "boolean") {
+    throw new BillingError(400, "invalid_request", "recommended须为布尔值");
+  }
+  if (requested === true && !definition.enabled) {
+    throw new BillingError(400, "invalid_request", "未上架的套餐不能设为推荐");
+  }
+  if (!definition.enabled) return false;
+  return requested ?? current?.recommended ?? false;
+}
+
 export function nextPackage(
   definition: PackageDefinition,
   current: CreditPackage | null,
   expected: number | null,
+  requestedRecommended?: unknown,
 ): CreditPackage {
   if ((current?.version ?? null) !== expected)
     throw new BillingError(409, "package_changed", "套餐版本已变化,请刷新后重试");
   const version = (current?.version ?? 0) + 1;
   if (version > MAX_VERSION)
     throw new BillingError(409, "package_version_limit", "套餐版本已达上限");
-  return { ...definition, version, updatedAt: Date.now() };
+  const recommended = recommendedOf(definition, current, requestedRecommended);
+  return { ...definition, recommended, version, updatedAt: Date.now() };
 }
 
 export function validateOrderRequest(input: CreateOrderRequest): void {

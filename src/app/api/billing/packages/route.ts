@@ -32,6 +32,8 @@ export async function POST(req: Request) {
     const body = (await req.json().catch(() => null)) as {
       definition?: PackageDefinition;
       expectedVersion?: unknown;
+      /** 可选:设为 / 取消推荐(充值页主推卡),不给保持原状 */
+      recommended?: unknown;
     } | null;
     if (
       !body?.definition ||
@@ -44,12 +46,22 @@ export async function POST(req: Request) {
     ) {
       return Response.json({ error: "须提供套餐定义和 expectedVersion" }, { status: 400 });
     }
-    const saved = await packages.save(body.definition, body.expectedVersion, subject.userId);
+    if (body.recommended !== undefined && typeof body.recommended !== "boolean") {
+      return Response.json({ error: "recommended 须为布尔值" }, { status: 400 });
+    }
+    const saved = await packages.save(body.definition, body.expectedVersion, subject.userId, {
+      recommended: body.recommended,
+    });
     await audit.record({
       actor: principal,
       action: "billing.package_update",
       resource: { type: "package", id: saved.id },
-      details: { name: saved.name, version: saved.version, enabled: saved.enabled },
+      details: {
+        name: saved.name,
+        version: saved.version,
+        enabled: saved.enabled,
+        recommended: saved.recommended,
+      },
       req,
     });
     return Response.json({ package: saved }, { status: 201 });

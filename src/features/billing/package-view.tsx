@@ -801,6 +801,7 @@ function UserPackages({
             >
               <div className="flex items-center gap-2">
                 <h3 className="min-w-0 break-words font-display text-lg font-bold">{pack.name}</h3>
+                {pack.recommended && <Badge variant="dark">推荐</Badge>}
                 <Badge variant="outline" className="ml-auto">
                   v{pack.version}
                 </Badge>
@@ -817,7 +818,7 @@ function UserPackages({
               )}
               <Button
                 className="mt-auto"
-                variant="outline"
+                variant={pack.recommended ? "default" : "outline"}
                 disabled={busy}
                 onClick={() => onBuy(pack)}
               >

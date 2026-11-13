@@ -456,6 +456,44 @@ export function packageContract(name: string, make: () => PackageFixture) {
       });
     });
 
+    it("推荐:默认否;设一个推荐会自动取消其他推荐;不传时保持原状;停用的不能设为推荐", async () => {
+      const h = await setup();
+      expect(h.pack.recommended).toBe(false);
+      const other = await h.repo.save(definition(h.otherPackageId), null, "admin", {
+        recommended: true,
+      });
+      expect(other.recommended).toBe(true);
+      const mine = await h.repo.save(definition(h.packageId), 1, "admin", { recommended: true });
+      expect(mine.recommended).toBe(true);
+      expect((await h.repo.get(h.otherPackageId))?.recommended).toBe(false);
+      const all = await h.repo.list(true);
+      expect(all.filter((p) => p.recommended).map((p) => p.id)).toEqual([h.packageId]);
+      // 只改定义不带推荐:保持原状
+      const kept = await h.repo.save({ ...definition(h.packageId), name: "改名" }, 2, "admin");
+      expect(kept.recommended).toBe(true);
+      expect((await h.repo.get(h.packageId))?.recommended).toBe(true);
+      // 取消推荐
+      const off = await h.repo.save(definition(h.packageId), 3, "admin", { recommended: false });
+      expect(off.recommended).toBe(false);
+      expect((await h.repo.list(true)).some((p) => p.recommended)).toBe(false);
+      // 停用的套餐用户看不到,设为推荐没有意义
+      await expect(
+        h.repo.save({ ...definition(h.packageId), enabled: false }, 4, "admin", {
+          recommended: true,
+        }),
+      ).rejects.toMatchObject({ status: 400, code: "invalid_request" });
+      expect((await h.repo.get(h.packageId))?.version).toBe(4);
+      // 停用一个推荐中的套餐:推荐随之取消
+      await h.repo.save(definition(h.packageId), 4, "admin", { recommended: true });
+      const disabled = await h.repo.save(
+        { ...definition(h.packageId), enabled: false },
+        5,
+        "admin",
+      );
+      expect(disabled.recommended).toBe(false);
+      expect((await h.repo.get(h.packageId))?.recommended).toBe(false);
+    });
+
     it("returned definitions/orders cannot mutate stored snapshots", async () => {
       const h = await setup();
       h.pack.creditsMicro = "1";

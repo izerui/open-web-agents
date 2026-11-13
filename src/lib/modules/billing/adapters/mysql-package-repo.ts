@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Db } from "@/lib/db/client";
 import { creditOrders, creditPackageVersions, creditPackages } from "@/lib/db/schema";
-import { and, desc, eq, lt, or } from "drizzle-orm";
+import { and, desc, eq, lt, ne, or } from "drizzle-orm";
 import {
   cancelledOrder,
   confirmableOrder,
@@ -23,6 +23,7 @@ import type {
   OrderQuery,
   PackageDefinition,
   PackageRepo,
+  SavePackageOptions,
 } from "../package-ports";
 import { BillingError } from "../ports";
 import { MysqlBillingRepo } from "./mysql-billing-repo";
@@ -30,6 +31,7 @@ import { MysqlBillingRepo } from "./mysql-billing-repo";
 function packageOf(row: typeof creditPackages.$inferSelect): CreditPackage {
   return {
     ...(row.definition as PackageDefinition),
+    recommended: row.recommended === 1,
     version: row.version,
     updatedAt: row.updatedAt,
   };
@@ -85,6 +87,7 @@ export class MysqlPackageRepo implements PackageRepo {
     raw: PackageDefinition,
     expectedVersion: number | null,
     actorId: string,
+    options: SavePackageOptions = {},
   ): Promise<CreditPackage> {
     const definition = validatePackageDefinition(raw);
     versionOf(expectedVersion, true);
@@ -97,14 +100,27 @@ export class MysqlPackageRepo implements PackageRepo {
             .from(creditPackages)
             .where(eq(creditPackages.id, definition.id))
             .for("update");
-          const next = nextPackage(definition, row ? packageOf(row) : null, expectedVersion);
+          const next = nextPackage(
+            definition,
+            row ? packageOf(row) : null,
+            expectedVersion,
+            options.recommended,
+          );
           const values = {
             id: definition.id,
             definition,
             version: next.version,
             enabled: definition.enabled ? 1 : 0,
+            recommended: next.recommended ? 1 : 0,
             updatedAt: next.updatedAt,
           };
+          // 同一时刻最多一个推荐:设新推荐时先取消其他的(同一事务)
+          if (next.recommended) {
+            await tx
+              .update(creditPackages)
+              .set({ recommended: 0 })
+              .where(and(eq(creditPackages.recommended, 1), ne(creditPackages.id, definition.id)));
+          }
           if (row)
             await tx.update(creditPackages).set(values).where(eq(creditPackages.id, definition.id));
           else await tx.insert(creditPackages).values(values);

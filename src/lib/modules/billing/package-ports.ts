@@ -7,11 +7,18 @@ export interface CreditPackage {
   priceMinor: string;
   currency: "CNY" | "USD";
   enabled: boolean;
+  /** 充值页主推;同一时刻最多一个。只是陈列,不进套餐定义与版本快照 */
+  recommended: boolean;
   version: number;
   updatedAt: number;
 }
 
-export type PackageDefinition = Omit<CreditPackage, "version" | "updatedAt">;
+export type PackageDefinition = Omit<CreditPackage, "version" | "updatedAt" | "recommended">;
+
+export interface SavePackageOptions {
+  /** true = 设为推荐(同时取消其他套餐的推荐);false = 取消推荐;不给 = 保持原状 */
+  recommended?: boolean;
+}
 
 export interface CreditOrder {
   id: string;
@@ -52,6 +59,7 @@ export interface PackageRepo {
     definition: PackageDefinition,
     expectedVersion: number | null,
     actorId: string,
+    options?: SavePackageOptions,
   ): Promise<CreditPackage>;
 
   /** 先重放既有订单,再校验当前套餐状态/版本;金额完全取服务端快照。 */

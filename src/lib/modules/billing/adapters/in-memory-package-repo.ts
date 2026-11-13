@@ -20,6 +20,7 @@ import type {
   OrderQuery,
   PackageDefinition,
   PackageRepo,
+  SavePackageOptions,
 } from "../package-ports";
 import type { BillingRepo } from "../ports";
 import { InMemoryBillingRepo } from "./in-memory-billing-repo";
@@ -50,11 +51,22 @@ export class InMemoryPackageRepo implements PackageRepo {
     raw: PackageDefinition,
     expectedVersion: number | null,
     actorId: string,
+    options: SavePackageOptions = {},
   ): Promise<CreditPackage> {
     const definition = validatePackageDefinition(raw);
     versionOf(expectedVersion, true);
     textOf(actorId, "actorId", 36);
-    const next = nextPackage(definition, this.packages.get(definition.id) ?? null, expectedVersion);
+    const next = nextPackage(
+      definition,
+      this.packages.get(definition.id) ?? null,
+      expectedVersion,
+      options.recommended,
+    );
+    if (next.recommended) {
+      for (const [id, p] of this.packages) {
+        if (p.recommended) this.packages.set(id, { ...p, recommended: false });
+      }
+    }
     this.packages.set(next.id, next);
     this.versions.set(
       `${next.id}:${next.version}`,

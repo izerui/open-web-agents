@@ -51,6 +51,7 @@ type Draft = {
   price: string;
   currency: "CNY" | "USD";
   enabled: boolean;
+  recommended: boolean;
   version: number | null;
 };
 const STATUS: Record<Order["status"], string> = {
@@ -67,6 +68,7 @@ const fresh = (): Draft => ({
   price: "",
   currency: "CNY",
   enabled: false,
+  recommended: false,
   version: null,
 });
 
@@ -81,6 +83,14 @@ const ORDER_FILTERS = [
 type OrderFilter = (typeof ORDER_FILTERS)[number]["value"];
 
 const when = (ms: number) => formatTime(ms);
+
+/** 「设为推荐」开关下的说明:同一时刻只有一个推荐,勾上会替换掉现有的 */
+function recommendHint(packages: CreditPackage[] | null, id: string): string {
+  const current = packages?.find((p) => p.recommended && p.id !== id);
+  return current
+    ? `充值页主推这一个；现在推荐的「${current.name}」会自动取消`
+    : "充值页把这一个做成主推卡；同一时刻只有一个推荐";
+}
 
 /** 价格只做展示：「¥ 100」后面跟币种小字 */
 function Price({ minor, currency }: { minor: string; currency: "CNY" | "USD" }) {
@@ -183,6 +193,7 @@ export function PackagesAdmin() {
       price: `${cents / 100n}.${(cents % 100n).toString().padStart(2, "0")}`,
       currency: pack.currency,
       enabled: pack.enabled,
+      recommended: pack.recommended,
       version: pack.version,
     });
   }
@@ -204,6 +215,7 @@ export function PackagesAdmin() {
             currency: draft.currency,
             enabled: draft.enabled,
           },
+          recommended: draft.enabled && draft.recommended,
         }),
       });
       setDraft(null);
@@ -347,11 +359,14 @@ export function PackagesAdmin() {
                       </td>
                       <td className={TD}>v{pack.version}</td>
                       <td className={TD}>
-                        {pack.enabled ? (
-                          <Badge variant="success">上架中</Badge>
-                        ) : (
-                          <Badge>未上架</Badge>
-                        )}
+                        <div className="flex flex-wrap gap-1.5">
+                          {pack.enabled ? (
+                            <Badge variant="success">上架中</Badge>
+                          ) : (
+                            <Badge>未上架</Badge>
+                          )}
+                          {pack.recommended && <Badge variant="outline">推荐</Badge>}
+                        </div>
                       </td>
                       <td className={cn(TD, "text-right")}>
                         <Button
@@ -662,10 +677,35 @@ export function PackagesAdmin() {
                     <Switch
                       id="pack-enabled"
                       checked={draft.enabled}
-                      onCheckedChange={(enabled) => setDraft({ ...draft, enabled })}
+                      onCheckedChange={(enabled) =>
+                        setDraft({ ...draft, enabled, recommended: enabled && draft.recommended })
+                      }
                       className="data-[state=checked]:bg-success"
                     />
                     上架（用户可以看到并下单）
+                  </label>
+                  <label
+                    className={cn(
+                      "flex min-h-10 items-start gap-2.5 text-sm",
+                      !draft.enabled && "text-muted-foreground",
+                    )}
+                    htmlFor="pack-recommended"
+                  >
+                    <Switch
+                      id="pack-recommended"
+                      checked={draft.enabled && draft.recommended}
+                      disabled={!draft.enabled}
+                      onCheckedChange={(recommended) => setDraft({ ...draft, recommended })}
+                      className="mt-0.5"
+                    />
+                    <span>
+                      设为推荐
+                      <span className="block text-xs text-muted-foreground">
+                        {draft.enabled
+                          ? recommendHint(packages, draft.id.trim())
+                          : "上架后才能设为推荐"}
+                      </span>
+                    </span>
                   </label>
                 </fieldset>
               </div>
