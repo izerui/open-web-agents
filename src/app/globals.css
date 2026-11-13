@@ -146,6 +146,42 @@
     font-size: 14px;
   }
 
+  /*
+   * 能点的东西鼠标变手型。Tailwind v4 的 preflight 把按钮改回了默认箭头(v3 是手型),
+   * 这里统一补回来:按钮、各种「当按钮用」的角色、下拉、勾选框、文件选择、可折叠摘要、
+   * 带 tabindex 的可点行(运行列表、汇总表的整行点击)。禁用的显示「不可用」。
+   */
+  button,
+  [role="button"],
+  [role="tab"],
+  [role="menuitem"],
+  [role="menuitemcheckbox"],
+  [role="menuitemradio"],
+  [role="option"],
+  [role="switch"],
+  [role="checkbox"],
+  [role="radio"],
+  [role="link"],
+  select,
+  summary,
+  label:has(> input[type="checkbox"]),
+  label:has(> input[type="radio"]),
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="file"],
+  input[type="range"],
+  input[type="color"],
+  tr[tabindex="0"] {
+    cursor: pointer;
+  }
+  button:disabled,
+  select:disabled,
+  input:disabled,
+  [aria-disabled="true"],
+  [data-disabled] {
+    cursor: not-allowed;
+  }
+
   /* Styled scrollbar (matches open-agents) */
   ::-webkit-scrollbar {
     width: 10px;
