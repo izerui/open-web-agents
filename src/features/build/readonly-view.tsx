@@ -15,7 +15,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
-import { canCloneAgent, ownerLabel, shareModeText } from "./build-model";
+import { canCloneAgent, fromMarket, ownerLabel, shareModeText } from "./build-model";
 import { Banner, CodeBlock, Seg } from "./ui";
 import type { BuildAgent } from "./use-build-data";
 
@@ -65,6 +65,7 @@ export function ReadonlyView({ agent }: { agent: BuildAgent }) {
   const [tab, setTab] = useState<"json" | "kb">("json");
   const clone = useClone(agent);
   const { publishedVersion } = agent;
+  const market = fromMarket(agent);
   return (
     <div className="flex min-h-0 flex-1 gap-4 p-4 max-lg:flex-col max-lg:overflow-y-auto max-md:p-3">
       <div className="flex w-[380px] shrink-0 flex-col gap-3 max-lg:w-full">
@@ -82,14 +83,14 @@ export function ReadonlyView({ agent }: { agent: BuildAgent }) {
           <dl className="m-0 mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[13px]">
             <dt className="text-muted-foreground">所有者</dt>
             <dd className="m-0">{ownerLabel(agent)}</dd>
-            <dt className="text-muted-foreground">分享方式</dt>
+            <dt className="text-muted-foreground">{market ? "来源" : "分享方式"}</dt>
             <dd className="m-0">
               {shareModeText({ ...agent, ownerName: null, author: null })}，只读
             </dd>
           </dl>
           <Banner icon={<Lock />} className="mt-3 mb-3 text-[13px]">
             这是只读智能体，你可以查看配置和资料清单、直接使用，但不能修改。
-            {`要改请联系所有者${agent.author || agent.ownerName ? ` ${agent.author || agent.ownerName}` : ""}${clone.can ? "，或克隆一份来改。" : "。"}`}
+            {`要改请联系${market ? "作者" : "所有者"}${agent.author || agent.ownerName ? ` ${agent.author || agent.ownerName}` : ""}${clone.can ? "，或克隆一份来改。" : "。"}`}
           </Banner>
           <div className="flex flex-wrap gap-2">
             <Button

@@ -363,7 +363,7 @@ type OwnerInfo = {
 const isBuiltinId = (id: string) => id === "default" || id === "agent-architect";
 
 /** 是从市场来的:只能使用(读不到定义),或已上架市场且不是本人的 */
-function fromMarket(a: OwnerInfo): boolean {
+export function fromMarket(a: OwnerInfo): boolean {
   if (isBuiltinId(a.id)) return false;
   return a.canRead === false || (a.marketListed === true && a.isOwner === false);
 }

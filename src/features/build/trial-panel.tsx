@@ -300,17 +300,8 @@ export function TrialPanel({
     const micro = t.runId ? credits.get(t.runId) : undefined;
     const result = t.events.find((e) => e.kind === "result");
     const failed = result?.kind === "result" && result.status !== "success";
-    const recharge = failed && needsRecharge(result.summary ?? "");
     return (
       <>
-        {recharge && (
-          <Link
-            href="/account/billing?tab=packages"
-            className="mr-1.5 font-medium text-foreground underline"
-          >
-            去充值
-          </Link>
-        )}
         {dur && <span className="mr-1.5 tabular-nums">耗时 {dur}</span>}
         {micro !== undefined && (
           <span className="mr-1.5 tabular-nums">{creditsAmount(micro)} 积分</span>
@@ -340,6 +331,21 @@ export function TrialPanel({
   const renderExtra = (t: Turn) => {
     if (t.running || !agentId) return null;
     const k = keyOf(t);
+    // 积分不足(发起运行就被拒,没有运行 ID,回复下那一行不出现):失败卡片下面给充值入口
+    const result = t.events.find((e) => e.kind === "result");
+    if (
+      result?.kind === "result" &&
+      result.status !== "success" &&
+      needsRecharge(result.summary ?? "")
+    )
+      return (
+        <div className="mt-1 pl-[46px] text-sm max-md:pl-0">
+          <Link href="/account/billing?tab=packages" className="font-medium underline">
+            去充值
+          </Link>
+          <span className="ml-2 text-muted-foreground">充值后回来点发送再试一次</span>
+        </div>
+      );
     if (formFor !== k) return null;
     const ans = turnAnswer(t);
     return (
