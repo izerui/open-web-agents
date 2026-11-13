@@ -426,8 +426,27 @@ export function DesignerPanel({
             void g.sendInput();
           }}
         >
-          {g.files.length > 0 && (
+          {(g.files.length > 0 || g.carried.length > 0) && (
             <ul className="mb-1.5 flex flex-wrap gap-1.5" aria-label="待发送的附件">
+              {g.carried.map((name) => (
+                <li
+                  key={`carried:${name}`}
+                  title="已上传到这次设计的工作目录，发送时一起交给设计器"
+                  className="inline-flex h-7 max-w-full items-center gap-1 rounded-full border border-border pr-0.5 pl-2 text-xs text-muted-foreground"
+                >
+                  <FileIcon className="size-3 shrink-0" />
+                  <span className="max-w-48 truncate">{name}</span>
+                  <button
+                    type="button"
+                    aria-label={`移除附件 ${name}`}
+                    disabled={g.blocked}
+                    onClick={() => g.dropCarried(name)}
+                    className="flex size-6 items-center justify-center rounded-full hover:bg-[#DDD9CF] max-md:size-11"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </li>
+              ))}
               {g.files.map((f) => (
                 <li
                   key={f.name}
@@ -509,7 +528,11 @@ export function DesignerPanel({
               <button
                 type="submit"
                 aria-label="发送"
-                disabled={g.blocked || (!g.prompt.trim() && !g.files.length) || v?.legacy}
+                disabled={
+                  g.blocked ||
+                  (!g.prompt.trim() && !g.files.length && !g.carried.length) ||
+                  v?.legacy
+                }
                 className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground disabled:bg-[#E3E0D8] disabled:text-[#57544D] max-md:size-11"
               >
                 <ArrowUp className="size-4" strokeWidth={2.4} />

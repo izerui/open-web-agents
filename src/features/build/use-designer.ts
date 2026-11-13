@@ -113,6 +113,11 @@ export function useDesigner(opts: {
   const [prompt, setPrompt] = useState(opts.initialPrompt ?? "");
   /** 输入框里待发送的附件:发送时先传进设计会话的工作区,再把文件名列在提示词末尾(与对话页一致) */
   const [files, setFiles] = useState<File[]>([]);
+  /**
+   * 已经传进工作区、但这一轮没发出去的附件(运行被拒,比如积分不足;或探索首页带来的附件自动发送失败)。
+   * 下次发送时照样列进提示词,不用再传一次(再传会撞同名文件)
+   */
+  const [carried, setCarried] = useState<string[]>([]);
   const filesRef = useRef<File[]>([]);
   filesRef.current = files;
   const addFiles = useCallback((incoming: File[]) => {
@@ -303,6 +308,8 @@ export function useDesigner(opts: {
     viewRef.current = null;
     setError("");
     setPendingQuestions([]);
+    // 换了设计会话:上一个会话工作区里的附件不能带到这里
+    setCarried((cur) => (cur.length ? [] : cur));
     if (!enabled || !sessionId) return;
     const abort = new AbortController();
     streamRef.current = abort;
@@ -394,7 +401,13 @@ export function useDesigner(opts: {
         }
         if (!current || current.legacy) throw new Error("旧设计没有保存基线，先载入当前草稿");
         current = await rebaseIfNeeded(current);
-        const names = [...uploaded, ...(await uploadDesignFiles(id, attach))];
+        const names = [...new Set([...uploaded, ...(await uploadDesignFiles(id, attach))])];
+        if (attach.length) {
+          const sent = new Set(attach);
+          setFiles((cur) => cur.filter((f) => !sent.has(f)));
+          filesRef.current = filesRef.current.filter((f) => !sent.has(f));
+        }
+        setCarried(names);
         const runPrompt = joinPromptAttachments(content, names);
         const abort = new AbortController();
         streamRef.current = abort;
@@ -422,10 +435,7 @@ export function useDesigner(opts: {
           },
         ]);
         setPrompt((p) => (p.trim() === text.trim() ? "" : p));
-        if (attach.length) {
-          const sent = new Set(attach);
-          setFiles((cur) => cur.filter((f) => !sent.has(f)));
-        }
+        setCarried([]);
         setRunning(true);
         void watch(id, runId, abort, response.body).catch((err) => setError(errorText(err)));
       });
@@ -747,7 +757,10 @@ export function useDesigner(opts: {
     addFiles,
     removeFile,
     /** 发送输入框里的文字与附件 */
-    sendInput: () => send(prompt, { attach: files }),
+    /** 已传进工作区、还没随消息发出去的附件 */
+    carried,
+    dropCarried: (name: string) => setCarried((cur) => cur.filter((n) => n !== name)),
+    sendInput: () => send(prompt, { attach: files, uploaded: carried }),
     pendingQuestions,
     setPendingQuestions,
     approvalRefresh,

@@ -101,6 +101,7 @@ describe("studioSource", () => {
   it("sharedByText:卡片 ID 后面的分享人(原型「id，X 分享」)", () => {
     expect(sharedByText(a("y", { isOwner: false, ownerName: "luojing" }))).toBe("luojing 分享");
     expect(sharedByText(a("y", { isOwner: false }))).toBeNull();
+    expect(sharedByText(a("y", { isOwner: false, isPublic: true, ownerName: "x" }))).toBe("x 公开");
     expect(sharedByText(a("y", { isOwner: true, ownerName: "x" }))).toBeNull();
     expect(sharedByText(a("default", { isOwner: false, ownerName: "x" }))).toBeNull();
   });

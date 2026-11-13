@@ -141,7 +141,7 @@ export function runTargetLabel(agent: AgentSummary): string {
 export function pickerNote(agent: AgentSummary, group: PickerGroup): string {
   const target = runTargetLabel(agent);
   if (group === "分享给我") {
-    const by = agent.ownerName ? `${agent.ownerName} 分享，` : "";
+    const by = agent.ownerName ? `${agent.ownerName} ${agent.isPublic ? "公开" : "分享"}，` : "";
     return `${by}${agent.canWrite ? "可编辑" : "只读"}，${target}`;
   }
   if (group === "市场") {

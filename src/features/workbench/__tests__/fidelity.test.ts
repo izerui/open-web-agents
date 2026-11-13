@@ -227,6 +227,9 @@ describe("F15 新会话弹层的说明", () => {
     expect(pickerNote({ ...base, canWrite: false, ownerName: "luojing" }, "分享给我")).toBe(
       "luojing 分享，只读，跑已发布 v2",
     );
+    expect(
+      pickerNote({ ...base, canWrite: false, isPublic: true, ownerName: "luojing" }, "分享给我"),
+    ).toBe("luojing 公开，只读，跑已发布 v2");
     expect(pickerNote({ ...base, canRead: false, avgCredits: 12 } as never, "市场")).toBe(
       "市场，跑已发布 v2，平均每次约 12 积分",
     );

@@ -47,7 +47,8 @@ export function studioSource(a: StudioAgent): string {
 
 /** 卡片 ID 后面的分享人(原型「id，X 分享」);不是分享来的或接口没给就不显示 */
 export function sharedByText(a: StudioAgent): string | null {
-  return studioKind(a) === "shared" && a.ownerName ? `${a.ownerName} 分享` : null;
+  if (studioKind(a) !== "shared" || !a.ownerName) return null;
+  return `${a.ownerName} ${a.isPublic ? "公开" : "分享"}`;
 }
 
 /** 只有市场使用权的条目不是「我的」智能体(Builder 列表同样排除) */

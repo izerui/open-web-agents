@@ -108,6 +108,8 @@ export async function fixture() {
     market: new AgentMarket(agents, releases),
     // GET /api/agents 的工作室统计(近 7 天运行数);这里没有运行记录
     agentActivity: { of: async () => new Map<string, { runs: number; updatedAt: number }>() },
+    // GET /api/agents 给非所有者带分享人(邮箱前缀);这里没有账号表
+    users: { get: async (_id: string): Promise<{ id: string; email: string } | null> => null },
     audit: {
       record: vi.fn(async () => {}),
     },
