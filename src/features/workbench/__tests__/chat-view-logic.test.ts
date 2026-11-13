@@ -2,7 +2,6 @@ import {
   agentGroupOf,
   agentPageHref,
   chatBuckets,
-  designSessionHref,
   filterSessions,
   groupPickerAgents,
   rowTime,
@@ -162,13 +161,6 @@ describe("agentGroupOf / runTargetLabel / groupPickerAgents", () => {
 });
 
 describe("跳转地址", () => {
-  it("设计器会话:有目标智能体去它的构建页,没有交给旧地址解析", () => {
-    expect(designSessionHref(session("d 1", NOW, { designTargetAgentId: "x/y" }))).toBe(
-      "/agents/x%2Fy?designer=d%201",
-    );
-    expect(designSessionHref(session("d1", NOW))).toBe("/agents/design?session=d1");
-  });
-
   it("智能体名:自己能编辑的去构建页,其他去市场详情", () => {
     expect(agentPageHref(agent("a b", { canWrite: true }))).toBe("/agents/a%20b");
     expect(agentPageHref(agent("a", { canWrite: false }))).toBe("/market/a");

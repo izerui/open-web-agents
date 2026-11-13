@@ -386,7 +386,7 @@ export function Workbench() {
   }, []);
 
   /**
-   * 拉会话列表(含智能体设计器的会话)与已归档列表。
+   * 拉会话列表与已归档列表。智能体设计器的会话不在这里(它是搭智能体,不是用智能体干活),在构建页的「设计记录」里。
    *
    * 【为什么不能直接 r.json()】接口 500 时响应体是空的,json() 会抛 SyntaxError,
    * 而这两条链原本既不看 res.ok 也没有 catch —— 于是变成 unhandledRejection,
@@ -395,7 +395,7 @@ export function Workbench() {
   const loadSessions = useCallback(async () => {
     setSessionsError(null);
     try {
-      const res = await fetch("/api/sessions?include=design");
+      const res = await fetch("/api/sessions");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = (await res.json()) as { sessions?: SessionSummary[] };
       setSessions(d.sessions ?? []);
@@ -406,7 +406,7 @@ export function Workbench() {
     }
     // 归档列表只是附加视图:读不到不影响主列表,计数显示 0
     try {
-      const res = await fetch("/api/sessions?archived=1&include=design");
+      const res = await fetch("/api/sessions?archived=1");
       if (res.ok) {
         const d = (await res.json()) as { sessions?: SessionSummary[] };
         setArchived(d.sessions ?? []);
@@ -680,7 +680,7 @@ export function Workbench() {
     initialSessionAppliedRef.current = true;
     const requestedSessionId = sessionIdFromSearch(window.location.search);
     const known = [...sessions, ...archived].find((s) => s.id === requestedSessionId);
-    if (requestedSessionId && known && known.source !== "design") {
+    if (requestedSessionId && known) {
       void openSession(requestedSessionId);
     } else {
       if (requestedSessionId) syncSessionUrl(null);
@@ -1260,7 +1260,7 @@ export function Workbench() {
     running && activeSession
       ? sessionLabel(activeSession)
       : (() => {
-          const other = sessions.find((s) => s.source !== "design" && (s.activeRuns ?? 0) > 0);
+          const other = sessions.find((s) => (s.activeRuns ?? 0) > 0);
           return other ? sessionLabel(other) : null;
         })();
   const badge = versionBadge({ running, session: activeSession, agent: current });
@@ -1369,7 +1369,7 @@ export function Workbench() {
       </EmptyBlock>
     );
   } else if (agentContextError) {
-    const recent = sessions.find((s) => s.source !== "design");
+    const recent = sessions[0];
     const requestedAgentId =
       typeof window === "undefined" ? null : agentIdFromSearch(window.location.search);
     stream = (
@@ -1650,7 +1650,7 @@ export function Workbench() {
         open={paletteOpen}
         onOpenChangeAction={setPaletteOpen}
         // 全部会话:命令面板是全局搜索,不该被侧栏搜索词收窄
-        sessions={sessions.filter((s) => s.source !== "design")}
+        sessions={sessions}
         agents={agents}
         currentAgentId={agentId}
         running={running}

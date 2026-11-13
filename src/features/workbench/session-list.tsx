@@ -3,17 +3,10 @@
 import { AgentAvatar } from "@/components/agent-avatar";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { Archive, ArrowLeft, Plus, RefreshCw, Search, Sparkles } from "lucide-react";
-import Link from "next/link";
+import { Archive, ArrowLeft, Plus, RefreshCw, Search } from "lucide-react";
 import { useMemo } from "react";
 import { Spin } from "./chat-bits";
-import {
-  chatBuckets,
-  designSessionHref,
-  filterSessions,
-  rowTime,
-  sessionWaitOf,
-} from "./chat-view.logic";
+import { chatBuckets, filterSessions, rowTime, sessionWaitOf } from "./chat-view.logic";
 import { SessionActions } from "./session-actions";
 import { activityOf, sessionLabel } from "./session-groups";
 import type { AgentSummary, SessionSummary } from "./types";
@@ -25,7 +18,7 @@ export type SessionWait = "approval" | "ask" | null;
 
 /**
  * 对话页左栏:搜索、新会话、按今天 / 昨天 / 更早分组的会话,底部切到「已归档」可恢复。
- * 智能体设计器的会话标「设计器」,点开去构建页。
+ * 只列用智能体干活的会话;智能体设计器的会话(搭智能体)在构建页的「设计记录」里,不在这里。
  */
 export function SessionList({
   view,
@@ -79,12 +72,11 @@ export function SessionList({
 
   const row = (s: SessionSummary) => {
     const on = s.id === activeSessionId;
-    const design = s.source === "design";
     const busy = (on && running) || (s.activeRuns ?? 0) > 0;
     // 没打开的会话也标:列表接口带回了运行中会话的待确认 / 待回答计数
     const waiting = sessionWaitOf(s, { id: activeSessionId, running, wait });
     const agent = byId.get(s.agentId);
-    const agentName = design ? "智能体设计器" : (agent?.name ?? s.agentId);
+    const agentName = agent?.name ?? s.agentId;
     const meta = (
       <>
         <span className="block truncate text-sm leading-[1.35]">{sessionLabel(s)}</span>
@@ -93,12 +85,6 @@ export function SessionList({
           {waiting && (
             <span className="shrink-0 rounded-full bg-warning-soft px-1.5 leading-[18px] text-warning-text">
               {waiting === "approval" ? "待你确认" : "等你回答"}
-            </span>
-          )}
-          {design && (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary px-1.5 leading-[18px] text-primary-foreground">
-              <Sparkles className="size-3" />
-              设计器
             </span>
           )}
           <span className="truncate">
@@ -111,40 +97,22 @@ export function SessionList({
       "group relative flex min-h-[46px] items-center gap-2 rounded-xl border border-transparent py-2 pr-2 pl-2.5 hover:bg-[#EFEDE7]",
       on && "border-border bg-card shadow-[0_1px_3px_rgb(0_0_0/4%)] hover:bg-card",
     );
-    const avatar = (
-      <AgentAvatar
-        id={design ? "agent-architect" : s.agentId}
-        icon={design ? null : agent?.icon}
-        size={26}
-        className="shrink-0"
-      />
-    );
+    const avatar = <AgentAvatar id={s.agentId} icon={agent?.icon} size={26} className="shrink-0" />;
     return (
       <li key={s.id} className={rowClass}>
-        {design && view === "active" ? (
-          <Link
-            href={designSessionHref(s)}
-            title="智能体设计器的会话，在构建页里打开"
-            className="flex min-w-0 flex-1 items-center gap-2 outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:after:ring-[3px] focus-visible:after:ring-[#D9D5CB]"
-          >
-            {avatar}
-            <span className="min-w-0 flex-1">{meta}</span>
-          </Link>
-        ) : (
-          <a
-            href={`/chat?session=${encodeURIComponent(s.id)}`}
-            aria-current={on ? "page" : undefined}
-            onClick={(e) => {
-              if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
-              e.preventDefault();
-              onOpenAction(s.id);
-            }}
-            className="flex min-w-0 flex-1 items-center gap-2 outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:after:ring-[3px] focus-visible:after:ring-[#D9D5CB]"
-          >
-            {avatar}
-            <span className="min-w-0 flex-1">{meta}</span>
-          </a>
-        )}
+        <a
+          href={`/chat?session=${encodeURIComponent(s.id)}`}
+          aria-current={on ? "page" : undefined}
+          onClick={(e) => {
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+            e.preventDefault();
+            onOpenAction(s.id);
+          }}
+          className="flex min-w-0 flex-1 items-center gap-2 outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:after:ring-[3px] focus-visible:after:ring-[#D9D5CB]"
+        >
+          {avatar}
+          <span className="min-w-0 flex-1">{meta}</span>
+        </a>
         <span className="relative z-10 shrink-0">
           {view === "archived" ? (
             <Button

@@ -167,14 +167,6 @@ export function groupPickerAgents(
   }));
 }
 
-/** 智能体设计器的会话在构建页里打开;没记下目标(新建中的设计)交给旧地址在服务端解析。 */
-export function designSessionHref(session: SessionSummary): string {
-  const id = encodeURIComponent(session.id);
-  return session.designTargetAgentId
-    ? `${agentHref({ id: session.designTargetAgentId })}?designer=${id}`
-    : `/agents/design?session=${id}`;
-}
-
 /** 对话头的智能体名:自己能编辑的去构建页,其他的去市场详情。 */
 export function agentPageHref(agent: AgentSummary): string {
   return agent.canWrite ? agentHref({ id: agent.id }) : `/market/${encodeURIComponent(agent.id)}`;
