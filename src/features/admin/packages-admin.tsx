@@ -88,8 +88,8 @@ const when = (ms: number) => formatTime(ms);
 function recommendHint(packages: CreditPackage[] | null, id: string): string {
   const current = packages?.find((p) => p.recommended && p.id !== id);
   return current
-    ? `充值页主推这一个；现在推荐的「${current.name}」会自动取消`
-    : "充值页把这一个做成主推卡；同一时刻只有一个推荐";
+    ? `打开后充值页主推这一个，现在推荐的「${current.name}」会自动取消`
+    : "打开后充值页把这一个做成主推卡；同一时刻只有一个推荐";
 }
 
 /** 价格只做展示：「¥ 100」后面跟币种小字 */
