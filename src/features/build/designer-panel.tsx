@@ -506,7 +506,7 @@ export function DesignerPanel({
               className="inline-flex h-8 shrink-0 items-center gap-1 rounded-full px-2 text-[13px] text-[#4D4A43] hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40 max-md:size-11 max-md:justify-center max-md:px-0"
             >
               <Paperclip className="size-[15px]" />
-              <span className="max-md:sr-only">添加文件</span>
+              <span className="max-md:sr-only">添加附件</span>
             </button>
             <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
               {g.pending.length
