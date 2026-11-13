@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { filterParam } from "@/features/admin/account-links";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import type { SummaryWindow } from "@/lib/modules/billing/domain/charge-summary";
 import {
@@ -70,7 +71,7 @@ export function BillingView({
   const [accounts, setAccounts] = useState<Account[]>([]);
   // 选中的账号记在地址 ?account= 里:刷新、分享都还在这个账号
   const [accountId, setAccountId] = useState(() =>
-    admin ? (searchParams.get("account") ?? "") : "",
+    admin ? filterParam(searchParams, "account") : "",
   );
   /** 发放表单没过校验的那一栏 */
   const [creditErr, setCreditErr] = useState<{ field: "credits" | "reason"; text: string } | null>(

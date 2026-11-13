@@ -34,6 +34,7 @@ import {
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { accountRecordLinks } from "./account-links";
 import {
   AdminDrawer,
   AdminPage,
@@ -708,19 +709,19 @@ function AccountDrawer({
       <DrawerSection title="相关记录">
         <div className="flex flex-wrap gap-2">
           <Button asChild size="sm" variant="outline">
-            <Link href="/admin/billing?tab=accounts">
+            <Link href={accountRecordLinks(a.id).billing}>
               <Coins />
               积分账户
             </Link>
           </Button>
           <Button asChild size="sm" variant="outline">
-            <Link href="/admin/ops?tab=runs">
+            <Link href={accountRecordLinks(a.id).runs}>
               <Activity />
               平台运行
             </Link>
           </Button>
           <Button asChild size="sm" variant="outline">
-            <Link href="/admin/ops?tab=audit">
+            <Link href={accountRecordLinks(a.id).audit}>
               <ScrollText />
               操作记录
             </Link>

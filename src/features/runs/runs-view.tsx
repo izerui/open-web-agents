@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { filterParam } from "@/features/admin/account-links";
 import { EmptyState, SpacePage, tb } from "@/features/settings/space-page";
 import { shortTime } from "@/features/settings/time-format";
 import { errorText, fetchJson } from "@/lib/fetch-json";
@@ -17,7 +18,7 @@ import { formatTime } from "@/lib/format-time";
 import { cn } from "@/lib/utils";
 import { Copy, ExternalLink, Loader2, MessageSquare, RefreshCw, Square, X } from "lucide-react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -114,12 +115,15 @@ export function RunsView({
   const searchParams = useSearchParams();
   // 构建页的「运行」阶段直接传入智能体;旧的 ?agent= 仍然认
   const requestedAgent = agentId ?? searchParams.get("agent");
+  // 平台运行从账号详情跳过来时带 ?account=,进来就按这个账号筛
+  const initialAccountId = platform ? filterParam(searchParams, "account") : "";
   // Changing objects resets the result list, pagination and detail together.
   return (
     <RunsInShell
       key={JSON.stringify([platform, requestedAgent])}
       requestedAgent={requestedAgent}
       platform={platform}
+      initialAccountId={initialAccountId}
     />
   );
 }
@@ -196,7 +200,8 @@ export function DeveloperRunsView() {
 function RunsInShell({
   requestedAgent,
   platform,
-}: { requestedAgent: string | null; platform: boolean }) {
+  initialAccountId,
+}: { requestedAgent: string | null; platform: boolean; initialAccountId: string }) {
   const list = useAgentList();
   const objectMode = requestedAgent !== null;
   return (
@@ -207,14 +212,19 @@ function RunsInShell({
         platform
           ? objectMode
             ? "此智能体在全平台的运行"
-            : "全平台运行,包括工作台、接口调用与评测"
+            : "全平台运行，包括工作台、接口调用与评测"
           : objectMode
             ? "此智能体下计费在你名下的运行"
-            : "计费在你名下的全部运行,包括工作台、接口调用与评测"
+            : "计费在你名下的全部运行，包括工作台、接口调用与评测"
       }
       width={objectMode ? "full" : "wide"}
     >
-      <RunsPanel requestedAgent={requestedAgent} platform={platform} agentList={list} />
+      <RunsPanel
+        requestedAgent={requestedAgent}
+        platform={platform}
+        agentList={list}
+        initialAccountId={initialAccountId}
+      />
     </SpaceShell>
   );
 }
@@ -223,10 +233,13 @@ export function RunsPanel({
   requestedAgent,
   platform,
   agentList,
+  initialAccountId = "",
 }: {
   requestedAgent: string | null;
   platform: boolean;
   agentList: AgentList;
+  /** 平台运行的初始账号筛选(来自地址 ?account=) */
+  initialAccountId?: string;
 }) {
   const objectMode = requestedAgent !== null;
   const confirm = useConfirm();
@@ -235,8 +248,20 @@ export function RunsPanel({
   const [status, setStatus] = useState("");
   const [source, setSource] = useState("");
   /** 平台运行按账号筛选;空 = 全部账号 */
-  const [accountId, setAccountId] = useState("");
+  const [accountId, setAccountIdState] = useState(platform ? initialAccountId : "");
   const accounts = usePlatformAccounts(platform);
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  /** 换账号筛选时同步写进地址 ?account=(不新增历史记录),刷新、分享都还在这个账号 */
+  function setAccountId(id: string) {
+    setAccountIdState(id);
+    if (!platform) return;
+    const q = new URLSearchParams(searchParams.toString());
+    if (id) q.set("account", id);
+    else q.delete("account");
+    router.replace(`${pathname}${q.size ? `?${q}` : ""}`, { scroll: false });
+  }
   const [items, setItems] = useState<RunItem[]>([]);
   const [cursor, setCursor] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);

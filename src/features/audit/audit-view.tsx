@@ -4,6 +4,7 @@ import { SpaceShell } from "@/components/space-shell";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { filterParam } from "@/features/admin/account-links";
 import {
   ACTION_LABEL,
   type AuditItem,
@@ -19,6 +20,7 @@ import { errorText, fetchJson } from "@/lib/fetch-json";
 import { formatTime } from "@/lib/format-time";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, RefreshCw } from "lucide-react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const GROUPS = actionGroups();
@@ -69,8 +71,22 @@ function ActorFace({ actor }: { actor: AuditItem["actor"] }) {
 
 function AuditContent({ platform }: { platform: boolean }) {
   const [action, setAction] = useState("");
-  /** 平台审计按操作者筛;空 = 全部操作者 */
-  const [actorId, setActorId] = useState("");
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  /** 平台审计按操作者筛;空 = 全部操作者。从账号详情跳过来时地址带 ?actor= */
+  const [actorId, setActorIdState] = useState(() =>
+    platform ? filterParam(searchParams, "actor") : "",
+  );
+  /** 换操作者时同步写进地址 ?actor=(不新增历史记录) */
+  function setActorId(id: string) {
+    setActorIdState(id);
+    if (!platform) return;
+    const q = new URLSearchParams(searchParams.toString());
+    if (id) q.set("actor", id);
+    else q.delete("actor");
+    router.replace(`${pathname}${q.size ? `?${q}` : ""}`, { scroll: false });
+  }
   const [people, setPeople] = useState<{ id: string; email: string }[]>([]);
   useEffect(() => {
     if (!platform) return;
