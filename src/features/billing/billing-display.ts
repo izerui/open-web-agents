@@ -23,14 +23,18 @@ export function billingTab(raw: string | null | undefined): BillingTab {
 export type LedgerTone = "success" | "warning" | "default" | "outline";
 
 /** 流水一行的类型名、正负号与标签色 */
-export function ledgerKind(e: Pick<LedgerEntry, "kind" | "amountMicroCredits">): {
+export function ledgerKind(
+  e: Pick<LedgerEntry, "kind" | "amountMicroCredits"> & { reference?: string },
+): {
   label: string;
   sign: "+" | "-" | "";
   tone: LedgerTone;
 } {
   switch (e.kind) {
     case "credit":
-      return { label: "人工入账", sign: "+", tone: "success" };
+      return e.reference?.startsWith("package-order:")
+        ? { label: "购买到账", sign: "+", tone: "success" }
+        : { label: "人工入账", sign: "+", tone: "success" };
     case "refund":
       return { label: "多扣退还", sign: "+", tone: "success" };
     case "reserve":

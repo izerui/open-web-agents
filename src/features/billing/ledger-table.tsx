@@ -12,13 +12,17 @@ import {
 import type { LedgerEntry } from "@/lib/modules/billing/ports";
 import { cn } from "@/lib/utils";
 import { ledgerKind } from "./billing-display";
+import { type LedgerRefs, ledgerNote } from "./ledger-note";
 
 /** 积分账户流水表(个人「积分与套餐」与管理员「计费」共用) */
 export function LedgerTable({
   items,
+  refs,
   compact = false,
 }: {
   items: LedgerEntry[];
+  /** 流水用到的运行与订单名字,用来把「说明」写成可读的句子 */
+  refs?: LedgerRefs;
   /** 概览里的「最近流水」:不显示冻结余额与流水号 */
   compact?: boolean;
 }) {
@@ -84,7 +88,7 @@ export function LedgerTable({
                   )}
                 </td>
                 <td className={cn(tb.td, tb.last, "min-w-48 break-words")}>
-                  {entry.reason || entry.reference}
+                  {ledgerNote(entry, refs)}
                   {!compact && (
                     <div className="break-all text-xs text-muted-foreground">{entry.id}</div>
                   )}

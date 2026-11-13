@@ -47,6 +47,14 @@ describe("ledgerKind:流水类型、正负与色调", () => {
       tone: "success",
     });
   });
+  it("套餐订单到账写「购买到账」,不叫人工入账", () => {
+    expect(ledgerKind({ ...entry("credit", "5"), reference: "package-order:o1" })).toEqual({
+      label: "购买到账",
+      sign: "+",
+      tone: "success",
+    });
+    expect(ledgerKind({ ...entry("credit", "5"), reference: "credit-1" }).label).toBe("人工入账");
+  });
   it("冻结是减项、提醒色", () => {
     expect(ledgerKind(entry("reserve", "5"))).toEqual({
       label: "冻结",

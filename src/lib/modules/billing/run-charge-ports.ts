@@ -178,6 +178,14 @@ export interface RunChargeQuery {
     until: number;
     by: SummaryDimension;
   }): Promise<ChargeSummaryRow[]>;
+  /**
+   * 积分流水「说明」用:这个账号名下这些运行的智能体名与来源(会话 source)。
+   * 只返回计费在该账号名下、还查得到的运行;智能体已删除时 agentName 为 null
+   */
+  describeRuns(
+    accountId: string,
+    runIds: string[],
+  ): Promise<Map<string, { agentName: string | null; source: string | null }>>;
   /** 本月各账号用量(口径同受理时的额度检查) */
   /** 传 accountId 只算这一个账号(用户积分页),不传算全部(账号管理) */
   monthUsageByAccount(since: number, accountId?: string): Promise<Map<string, bigint>>;

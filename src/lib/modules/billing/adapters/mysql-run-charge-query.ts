@@ -1,7 +1,7 @@
 import type { Db } from "@/lib/db/client";
 import { agents, apiKeys, runCharges, runs, sessions, users } from "@/lib/db/schema";
 import type { RunPricing } from "@/lib/shared";
-import { type SQL, and, desc, eq, gte, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import { type SQL, and, desc, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import {
   type ChargeSummaryRow,
   SESSION_SOURCE_TO_CHARGE,
@@ -157,6 +157,23 @@ export class MysqlRunChargeQuery implements RunChargeQuery {
       items: page,
       ...(rows.length > opts.limit && last ? { nextCursor: encodeCursor(last) } : {}),
     };
+  }
+
+  async describeRuns(
+    accountId: string,
+    runIds: string[],
+  ): Promise<Map<string, { agentName: string | null; source: string | null }>> {
+    if (runIds.length === 0) return new Map();
+    const rows = await this.db
+      .select({ runId: runCharges.runId, agentName: agents.name, source: sessions.source })
+      .from(runCharges)
+      .leftJoin(runs, eq(runs.id, runCharges.runId))
+      .leftJoin(sessions, eq(sessions.id, runs.sessionId))
+      .leftJoin(agents, eq(agents.id, sessions.agentId))
+      .where(and(eq(runCharges.accountId, accountId), inArray(runCharges.runId, runIds)));
+    return new Map(
+      rows.map((r) => [r.runId, { agentName: r.agentName ?? null, source: r.source ?? null }]),
+    );
   }
 
   async listPending(opts: {

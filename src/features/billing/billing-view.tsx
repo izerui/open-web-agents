@@ -33,6 +33,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { BatchCreditDialog } from "./batch-credit-form";
 import { type ChargeDrill, ChargeSummary, WINDOW_LABEL } from "./charge-summary";
+import { type LedgerRefs, mergeRefs } from "./ledger-note";
 import { LedgerTable } from "./ledger-table";
 import { PendingCharges } from "./pending-charges";
 import { ReconciliationView } from "./reconciliation-view";
@@ -41,6 +42,8 @@ import { RunChargeList } from "./run-charge-list";
 type Statement = {
   balance: WalletBalance;
   items: LedgerEntry[];
+  /** 本页流水用到的运行与订单名字(流水「说明」用) */
+  refs?: LedgerRefs;
   nextCursor?: string;
   month?: {
     since: number;
@@ -155,6 +158,10 @@ export function BillingView({
             cursor && previous?.balance.accountId === result.balance.accountId
               ? [...previous.items, ...result.items]
               : result.items,
+          refs:
+            cursor && previous?.balance.accountId === result.balance.accountId
+              ? mergeRefs(previous.refs, result.refs)
+              : result.refs,
         }));
       } catch (err) {
         if (seq === requestSeq.current) setError(errorText(err));
@@ -568,7 +575,7 @@ export function BillingView({
                 {statement.items.length === 0 ? (
                   <p className="py-5 text-sm text-muted-foreground">暂无流水</p>
                 ) : (
-                  <LedgerTable items={statement.items} />
+                  <LedgerTable items={statement.items} refs={statement.refs} />
                 )}
                 {statement.nextCursor && (
                   <Button
