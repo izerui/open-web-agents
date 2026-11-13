@@ -169,7 +169,10 @@ describe("billing HTTP permissions and idempotency", () => {
       amountMicroCredits: "5000000",
     });
     const body = await (await GET(new Request("http://test/api/billing"))).json();
-    expect(refLookups).toEqual([{ accountId: "alice", runIds: ["run-gone", "run-a"] }]);
+    // 同一毫秒内的流水顺序不固定,只比对查了哪些运行
+    expect(refLookups.map((l) => ({ ...l, runIds: [...l.runIds].sort() }))).toEqual([
+      { accountId: "alice", runIds: ["run-a", "run-gone"] },
+    ]);
     expect(body.refs).toEqual({
       runs: { "run-a": { agentName: "报销审核助手", source: "web" } },
       orders: { "o-alice": { packageName: "标准包" } },

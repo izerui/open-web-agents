@@ -230,7 +230,8 @@ describe("GET /api/agents —— 分享人(ownerName)", () => {
     state.agents = [mk("listed", "other", { marketListed: true, publishedVersion: 2 })];
     const { agents } = await list();
     expect(agents[0]?.canRead).toBe(false);
-    expect(agents[0]?.author).toBe("luojing");
+    // 作者取市场统计(与市场列表同一口径;测试替身里统计的作者固定为 "author")
+    expect(agents[0]?.author).toBe("author");
     expect(JSON.stringify(agents)).not.toContain("@xinghe.example");
   });
 

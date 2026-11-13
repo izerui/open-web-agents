@@ -163,13 +163,14 @@ let page: Page;
 test.beforeAll(async ({ browser }) => {
   page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const res = await page.request.post("/api/auth", {
+    // 接口都用 page.route 模拟,账号只用来过登录:注册一个新的
     data: {
-      action: "login",
-      email: process.env.OWA_REVIEW_EMAIL ?? "design-review@example.test",
-      password: process.env.OWA_REVIEW_PASSWORD ?? "design-review-123",
+      action: "register",
+      email: `pw-chat-fidelity2-${Date.now()}@example.test`,
+      password: "e2e-password-123456",
     },
   });
-  expect(res.ok(), `登录失败: ${res.status()}`).toBeTruthy();
+  expect(res.ok(), `注册失败: ${res.status()}`).toBeTruthy();
   await page.addInitScript(() => localStorage.setItem("owa.chat.right", "none"));
 });
 test.afterAll(async () => {
