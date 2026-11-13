@@ -18,7 +18,7 @@ describe("审计展示", () => {
 
   it("一句话描述", () => {
     expect(describeAudit(item("agent.publish", { version: 3, note: "加配音" }))).toBe(
-      "发布 v3:加配音",
+      "发布 v3：加配音",
     );
     expect(describeAudit(item("agent.activate_version", { from: 3, to: 1 }))).toBe(
       "发布版本 v3 → v1",
@@ -30,7 +30,7 @@ describe("审计展示", () => {
     ).toBe("「视频」:改动 systemPrompt、skillPackages");
     expect(
       describeAudit(item("approval.decide", { decision: "denied", tool: "Bash", runId: "r1" })),
-    ).toBe("拒绝 Bash(运行 r1)");
+    ).toBe("拒绝 Bash（运行 r1）");
     expect(describeAudit(item("api_key.rate_limit", { name: "订单", from: null, to: 10 }))).toBe(
       "「订单」每分钟上限 默认 → 10",
     );
@@ -48,9 +48,9 @@ describe("审批分级的审计文案", () => {
           grantLabel: "含「curl」的命令",
         }),
       ),
-    ).toContain("并授权本会话内同类(含「curl」的命令)不再询问");
+    ).toContain("并授权本会话内同类（含「curl」的命令）不再询问");
     expect(describeAudit(item("approval.revoke_grant", { grantLabel: "工具 Write" }))).toBe(
-      "撤销本会话的同类授权:工具 Write",
+      "撤销本会话的同类授权：工具 Write",
     );
   });
 });
@@ -64,15 +64,15 @@ describe("上架申请与用户组的审计文案", () => {
       describeAudit(
         item("market.listing_request", { name: "报销审核", version: 3, note: "财务部在用" }),
       ),
-    ).toBe("「报销审核」v3 申请上架:财务部在用");
+    ).toBe("「报销审核」v3 申请上架：财务部在用");
     expect(
       describeAudit(item("market.listing_approve", { name: "报销审核", categoryName: "办公运营" })),
     ).toBe("「报销审核」上架到「办公运营」");
     expect(
       describeAudit(item("market.listing_reject", { name: "报销审核", reason: "用途不清" })),
-    ).toBe("「报销审核」:用途不清");
+    ).toBe("「报销审核」：用途不清");
     expect(describeAudit(item("group.delete", { name: "财务部", members: 6 }))).toBe(
-      "「财务部」(6 位成员)",
+      "「财务部」（6 位成员）",
     );
   });
 

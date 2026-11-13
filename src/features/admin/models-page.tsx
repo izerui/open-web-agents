@@ -206,7 +206,7 @@ function ProvidersTab({
               </Button>
             }
           >
-            添加一个提供者并填入 API Key,智能体才有模型可用。
+            添加一个提供者并填入 API Key，智能体才有模型可用。
           </EmptyState>
         ) : (
           <table className="w-full min-w-[760px] border-collapse text-sm">

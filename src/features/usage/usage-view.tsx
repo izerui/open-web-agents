@@ -80,7 +80,7 @@ export function UsageView({ scope = "self" }: { scope?: "self" | "all" }) {
       <SpaceShell
         area="admin"
         title="全平台 token 用量"
-        subtitle="所有用户的运行,按 UTC 日期统计"
+        subtitle="所有用户的运行，按 UTC 日期统计"
         actions={windowPicker}
       >
         {body}
@@ -316,7 +316,7 @@ function ByAgent({ buckets }: { buckets: UsageBucket[] }) {
                 </span>
                 <span
                   className="flex h-3.5 overflow-hidden rounded bg-[#F1EFEA] max-sm:order-last max-sm:col-span-2"
-                  title={`${b.label}:${b.runs} 次,失败 ${b.failed} 次`}
+                  title={`${b.label}：${b.runs} 次，失败 ${b.failed} 次`}
                 >
                   <span className="flex h-full" style={{ width: `${w.total}%` }}>
                     <span className="h-full" style={{ width: `${w.ok}%`, background: OK_COLOR }} />
@@ -377,7 +377,7 @@ function ByDay({ buckets, days }: { buckets: UsageBucket[]; days: number }) {
                 key={d.key}
                 // biome-ignore lint/a11y/noNoninteractiveTabindex: 键盘聚焦也能看到当天的数字
                 tabIndex={0}
-                aria-label={`${d.key}:${d.runs} 次,失败 ${d.failed}`}
+                aria-label={`${d.key}：${d.runs} 次，失败 ${d.failed}`}
                 className="group relative flex h-full min-w-0 flex-1 flex-col justify-end outline-none"
               >
                 {/* 悬停或聚焦立即出现的提示(原生 title 要停一会儿才出) */}

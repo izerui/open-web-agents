@@ -31,6 +31,7 @@ import {
   shareOf,
 } from "./billing-display";
 import { type ChargeDrill, ChargeSummary } from "./charge-summary";
+import { type LedgerRefs, mergeRefs } from "./ledger-note";
 import { LedgerTable } from "./ledger-table";
 import { PackagesPanel } from "./package-view";
 import { RunChargeList } from "./run-charge-list";
@@ -38,6 +39,8 @@ import { RunChargeList } from "./run-charge-list";
 type Statement = {
   balance: WalletBalance;
   items: LedgerEntry[];
+  /** 本页流水用到的运行与订单名字(流水「说明」用) */
+  refs?: LedgerRefs;
   nextCursor?: string;
   month?: {
     since: number;
@@ -90,6 +93,7 @@ export function AccountBillingView() {
         ...result,
         month: result.month ?? prev?.month,
         items: cursor && prev ? [...prev.items, ...result.items] : result.items,
+        refs: cursor && prev ? mergeRefs(prev.refs, result.refs) : result.refs,
       }));
     } catch (err) {
       if (mine === seq.current) setError(errorText(err));
@@ -217,7 +221,7 @@ export function AccountBillingView() {
                 <p className="px-[22px] pb-5 text-sm text-muted-foreground">暂无流水</p>
               ) : (
                 <>
-                  <LedgerTable items={statement.items} />
+                  <LedgerTable items={statement.items} refs={statement.refs} />
                   <div className="flex justify-center p-3.5">
                     {statement.nextCursor ? (
                       <Button
@@ -351,7 +355,7 @@ function Overview({
           {statement.items.length === 0 ? (
             <p className="px-[22px] pb-5 text-sm text-muted-foreground">暂无流水</p>
           ) : (
-            <LedgerTable items={statement.items.slice(0, 5)} compact />
+            <LedgerTable items={statement.items.slice(0, 5)} refs={statement.refs} compact />
           )}
         </section>
         <section
@@ -397,7 +401,7 @@ function MonthBySource({ onDrill }: { onDrill: (drill: ChargeDrill) => void }) {
     };
   }, []);
 
-  if (error) return <p className="mb-2 text-xs text-destructive">没读到:{error}</p>;
+  if (error) return <p className="mb-2 text-xs text-destructive">没读到：{error}</p>;
   if (!rows) return <p className="mb-2 text-sm text-muted-foreground">载入中…</p>;
   if (rows.length === 0)
     return <p className="mb-2 text-sm text-muted-foreground">本月还没有运行</p>;

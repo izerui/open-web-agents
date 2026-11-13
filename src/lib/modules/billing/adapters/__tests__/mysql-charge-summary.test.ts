@@ -214,5 +214,16 @@ if (!url) {
         apiKeyHint: null,
       });
     });
+
+    it("流水说明用的运行信息:只查本账号的运行,带智能体名与来源,智能体已删除为 null", async () => {
+      const w = await world();
+      const info = await query.describeRuns(w.account, [w.ids.web, w.ids.design, "missing-run"]);
+      expect(info.get(w.ids.web)).toEqual({ agentName: "汇总甲", source: "web" });
+      expect(info.get(w.ids.design)).toEqual({ agentName: null, source: "design" });
+      expect(info.has("missing-run")).toBe(false);
+      // 别的账号查不到这些运行
+      expect((await query.describeRuns(w.other, [w.ids.web])).size).toBe(0);
+      expect((await query.describeRuns(w.account, [])).size).toBe(0);
+    });
   });
 }

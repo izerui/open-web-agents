@@ -44,7 +44,7 @@ function rowLabel(by: SummaryDimension, r: ChargeSummaryRow): string {
   if (by === "source") return isChargeSource(r.key) ? CHARGE_SOURCE_LABEL[r.key] : "其他";
   if (by === "agent") return r.key === null ? "已删除的智能体" : (r.name ?? r.key);
   if (by === "key") {
-    if (r.key === null) return "不经 API Key(网页、智能体设计器、评测)";
+    if (r.key === null) return "不经 API Key（网页、智能体设计器、评测）";
     return r.name ? `${r.name}` : `已删除的 Key(${r.key.slice(0, 8)})`;
   }
   return r.name ?? r.key ?? "未知账号";

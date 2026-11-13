@@ -5,6 +5,7 @@ import { InMemoryBillingRepo } from "@/lib/modules/billing/adapters/in-memory-bi
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({ admin: false, apiKey: false, authenticated: true }));
+const refLookups: { accountId: string; runIds: string[] }[] = [];
 let billing = new InMemoryBillingRepo();
 const auditFault = { failNext: false };
 class FlakyAuditRepo extends InMemoryAuditRepo {
@@ -23,7 +24,24 @@ const audited = async () => (await auditRepo.list({ limit: 200 })).items;
 vi.mock("@/lib/container", () => ({
   getContainer: () => ({
     billing,
-    runCharges: { monthUsageByAccount: async () => new Map() },
+    runCharges: {
+      monthUsageByAccount: async () => new Map(),
+      describeRuns: async (accountId: string, runIds: string[]) => {
+        refLookups.push({ accountId, runIds });
+        return new Map(
+          runIds
+            .filter((id) => id === "run-a")
+            .map((id) => [id, { agentName: "报销审核助手", source: "web" }]),
+        );
+      },
+    },
+    packages: {
+      getOrder: async (id: string) =>
+        ({
+          "o-alice": { id, accountId: "alice", packageName: "标准包" },
+          "o-bob": { id, accountId: "bob", packageName: "别人的包" },
+        })[id] ?? null,
+    },
     audit: { record: (e: Parameters<AuditLog["record"]>[0]) => audit().record(e) },
     users: {
       get: async (id: string) =>
@@ -122,5 +140,39 @@ describe("billing HTTP permissions and idempotency", () => {
     expect((await credit("1", "unknown", "nobody")).status).toBe(404);
     expect(await audited()).toHaveLength(0);
     expect((await billing.balance("bob")).availableMicroCredits).toBe("0");
+  });
+
+  it("流水带回本页运行与订单的名字:只查本账号的运行,别人的订单不带", async () => {
+    refLookups.length = 0;
+    await billing.credit({
+      accountId: "alice",
+      amountMicroCredits: "100000000",
+      idempotencyKey: "package-order:o-alice",
+      actorId: "admin",
+      reason: "确认",
+    });
+    await billing.credit({
+      accountId: "alice",
+      amountMicroCredits: "1000000",
+      idempotencyKey: "package-order:o-bob",
+      actorId: "admin",
+      reason: "确认",
+    });
+    await billing.reserve({
+      accountId: "alice",
+      reservationId: "run:run-a:0",
+      amountMicroCredits: "5000000",
+    });
+    await billing.reserve({
+      accountId: "alice",
+      reservationId: "run:run-gone:0",
+      amountMicroCredits: "5000000",
+    });
+    const body = await (await GET(new Request("http://test/api/billing"))).json();
+    expect(refLookups).toEqual([{ accountId: "alice", runIds: ["run-gone", "run-a"] }]);
+    expect(body.refs).toEqual({
+      runs: { "run-a": { agentName: "报销审核助手", source: "web" } },
+      orders: { "o-alice": { packageName: "标准包" } },
+    });
   });
 });

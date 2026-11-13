@@ -39,6 +39,7 @@ import {
   keyLabel,
   parseRpmDraft,
   rotatedOldKeys,
+  rpmHint,
   rpmRangeText,
 } from "./key-display";
 
@@ -176,10 +177,10 @@ export function DeveloperKeysView() {
       setKeyName("");
       setKeyLimit("");
       setKeyDays("");
-      toast.success("Key 已签发,请立即复制");
+      toast.success("Key 已签发，请立即复制");
       await reload();
     } catch (error) {
-      setFormError(`签发失败:${errorText(error)}`);
+      setFormError(`签发失败：${errorText(error)}`);
     } finally {
       setBusy(null);
     }
@@ -206,12 +207,12 @@ export function DeveloperKeysView() {
         agentId: k.agentId,
       });
       await reload();
-      toast.success(`新 Key 已签发,旧 Key ${GRACE_HOURS} 小时后失效`);
+      toast.success(`新 Key 已签发，旧 Key ${GRACE_HOURS} 小时后失效`);
       document
         .getElementById("issued-key")
         ?.scrollIntoView({ behavior: "smooth", block: "center" });
     } catch (error) {
-      toast.error(`轮换失败:${errorText(error)}`);
+      toast.error(`轮换失败：${errorText(error)}`);
     } finally {
       setBusy(null);
     }
@@ -225,7 +226,7 @@ export function DeveloperKeysView() {
       await reload();
       toast.success("Key 已吊销");
     } catch (error) {
-      toast.error(`吊销失败:${errorText(error)}`);
+      toast.error(`吊销失败：${errorText(error)}`);
     } finally {
       setBusy(null);
     }
@@ -237,7 +238,7 @@ export function DeveloperKeysView() {
       await navigator.clipboard.writeText(issued.plaintext);
       toast.success("已复制到剪贴板");
     } catch (error) {
-      toast.error(`复制失败:${errorText(error)}`);
+      toast.error(`复制失败：${errorText(error)}`);
     }
   }
 
@@ -360,7 +361,7 @@ export function DeveloperKeysView() {
               formError ? "text-destructive" : "text-muted-foreground",
             )}
           >
-            {formError || `每分钟上限填 ${rpmRangeText(rpmMax)}，留空用平台默认。`}
+            {formError || rpmHint(rpmMax)}
           </p>
         </form>
         {issued && (

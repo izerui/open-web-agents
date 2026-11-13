@@ -1,6 +1,7 @@
 // 积分在界面上的显示规则(内部全程微积分,1 积分 = 1,000,000 微积分):
-// - 消耗、价格等金额:≥ 0.01 保留两位小数(四舍五入),不足 0.01 显示 "< 0.01",0 显示 "0"
-// - 余额:两位小数向下取整 —— 绝不显示比实际多的余额
+// - 消耗、价格等金额:≥ 0.01 最多两位小数(四舍五入),整数不带小数、去尾零(12.50 → 12.5),
+//   不足 0.01 显示 "< 0.01",0 显示 "0";整数部分统一千分位
+// - 余额:两位小数向下取整 —— 绝不显示比实际多的余额;同样去尾零
 // - 明细:完整六位小数
 
 const MICRO = 1_000_000n;
@@ -11,7 +12,8 @@ function grouped(whole: bigint): string {
 }
 
 function twoDecimals(cents: bigint): string {
-  return `${grouped(cents / 100n)}.${(cents % 100n).toString().padStart(2, "0")}`;
+  const fraction = (cents % 100n).toString().padStart(2, "0").replace(/0+$/, "");
+  return fraction ? `${grouped(cents / 100n)}.${fraction}` : grouped(cents / 100n);
 }
 
 function parse(micro: string | bigint): bigint {

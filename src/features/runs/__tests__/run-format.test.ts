@@ -65,10 +65,10 @@ describe("输入的展示", () => {
 
 describe("runCreditsText:运行花费一律显示积分", () => {
   it("已结算显示实际扣除", () => {
-    expect(runCreditsText({ micro: "1500000", state: "settled" })).toBe("1.50 积分");
+    expect(runCreditsText({ micro: "1500000", state: "settled" })).toBe("1.5 积分");
   });
   it("冻结中写明是冻结", () => {
-    expect(runCreditsText({ micro: "9000000", state: "open" })).toBe("冻结 9.00 积分");
+    expect(runCreditsText({ micro: "9000000", state: "open" })).toBe("冻结 9 积分");
   });
   it("没有扣费记录返回 null(不退回显示美元)", () => {
     expect(runCreditsText(undefined)).toBeNull();

@@ -11,11 +11,11 @@ import { RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const REASON: Record<PendingReason, { label: string; hint: string }> = {
-  owed: { label: "欠款", hint: "余额不足未扣齐,充值后自动补扣" },
-  usage_unknown: { label: "用量未知", hint: "运行过,但结算时没有拿到用量" },
+  owed: { label: "欠款", hint: "余额不足未扣齐，充值后自动补扣" },
+  usage_unknown: { label: "用量未知", hint: "运行过，但结算时没有拿到用量" },
   unpriced: {
     label: "无法完整计价",
-    hint: "取不到本次运行主模型的价目,或上游计量有读不出的计数;能算出的部分已扣",
+    hint: "取不到本次运行主模型的价目，或上游计量有读不出的计数；能算出的部分已扣",
   },
 };
 const REASONS = Object.keys(REASON) as PendingReason[];
@@ -76,7 +76,7 @@ export function PendingCharges({ onSelectAccount }: { onSelectAccount?: (id: str
   return (
     <section className="mb-6 space-y-3 border-b pb-5" aria-label="待核对计费">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-sm font-semibold">待核对(所有账号)</h2>
+        <h2 className="text-sm font-semibold">待核对（所有账号）</h2>
         <Button
           variant="ghost"
           size="icon"
@@ -103,7 +103,7 @@ export function PendingCharges({ onSelectAccount }: { onSelectAccount?: (id: str
         ))}
       </fieldset>
       <p className="text-xs text-muted-foreground">
-        {reason ? REASON[reason].hint : "这里只列出,不提供核销、退还或确认结清等处理操作。"}
+        {reason ? REASON[reason].hint : "这里只列出，不提供核销、退还或确认结清等处理操作。"}
       </p>
       {error && <LoadError compact what="待核对记录" message={error} />}
       {items.length === 0 ? (

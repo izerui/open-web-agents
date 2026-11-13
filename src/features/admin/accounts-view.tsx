@@ -34,6 +34,7 @@ import {
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { accountRecordLinks } from "./account-links";
 import {
   AdminDrawer,
   AdminPage,
@@ -321,7 +322,7 @@ function AccountsPanel({
           <>
             {/*
               【为什么是表格】改造前每个账号一张卡片，几百个账号一屏只看得到几个；
-              运营要做的是"扫一遍、挑出异常的那几个",这需要一行一个、列对齐。
+              运营要做的是"扫一遍、挑出异常的那几个"，这需要一行一个、列对齐。
               改额度、改角色、停用这些写操作在右侧详情里。
             */}
             {/* 窄屏:卡片列表,邮箱、角色、状态和本月消耗都看得到 */}
@@ -476,7 +477,7 @@ function AccountsPanel({
           onToggleRole={() => {
             const toAdmin = selected.role !== "admin";
             confirm.ask({
-              title: toAdmin ? "设为管理员?" : "取消管理员?",
+              title: toAdmin ? "设为管理员？" : "取消管理员？",
               description: toAdmin
                 ? `${selected.email} 将能进入平台管理，操作所有账号、模型、计费和全部智能体（但仍看不到别人的会话）。`
                 : `${selected.email} 将失去平台管理入口，只保留自己名下资源的权限。`,
@@ -493,7 +494,7 @@ function AccountsPanel({
           }}
           onResetPassword={() =>
             confirm.ask({
-              title: `重置 ${selected.email} 的密码?`,
+              title: `重置 ${selected.email} 的密码？`,
               description: "旧密码立即失效，系统会生成一个一次性的新密码供你转交。",
               confirmLabel: "生成一次性密码",
               onConfirm: async () => {
@@ -534,7 +535,7 @@ function LimitCell({ a }: { a: Account }) {
     return (
       <span className="inline-flex items-center gap-1 text-xs text-warning-text">
         <AlertTriangle className="size-3.5" />
-        旧上限 ${(a.legacyLimitMicroUsd / 1_000_000).toFixed(2)},需按积分重设
+        旧上限 ${(a.legacyLimitMicroUsd / 1_000_000).toFixed(2)}，需按积分重设
       </span>
     );
   }
@@ -591,8 +592,8 @@ function AccountDrawer({
               {isSelf && <Badge variant="outline">你自己</Badge>}
             </div>
             <div className="text-xs text-muted-foreground">
-              {roleText},注册于 {dateText(a.createdAt)}
-              {a.disabled ? ",已停用" : ""}
+              {roleText}，注册于 {dateText(a.createdAt)}
+              {a.disabled ? "，已停用" : ""}
             </div>
           </div>
         </div>
@@ -691,7 +692,7 @@ function AccountDrawer({
         desc={
           a.disabled
             ? "恢复后可以重新登录，但原有 API Key 不会自动启用，需要本人重新签发。"
-            : "停用会立即登出该账号，并停用它名下的全部 API Key;智能体与历史数据保留。"
+            : "停用会立即登出该账号，并停用它名下的全部 API Key；智能体与历史数据保留。"
         }
       >
         <Button
@@ -708,19 +709,19 @@ function AccountDrawer({
       <DrawerSection title="相关记录">
         <div className="flex flex-wrap gap-2">
           <Button asChild size="sm" variant="outline">
-            <Link href="/admin/billing?tab=accounts">
+            <Link href={accountRecordLinks(a.id).billing}>
               <Coins />
               积分账户
             </Link>
           </Button>
           <Button asChild size="sm" variant="outline">
-            <Link href="/admin/ops?tab=runs">
+            <Link href={accountRecordLinks(a.id).runs}>
               <Activity />
               平台运行
             </Link>
           </Button>
           <Button asChild size="sm" variant="outline">
-            <Link href="/admin/ops?tab=audit">
+            <Link href={accountRecordLinks(a.id).audit}>
               <ScrollText />
               操作记录
             </Link>

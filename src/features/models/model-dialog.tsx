@@ -171,8 +171,8 @@ export function ModelDialog({ providerId, kind, model, onClose, onSaved }: Props
             {model ? `编辑模型「${model.name}」` : `添加${KIND_LABEL[kind]}模型`}
           </DialogTitle>
           <DialogDescription>
-            按成本单价(人民币)录入,系统按 1 元 = 100
-            积分换算,再乘以加价得到用户看到的售价。每次保存生成新版本,进行中的运行按原版本结算。
+            按成本单价（人民币）录入，系统按 1 元 = 100
+            积分换算，再乘以加价得到用户看到的售价。每次保存生成新版本，进行中的运行按原版本结算。
           </DialogDescription>
         </DialogHeader>
 
@@ -217,7 +217,7 @@ export function ModelDialog({ providerId, kind, model, onClose, onSaved }: Props
           </label>
           {kind === "llm" && (
             <label className="grid gap-1.5 text-sm">
-              单次运行冻结(积分)
+              单次运行冻结（积分）
               <Input
                 value={reserve}
                 inputMode="decimal"
@@ -227,7 +227,7 @@ export function ModelDialog({ providerId, kind, model, onClose, onSaved }: Props
               />
               {fieldError("reserve")}
               <span className="text-xs text-muted-foreground">
-                每次运行发起先冻结这么多,用到八成自动追加;结束按实际用量扣除。
+                每次运行发起先冻结这么多，用到八成自动追加；结束按实际用量扣除。
               </span>
             </label>
           )}
@@ -271,13 +271,13 @@ export function ModelDialog({ providerId, kind, model, onClose, onSaved }: Props
                   计量
                 </th>
                 <th scope="col" className="py-2 pr-3">
-                  成本单价(元)
+                  成本单价（元）
                 </th>
                 <th scope="col" className="py-2 pr-3">
                   成本积分价
                 </th>
                 <th scope="col" className="py-2">
-                  售价积分价(用户可见)
+                  售价积分价（用户可见）
                 </th>
               </tr>
             </thead>
@@ -307,7 +307,7 @@ export function ModelDialog({ providerId, kind, model, onClose, onSaved }: Props
         </div>
         {legacyUnits && (
           <p className="text-xs text-muted-foreground">
-            这个模型的旧价目使用非标准单位,已按标准单位向上取整显示;保存后统一为标准单位。
+            这个模型的旧价目使用非标准单位，已按标准单位向上取整显示；保存后统一为标准单位。
           </p>
         )}
 
@@ -315,7 +315,7 @@ export function ModelDialog({ providerId, kind, model, onClose, onSaved }: Props
           <p className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" />
             {impact
-              ? `停用后影响 ${impact.agents} 个智能体${impact.aliases.length ? `;别名 ${impact.aliases.join("、")} 指向此模型,使用这些别名的智能体也会无法运行` : ""}。进行中的运行不受影响。`
+              ? `停用后影响 ${impact.agents} 个智能体${impact.aliases.length ? `；别名 ${impact.aliases.join("、")} 指向此模型，使用这些别名的智能体也会无法运行` : ""}。进行中的运行不受影响。`
               : "正在统计影响的智能体…"}
           </p>
         )}

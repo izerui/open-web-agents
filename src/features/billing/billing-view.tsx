@@ -14,6 +14,8 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { filterParam } from "@/features/admin/account-links";
+import { creditsText } from "@/features/models/model-shared";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import type { SummaryWindow } from "@/lib/modules/billing/domain/charge-summary";
 import {
@@ -22,7 +24,7 @@ import {
   creditsExact,
 } from "@/lib/modules/billing/domain/credits-display";
 import type { LedgerEntry, WalletBalance } from "@/lib/modules/billing/ports";
-import { formatCredits, parseCredits } from "@/lib/modules/capabilities/domain/catalog";
+import { parseCredits } from "@/lib/modules/capabilities/domain/catalog";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, ArrowDownToLine, RefreshCw, Users, Wallet } from "lucide-react";
 import Link from "next/link";
@@ -31,6 +33,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { BatchCreditDialog } from "./batch-credit-form";
 import { type ChargeDrill, ChargeSummary, WINDOW_LABEL } from "./charge-summary";
+import { type LedgerRefs, mergeRefs } from "./ledger-note";
 import { LedgerTable } from "./ledger-table";
 import { PendingCharges } from "./pending-charges";
 import { ReconciliationView } from "./reconciliation-view";
@@ -39,6 +42,8 @@ import { RunChargeList } from "./run-charge-list";
 type Statement = {
   balance: WalletBalance;
   items: LedgerEntry[];
+  /** 本页流水用到的运行与订单名字(流水「说明」用) */
+  refs?: LedgerRefs;
   nextCursor?: string;
   month?: {
     since: number;
@@ -70,7 +75,7 @@ export function BillingView({
   const [accounts, setAccounts] = useState<Account[]>([]);
   // 选中的账号记在地址 ?account= 里:刷新、分享都还在这个账号
   const [accountId, setAccountId] = useState(() =>
-    admin ? (searchParams.get("account") ?? "") : "",
+    admin ? filterParam(searchParams, "account") : "",
   );
   /** 发放表单没过校验的那一栏 */
   const [creditErr, setCreditErr] = useState<{ field: "credits" | "reason"; text: string } | null>(
@@ -153,6 +158,10 @@ export function BillingView({
             cursor && previous?.balance.accountId === result.balance.accountId
               ? [...previous.items, ...result.items]
               : result.items,
+          refs:
+            cursor && previous?.balance.accountId === result.balance.accountId
+              ? mergeRefs(previous.refs, result.refs)
+              : result.refs,
         }));
       } catch (err) {
         if (seq === requestSeq.current) setError(errorText(err));
@@ -206,13 +215,13 @@ export function BillingView({
         body: payload,
       });
       setReceipt(
-        `${result.replayed ? "已确认原入账" : "入账成功"}: ${formatCredits(result.entry.amountMicroCredits)} 积分 · 流水 ${result.entry.id}`,
+        `${result.replayed ? "已确认原入账" : "入账成功"}：${creditsText(result.entry.amountMicroCredits)} 积分 · 流水 ${result.entry.id}`,
       );
       setCredits("");
       setReason("");
       setConfirm(false);
       creditAttempt.current = null;
-      toast.success(result.replayed ? "原请求已处理,未重复入账" : "积分已入账");
+      toast.success(result.replayed ? "原请求已处理，未重复入账" : "积分已入账");
       setStatement((previous) => ({
         ...previous,
         balance: result.balance,
@@ -566,7 +575,7 @@ export function BillingView({
                 {statement.items.length === 0 ? (
                   <p className="py-5 text-sm text-muted-foreground">暂无流水</p>
                 ) : (
-                  <LedgerTable items={statement.items} />
+                  <LedgerTable items={statement.items} refs={statement.refs} />
                 )}
                 {statement.nextCursor && (
                   <Button

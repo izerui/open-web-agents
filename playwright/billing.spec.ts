@@ -49,7 +49,7 @@ test.describe("积分与计费界面", () => {
       await expect(page.getByRole("term").filter({ hasText: /^可用$/ })).toBeVisible();
       // 余额区的标签;消耗汇总表也有"冻结中"一列,不能只按文字找
       await expect(page.getByRole("term").filter({ hasText: /^冻结中$/ })).toBeVisible();
-      await expect(page.getByTestId("balance-available")).toHaveText("0.00");
+      await expect(page.getByTestId("balance-available")).toHaveText("0");
       await expect(page.getByTestId("balance-reserved")).toHaveText("0");
       await expect(page.getByText("结束后按实际用量扣除")).toBeVisible();
       await page.getByRole("tab", { name: "运行消耗", exact: true }).click();
@@ -79,7 +79,7 @@ test.describe("积分与计费界面", () => {
     await row.getByRole("button", { name: "修改月度积分上限" }).click();
     await page.getByLabel("本月积分上限").fill("100");
     await row.getByRole("button", { name: "保存" }).click();
-    await expect(row).toContainText("/ 100.00");
+    await expect(row).toContainText("/ 100");
     await row.getByRole("button", { name: "修改月度积分上限" }).click();
     await row.getByRole("button", { name: "设为不限额" }).click();
     await expect(row).toContainText("/ 不限额");
@@ -133,12 +133,12 @@ test.describe("积分与计费界面", () => {
       await page.getByRole("tab", { name: "运行消耗", exact: true }).click();
       const row = (i: number) =>
         page.getByTestId("run-charge").filter({ hasText: rows[i]?.id ?? "" });
-      await expect(row(0)).toContainText("欠额余额不足,欠 27.75 积分,充值后自动补扣");
-      await expect(row(0).locator("td").nth(5)).toHaveText("30.00");
+      await expect(row(0)).toContainText("欠额余额不足，欠 27.75 积分，充值后自动补扣");
+      await expect(row(0).locator("td").nth(5)).toHaveText("30");
       await expect(row(1)).toContainText("待核对用量待补记");
       await expect(row(1)).not.toContainText("退还");
-      await expect(row(1).locator("td").nth(4)).toHaveText("69.30");
-      await expect(row(1).locator("td").nth(5)).toHaveText("92.40");
+      await expect(row(1).locator("td").nth(4)).toHaveText("69.3");
+      await expect(row(1).locator("td").nth(5)).toHaveText("92.4");
       await expect(row(2)).toContainText("待核对用量待补记");
     } finally {
       for (const r of rows) await sql("DELETE FROM run_charges WHERE run_id = ?", [r.id]);
@@ -156,8 +156,8 @@ test.describe("积分与计费界面", () => {
       await page.reload();
       await page.getByRole("tab", { name: "运行消耗", exact: true }).click();
       const r = page.getByTestId("run-charge").filter({ hasText: refunded });
-      await expect(r).toContainText("多扣已退还多扣的 23.10 积分已退还");
-      await expect(r.locator("td").nth(5)).toHaveText("69.30");
+      await expect(r).toContainText("多扣已退还多扣的 23.1 积分已退还");
+      await expect(r.locator("td").nth(5)).toHaveText("69.3");
     } finally {
       await sql("DELETE FROM run_charges WHERE run_id = ?", [refunded]);
     }
@@ -521,7 +521,7 @@ test.describe("积分与计费界面", () => {
       await expect(line).toContainText("10,000 / 0");
       await expect(line).toContainText("0.21"); // 成本估算:1 万输入 × 21 元/百万
       await expect(line).toContainText("用量未知 1");
-      await expect(line).toContainText("未观察到用量(按 0 结清) 1");
+      await expect(line).toContainText("未观察到用量（按 0 结清） 1");
 
       const download = page.waitForEvent("download");
       await section.getByRole("button", { name: "导出 CSV" }).click();
@@ -529,7 +529,7 @@ test.describe("积分与计费界面", () => {
       const fs = await import("node:fs/promises");
       const text = await fs.readFile((await file.path()) ?? "", "utf8");
       expect(text).toContain(providerName);
-      expect(text).toContain("成本估算(元)");
+      expect(text).toContain("成本估算（元）");
     } finally {
       for (const id of runIds) {
         await sql("DELETE FROM run_charges WHERE run_id = ?", [id]);

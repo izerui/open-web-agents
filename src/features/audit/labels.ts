@@ -131,13 +131,13 @@ export function describeAudit(e: AuditItem): string {
     case "agent.create":
     case "agent.update": {
       const changed = Array.isArray(d.changed) ? (d.changed as string[]) : [];
-      const via = d.via === "designer" ? "(通过 AI 设计师)" : "";
+      const via = d.via === "designer" ? "（通过 AI 设计师）" : "";
       return `「${s(d.name)}」${via}${changed.length ? `:改动 ${changed.join("、")}` : ""}`;
     }
     case "agent.delete":
       return `「${s(d.name)}」`;
     case "agent.publish":
-      return `发布 v${s(d.version)}${d.note ? `:${s(d.note)}` : ""}`;
+      return `发布 v${s(d.version)}${d.note ? `：${s(d.note)}` : ""}`;
     case "agent.activate_version":
       return `发布版本 ${d.from ? `v${s(d.from)}` : "无"} → v${s(d.to)}`;
     case "agent.restore_version":
@@ -151,54 +151,54 @@ export function describeAudit(e: AuditItem): string {
       return `「${s(d.title)}」`;
     case "api_key.issue":
       return `「${s(d.name) || "未命名"}」${
-        d.boundAgentId ? `,仅限智能体「${s(d.boundAgentName) || s(d.boundAgentId)}」` : ""
+        d.boundAgentId ? `，仅限智能体「${s(d.boundAgentName) || s(d.boundAgentId)}」` : ""
       }`;
     case "api_key.revoke":
       return `「${s(d.name) || "未命名"}」`;
     case "api_key.rotate":
-      return `「${s(d.name) || "未命名"}」签发新 Key,旧 Key 于 ${s(d.oldExpiresAt)} 失效`;
+      return `「${s(d.name) || "未命名"}」签发新 Key，旧 Key 于 ${s(d.oldExpiresAt)} 失效`;
     case "api_key.rate_limit":
       return `「${s(d.name) || "未命名"}」每分钟上限 ${d.from ?? "默认"} → ${d.to ?? "默认"}`;
     case "api_key.monthly_limit":
       return `「${s(d.name) || "未命名"}」本月积分上限 ${limitText(d.from)} → ${limitText(d.to)}`;
     case "billing.credit":
       return typeof d.amountMicroCredits === "string" && /^\d+$/.test(d.amountMicroCredits)
-        ? `${creditsAmount(d.amountMicroCredits)} 积分${d.via === "batch" ? "(批量发放)" : ""}`
+        ? `${creditsAmount(d.amountMicroCredits)} 积分${d.via === "batch" ? "（批量发放）" : ""}`
         : "";
     case "billing.mode_update":
       return `${modeText(d.from)} → ${modeText(d.to)}`;
     case "approval.decide":
       return `${d.decision === "approved" ? "批准" : "拒绝"} ${s(d.tool)}${
-        d.remember ? `,并授权本会话内同类(${s(d.grantLabel)})不再询问` : ""
-      }${d.runId ? `(运行 ${s(d.runId)})` : ""}`;
+        d.remember ? `，并授权本会话内同类（${s(d.grantLabel)}）不再询问` : ""
+      }${d.runId ? `（运行 ${s(d.runId)}）` : ""}`;
     case "approval.revoke_grant":
-      return `撤销本会话的同类授权:${s(d.grantLabel) || s(d.grantCategory)}`;
+      return `撤销本会话的同类授权：${s(d.grantLabel) || s(d.grantCategory)}`;
     case "account.create":
       return `${s(d.email)}(${s(d.role)})`;
     case "account.update": {
       const changes = (d.changes ?? {}) as Record<string, { from: unknown; to: unknown }>;
       const parts = Object.entries(changes).map(([k, v]) =>
         k === "monthlyLimitMicroCredits"
-          ? `月度积分上限: ${limitText(v.from)} → ${limitText(v.to)}`
+          ? `月度积分上限：${limitText(v.from)} → ${limitText(v.to)}`
           : k === "legacyMonthlyLimitMicroUsd"
             ? `旧美元上限 $${(Number(v.from) / 1_000_000).toFixed(2)} 已改为积分上限`
             : `${k}: ${String(v.from)} → ${String(v.to)}`,
       );
-      return `${s(d.email)}${parts.length ? `:${parts.join(",")}` : ""}`;
+      return `${s(d.email)}${parts.length ? `：${parts.join("，")}` : ""}`;
     }
     case "account.reset_password":
       return s(d.email);
     case "auth.login_failed":
       return `${s(d.email)}:${s(d.reason)}`;
     case "me.credentials_update":
-      return `Base URL ${s(d.baseUrl)},模型 Key ${s(d.modelKey)}`;
+      return `Base URL ${s(d.baseUrl)}，模型 Key ${s(d.modelKey)}`;
     case "group.create":
       return `「${s(d.name)}」`;
     case "group.member_add":
       return `「${s(d.group)}」加入 ${s(d.email)}`;
     case "webhook.test":
       return d.ok
-        ? `成功(HTTP ${s(d.httpStatus)})`
+        ? `成功（HTTP ${s(d.httpStatus)}）`
         : `失败${d.httpStatus ? `(HTTP ${s(d.httpStatus)})` : ""}`;
     case "webhook.redeliver":
       return "已放回发件箱";
@@ -207,13 +207,13 @@ export function describeAudit(e: AuditItem): string {
     case "group.member_remove":
       return `「${s(d.group)}」移除 ${s(d.memberId)}`;
     case "group.delete":
-      return `「${s(d.name)}」${typeof d.members === "number" ? `(${d.members} 位成员)` : ""}`;
+      return `「${s(d.name)}」${typeof d.members === "number" ? `（${d.members} 位成员）` : ""}`;
     case "market.listing_request":
-      return `「${s(d.name)}」v${s(d.version)} 申请上架${d.note ? `:${s(d.note)}` : ""}`;
+      return `「${s(d.name)}」v${s(d.version)} 申请上架${d.note ? `：${s(d.note)}` : ""}`;
     case "market.listing_approve":
       return `「${s(d.name)}」上架到「${s(d.categoryName) || s(d.category)}」`;
     case "market.listing_reject":
-      return `「${s(d.name)}」:${s(d.reason)}`;
+      return `「${s(d.name)}」：${s(d.reason)}`;
     case "agent.clone":
       return `克隆自「${s(d.sourceAgentId)}」v${s(d.sourceVersion)}`;
     default:

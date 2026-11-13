@@ -1,3 +1,4 @@
+import { type LedgerRefs, ledgerRefIds } from "@/features/billing/ledger-note";
 import { getContainer } from "@/lib/container";
 import { authErrorResponse } from "@/lib/modules/access/application/authorize";
 import { monthStartUtc } from "@/lib/modules/billing/application/run-charging";
@@ -8,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   try {
-    const { auth, billing, users, runCharges } = getContainer();
+    const { auth, billing, users, runCharges, packages } = getContainer();
     const principal = await auth.resolveWeb(req);
     if (principal.type !== "web") {
       return Response.json({ error: "集成 API Key 无权读取账号账务" }, { status: 403 });
@@ -28,10 +29,25 @@ export async function GET(req: Request) {
       billing.ledger(account.id, { limit, cursor: query.get("cursor") ?? undefined }),
       runCharges.monthUsageByAccount(since, account.id),
     ]);
+    // 流水「说明」要写成可读的句子:带回本页用到的运行(智能体名、来源)与订单(套餐名)
+    const ids = ledgerRefIds(ledger.items);
+    const [runInfo, orders] = await Promise.all([
+      ids.runIds.length
+        ? runCharges.describeRuns(account.id, ids.runIds)
+        : Promise.resolve(new Map()),
+      Promise.all(ids.orderIds.map((id) => packages.getOrder(id))),
+    ]);
+    const refs: LedgerRefs = { runs: Object.fromEntries(runInfo), orders: {} };
+    for (const order of orders) {
+      // 只带本账号的订单
+      if (order && order.accountId === account.id)
+        refs.orders[order.id] = { packageName: order.packageName };
+    }
     return Response.json(
       {
         balance,
         ...ledger,
+        refs,
         paymentsConnected: false,
         month: {
           since,

@@ -31,6 +31,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { sortByCredits } from "./billing-display";
 import { formatPrice, parsePrice, priceParts } from "./money";
+import { OrderNo } from "./order-no";
 
 type Order = CreditOrder & { accountEmail?: string };
 type OrderPage = { items: Order[]; nextCursor?: string };
@@ -224,7 +225,7 @@ export function PackageView({
       requestKey.current = null;
       setPurchase(null);
       setView("orders");
-      toast.success(result.replayed ? "已找到原订单,未重复创建" : "订单已创建,等待人工处理");
+      toast.success(result.replayed ? "已找到原订单，未重复创建" : "订单已创建，等待人工处理");
       await loadOrders();
     });
   }
@@ -246,7 +247,7 @@ export function PackageView({
         action.kind === "cancel"
           ? "订单已取消"
           : result.replayed
-            ? "原订单已发放,没有重复入账"
+            ? "原订单已发放，没有重复入账"
             : "积分已发放",
       );
       setAction(null);
@@ -422,7 +423,9 @@ export function PackageView({
               {action && (
                 <div>
                   <dt className="text-muted-foreground">订单号</dt>
-                  <dd className="break-all font-mono text-[13px]">{action.order.id}</dd>
+                  <dd className="text-[13px]">
+                    <OrderNo id={action.order.id} />
+                  </dd>
                 </div>
               )}
               <div>
@@ -440,7 +443,7 @@ export function PackageView({
               <div>
                 <dt className="text-muted-foreground">积分</dt>
                 <dd className="font-mono">
-                  {formatCredits(purchase?.creditsMicro ?? action?.order.creditsMicro ?? "0")}
+                  {creditsText(purchase?.creditsMicro ?? action?.order.creditsMicro ?? "0")}
                 </dd>
               </div>
               <div>
@@ -593,7 +596,7 @@ export function PackageView({
                     <h3 className="min-w-0 break-words text-sm font-semibold">{pack.name}</h3>
                   </div>
                   <p className="break-all text-2xl font-medium">
-                    {formatCredits(pack.creditsMicro)}{" "}
+                    {creditsText(pack.creditsMicro)}{" "}
                     <span className="text-sm text-muted-foreground">积分</span>
                   </p>
                   <p className="mt-2 break-all font-mono text-lg">
@@ -676,7 +679,9 @@ export function PackageView({
                           <p className="break-words font-medium">
                             {order.packageName} · v{order.packageVersion}
                           </p>
-                          <p className="mt-1 break-all text-muted-foreground">{order.id}</p>
+                          <p className="mt-1 text-muted-foreground">
+                            <OrderNo id={order.id} />
+                          </p>
                           <p className="mt-1 whitespace-nowrap text-muted-foreground">
                             {formatTime(order.createdAt)}
                           </p>
@@ -690,7 +695,7 @@ export function PackageView({
                           {formatPrice(order.priceMinor, order.currency)}
                         </td>
                         <td className="whitespace-nowrap px-2 py-3 font-mono">
-                          {formatCredits(order.creditsMicro)}
+                          {creditsText(order.creditsMicro)}
                         </td>
                         <td className="whitespace-nowrap px-2 py-3">{STATUS[order.status]}</td>
                         <td className="px-2 py-3">
@@ -926,8 +931,8 @@ function UserPackages({
               <tbody>
                 {orders.items.map((order) => (
                   <tr key={order.id}>
-                    <td className={cn(tb.td, tb.first, "font-mono text-[12.5px] break-all")}>
-                      {order.id}
+                    <td className={cn(tb.td, tb.first, "text-[12.5px]")}>
+                      <OrderNo id={order.id} />
                     </td>
                     <td className={tb.td}>
                       {order.packageName} v{order.packageVersion}

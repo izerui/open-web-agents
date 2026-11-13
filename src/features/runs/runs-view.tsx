@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { filterParam } from "@/features/admin/account-links";
 import { Seg } from "@/features/build/ui";
 import { EmptyState, SpacePage, tb } from "@/features/settings/space-page";
 import { shortTime } from "@/features/settings/time-format";
@@ -18,7 +19,7 @@ import { formatTime } from "@/lib/format-time";
 import { cn } from "@/lib/utils";
 import { Copy, ExternalLink, Loader2, MessageSquare, RefreshCw, Square, X } from "lucide-react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -115,12 +116,15 @@ export function RunsView({
   const searchParams = useSearchParams();
   // 构建页的「运行」阶段直接传入智能体;旧的 ?agent= 仍然认
   const requestedAgent = agentId ?? searchParams.get("agent");
+  // 平台运行从账号详情跳过来时带 ?account=,进来就按这个账号筛
+  const initialAccountId = platform ? filterParam(searchParams, "account") : "";
   // Changing objects resets the result list, pagination and detail together.
   return (
     <RunsInShell
       key={JSON.stringify([platform, requestedAgent])}
       requestedAgent={requestedAgent}
       platform={platform}
+      initialAccountId={initialAccountId}
     />
   );
 }
@@ -197,7 +201,8 @@ export function DeveloperRunsView() {
 function RunsInShell({
   requestedAgent,
   platform,
-}: { requestedAgent: string | null; platform: boolean }) {
+  initialAccountId,
+}: { requestedAgent: string | null; platform: boolean; initialAccountId: string }) {
   const list = useAgentList();
   const objectMode = requestedAgent !== null;
   return (
@@ -208,14 +213,19 @@ function RunsInShell({
         platform
           ? objectMode
             ? "此智能体在全平台的运行"
-            : "全平台运行,包括工作台、接口调用与评测"
+            : "全平台运行，包括工作台、接口调用与评测"
           : objectMode
             ? "此智能体下计费在你名下的运行"
-            : "计费在你名下的全部运行,包括工作台、接口调用与评测"
+            : "计费在你名下的全部运行，包括工作台、接口调用与评测"
       }
       width={objectMode ? "full" : "wide"}
     >
-      <RunsPanel requestedAgent={requestedAgent} platform={platform} agentList={list} />
+      <RunsPanel
+        requestedAgent={requestedAgent}
+        platform={platform}
+        agentList={list}
+        initialAccountId={initialAccountId}
+      />
     </SpaceShell>
   );
 }
@@ -225,12 +235,15 @@ export function RunsPanel({
   platform,
   agentList,
   inAgent = false,
+  initialAccountId = "",
 }: {
   requestedAgent: string | null;
   platform: boolean;
   agentList: AgentList;
   /** 构建页「运行」阶段(单个智能体):不显示智能体列,改显示版本列;来源用分段按钮 */
   inAgent?: boolean;
+  /** 平台运行的初始账号筛选(来自地址 ?account=) */
+  initialAccountId?: string;
 }) {
   const objectMode = requestedAgent !== null;
   const confirm = useConfirm();
@@ -239,8 +252,20 @@ export function RunsPanel({
   const [status, setStatus] = useState("");
   const [source, setSource] = useState("");
   /** 平台运行按账号筛选;空 = 全部账号 */
-  const [accountId, setAccountId] = useState("");
+  const [accountId, setAccountIdState] = useState(platform ? initialAccountId : "");
   const accounts = usePlatformAccounts(platform);
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  /** 换账号筛选时同步写进地址 ?account=(不新增历史记录),刷新、分享都还在这个账号 */
+  function setAccountId(id: string) {
+    setAccountIdState(id);
+    if (!platform) return;
+    const q = new URLSearchParams(searchParams.toString());
+    if (id) q.set("account", id);
+    else q.delete("account");
+    router.replace(`${pathname}${q.size ? `?${q}` : ""}`, { scroll: false });
+  }
   const [items, setItems] = useState<RunItem[]>([]);
   const [cursor, setCursor] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
@@ -257,8 +282,8 @@ export function RunsPanel({
   const contextError =
     objectMode && agentsLoaded && !agentsError && !selectedAgent
       ? requestedAgent
-        ? "找不到指定的智能体,它可能已被删除或你没有访问权限。"
-        : "链接缺少智能体 ID,请选择智能体后再查看运行。"
+        ? "找不到指定的智能体，它可能已被删除或你没有访问权限。"
+        : "链接缺少智能体 ID，请选择智能体后再查看运行。"
       : null;
 
   const load = useCallback(
@@ -321,10 +346,10 @@ export function RunsPanel({
         { method: "POST" },
       );
       if (r.cancelled) toast.success("运行已取消");
-      else toast.message(r.note ?? "运行已结束,无需取消");
+      else toast.message(r.note ?? "运行已结束，无需取消");
       await Promise.all([load(), openDetail(run.id)]);
     } catch (e) {
-      toast.error(`取消失败:${errorText(e)}`);
+      toast.error(`取消失败：${errorText(e)}`);
     } finally {
       setCancelling(false);
     }
@@ -335,7 +360,7 @@ export function RunsPanel({
       await navigator.clipboard.writeText(text);
       toast.success("taskId 已复制");
     } catch (e) {
-      toast.error(`复制失败:${errorText(e)}`);
+      toast.error(`复制失败：${errorText(e)}`);
     }
   }
 
@@ -346,7 +371,7 @@ export function RunsPanel({
     <>
       {agentsError && (
         <Alert variant="destructive" className="mb-3 flex flex-wrap items-center gap-2">
-          智能体列表加载失败:{agentsError}
+          智能体列表加载失败：{agentsError}
           <Button size="sm" variant="outline" onClick={() => void loadAgents()}>
             重试
           </Button>
@@ -370,7 +395,7 @@ export function RunsPanel({
       )}
       {detailError && (
         <p aria-live="polite" className="mb-3 text-sm text-destructive">
-          运行详情没有读到:{detailError}
+          运行详情没有读到：{detailError}
         </p>
       )}
       {canLoad && (
@@ -563,7 +588,7 @@ export function RunsPanel({
                       platform ? "min-w-[1040px]" : inAgent ? "min-w-[760px]" : "min-w-[880px]",
                     )}
                   >
-                    <caption className="sr-only">运行列表,按回车查看详情</caption>
+                    <caption className="sr-only">运行列表，按回车查看详情</caption>
                     <thead>
                       <tr>
                         <th scope="col" className={cn(tb.th, tb.first)}>
@@ -664,7 +689,7 @@ export function RunsPanel({
                                     <Badge
                                       variant="warning"
                                       className="ml-1"
-                                      title="有模型调用没回报用量,统计不完整"
+                                      title="有模型调用没回报用量，统计不完整"
                                     >
                                       部分
                                     </Badge>
