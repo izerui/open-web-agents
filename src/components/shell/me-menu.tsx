@@ -31,10 +31,8 @@ export function MeMenu({ balance }: { balance: Balance }) {
   if (loading) return <Skeleton className="size-[34px] rounded-full" />;
 
   const local = me?.authRequired === false && !me.user;
-  // 本地模式的匿名管理员没有积分账户:隐藏积分入口,免得点进去报「账号不存在」
-  const items = meMenuItems(me, {
-    credits: local && balance.status === "none" ? false : undefined,
-  });
+  // 本地模式的匿名管理员没有积分账户和密码:meMenuItems 不给积分与套餐、账号安全
+  const items = meMenuItems(me);
   if (items.length === 1 && items[0]?.href === "/login") {
     return (
       <Link

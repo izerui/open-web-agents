@@ -10,9 +10,10 @@ import {
   usePromptInputAttachments,
 } from "@/components/ai-elements/prompt-input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { takeAttachments } from "@/lib/attachment-handoff";
 import { cn } from "@/lib/utils";
 import { ArrowUp, Clock, File, Image, Paperclip, Square, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ContextWindowMeter } from "./context-window-meter";
 
@@ -72,6 +73,17 @@ function SlashMenu({
       ))}
     </div>
   );
+}
+
+/** 探索首页「立即使用」带来的附件:打开的正是那个会话时放进附件条(见 lib/attachment-handoff) */
+function HandedOffAttachments() {
+  const { add } = usePromptInputAttachments();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: take once on mount
+  useEffect(() => {
+    const files = takeAttachments(new URLSearchParams(window.location.search).get("session"));
+    if (files.length) add(files);
+  }, []);
+  return null;
 }
 
 function AttachmentChips() {
@@ -240,6 +252,7 @@ export function Composer({
         >
           <PromptInputHeader className="px-3.5 pt-2.5 pb-0 empty:hidden">
             <AttachmentChips />
+            <HandedOffAttachments />
           </PromptInputHeader>
           <PromptInputBody>
             <PromptInputTextarea

@@ -3,12 +3,14 @@ import {
   MOBILE_TABS,
   agentHref,
   agentRoute,
+  hasCreditsAccount,
   legacyRedirect,
   meMenuItems,
   mobileTabOf,
   mobileTabsVisible,
   navFor,
   paletteEntries,
+  sideNavFor,
   spaceOf,
   stageOfLegacyTab,
 } from "../routes";
@@ -115,6 +117,50 @@ describe("navFor:按角色给出顶栏空间", () => {
   it("还没读到登录态时按普通账号处理", () => {
     expect(navFor(null).map((s) => s.key)).not.toContain("admin");
   });
+
+  it("「账户」平时指向积分与套餐;本地模式没有积分账户,改指用量分析", () => {
+    expect(navFor(user).find((s) => s.key === "account")?.href).toBe("/account/billing");
+    const local = { authenticated: false, authRequired: false };
+    expect(navFor(local).find((s) => s.key === "account")?.href).toBe("/account/usage");
+    expect(navFor(local).map((s) => s.key)).toContain("admin");
+  });
+});
+
+describe("hasCreditsAccount / sideNavFor:本地模式没有积分账户和密码", () => {
+  const user = {
+    authenticated: true,
+    authRequired: true,
+    user: { id: "u", email: "u@x", role: "user" },
+  };
+  const local = { authenticated: false, authRequired: false };
+  const hrefs = (me: Parameters<typeof sideNavFor>[1]) =>
+    sideNavFor("account", me).flatMap((g) => g.items.map((i) => i.href));
+
+  it("登录账号有积分账户;本地模式的匿名管理员没有", () => {
+    expect(hasCreditsAccount(user)).toBe(true);
+    expect(hasCreditsAccount(local)).toBe(false);
+    // 还没读到登录态时先按有处理,免得登录用户的入口闪一下又出来
+    expect(hasCreditsAccount(null)).toBe(true);
+  });
+
+  it("账户侧栏:本地模式去掉积分与套餐、账号安全", () => {
+    expect(hrefs(user)).toEqual([
+      "/account/billing",
+      "/account/usage",
+      "/account/prices",
+      "/account/security",
+      "/account/audit",
+    ]);
+    expect(hrefs(local)).toEqual(["/account/usage", "/account/prices", "/account/audit"]);
+  });
+
+  it("空掉的分组不留标题", () => {
+    for (const g of sideNavFor("account", local)) expect(g.items.length).toBeGreaterThan(0);
+  });
+
+  it("其他空间的侧栏不受影响", () => {
+    expect(sideNavFor("developer", local)).toEqual(sideNavFor("developer", user));
+  });
 });
 
 describe("agentRoute / agentHref:构建页的地址", () => {
@@ -182,15 +228,16 @@ describe("meMenuItems:头像菜单", () => {
 
   it("关闭登录的本地模式(接口真实返回 authenticated:false)给本地菜单,不是去登录,也没有登出", () => {
     const local = { authenticated: false, authRequired: false };
-    expect(labels(local)).toEqual(["积分与套餐", "账号安全", "操作日志", "平台管理"]);
+    // 匿名管理员没有积分账户、也没有密码:积分与套餐、账号安全都不给
+    expect(labels(local)).toEqual(["操作日志", "平台管理"]);
   });
 
-  it("没有积分账户(本地模式读不到余额)时隐藏积分入口", () => {
-    const local = { authenticated: false, authRequired: false };
-    expect(meMenuItems(local, { credits: false }).map((i) => i.label)).toEqual([
+  it("没有积分账户(读不到余额)时隐藏积分入口", () => {
+    expect(meMenuItems(admin, { credits: false }).map((i) => i.label)).toEqual([
       "账号安全",
       "操作日志",
       "平台管理",
+      "登出",
     ]);
     // 余额还在读(undefined)时照常显示
     expect(meMenuItems(user, {}).map((i) => i.label)).toContain("积分与套餐");
@@ -273,6 +320,18 @@ describe("paletteEntries:⌘K 里能跳的页面", () => {
     // 新会话不和「对话」空间入口合并:两个都在
     expect(list.find((e) => e.label === "新会话")?.href).toMatch(/^\/chat\?/);
     expect(list.some((e) => e.group === "空间" && e.label === "对话")).toBe(true);
+  });
+
+  it("本地模式不列积分与套餐、账号安全", () => {
+    const h = hrefs({ authenticated: false, authRequired: false });
+    expect(h).not.toContain("/account/billing");
+    expect(h).not.toContain("/account/security");
+    expect(h).toContain("/account/usage");
+    // 「账户」空间入口指向用量分析,和侧栏那项合并成一条
+    const usage = paletteEntries({ authenticated: false, authRequired: false }).find(
+      (e) => e.href === "/account/usage",
+    );
+    expect(usage?.keywords).toContain("账户");
   });
 
   it("同一个地址只出现一次", () => {

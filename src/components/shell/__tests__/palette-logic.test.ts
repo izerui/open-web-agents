@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { agentStatusText, sessionMeta, sessionTitle } from "../palette-logic";
+import {
+  PALETTE_AGENT_LIMIT,
+  agentStatusText,
+  paletteAgents,
+  sessionMeta,
+  sessionTitle,
+} from "../palette-logic";
 
 describe("⌘K 智能体右侧的发布状态", () => {
   it("已发布 / 有改动未发布 / 草稿", () => {
@@ -11,6 +17,34 @@ describe("⌘K 智能体右侧的发布状态", () => {
     );
     expect(agentStatusText({ publishedVersion: null })).toBe("草稿");
     expect(agentStatusText({})).toBe("草稿");
+  });
+
+  it("内置的写「内置」,别人分享来的写「分享」(公开的写「公开」),不一律叫草稿", () => {
+    expect(agentStatusText({ id: "default", isOwner: true, publishedVersion: null })).toBe("内置");
+    expect(agentStatusText({ id: "agent-architect", publishedVersion: 2 })).toBe("内置");
+    expect(agentStatusText({ id: "x", isOwner: false, publishedVersion: null })).toBe("分享");
+    expect(agentStatusText({ id: "x", isOwner: false, publishedVersion: 4 })).toBe("分享");
+    expect(agentStatusText({ id: "x", isOwner: false, isPublic: true })).toBe("公开");
+    // 自己的照旧
+    expect(agentStatusText({ id: "x", isOwner: true, publishedVersion: null })).toBe("草稿");
+  });
+});
+
+describe("⌘K 智能体组的条数", () => {
+  const list = Array.from({ length: 20 }, (_, i) => ({ id: `a${i}` }));
+  it("没输入时只列前 8 条,并提示还有更多", () => {
+    expect(PALETTE_AGENT_LIMIT).toBe(8);
+    const r = paletteAgents(list, "");
+    expect(r.shown.map((a) => a.id)).toEqual(list.slice(0, 8).map((a) => a.id));
+    expect(r.more).toBe(true);
+  });
+  it("输入了搜索词时全部交给面板过滤,不截断", () => {
+    const r = paletteAgents(list, "a1");
+    expect(r.shown).toHaveLength(20);
+    expect(r.more).toBe(false);
+  });
+  it("不够 8 条时没有「查看全部」", () => {
+    expect(paletteAgents(list.slice(0, 5), "").more).toBe(false);
   });
 });
 

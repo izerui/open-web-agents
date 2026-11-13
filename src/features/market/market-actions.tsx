@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { chatHref, startedText } from "@/features/explore/explore-logic";
+import { handOffAttachments } from "@/lib/attachment-handoff";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { agentHref } from "@/lib/nav/routes";
 import { cn } from "@/lib/utils";
@@ -75,11 +76,14 @@ export function useAgentActions() {
         question?: string;
         name?: string;
         version?: number | null;
+        /** 探索首页选的附件:建好会话后交给对话页,进去时已在输入框附件条里 */
+        files?: File[];
       } = {},
     ) =>
       guard("start", async () => {
         try {
           const s = await startAgentSession(agentId, opts.mode);
+          if (opts.files?.length) handOffAttachments(s.id, opts.files);
           toast.success(
             startedText(
               s.name ?? opts.name,

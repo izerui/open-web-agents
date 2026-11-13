@@ -3,7 +3,7 @@
 import { LoadError } from "@/components/load-error";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Banner, CardHead, SpacePage, StatCard } from "@/features/settings/space-page";
+import { Banner, CardHead, EmptyState, SpacePage, StatCard } from "@/features/settings/space-page";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import {
   CHARGE_SOURCE_LABEL,
@@ -16,8 +16,10 @@ import {
   creditsExact,
 } from "@/lib/modules/billing/domain/credits-display";
 import type { LedgerEntry, WalletBalance } from "@/lib/modules/billing/ports";
+import { hasCreditsAccount } from "@/lib/nav/routes";
 import { useMe } from "@/lib/use-me";
 import { AlertTriangle, Plus, RefreshCw } from "lucide-react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -103,13 +105,43 @@ export function AccountBillingView() {
     };
   }, [load]);
 
-  const name = me?.user?.email ? me.user.email.split("@")[0] : "你";
+  // 有邮箱写「X 的积分账户」,没有时写「你的积分账户」(不要「你 的」)
+  const owner = me?.user?.email ? `${me.user.email.split("@")[0]} 的` : "你的";
+
+  // 关闭登录的本地模式:匿名管理员不在账号表里,没有积分账户。给说明,不给「账号不存在」报错
+  if (!hasCreditsAccount(me)) {
+    return (
+      <SpacePage side="account" title="积分与套餐" subtitle="本地模式下没有个人积分账户。">
+        <div className="rounded-2xl border border-border bg-card">
+          <EmptyState
+            title="本地模式没有积分账户"
+            action={
+              <>
+                <Button asChild variant="outline">
+                  <Link href="/account/usage">看用量分析</Link>
+                </Button>
+                <Button asChild variant="outline">
+                  <Link href="/account/prices">看模型价格</Link>
+                </Button>
+                <Button asChild variant="outline">
+                  <Link href="/admin/billing">平台计费</Link>
+                </Button>
+              </>
+            }
+          >
+            现在是关闭登录的本地模式，你以匿名管理员身份使用，运行不扣个人积分。
+            要按账号充值和扣费，请开启登录后用注册的账号进入。
+          </EmptyState>
+        </div>
+      </SpacePage>
+    );
+  }
 
   return (
     <SpacePage
       side="account"
       title="积分与套餐"
-      subtitle={`${name} 的积分账户。每次运行发起时先按模型冻结积分，结束后按实际用量扣除，多余的退回可用余额。`}
+      subtitle={`${owner}积分账户。每次运行发起时先按模型冻结积分，结束后按实际用量扣除，多余的退回可用余额。`}
       actions={
         <Button onClick={() => openTab("packages")}>
           <Plus />

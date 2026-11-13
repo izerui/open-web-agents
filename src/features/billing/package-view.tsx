@@ -26,6 +26,7 @@ import { formatCredits, parseCredits } from "@/lib/modules/capabilities/domain/c
 import { cn } from "@/lib/utils";
 import { Check, Info, Package, Pencil, Plus, RefreshCw, Save, ShoppingCart, X } from "lucide-react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { sortByCredits } from "./billing-display";
@@ -55,9 +56,13 @@ const fresh = (): Draft => ({
   version: null,
 });
 
-/** 个人「积分与套餐」的「充值与订单」页签:积分包卡片 + 我的订单(不带外壳) */
+/**
+ * 个人「积分与套餐」的「充值与订单」页签:积分包卡片 + 我的订单(不带外壳)。
+ * 地址带 view=orders(手机「我的」页的「我的订单」)时直接落到订单。
+ */
 export function PackagesPanel({ onOpenAccount }: { onOpenAccount?: () => void } = {}) {
-  return <PackageView embedded onOpenAccount={onOpenAccount} />;
+  const focusOrders = useSearchParams().get("view") === "orders";
+  return <PackageView embedded onOpenAccount={onOpenAccount} focusOrders={focusOrders} />;
 }
 
 /** 价格:「¥10」+ 币种小字 */
@@ -79,8 +84,15 @@ export function PackageView({
   admin = false,
   embedded = false,
   onOpenAccount,
-}: { admin?: boolean; embedded?: boolean; onOpenAccount?: () => void }) {
-  const [view, setView] = useState("catalog");
+  focusOrders = false,
+}: {
+  admin?: boolean;
+  embedded?: boolean;
+  onOpenAccount?: () => void;
+  /** 一进来就看订单:带页签的版本选中订单页签,平铺版本滚到订单表 */
+  focusOrders?: boolean;
+}) {
+  const [view, setView] = useState(focusOrders ? "orders" : "catalog");
   const [packages, setPackages] = useState<CreditPackage[] | null>(null);
   const [orders, setOrders] = useState<OrderPage | null>(null);
   const [catalogError, setCatalogError] = useState("");
@@ -501,6 +513,7 @@ export function PackageView({
           loadingOrders={loadingOrders}
           onRetryCatalog={() => void loadCatalog()}
           onOpenAccount={onOpenAccount}
+          focusOrders={focusOrders}
           onReloadOrders={(cursor) => void loadOrders(cursor)}
           onBuy={(pack) => {
             setActionError("");
@@ -740,8 +753,10 @@ function UserPackages({
   onBuy,
   onCancel,
   onOpenAccount,
+  focusOrders = false,
 }: {
   onOpenAccount?: () => void;
+  focusOrders?: boolean;
   packages: CreditPackage[] | null;
   orders: OrderPage | null;
   catalogError: string;
@@ -753,6 +768,14 @@ function UserPackages({
   onBuy: (pack: CreditPackage) => void;
   onCancel: (order: Order) => void;
 }) {
+  const ordersRef = useRef<HTMLElement>(null);
+  const scrolled = useRef(false);
+  // 积分包卡片载入后版面才稳定,这时再滚到订单表;只滚一次
+  useEffect(() => {
+    if (!focusOrders || scrolled.current || (packages === null && !catalogError)) return;
+    scrolled.current = true;
+    ordersRef.current?.scrollIntoView({ block: "start" });
+  }, [focusOrders, packages, catalogError]);
   return (
     <>
       <Banner icon={<Info />}>
@@ -830,7 +853,11 @@ function UserPackages({
         </ul>
       )}
 
-      <section aria-label="我的订单" className="rounded-2xl border border-border bg-card">
+      <section
+        ref={ordersRef}
+        aria-label="我的订单"
+        className="scroll-mt-4 rounded-2xl border border-border bg-card"
+      >
         <CardHead
           title="我的订单"
           meta={

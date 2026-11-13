@@ -171,7 +171,7 @@ function Suggestions({
   file,
 }: {
   result: Exclude<Result, { state: "idle" }>;
-  /** 首页选的附件:「用设计器创建」时先建设计会话、传进它的工作区再带过去;交给现成的智能体要进对话后再传 */
+  /** 首页选的附件:「用设计器创建」时先建设计会话、传进它的工作区再带过去;交给现成的智能体时放进对话页输入框 */
   file: File | null;
 }) {
   const { busy, start } = useAgentActions();
@@ -242,7 +242,7 @@ function Suggestions({
           {file && (
             <p className="mx-3 mt-1.5 mb-1 rounded-lg bg-[#F6F5F1] px-3 py-2 text-[13px] text-[#4D4A43]">
               附件「{file.name}
-              」会随「用设计器创建」一起交给设计器；交给现成的智能体时，进对话后再把文件拖进输入框。
+              」会一起带过去：用设计器创建时交给设计器；交给现成的智能体时放进对话输入框，随第一条消息上传。
             </p>
           )}
           {result.items.map((a) => (
@@ -268,6 +268,7 @@ function Suggestions({
                     mode: a.mine ? "own" : "market",
                     question: result.text,
                     name: a.name,
+                    files: file ? [file] : undefined,
                   })
                 }
               >

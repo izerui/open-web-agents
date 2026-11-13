@@ -89,8 +89,30 @@ function isAdmin(me: Me | null): boolean {
   return me.user ? me.user.role === "admin" : me.authRequired === false;
 }
 
+/**
+ * 有没有积分账户与密码。关闭登录的本地模式由后端发一个匿名管理员,它不在账号表里:
+ * 积分页读出来是「账号不存在」,改密码也无从谈起。还没读到登录态时先按有处理。
+ */
+export function hasCreditsAccount(me: Me | null): boolean {
+  return !(me && me.authRequired === false && !me.user);
+}
+
+/** 本地模式下不该出现的入口(积分页、账号安全) */
+const NO_ACCOUNT_HREFS = new Set(["/account/billing", "/account/security"]);
+
 export function navFor(me: Me | null): typeof SPACES {
-  return isAdmin(me) ? SPACES : SPACES.filter((s) => !s.adminOnly);
+  const spaces = isAdmin(me) ? SPACES : SPACES.filter((s) => !s.adminOnly);
+  if (hasCreditsAccount(me)) return spaces;
+  // 「账户」默认进积分与套餐;本地模式没有积分账户,改进用量分析
+  return spaces.map((s) => (s.key === "account" ? { ...s, href: "/account/usage" } : s));
+}
+
+/** 某个空间的侧栏(本地模式去掉积分与套餐、账号安全;去空后不留空分组) */
+export function sideNavFor(kind: keyof typeof SIDE_NAV, me: Me | null): readonly SideGroup[] {
+  if (hasCreditsAccount(me)) return SIDE_NAV[kind];
+  return SIDE_NAV[kind]
+    .map((g) => ({ ...g, items: g.items.filter((i) => !NO_ACCOUNT_HREFS.has(i.href)) }))
+    .filter((g) => g.items.length > 0);
 }
 
 export function spaceOf(pathname: string): Space {
@@ -270,15 +292,19 @@ export type MeMenuItem = { label: string; href?: string; action?: "logout" };
 /** 头像菜单:身份相关的低频入口;平台管理在顶栏已有,这里给管理员留一个快捷入口 */
 export function meMenuItems(
   me: Me | null,
-  /** credits:false = 读不到积分账户(本地模式的匿名管理员没有),隐藏积分入口;没给 = 照常显示 */
+  /** credits:false = 读不到积分账户,隐藏积分入口;没给 = 照常显示(本地模式另由 hasCreditsAccount 判定) */
   opts: { credits?: boolean } = {},
 ): MeMenuItem[] {
   // 关闭登录的本地模式:接口返回 authenticated:false + authRequired:false,后端按匿名 admin 放行
   const local = me?.authRequired === false;
   if (me && !me.authenticated && !local) return [{ label: "去登录", href: "/login" }];
+  const account = hasCreditsAccount(me);
   const items: MeMenuItem[] = [
-    ...(opts.credits === false ? [] : [{ label: "积分与套餐", href: "/account/billing" }]),
-    { label: "账号安全", href: "/account/security" },
+    ...(opts.credits === false || !account
+      ? []
+      : [{ label: "积分与套餐", href: "/account/billing" }]),
+    // 本地模式没有密码,改密码表单用不了
+    ...(account ? [{ label: "账号安全", href: "/account/security" }] : []),
     { label: "操作日志", href: "/account/audit" },
   ];
   if (isAdmin(me)) items.push({ label: "平台管理", href: "/admin/accounts" });
@@ -298,9 +324,9 @@ export function paletteEntries(me: Me | null): PaletteEntry[] {
   const admin = isAdmin(me);
   const spaces = navFor(me);
   const entries: PaletteEntry[] = [];
-  for (const [kind, groups] of Object.entries(SIDE_NAV)) {
+  for (const kind of Object.keys(SIDE_NAV) as (keyof typeof SIDE_NAV)[]) {
     if (kind === "admin" && !admin) continue;
-    for (const g of groups) {
+    for (const g of sideNavFor(kind, me)) {
       for (const item of g.items) {
         entries.push({ group: g.group, label: item.label, href: item.href, keywords: g.group });
       }
