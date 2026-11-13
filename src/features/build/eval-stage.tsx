@@ -115,6 +115,7 @@ export function EvalStage({
   goStage,
   credits,
   onProgress,
+  askRun: askRunToken = 0,
 }: {
   agentId: string | null;
   publishedVersion: number | null;
@@ -130,6 +131,8 @@ export function EvalStage({
   credits: ReadonlyMap<string, string>;
   /** 对草稿的评测在跑时报告进度(页头徽标「运行中 x/n」) */
   onProgress?: (p: { done: number; total: number } | null) => void;
+  /** 变化(且非 0)时对草稿弹出运行确认 —— 设计器「重新运行评测」 */
+  askRun?: number;
 }) {
   const confirmDialog = useConfirm();
   const [history, setHistory] = useState<{ run: EvalRun; results: EvalResult[] } | null>(null);
@@ -248,6 +251,18 @@ export function EvalStage({
     }
     setConfirm({ estimate });
   }
+
+  // 「重新运行评测」:用例读到之后对草稿弹出运行确认,同一个请求只弹一次
+  const askedRef = useRef(0);
+  const askRef = useRef(askRun);
+  askRef.current = askRun;
+  useEffect(() => {
+    if (!askRunToken || askedRef.current === askRunToken || cases === null) return;
+    askedRef.current = askRunToken;
+    if (running) return;
+    setTarget("draft");
+    void askRef.current();
+  }, [askRunToken, cases, running]);
 
   async function run() {
     setBusy(true);

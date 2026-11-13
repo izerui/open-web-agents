@@ -484,7 +484,7 @@ export function DesignerPanel({
               }
             }}
             placeholder="继续交代，比如：餐饮费每人每餐不超过 150 元"
-            className="max-h-48 min-h-[52px] resize-none overflow-y-auto border-0 bg-transparent px-1 py-1 shadow-none focus-visible:ring-0 max-md:text-base"
+            className="max-h-48 min-h-[52px] resize-none overflow-x-hidden overflow-y-auto [overflow-wrap:anywhere] border-0 bg-transparent px-1 py-1 shadow-none focus-visible:ring-0 max-md:text-base"
           />
           <div className="mt-1 flex items-center gap-2">
             <input

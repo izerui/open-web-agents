@@ -83,11 +83,13 @@ export function ReadonlyView({ agent }: { agent: BuildAgent }) {
             <dt className="text-muted-foreground">所有者</dt>
             <dd className="m-0">{ownerLabel(agent)}</dd>
             <dt className="text-muted-foreground">分享方式</dt>
-            <dd className="m-0">{shareModeText({ ...agent, ownerName: null })}，只读</dd>
+            <dd className="m-0">
+              {shareModeText({ ...agent, ownerName: null, author: null })}，只读
+            </dd>
           </dl>
           <Banner icon={<Lock />} className="mt-3 mb-3 text-[13px]">
             这是只读智能体，你可以查看配置和资料清单、直接使用，但不能修改。
-            {`要改请联系所有者${agent.ownerName ? ` ${agent.ownerName}` : ""}${clone.can ? "，或克隆一份来改。" : "。"}`}
+            {`要改请联系所有者${agent.author || agent.ownerName ? ` ${agent.author || agent.ownerName}` : ""}${clone.can ? "，或克隆一份来改。" : "。"}`}
           </Banner>
           <div className="flex flex-wrap gap-2">
             <Button

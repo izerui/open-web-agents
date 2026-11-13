@@ -57,6 +57,15 @@ describe("nextStepFor:设计器底部的「下一步」提示(前端生成,不�
       ["看评测用例", "eval"],
     ]);
   });
+  it("修复类改动或已有评测用例时:配置变了,评测结论作废 —— 重新运行评测 / 看看改动", () => {
+    const s = nextStepFor({ kind: "applied", sections: ["提示词"], stale: true });
+    expect(s.text).toContain("「提示词」");
+    expect(s.text).toContain("配置变了，之前的评测结论作废");
+    expect(s.actions.map((a) => [a.label, a.to])).toEqual([
+      ["重新运行评测", "rerun"],
+      ["看看改动", "review"],
+    ]);
+  });
   it("存为用例后:去评测", () => {
     const s = nextStepFor({ kind: "caseSaved", count: 3 });
     expect(s.text).toContain("共 3 个");
@@ -80,6 +89,7 @@ describe("nextStepFor:设计器底部的「下一步」提示(前端生成,不�
 
 describe("needsRecharge:积分不足的报错带充值链接", () => {
   it.each([
+    ["积分不足，请充值或联系管理员", true],
     ["积分不足,请充值或联系管理员", true],
     ["可用积分不足", true],
     ["HTTP 500", false],

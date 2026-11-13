@@ -197,6 +197,15 @@ describe("GET /api/agents —— 分享人(ownerName)", () => {
     expect(agents[0]?.ownerName).toBeNull();
   });
 
+  it("只能使用的市场条目带市场作者(邮箱前缀),构建页据此写「市场智能体 · X 发布」", async () => {
+    state.users = { other: { id: "other", email: "luojing@xinghe.example" } };
+    state.agents = [mk("listed", "other", { marketListed: true, publishedVersion: 2 })];
+    const { agents } = await list();
+    expect(agents[0]?.canRead).toBe(false);
+    expect(agents[0]?.author).toBe("luojing");
+    expect(JSON.stringify(agents)).not.toContain("@xinghe.example");
+  });
+
   it("本地模式不带 ownerName,也不查账号", async () => {
     state.authRequired = false;
     state.users = { other: { id: "other", email: "x@y.z" } };

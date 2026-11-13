@@ -35,7 +35,8 @@ export type Outcome = DesignOutcome;
 /** 轮次(运行 ID)→ 处理结果 */
 export type Outcomes = Record<string, Outcome[]>;
 
-export type NextTarget = "trial" | "eval" | "publish" | "access" | "fix";
+/** rerun:到评测阶段并弹出运行确认;review:展开刚改过的那一节 */
+export type NextTarget = "trial" | "eval" | "publish" | "access" | "fix" | "rerun" | "review";
 export interface NextAction {
   label: string;
   to: NextTarget;
@@ -45,7 +46,8 @@ export interface NextStep {
   actions: NextAction[];
 }
 export type NextEvent =
-  | { kind: "applied"; sections: string[] }
+  /** stale:修复类改动或已有评测用例 —— 之前的评测结论作废 */
+  | { kind: "applied"; sections: string[]; stale?: boolean }
   | { kind: "caseSaved"; count: number }
   | { kind: "evalDone"; passed: number; total: number }
   | { kind: "published"; version: number };
@@ -53,14 +55,24 @@ export type NextEvent =
 /** 各阶段之后设计器底部的「下一步」(原型里设计器主动跟的那条带按钮的消息) */
 export function nextStepFor(e: NextEvent): NextStep {
   switch (e.kind) {
-    case "applied":
+    case "applied": {
+      const secs = e.sections.map((s) => `「${s}」`).join("");
+      if (e.stale)
+        return {
+          text: `已应用到草稿，${secs}刚更新。配置变了，之前的评测结论作废，需要对当前草稿重跑。`,
+          actions: [
+            { label: "重新运行评测", to: "rerun" },
+            { label: "看看改动", to: "review" },
+          ],
+        };
       return {
-        text: `已应用到草稿，${e.sections.map((s) => `「${s}」`).join("")}刚更新。先用草稿试聊一条，回答满意就存成评测用例。`,
+        text: `已应用到草稿，${secs}刚更新。先用草稿试聊一条，回答满意就存成评测用例。`,
         actions: [
           { label: "试聊一条", to: "trial" },
           { label: "看评测用例", to: "eval" },
         ],
       };
+    }
     case "caseSaved":
       return {
         text: `已存为评测用例，现在共 ${e.count} 个。去评测对当前草稿跑一遍？`,

@@ -12,6 +12,8 @@ import { type EvalSummary, runStats } from "./build-model";
 export type BuildAgent = StudioAgent & {
   config: Record<string, unknown>;
   webhookUrl?: string;
+  /** 只能使用的市场条目:市场作者(邮箱前缀) */
+  author?: string | null;
 };
 
 export function useAgentList() {
@@ -236,16 +238,19 @@ export function useAgentUsage(agentId: string | null) {
 }
 
 /** 左栏底部「本月已用 N 积分」(与账户页的消耗汇总同一口径) */
+/**
+ * 本月已用积分:null = 读取中;false = 没读到(本地模式没有积分账户等),左栏不显示这一行
+ */
 export function useMonthUsed(enabled: boolean) {
-  const [micro, setMicro] = useState<string | null>(null);
+  const [micro, setMicro] = useState<string | null | false>(null);
   useEffect(() => {
     if (!enabled) return;
     let live = true;
     void fetchJson<{ total?: { usedMicro?: string } }>(
       "/api/billing/summary?window=this_month&by=source",
     ).then(
-      (r) => live && setMicro(r.total?.usedMicro ?? null),
-      () => {},
+      (r) => live && setMicro(r.total?.usedMicro ?? false),
+      () => live && setMicro(false),
     );
     return () => {
       live = false;

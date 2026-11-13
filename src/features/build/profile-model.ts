@@ -639,7 +639,13 @@ export function sectionSummary(k: SectionKey, d: ProfileDraft, ctx: SectionConte
       const rules = d.systemPrompt
         .split("\n")
         .filter((l) => /^\s*\d+[.、]/.test(l))
-        .map((l) => l.replace(/^\s*\d+[.、]\s*/, "").trim());
+        .map((l) =>
+          l
+            .replace(/^\s*\d+[.、]\s*/, "")
+            .trim()
+            .replace(/[。；;，,.、\s]+$/, ""),
+        )
+        .filter(Boolean);
       return rules.length
         ? rules.join("；")
         : d.systemPrompt.replace(/\s+/g, " ").trim().slice(0, 80);

@@ -2,6 +2,7 @@ import type { DesignDraft } from "@/lib/modules/agent/domain/design";
 import { describe, expect, it } from "vitest";
 import {
   changeLabel,
+  changeRows,
   changedSections,
   evalFixPrompt,
   groupChanges,
@@ -162,5 +163,40 @@ describe("changeLabel", () => {
     ["config.unknownKey", "unknownKey"],
   ])("%s → %s", (path, label) => {
     expect(changeLabel(path)).toBe(label);
+  });
+});
+
+describe("changeRows:差异卡要显示的行,超过 12 行时默认折叠", () => {
+  it("新增的对象按格式化 JSON 一行行给出,行多时 long", () => {
+    const after = {
+      type: "object",
+      properties: Object.fromEntries([...Array(8)].map((_, i) => [`f${i}`, { type: "string" }])),
+    };
+    const r = changeRows({ path: "outputSchema", kind: "added", after });
+    expect(r.rows.every((x) => x.op === "add")).toBe(true);
+    expect(r.lineCount).toBeGreaterThan(12);
+    expect(r.long).toBe(true);
+  });
+  it("短的修改不折叠;行级差异只留改动行及上下各一行", () => {
+    const r = changeRows({
+      path: "systemPrompt",
+      kind: "changed",
+      before: "a\nb\nc\nd\ne",
+      after: "a\nb\nC\nd\ne",
+      lines: [
+        { op: "same", text: "a" },
+        { op: "same", text: "b" },
+        { op: "del", text: "c" },
+        { op: "add", text: "C" },
+        { op: "same", text: "d" },
+        { op: "same", text: "e" },
+      ],
+    });
+    expect(r.rows.map((x) => x.text)).toEqual(["b", "c", "C", "d"]);
+    expect(r.long).toBe(false);
+  });
+  it("修改前为空:只给新增行", () => {
+    const r = changeRows({ path: "description", kind: "changed", before: "", after: "x" });
+    expect(r.rows).toEqual([{ op: "add", text: "x" }]);
   });
 });

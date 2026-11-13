@@ -84,11 +84,11 @@ export function remaining(limit: bigint | null, used: bigint): bigint | null {
 }
 
 export const REJECTION_MESSAGE: Record<HoldRejection, string> = {
-  insufficient_balance: "积分不足,请充值或联系管理员",
+  insufficient_balance: "积分不足，请充值或联系管理员",
   account_limit_exceeded: "已达到账号本月积分上限",
   key_limit_exceeded: "已达到这把 API Key 本月积分上限",
   account_limit_pending: "账号的月度上限需要管理员按积分重新设置,设置前不能发起运行",
-  billing_account_missing: "这个历史会话没有可记账的账号,请新建会话后再运行",
+  billing_account_missing: "这个历史会话没有可记账的账号，请新建会话后再运行",
 };
 
 export interface HoldSlice {

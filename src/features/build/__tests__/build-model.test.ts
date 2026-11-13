@@ -11,6 +11,7 @@ import {
   readonlyHeaderText,
   runStats,
   shareModeText,
+  shortBadgeText,
   stageBadges,
   stageFromParam,
   stageParam,
@@ -294,6 +295,20 @@ describe("分享人:只读视图、页头用的文案", () => {
     expect(readonlyHeaderText({ id: "default" })).toBe("只读，平台内置");
     expect(readonlyHeaderText(null)).toBe("只读，所有者管理");
   });
+  it("从市场进来(只能使用,或上架了且不是本人的):写「市场智能体 · X 发布」,所有者用市场作者", () => {
+    const m = { id: "a", canRead: false, marketListed: true, author: "luojing" };
+    expect(shareModeText(m)).toBe("市场智能体 · luojing 发布");
+    expect(ownerLabel(m)).toBe("luojing");
+    expect(readonlyHeaderText(m)).toBe("只读，市场智能体 · luojing 发布");
+    expect(shareModeText({ id: "a", canRead: false })).toBe("市场智能体");
+    expect(ownerLabel({ id: "a", canRead: false })).toBe("市场作者");
+    const listed = { id: "a", marketListed: true, isOwner: false, ownerName: "wl" };
+    expect(shareModeText(listed)).toBe("市场智能体 · wl 发布");
+    expect(readonlyHeaderText(listed)).toBe("只读，市场智能体 · wl 发布");
+    expect(shareModeText({ id: "a", marketListed: true, isOwner: false, isPublic: true })).toBe(
+      "市场智能体",
+    );
+  });
 });
 
 describe("assertionText:用例断言摘要", () => {
@@ -325,5 +340,26 @@ describe("runStats:运行阶段的 7 天小统计(A17)", () => {
       }),
     ).toEqual({ runs: 8, failRate: "12.5%", microCredits: "2000000" });
     expect(runStats({})).toEqual({ runs: 0, failRate: "—", microCredits: "0" });
+  });
+});
+
+describe("shortBadgeText:375 宽下阶段徽标只有约 4 个字的位置", () => {
+  it.each([
+    ["6 个未运行", "未运行"],
+    ["运行中 1/2", "1/2"],
+    ["运行中", "运行中"],
+    ["用例已改动", "需重跑"],
+    ["12 个用例", "12 例"],
+    ["4/6 通过", "4/6"],
+    ["v3，4 处修改", "v3 有改"],
+    ["v3，有修改", "v3 有改"],
+    ["v12 已发布", "v12"],
+    ["Key 已签发", "已签"],
+    ["未签 Key", "未签"],
+    ["5/9 节", "5/9 节"],
+    ["未发布", "未发布"],
+    ["214 次", "214 次"],
+  ])("%s → %s", (full, short) => {
+    expect(shortBadgeText(full)).toBe(short);
   });
 });

@@ -233,6 +233,14 @@ describe("九节的摘要与是否已填", () => {
     expect(sectionSummary("ability", d, ctx)).toBe("工具 2 个，技能包 1 个，MCP 2 个，子代理 1 个");
     expect(sectionSummary("knowledge", d, ctx)).toBe("2 篇：《差旅制度》《常见问题》");
     expect(sectionSummary("vars", d, ctx)).toBe("ERP_TOKEN（密钥）");
+    // 规则末尾的句号先去掉,不出现「。；」
+    const ended = {
+      ...d,
+      systemPrompt: "1. 单笔超过 5000 元需要审批。\n2. 发票抬头写全称;\n3. 先问清用途.",
+    };
+    expect(sectionSummary("prompt", ended, ctx)).toBe(
+      "单笔超过 5000 元需要审批；发票抬头写全称；先问清用途",
+    );
     expect(sectionSummary("contract", d, ctx)).toBe("输入 amount；输出 verdict");
     expect(sectionSummary("approval", d, ctx)).toBe("规划模式；需审批工具 erp.submit");
     expect(sectionSummary("webhook", d, ctx)).toBe("https://hooks.example/owa");

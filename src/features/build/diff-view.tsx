@@ -5,18 +5,15 @@
 
 import type { SnapshotChange } from "@/lib/modules/agent/domain/snapshot-diff";
 import { cn } from "@/lib/utils";
-import { changeLabel } from "./design-sections";
+import { ChevronDown, ChevronUp } from "lucide-react";
+import { useState } from "react";
+import { changeLabel, changeRows } from "./design-sections";
 
 const KIND = {
   added: { text: "新增", cls: "bg-success-soft text-success-text" },
   removed: { text: "删除", cls: "bg-destructive-soft text-destructive" },
   changed: { text: "修改", cls: "bg-warning-soft text-warning-text" },
 } as const;
-
-const show = (v: unknown) => {
-  const s = typeof v === "string" ? v : JSON.stringify(v, null, 2);
-  return s === undefined ? "(空)" : s.length > 600 ? `${s.slice(0, 600)}…` : s;
-};
 
 function Line({ op, text }: { op: "add" | "del" | "same"; text: string }) {
   return (
@@ -48,29 +45,36 @@ export function KindTag({ kind }: { kind: SnapshotChange["kind"] }) {
 }
 
 export function ChangeBlock({ c }: { c: SnapshotChange }) {
+  const { rows, lineCount, long } = changeRows(c);
+  const [open, setOpen] = useState(false);
+  const folded = long && !open;
   return (
     <div>
       <div className="flex items-center gap-2 border-b border-line-soft bg-[#FBFAF7] px-3 py-2 text-xs text-muted-foreground">
         <KindTag kind={c.kind} />
         <span className="min-w-0 [overflow-wrap:anywhere]">{changeLabel(c.path)}</span>
       </div>
-      {c.kind === "changed" && c.lines ? (
-        c.lines
-          .map((l, i, all) => ({ l, i, all }))
-          .filter(
-            ({ l, i, all }) =>
-              l.op !== "same" || all[i - 1]?.op !== "same" || all[i + 1]?.op !== "same",
-          )
-          .map(({ l, i }) => <Line key={i} op={l.op} text={l.text} />)
-      ) : c.kind === "changed" ? (
-        <>
-          {c.before !== "" && c.before !== undefined && <Line op="del" text={show(c.before)} />}
-          <Line op="add" text={show(c.after)} />
-        </>
-      ) : c.kind === "added" ? (
-        <Line op="add" text={show(c.after)} />
-      ) : (
-        <Line op="del" text={show(c.before)} />
+      <div
+        className={cn(
+          folded &&
+            "relative max-h-[220px] overflow-hidden after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-12 after:bg-gradient-to-t after:from-card after:to-transparent",
+        )}
+      >
+        {rows.map((l, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: 行没有稳定 ID,顺序不变
+          <Line key={i} op={l.op} text={l.text} />
+        ))}
+      </div>
+      {long && (
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+          className="flex w-full items-center justify-center gap-1 border-t border-line-soft px-3 py-1.5 text-xs text-muted-foreground hover:bg-[#F6F4EF] hover:text-foreground max-md:min-h-11"
+        >
+          {open ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+          {open ? "收起" : `展开全部（共 ${lineCount} 行）`}
+        </button>
       )}
     </div>
   );

@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Seg } from "@/features/build/ui";
 import { EmptyState, SpacePage, tb } from "@/features/settings/space-page";
 import { shortTime } from "@/features/settings/time-format";
 import { errorText, fetchJson } from "@/lib/fetch-json";
@@ -223,10 +224,13 @@ export function RunsPanel({
   requestedAgent,
   platform,
   agentList,
+  inAgent = false,
 }: {
   requestedAgent: string | null;
   platform: boolean;
   agentList: AgentList;
+  /** 构建页「运行」阶段(单个智能体):不显示智能体列,改显示版本列;来源用分段按钮 */
+  inAgent?: boolean;
 }) {
   const objectMode = requestedAgent !== null;
   const confirm = useConfirm();
@@ -417,19 +421,29 @@ export function RunsPanel({
                 </option>
               ))}
             </NativeSelect>
-            <NativeSelect
-              className="w-auto min-w-[150px] max-sm:flex-1"
-              aria-label="按来源筛选"
-              value={source}
-              onChange={(e) => setSource(e.target.value)}
-            >
-              <option value="">全部来源</option>
-              {Object.entries(SOURCE_LABEL).map(([k, v]) => (
-                <option key={k} value={k}>
-                  {v}
-                </option>
-              ))}
-            </NativeSelect>
+            {inAgent ? (
+              <Seg
+                ariaLabel="按来源筛选"
+                className="order-first max-sm:w-full"
+                value={source}
+                onChange={setSource}
+                options={[["", "全部"], ...Object.entries(SOURCE_LABEL)] as [string, string][]}
+              />
+            ) : (
+              <NativeSelect
+                className="w-auto min-w-[150px] max-sm:flex-1"
+                aria-label="按来源筛选"
+                value={source}
+                onChange={(e) => setSource(e.target.value)}
+              >
+                <option value="">全部来源</option>
+                {Object.entries(SOURCE_LABEL).map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {v}
+                  </option>
+                ))}
+              </NativeSelect>
+            )}
             {!loading && !error && (
               <span className="text-xs text-muted-foreground">
                 {items.length} 条{cursor ? "，还有更早的" : ""}
@@ -508,14 +522,22 @@ export function RunsPanel({
                           onClick={() => void openDetail(r.id)}
                         >
                           <span className="flex w-full items-center gap-2">
-                            <AgentAvatar
-                              id={r.agentId}
-                              icon={agentById.get(r.agentId)?.icon}
-                              size={24}
-                            />
-                            <span className="min-w-0 flex-1 truncate font-semibold">
-                              {r.agentName ?? r.agentId}
-                            </span>
+                            {inAgent ? (
+                              <span className="min-w-0 flex-1">
+                                <VersionBadge version={r.agentVersion} />
+                              </span>
+                            ) : (
+                              <>
+                                <AgentAvatar
+                                  id={r.agentId}
+                                  icon={agentById.get(r.agentId)?.icon}
+                                  size={24}
+                                />
+                                <span className="min-w-0 flex-1 truncate font-semibold">
+                                  {r.agentName ?? r.agentId}
+                                </span>
+                              </>
+                            )}
                             <StatusBadge status={r.status} />
                           </span>
                           <span className="line-clamp-2 text-sm">{r.promptPreview}</span>
@@ -535,7 +557,12 @@ export function RunsPanel({
                   })}
                 </ul>
                 <div className={cn(tb.wrap, "max-sm:hidden")}>
-                  <table className={cn(tb.table, platform ? "min-w-[1040px]" : "min-w-[880px]")}>
+                  <table
+                    className={cn(
+                      tb.table,
+                      platform ? "min-w-[1040px]" : inAgent ? "min-w-[760px]" : "min-w-[880px]",
+                    )}
+                  >
                     <caption className="sr-only">运行列表,按回车查看详情</caption>
                     <thead>
                       <tr>
@@ -548,7 +575,7 @@ export function RunsPanel({
                           </th>
                         )}
                         <th scope="col" className={tb.th}>
-                          智能体
+                          {inAgent ? "版本" : "智能体"}
                         </th>
                         <th scope="col" className={tb.th}>
                           来源
@@ -595,17 +622,21 @@ export function RunsPanel({
                               </td>
                             )}
                             <td className={tb.td}>
-                              <span className="flex items-center gap-2 whitespace-nowrap">
-                                <AgentAvatar
-                                  id={r.agentId}
-                                  icon={agentById.get(r.agentId)?.icon}
-                                  size={24}
-                                />
-                                <span className="max-w-40 truncate">
-                                  {r.agentName ?? r.agentId}
-                                </span>
+                              {inAgent ? (
                                 <VersionBadge version={r.agentVersion} />
-                              </span>
+                              ) : (
+                                <span className="flex items-center gap-2 whitespace-nowrap">
+                                  <AgentAvatar
+                                    id={r.agentId}
+                                    icon={agentById.get(r.agentId)?.icon}
+                                    size={24}
+                                  />
+                                  <span className="max-w-40 truncate">
+                                    {r.agentName ?? r.agentId}
+                                  </span>
+                                  <VersionBadge version={r.agentVersion} />
+                                </span>
+                              )}
                             </td>
                             <td className={cn(tb.td, "whitespace-nowrap")}>
                               {SOURCE_LABEL[r.source]}
