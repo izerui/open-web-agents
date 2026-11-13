@@ -4,6 +4,7 @@ import {
   deleteBlock,
   filterStudio,
   formatUpdated,
+  sharedByText,
   studioAgents,
   studioBadges,
   studioCounts,
@@ -95,6 +96,13 @@ describe("studioSource", () => {
     expect(studioSource(a("default", { isOwner: false }))).toBe("平台内置");
     expect(studioSource(a("y", { isOwner: false }))).toBe("分享给我的");
     expect(studioSource(a("z", { isOwner: false, isPublic: true }))).toBe("公开");
+    expect(studioSource(a("y", { isOwner: false, ownerName: "luojing" }))).toBe("luojing 分享");
+  });
+  it("sharedByText:卡片 ID 后面的分享人(原型「id，X 分享」)", () => {
+    expect(sharedByText(a("y", { isOwner: false, ownerName: "luojing" }))).toBe("luojing 分享");
+    expect(sharedByText(a("y", { isOwner: false }))).toBeNull();
+    expect(sharedByText(a("y", { isOwner: true, ownerName: "x" }))).toBeNull();
+    expect(sharedByText(a("default", { isOwner: false, ownerName: "x" }))).toBeNull();
   });
 });
 

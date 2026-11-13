@@ -40,6 +40,8 @@ export interface AgentSummary {
   description?: string;
   /** 所有者;"system" = 平台内置。市场智能体不返回 */
   ownerId?: string;
+  /** 分享人:所有者邮箱 @ 前那段;只给非所有者,查不到为 null */
+  ownerName?: string | null;
   config: {
     /** 别名或模型目录 id;显示时换成模型名与售价 */
     model?: string;

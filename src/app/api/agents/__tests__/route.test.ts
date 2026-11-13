@@ -19,6 +19,8 @@ const state = vi.hoisted(() => ({
   activityCalls: [] as { ids: string[]; since: number }[],
   upserts: [] as Record<string, unknown>[],
   authRequired: true,
+  users: {} as Record<string, { id: string; email: string }>,
+  userGets: [] as string[],
 }));
 
 vi.mock("@/lib/container", () => ({
@@ -71,6 +73,12 @@ vi.mock("@/lib/container", () => ({
         return new Map(ids.map((id, i) => [id, { runs: i + 3, updatedAt: 1_700_000_000_000 + i }]));
       },
     },
+    users: {
+      get: async (id: string) => {
+        state.userGets.push(id);
+        return state.users[id] ?? null;
+      },
+    },
     audit: { record: async () => {} },
     modelCatalogView: async () => undefined,
   }),
@@ -83,6 +91,8 @@ beforeEach(() => {
   state.activityCalls = [];
   state.upserts = [];
   state.authRequired = true;
+  state.users = {};
+  state.userGets = [];
 });
 
 async function list() {
@@ -143,6 +153,57 @@ describe("GET /api/agents —— 工作室字段", () => {
     const { agents } = await list();
     expect(agents).toEqual([]);
     expect(state.activityCalls).toHaveLength(0);
+  });
+});
+
+describe("GET /api/agents —— 分享人(ownerName)", () => {
+  it("非所有者拿到所有者邮箱前缀,不含完整邮箱;所有者本人不带", async () => {
+    state.users = {
+      other: { id: "other", email: "luojing@xinghe.example" },
+      me: { id: "me", email: "me@xinghe.example" },
+    };
+    state.agents = [mk("mine", "me"), mk("shared", "other"), mk("shared-2", "other")];
+    state.grants = ["shared", "shared-2"].map((id) => ({
+      id: `g-${id}`,
+      resourceType: "agent",
+      resourceId: id,
+      principalType: "user",
+      principalId: "me",
+      permission: "read",
+    }));
+    const { agents } = await list();
+    const by = new Map(agents.map((a) => [a.id, a]));
+    expect(by.get("shared")?.ownerName).toBe("luojing");
+    expect(by.get("shared-2")?.ownerName).toBe("luojing");
+    expect(by.get("mine")).not.toHaveProperty("ownerName");
+    expect(JSON.stringify(agents)).not.toContain("@xinghe.example");
+    // 同一所有者只查一次,本人不查
+    expect(state.userGets).toEqual(["other"]);
+  });
+
+  it("查不到账号(内置智能体等)时 ownerName 为 null", async () => {
+    state.agents = [mk("builtin", "system", { id: "builtin" })];
+    state.grants = [
+      {
+        id: "g",
+        resourceType: "agent",
+        resourceId: "builtin",
+        principalType: "user",
+        principalId: "me",
+        permission: "read",
+      },
+    ];
+    const { agents } = await list();
+    expect(agents[0]?.ownerName).toBeNull();
+  });
+
+  it("本地模式不带 ownerName,也不查账号", async () => {
+    state.authRequired = false;
+    state.users = { other: { id: "other", email: "x@y.z" } };
+    state.agents = [mk("someone-elses", "other")];
+    const { agents } = await list();
+    expect(agents[0]).not.toHaveProperty("ownerName");
+    expect(state.userGets).toEqual([]);
   });
 });
 

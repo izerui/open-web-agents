@@ -223,6 +223,10 @@ describe("F15 新会话弹层的说明", () => {
   it("分享来的写明只读或可编辑,市场的写明来源与平均花费", () => {
     expect(pickerNote({ ...base, canWrite: false }, "分享给我")).toBe("只读，跑已发布 v2");
     expect(pickerNote({ ...base, canWrite: true }, "分享给我")).toContain("可编辑，跑草稿");
+    // 原型:「由 X 分享」—— 分享人取所有者邮箱前缀
+    expect(pickerNote({ ...base, canWrite: false, ownerName: "luojing" }, "分享给我")).toBe(
+      "luojing 分享，只读，跑已发布 v2",
+    );
     expect(pickerNote({ ...base, canRead: false, avgCredits: 12 } as never, "市场")).toBe(
       "市场，跑已发布 v2，平均每次约 12 积分",
     );

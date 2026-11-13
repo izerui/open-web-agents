@@ -140,7 +140,10 @@ export function runTargetLabel(agent: AgentSummary): string {
 /** 新会话弹层里每一项的说明:跑哪一版,外加分享来的是只读还是可编辑、市场的平均花费 */
 export function pickerNote(agent: AgentSummary, group: PickerGroup): string {
   const target = runTargetLabel(agent);
-  if (group === "分享给我") return `${agent.canWrite ? "可编辑" : "只读"}，${target}`;
+  if (group === "分享给我") {
+    const by = agent.ownerName ? `${agent.ownerName} 分享，` : "";
+    return `${by}${agent.canWrite ? "可编辑" : "只读"}，${target}`;
+  }
   if (group === "市场") {
     const avg = (agent as AgentSummary & { avgCredits?: number | null }).avgCredits;
     return `市场，${target}${avg ? `，平均每次约 ${avg} 积分` : ""}`;

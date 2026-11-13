@@ -49,6 +49,7 @@ import {
   STAGES,
   type Stage,
   railStatus,
+  readonlyHeaderText,
   stageBadges,
   stageParam,
 } from "./build-model";
@@ -68,7 +69,7 @@ import {
 } from "./profile-model";
 import { PublishStage } from "./publish-stage";
 import { READONLY_ACCESS_BADGE, READONLY_STAGES, ReadonlyAccess } from "./readonly-access";
-import { ReadonlyView, shareModeText, useClone } from "./readonly-view";
+import { ReadonlyView, useClone } from "./readonly-view";
 import { RunsStage } from "./runs-stage";
 import { TrialPanel } from "./trial-panel";
 import { Seg, TextButton } from "./ui";
@@ -365,7 +366,7 @@ export function BuildPage({
       return (
         <span className="flex items-center gap-1.5 text-muted-foreground">
           <Lock className="size-3.5" />
-          只读，{agent ? shareModeText(agent) : "所有者管理"}
+          {readonlyHeaderText(agent ?? null)}
         </span>
       );
     if (designer.working !== null)
@@ -710,6 +711,7 @@ export function BuildPage({
         agentId={currentId}
         canManageWebhook={canManageWebhook}
         sharedWrite={Boolean(agent && !agent.isOwner && !BUILT_IN.includes(agent.id))}
+        ownerName={agent?.ownerName}
         publishedVersion={agent?.publishedVersion ?? null}
         changeCount={meta.meta.changeCount}
         catalog={catalog}
