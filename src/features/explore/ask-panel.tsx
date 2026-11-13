@@ -2,15 +2,18 @@
 
 import { AgentAvatar } from "@/components/agent-avatar";
 import { Button } from "@/components/ui/button";
+import { uploadDesignFiles } from "@/features/build/design-files";
+import { MAX_ATTACHMENT_BYTES } from "@/features/build/designer-model";
 import { useAgentActions } from "@/features/market/market-actions";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { formatPerRun } from "@/lib/modules/market/domain/display";
 import { cn } from "@/lib/utils";
 import { ArrowUp, FileText, Paperclip, Sparkles, X } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
-import { designerHref } from "./explore-logic";
+import { designerHref, designerSessionHref } from "./explore-logic";
 
 const EXAMPLES = [
   "做一个审核报销单的助手，超过 5000 元提醒我",
@@ -109,8 +112,12 @@ export function AskPanel() {
             aria-label="选择文件"
             onChange={(e) => {
               const picked = e.target.files?.[0] ?? null;
+              if (picked && picked.size > MAX_ATTACHMENT_BYTES) {
+                toast.error("文件超过 10MB，没有添加");
+                e.target.value = "";
+                return;
+              }
               setFile(picked);
-              if (picked) toast.info("附件会在对话里上传：选好智能体、进入对话后再把文件拖进去");
             }}
           />
           <Button
@@ -138,7 +145,7 @@ export function AskPanel() {
         </div>
       </div>
 
-      {result.state !== "idle" && <Suggestions result={result} file={file?.name ?? null} />}
+      {result.state !== "idle" && <Suggestions result={result} file={file} />}
 
       <div className="mt-4 flex max-w-[820px] flex-wrap justify-center gap-2">
         {EXAMPLES.map((t) => (
@@ -164,10 +171,27 @@ function Suggestions({
   file,
 }: {
   result: Exclude<Result, { state: "idle" }>;
-  /** 首页选的附件:会话建好之前没有地方放,只能进对话后再传,这里写明 */
-  file: string | null;
+  /** 首页选的附件:「用设计器创建」时先建设计会话、传进它的工作区再带过去;交给现成的智能体要进对话后再传 */
+  file: File | null;
 }) {
   const { busy, start } = useAgentActions();
+  const router = useRouter();
+  const [designing, setDesigning] = useState(false);
+  async function designWithFile(f: File) {
+    setDesigning(true);
+    try {
+      const d = await fetchJson<{ sessionId: string }>("/api/agents/design", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      const names = await uploadDesignFiles(d.sessionId, [f]);
+      router.push(designerSessionHref(d.sessionId, result.text, names));
+    } catch (error) {
+      toast.error(errorText(error));
+      setDesigning(false);
+    }
+  }
   return (
     <section
       aria-label="推荐"
@@ -179,15 +203,27 @@ function Suggestions({
         <div className="min-w-0 flex-1">
           <p className="font-display text-[17px] font-bold">让智能体设计器做一个专门的</p>
           <p className="mt-0.5 text-sm text-[#4D4A43]">
-            说清规则，设计器帮你配好模型、工具、知识和评测。这段描述会直接带进去。
+            说清规则，设计器帮你配好模型、工具、知识和评测。这段描述{file ? "和附件" : ""}
+            会直接带进去。
           </p>
         </div>
-        <Button asChild className="max-sm:h-11 max-sm:w-full">
-          <Link href={designerHref(result.text)}>
+        {file ? (
+          <Button
+            className="max-sm:h-11 max-sm:w-full"
+            disabled={designing}
+            onClick={() => void designWithFile(file)}
+          >
             <Sparkles />
-            用设计器创建
-          </Link>
-        </Button>
+            {designing ? "正在带上附件…" : "用设计器创建"}
+          </Button>
+        ) : (
+          <Button asChild className="max-sm:h-11 max-sm:w-full">
+            <Link href={designerHref(result.text)}>
+              <Sparkles />
+              用设计器创建
+            </Link>
+          </Button>
+        )}
       </div>
       {result.state === "loading" ? (
         <p className="flex items-center gap-2 px-3 pt-3 pb-2 text-[13px] text-muted-foreground">
@@ -205,8 +241,8 @@ function Suggestions({
           </p>
           {file && (
             <p className="mx-3 mt-1.5 mb-1 rounded-lg bg-[#F6F5F1] px-3 py-2 text-[13px] text-[#4D4A43]">
-              附件「{file}
-              」不会自动带过去：进对话后再把文件拖进输入框；设计器不收附件，可以把要点写进描述。
+              附件「{file.name}
+              」会随「用设计器创建」一起交给设计器；交给现成的智能体时，进对话后再把文件拖进输入框。
             </p>
           )}
           {result.items.map((a) => (

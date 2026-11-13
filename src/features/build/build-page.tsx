@@ -95,12 +95,15 @@ export function BuildPage({
   agentId: routeId,
   designerSession,
   initialDesc,
+  initialFiles,
   initialStage,
 }: {
   /** 地址里的智能体;新建态为 undefined */
   agentId?: string;
   designerSession?: string;
   initialDesc?: string;
+  /** 已传进设计会话工作区的附件(探索首页带来),随描述一起自动发给设计器 */
+  initialFiles?: string[];
   initialStage: Stage;
 }) {
   const router = useRouter();
@@ -206,6 +209,7 @@ export function BuildPage({
     agentId: currentId,
     initialSession: designerSession,
     initialPrompt: initialDesc,
+    initialFiles,
     // 自动发过一次之后从地址里去掉 desc:刷新不会再发
     onAutoSent: () => replaceUrl(currentIdRef.current, stageRef.current, sessionRef.current),
     enabled: !readOnly && !notFound && (!routeId || Boolean(agent)),

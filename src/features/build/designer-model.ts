@@ -114,3 +114,39 @@ export function copiedFrom(view: RefView): {
   }
   return out;
 }
+
+/** 单个附件上限与一次最多几个(与对话页、上传接口一致) */
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+export const MAX_ATTACHMENTS = 20;
+/** 设计草稿文件名保留给设计器(见 domain/design 的 DRAFT_FILE;这里不引那个模块,免得带进前端包) */
+const RESERVED_NAME = "design-draft.json";
+
+/** 往设计器输入框加附件:同名替换,过大、超量、保留名不加并给出原因 */
+export function addAttachments<T extends { name: string; size: number }>(
+  current: readonly T[],
+  incoming: readonly T[],
+): { files: T[]; rejected: string[] } {
+  const files = [...current];
+  const rejected: string[] = [];
+  for (const file of incoming) {
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      rejected.push(`${file.name} 超过 10MB`);
+      continue;
+    }
+    if (file.name === RESERVED_NAME) {
+      rejected.push(`${file.name} 是设计草稿专用的文件名，改个名字再添加`);
+      continue;
+    }
+    const same = files.findIndex((f) => f.name === file.name);
+    if (same >= 0) {
+      files[same] = file;
+      continue;
+    }
+    if (files.length >= MAX_ATTACHMENTS) {
+      rejected.push(`一次最多 ${MAX_ATTACHMENTS} 个附件，${file.name} 没有添加`);
+      continue;
+    }
+    files.push(file);
+  }
+  return { files, rejected };
+}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  addAttachments,
   copiedFrom,
   needsRecharge,
   nextStepFor,
@@ -120,5 +121,34 @@ describe("copiedFrom:复制进来的技能包 / MCP 来自哪个智能体(取舍
   });
   it("没有设计会话:空", () => {
     expect(copiedFrom(null)).toEqual({ skill: {}, mcp: {} });
+  });
+});
+
+describe("addAttachments:设计器附件(与对话页同样的限制)", () => {
+  const f = (name: string, size = 10) => ({ name, size });
+  it("追加新文件,同名的替换为新选的", () => {
+    const r = addAttachments([f("a.md"), f("b.md")], [f("b.md", 20), f("c.md")]);
+    expect(r.files.map((x) => [x.name, x.size])).toEqual([
+      ["a.md", 10],
+      ["b.md", 20],
+      ["c.md", 10],
+    ]);
+    expect(r.rejected).toEqual([]);
+  });
+  it("超过 10MB 的不加,写明原因", () => {
+    const r = addAttachments([], [f("big.pdf", 10 * 1024 * 1024 + 1), f("ok.md")]);
+    expect(r.files.map((x) => x.name)).toEqual(["ok.md"]);
+    expect(r.rejected).toEqual(["big.pdf 超过 10MB"]);
+  });
+  it("最多 20 个,多出来的不加", () => {
+    const cur = Array.from({ length: 19 }, (_, i) => f(`f${i}`));
+    const r = addAttachments(cur, [f("x"), f("y")]);
+    expect(r.files).toHaveLength(20);
+    expect(r.rejected).toEqual(["一次最多 20 个附件，y 没有添加"]);
+  });
+  it("设计草稿同名文件不加", () => {
+    const r = addAttachments([], [f("design-draft.json")]);
+    expect(r.files).toEqual([]);
+    expect(r.rejected[0]).toContain("design-draft.json");
   });
 });

@@ -7,6 +7,7 @@
 
 import { followRun } from "@/features/chat/follow-run";
 import type { PendingQuestion } from "@/features/workbench/approval-bar";
+import { joinPromptAttachments } from "@/features/workbench/chat-view.logic";
 import type { SubmitAnswer } from "@/features/workbench/conversation";
 import { createEventBatcher } from "@/features/workbench/event-batcher";
 import type { Turn } from "@/features/workbench/types";
@@ -14,6 +15,7 @@ import { errorText, fetchJson } from "@/lib/fetch-json";
 import type { DesignDraft, DesignResource } from "@/lib/modules/agent/domain/design";
 import type { SnapshotChange } from "@/lib/modules/agent/domain/snapshot-diff";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { uploadDesignFiles } from "./design-files";
 import {
   type DesignSection,
   changedSections,
@@ -21,7 +23,13 @@ import {
   mergeDesignSections,
   sectionOfChangePath,
 } from "./design-sections";
-import { type Outcome, type Outcomes, pendingAnchor, shouldAutoSend } from "./designer-model";
+import {
+  type Outcome,
+  type Outcomes,
+  addAttachments,
+  pendingAnchor,
+  shouldAutoSend,
+} from "./designer-model";
 
 export interface DesignView {
   sessionId: string;
@@ -84,6 +92,8 @@ export function useDesigner(opts: {
    * 用户在弹层里已经明确点了「用设计器创建」),发完调 onAutoSent(页面从地址里去掉 desc,刷新不会重发)
    */
   initialPrompt?: string;
+  /** 和描述一起带来的附件:已经传进这个设计会话的工作区(探索首页「用设计器创建」),自动发送时列进提示词 */
+  initialFiles?: string[];
   onAutoSent?: () => void;
   /** 只读视图不加载设计器 */
   enabled: boolean;
@@ -101,6 +111,20 @@ export function useDesigner(opts: {
   const [view, setView] = useState<DesignView | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [prompt, setPrompt] = useState(opts.initialPrompt ?? "");
+  /** 输入框里待发送的附件:发送时先传进设计会话的工作区,再把文件名列在提示词末尾(与对话页一致) */
+  const [files, setFiles] = useState<File[]>([]);
+  const filesRef = useRef<File[]>([]);
+  filesRef.current = files;
+  const addFiles = useCallback((incoming: File[]) => {
+    if (!incoming.length) return;
+    const r = addAttachments(filesRef.current, incoming);
+    filesRef.current = r.files;
+    setFiles(r.files);
+    if (r.rejected.length) setError(r.rejected.join("；"));
+  }, []);
+  const removeFile = useCallback((name: string) => {
+    setFiles((cur) => cur.filter((f) => f.name !== name));
+  }, []);
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -354,8 +378,11 @@ export function useDesigner(opts: {
   const create = useCallback(() => act(createSession), [act, createSession]);
 
   const send = useCallback(
-    async (text = prompt) => {
-      const content = text.trim();
+    async (text = prompt, opts: { attach?: File[]; uploaded?: string[] } = {}) => {
+      const attach = opts.attach ?? [];
+      const uploaded = opts.uploaded ?? [];
+      const content =
+        text.trim() || (attach.length || uploaded.length ? "请根据附件设计这个智能体。" : "");
       if (!content || blocked) return false;
       return act(async () => {
         let id = sessionRef.current;
@@ -367,12 +394,14 @@ export function useDesigner(opts: {
         }
         if (!current || current.legacy) throw new Error("旧设计没有保存基线，先载入当前草稿");
         current = await rebaseIfNeeded(current);
+        const names = [...uploaded, ...(await uploadDesignFiles(id, attach))];
+        const runPrompt = joinPromptAttachments(content, names);
         const abort = new AbortController();
         streamRef.current = abort;
         const response = await fetch(`/api/agents/design/${id}/run`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt: content, revision: current.revision }),
+          body: JSON.stringify({ prompt: runPrompt, revision: current.revision }),
           signal: abort.signal,
         });
         if (!response.ok) {
@@ -386,13 +415,17 @@ export function useDesigner(opts: {
           ...all,
           {
             runId,
-            prompt: content,
+            prompt: runPrompt,
             events: [],
             running: true,
             startedAt: new Date().toISOString(),
           },
         ]);
-        setPrompt((p) => (p.trim() === content ? "" : p));
+        setPrompt((p) => (p.trim() === text.trim() ? "" : p));
+        if (attach.length) {
+          const sent = new Set(attach);
+          setFiles((cur) => cur.filter((f) => !sent.has(f)));
+        }
         setRunning(true);
         void watch(id, runId, abort, response.body).catch((err) => setError(errorText(err)));
       });
@@ -679,7 +712,9 @@ export function useDesigner(opts: {
     )
       return;
     autoTried.current = true;
-    void send(autoPrompt).finally(() => cb.current.onAutoSent?.());
+    void send(autoPrompt, { uploaded: cb.current.initialFiles }).finally(() =>
+      cb.current.onAutoSent?.(),
+    );
   }, [enabled, autoPrompt, sessionId, loading, view, turns.length, blocked, send]);
 
   const pending = useMemo(() => groupChanges(view?.changes ?? []), [view?.changes]);
@@ -708,6 +743,11 @@ export function useDesigner(opts: {
     setError,
     prompt,
     setPrompt,
+    files,
+    addFiles,
+    removeFile,
+    /** 发送输入框里的文字与附件 */
+    sendInput: () => send(prompt, { attach: files }),
     pendingQuestions,
     setPendingQuestions,
     approvalRefresh,

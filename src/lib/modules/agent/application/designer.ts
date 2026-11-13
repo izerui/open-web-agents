@@ -377,6 +377,14 @@ export class AgentDesigner {
     });
   }
 
+  /** 附件上传用:确认是本人的设计会话(目标仍可编辑),给出它的工作目录 */
+  workspaceOf(subject: Subject, id: string) {
+    return this.deps.inSession(id, async (tx) => {
+      const { session } = await this.context(tx, subject, id);
+      return { sessionId: session.id, workspaceDir: session.workspaceDir };
+    });
+  }
+
   /**
    * 记下某一轮设计器提议的处理结果(已应用到草稿 / 没有应用)。只动处理记录,不碰草稿,
    * 所以不要求空闲、不核对 revision,也不让 revision 与 previewToken 变化。

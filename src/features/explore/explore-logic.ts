@@ -8,6 +8,16 @@ export function designerHref(desc: string): string {
   return text ? `/agents/new?desc=${encodeURIComponent(text)}` : "/agents/new";
 }
 
+/** 带附件「用设计器创建」:设计会话已建好、附件已传进它的工作区,直接进构建页新建态自动发送 */
+export function designerSessionHref(sessionId: string, desc: string, files: string[]): string {
+  const q = [
+    `designer=${encodeURIComponent(sessionId)}`,
+    `desc=${encodeURIComponent(desc.trim())}`,
+  ];
+  for (const f of files) q.push(`file=${encodeURIComponent(f)}`);
+  return `/agents/new?${q.join("&")}`;
+}
+
 /** 打开新建的会话;带上示例问题时用 q 参数预填进对话页输入框(只预填,不自动发送) */
 export function chatHref(sessionId: string, question?: string): string {
   const base = `/chat?session=${encodeURIComponent(sessionId)}`;

@@ -19,6 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ApprovalBar } from "@/features/workbench/approval-bar";
 import { ChatThread } from "@/features/workbench/conversation";
 import type { Turn } from "@/features/workbench/types";
+import { makeWorkspaceFileDropHandlers } from "@/features/workbench/workspace-file-drop";
 import { formatTime } from "@/lib/format-time";
 import { cn } from "@/lib/utils";
 import {
@@ -26,21 +27,25 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  File as FileIcon,
+  Image as ImageIcon,
   Info,
   Layers,
   Loader2,
   Maximize2,
   Minimize2,
+  Paperclip,
   Plus,
   RefreshCw,
   RotateCcw,
   Sparkles,
   Square,
   TriangleAlert,
+  Upload,
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { trialFeedbackPrompt } from "./design-sections";
 import {
   type NextStep,
@@ -102,6 +107,14 @@ export function DesignerPanel({
   const [token, setToken] = useState<string | undefined>();
   const [feedOpen, setFeedOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const canAttach = !v?.legacy;
+  const addFiles = g.addFiles;
+  const drop = useMemo(
+    () => makeWorkspaceFileDropHandlers({ setDragActive, addFiles }),
+    [addFiles],
+  );
   const wide = mode === "wide";
   const anchor = pendingAnchor(g.turns);
   const inlinePending = anchor >= 0;
@@ -132,8 +145,12 @@ export function DesignerPanel({
   return (
     <section
       aria-label="智能体设计器"
+      onDragEnter={canAttach ? (drop.onDragEnter as React.DragEventHandler) : undefined}
+      onDragOver={canAttach ? (drop.onDragOver as React.DragEventHandler) : undefined}
+      onDragLeave={canAttach ? (drop.onDragLeave as React.DragEventHandler) : undefined}
+      onDrop={canAttach ? (drop.onDrop as React.DragEventHandler) : undefined}
       className={cn(
-        "flex min-h-0 flex-col overflow-hidden bg-[#F2F1EC]",
+        "relative flex min-h-0 flex-col overflow-hidden bg-[#F2F1EC]",
         mode === "sheet"
           ? "h-full"
           : "rounded-[18px] border border-[#D9D4C8] shadow-[0_6px_24px_rgba(40,35,25,.06)]",
@@ -406,9 +423,35 @@ export function DesignerPanel({
           )}
           onSubmit={(e) => {
             e.preventDefault();
-            void g.send();
+            void g.sendInput();
           }}
         >
+          {g.files.length > 0 && (
+            <ul className="mb-1.5 flex flex-wrap gap-1.5" aria-label="待发送的附件">
+              {g.files.map((f) => (
+                <li
+                  key={f.name}
+                  className="inline-flex h-7 max-w-full items-center gap-1 rounded-full border border-border pr-0.5 pl-2 text-xs text-muted-foreground"
+                >
+                  {f.type.startsWith("image/") ? (
+                    <ImageIcon className="size-3 shrink-0" />
+                  ) : (
+                    <FileIcon className="size-3 shrink-0" />
+                  )}
+                  <span className="max-w-48 truncate">{f.name}</span>
+                  <button
+                    type="button"
+                    aria-label={`移除附件 ${f.name}`}
+                    disabled={g.blocked}
+                    onClick={() => g.removeFile(f.name)}
+                    className="flex size-6 items-center justify-center rounded-full hover:bg-[#DDD9CF] max-md:size-11"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
           <Textarea
             ref={inputRef}
             aria-label="对智能体设计器说"
@@ -418,13 +461,34 @@ export function DesignerPanel({
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
-                void g.send();
+                void g.sendInput();
               }
             }}
             placeholder="继续交代，比如：餐饮费每人每餐不超过 150 元"
             className="max-h-48 min-h-[52px] resize-none overflow-y-auto border-0 bg-transparent px-1 py-1 shadow-none focus-visible:ring-0 max-md:text-base"
           />
           <div className="mt-1 flex items-center gap-2">
+            <input
+              ref={fileRef}
+              type="file"
+              multiple
+              className="hidden"
+              aria-label="选择要交给设计器的文件"
+              onChange={(e) => {
+                g.addFiles(Array.from(e.target.files ?? []));
+                e.target.value = "";
+              }}
+            />
+            <button
+              type="button"
+              disabled={!canAttach || g.blocked}
+              onClick={() => fileRef.current?.click()}
+              title="添加业务文档，单个不超过 10MB，也可以直接拖进来"
+              className="inline-flex h-8 shrink-0 items-center gap-1 rounded-full px-2 text-[13px] text-[#4D4A43] hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40 max-md:size-11 max-md:justify-center max-md:px-0"
+            >
+              <Paperclip className="size-[15px]" />
+              <span className="max-md:sr-only">添加文件</span>
+            </button>
             <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
               {g.pending.length
                 ? `发送前会保留待确认的 ${g.pending.length} 节改动`
@@ -445,7 +509,7 @@ export function DesignerPanel({
               <button
                 type="submit"
                 aria-label="发送"
-                disabled={g.blocked || !g.prompt.trim() || v?.legacy}
+                disabled={g.blocked || (!g.prompt.trim() && !g.files.length) || v?.legacy}
                 className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground disabled:bg-[#E3E0D8] disabled:text-[#57544D] max-md:size-11"
               >
                 <ArrowUp className="size-4" strokeWidth={2.4} />
@@ -454,6 +518,18 @@ export function DesignerPanel({
           </div>
         </form>
       </div>
+
+      {dragActive && (
+        <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center bg-[rgb(247_246_242/88%)]">
+          <div className="mx-4 rounded-3xl border-2 border-dashed border-[#9C978B] bg-card px-8 py-8 text-center">
+            <Upload className="mx-auto size-8" />
+            <p className="mt-3 mb-1 font-display text-[22px]">松手交给设计器</p>
+            <p className="text-sm text-muted-foreground">
+              单个文件不超过 10MB，发送时上传到这次设计的工作目录
+            </p>
+          </div>
+        </div>
+      )}
 
       <Dialog
         open={dialog !== null}

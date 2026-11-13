@@ -254,6 +254,19 @@ describe("AgentDesigner", () => {
     expect((await h.inspect()).outcomes).toEqual(out);
   });
 
+  it("workspaceOf:附件上传只给本人的设计会话工作目录", async () => {
+    const h = await setup();
+    expect(await h.designer.workspaceOf(owner, "design")).toEqual({
+      sessionId: "design",
+      workspaceDir: "/design-test",
+    });
+    for (const subject of [{ userId: "other" }, { userId: "admin", role: "admin" as const }]) {
+      await expect(h.designer.workspaceOf(subject, "design")).rejects.toMatchObject({
+        status: 404,
+      });
+    }
+  });
+
   it("recordOutcomes:只有本人的设计会话;输入不合法 400", async () => {
     const h = await setup();
     const ok = { turnKey: "run-1", outcomes: [{ section: "prompt", count: 1, applied: true }] };
