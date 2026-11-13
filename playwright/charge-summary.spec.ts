@@ -98,7 +98,7 @@ test.describe("消耗汇总", () => {
       await platform.getByLabel("时间范围").selectOption("last_month");
       await platform.getByRole("button", { name: "按账号" }).click();
       const row = platform.getByTestId("charge-summary-row").filter({ hasText: target.email });
-      await expect(row).toContainText("100.00");
+      await expect(row.locator("td").nth(2)).toHaveText("100");
       await row.getByRole("button", { name: target.email }).click();
       await expect(page.locator("#billing-account")).toHaveValue(target.id);
       await expect(page.getByRole("tab", { name: "运行消耗", exact: true })).toHaveAttribute(
@@ -110,8 +110,8 @@ test.describe("消耗汇总", () => {
       await page.getByRole("tab", { name: "概览", exact: true }).click();
       const own = page.getByRole("region", { name: "消耗汇总", exact: true });
       await expect(own.getByLabel("时间范围")).toHaveValue("last_month");
-      await expect(own.getByTestId("charge-summary-total")).toContainText("100.00");
-      await expect(own.getByTestId("charge-summary-total")).not.toContainText("107.00");
+      await expect(own.getByTestId("charge-summary-total").locator("td").nth(2)).toHaveText("100");
+      await expect(own.getByTestId("charge-summary-total").locator("td").nth(2)).not.toHaveText("107");
       // 运行明细也只看上月
       await page.getByRole("tab", { name: "运行消耗", exact: true }).click();
       await expect(page.getByTestId("run-charge-drill")).toContainText("上月");
@@ -126,7 +126,7 @@ test.describe("消耗汇总", () => {
       await page.locator("#billing-account").selectOption("");
       await page.locator("#billing-account").selectOption(target.id);
       await expect(own.getByLabel("时间范围")).toHaveValue("this_month");
-      await expect(own.getByTestId("charge-summary-total")).toContainText("7.00");
+      await expect(own.getByTestId("charge-summary-total").locator("td").nth(2)).toHaveText("7");
       await page.getByRole("tab", { name: "运行消耗", exact: true }).click();
       await expect(page.getByTestId("run-charge-drill")).toHaveCount(0);
     } finally {
@@ -169,7 +169,7 @@ test.describe("消耗汇总", () => {
       await page.getByRole("tab", { name: "概览", exact: true }).click();
       const own = page.getByRole("region", { name: "消耗汇总", exact: true });
       // 账号区域先载入余额流水再载入汇总:全量跑时会超过默认的 5 秒
-      await expect(own.getByTestId("charge-summary-total")).toContainText("7.00", {
+      await expect(own.getByTestId("charge-summary-total").locator("td").nth(2)).toHaveText("7", {
         timeout: 15_000,
       });
       await expect(page.getByTestId("balance-available")).toBeVisible();
@@ -180,7 +180,7 @@ test.describe("消耗汇总", () => {
         .getByRole("button", { name: "概览", exact: true })
         .click();
       await platform.getByLabel("时间范围").selectOption("last_month");
-      await expect(row).toContainText("100.00");
+      await expect(row.locator("td").nth(2)).toHaveText("100");
       await row.getByRole("button", { name: target.email }).click();
 
       // 账号区域仍在(余额、账号汇总、明细都没消失),并切到上月
@@ -192,7 +192,7 @@ test.describe("消耗汇总", () => {
       await page.getByRole("tab", { name: "概览", exact: true }).click();
       await expect(page.getByTestId("balance-available")).toBeVisible();
       await expect(own.getByLabel("时间范围")).toHaveValue("last_month");
-      await expect(own.getByTestId("charge-summary-total")).toContainText("100.00", {
+      await expect(own.getByTestId("charge-summary-total").locator("td").nth(2)).toHaveText("100", {
         timeout: 15_000,
       });
       await page.getByRole("tab", { name: "运行消耗", exact: true }).click();
@@ -229,20 +229,20 @@ test.describe("消耗汇总", () => {
     // 概览页的"本月已用"是汇总的对照口径
     await expect(
       page.locator("dt", { hasText: "本月已用 / 月度上限" }).locator("+ dd"),
-    ).toContainText("15.00");
+    ).toHaveText(/^15\s*\//);
     // 消耗汇总在积分页的「运行消耗」页签
     await page.getByRole("tab", { name: "运行消耗", exact: true }).click();
     const summary = page.getByRole("region", { name: "消耗汇总", exact: true });
     const rows = summary.getByTestId("charge-summary-row");
     await expect(rows).toHaveCount(2);
-    await expect(rows.filter({ hasText: "网页对话" })).toContainText("10.00");
-    await expect(rows.filter({ hasText: "API 调用" })).toContainText("5.00");
+    await expect(rows.filter({ hasText: "网页对话" }).locator("td").nth(2)).toHaveText("10");
+    await expect(rows.filter({ hasText: "API 调用" }).locator("td").nth(2)).toHaveText("5");
     // 本月合计与"本月已用"一致
-    await expect(summary.getByTestId("charge-summary-total")).toContainText("15.00");
+    await expect(summary.getByTestId("charge-summary-total").locator("td").nth(2)).toHaveText("15");
 
     await summary.getByRole("button", { name: "按 API Key" }).click();
-    await expect(rows.filter({ hasText: "PW 对接 Key" })).toContainText("5.00");
-    await expect(rows.filter({ hasText: "不经 API Key" })).toContainText("10.00");
+    await expect(rows.filter({ hasText: "PW 对接 Key" }).locator("td").nth(2)).toHaveText("5");
+    await expect(rows.filter({ hasText: "不经 API Key" }).locator("td").nth(2)).toHaveText("10");
 
     await summary.getByRole("button", { name: "按智能体" }).click();
     await expect(rows).toHaveCount(1);
@@ -293,7 +293,7 @@ test.describe("消耗汇总", () => {
       await expect(platform.getByRole("button", { name: "按 API Key" })).toHaveCount(0);
       await platform.getByRole("button", { name: "按账号" }).click();
       const row = platform.getByTestId("charge-summary-row").filter({ hasText: target.email });
-      await expect(row).toContainText("7.00");
+      await expect(row.locator("td").nth(2)).toHaveText("7");
       await row.getByRole("button", { name: target.email }).click();
       // 选中该账号:账号下拉切过去,该账号自己的汇总只有评测
       await expect(page.locator("#billing-account")).toHaveValue(target.id);

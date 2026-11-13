@@ -15,6 +15,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { filterParam } from "@/features/admin/account-links";
+import { creditsText } from "@/features/models/model-shared";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import type { SummaryWindow } from "@/lib/modules/billing/domain/charge-summary";
 import {
@@ -23,7 +24,7 @@ import {
   creditsExact,
 } from "@/lib/modules/billing/domain/credits-display";
 import type { LedgerEntry, WalletBalance } from "@/lib/modules/billing/ports";
-import { formatCredits, parseCredits } from "@/lib/modules/capabilities/domain/catalog";
+import { parseCredits } from "@/lib/modules/capabilities/domain/catalog";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, ArrowDownToLine, RefreshCw, Users, Wallet } from "lucide-react";
 import Link from "next/link";
@@ -207,7 +208,7 @@ export function BillingView({
         body: payload,
       });
       setReceipt(
-        `${result.replayed ? "已确认原入账" : "入账成功"}: ${formatCredits(result.entry.amountMicroCredits)} 积分 · 流水 ${result.entry.id}`,
+        `${result.replayed ? "已确认原入账" : "入账成功"}：${creditsText(result.entry.amountMicroCredits)} 积分 · 流水 ${result.entry.id}`,
       );
       setCredits("");
       setReason("");

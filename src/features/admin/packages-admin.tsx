@@ -16,8 +16,10 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { orderStats } from "@/features/billing/billing-display";
+import { orderStats, sortByCredits } from "@/features/billing/billing-display";
 import { formatPrice, parsePrice } from "@/features/billing/money";
+import { OrderNo } from "@/features/billing/order-no";
+import { orderMatches, shortOrderId } from "@/features/billing/order-number";
 import { creditsText } from "@/features/models/model-shared";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { formatTime } from "@/lib/format-time";
@@ -25,7 +27,7 @@ import { creditsAmount } from "@/lib/modules/billing/domain/credits-display";
 import type { CreditOrder, CreditPackage } from "@/lib/modules/billing/package-ports";
 import { formatCredits, parseCredits } from "@/lib/modules/capabilities/domain/catalog";
 import { cn } from "@/lib/utils";
-import { AlertTriangle, Check, Pencil, Plus, RefreshCw } from "lucide-react";
+import { AlertTriangle, Check, Pencil, Plus, RefreshCw, Search } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -125,6 +127,8 @@ export function PackagesAdmin() {
   const [cancelReason, setCancelReason] = useState("");
   const [reason, setReason] = useState("");
   const [orderFilter, setOrderFilter] = useState<OrderFilter>("all");
+  /** 订单搜索:短号、完整编号、邮箱、套餐名(只在已载入的订单里找) */
+  const [orderQuery, setOrderQuery] = useState("");
   const catalogSeq = useRef(0);
   const orderSeq = useRef(0);
   const pending = useRef(false);
@@ -134,7 +138,7 @@ export function PackagesAdmin() {
     setCatalogError("");
     try {
       const data = await fetchJson<{ packages: CreditPackage[] }>("/api/billing/packages?manage=1");
-      if (seq === catalogSeq.current) setPackages(data.packages);
+      if (seq === catalogSeq.current) setPackages(sortByCredits(data.packages));
     } catch (err) {
       if (seq === catalogSeq.current) setCatalogError(errorText(err));
     }
@@ -262,7 +266,9 @@ export function PackagesAdmin() {
   /** 还有没载入的更早订单:统计只覆盖已载入的部分,数字后面加「+」并说明 */
   const partial = Boolean(orders?.nextCursor);
   const shownOrders =
-    orders?.items.filter((o) => orderFilter === "all" || o.status === orderFilter) ?? [];
+    orders?.items.filter(
+      (o) => (orderFilter === "all" || o.status === orderFilter) && orderMatches(o, orderQuery),
+    ) ?? [];
 
   return (
     <AdminPage
@@ -426,6 +432,17 @@ export function PackagesAdmin() {
               value={orderFilter}
               onChange={setOrderFilter}
             />
+            <div className="relative w-64 max-sm:w-full">
+              <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                type="search"
+                aria-label="搜索订单"
+                placeholder="订单号、邮箱或套餐"
+                className="pl-8"
+                value={orderQuery}
+                onChange={(e) => setOrderQuery(e.target.value)}
+              />
+            </div>
             <Button
               variant="outline"
               size="sm"
@@ -450,11 +467,21 @@ export function PackagesAdmin() {
                 正在加载订单…
               </div>
             ) : shownOrders.length === 0 ? (
-              <EmptyState
-                title={orderFilter === "all" ? "暂无订单" : `没有「${STATUS[orderFilter]}」的订单`}
-              >
-                用户在「积分与套餐」里下单后会出现在这里。
-              </EmptyState>
+              orderQuery.trim() ? (
+                <EmptyState title={`没有找到「${orderQuery.trim()}」相关的订单`}>
+                  {partial
+                    ? "只在已载入的订单里找。可以先加载更早的订单，或换个订单号、邮箱试试。"
+                    : "换个订单号、邮箱或套餐名试试。"}
+                </EmptyState>
+              ) : (
+                <EmptyState
+                  title={
+                    orderFilter === "all" ? "暂无订单" : `没有「${STATUS[orderFilter]}」的订单`
+                  }
+                >
+                  用户在「积分与套餐」里下单后会出现在这里。
+                </EmptyState>
+              )
             ) : (
               <table className="w-full min-w-[880px] border-collapse text-sm">
                 <caption className="sr-only">积分套餐订单</caption>
@@ -473,11 +500,8 @@ export function PackagesAdmin() {
                 <tbody>
                   {shownOrders.map((order) => (
                     <tr key={order.id}>
-                      <td
-                        className={cn(TD, "font-mono text-xs whitespace-nowrap")}
-                        title={order.id}
-                      >
-                        {order.id.slice(0, 8).toUpperCase()}
+                      <td className={cn(TD, "text-xs")}>
+                        <OrderNo id={order.id} />
                       </td>
                       <td className={cn(TD, "max-w-56 break-all")}>
                         {order.accountEmail ?? order.accountId}
@@ -805,7 +829,7 @@ export function PackagesAdmin() {
             <DialogTitle>取消这笔订单？</DialogTitle>
             <DialogDescription>
               {cancelling
-                ? `${cancelling.id.slice(0, 8).toUpperCase()}（${cancelling.accountEmail ?? cancelling.accountId}，${cancelling.packageName}）会标为已取消，不发放积分。对方可以重新下单。`
+                ? `${shortOrderId(cancelling.id)}（${cancelling.accountEmail ?? cancelling.accountId}，${cancelling.packageName}）会标为已取消，不发放积分。对方可以重新下单。`
                 : ""}
             </DialogDescription>
           </DialogHeader>
