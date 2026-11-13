@@ -13,10 +13,11 @@ import {
 import { requestClientNavigation } from "@/lib/client-navigation";
 import { fetchJson } from "@/lib/fetch-json";
 import { agentHref } from "@/lib/nav/routes";
+import { ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { NavigationCommands } from "./nav-commands";
-import { agentStatusText, sessionMeta, sessionTitle } from "./palette-logic";
+import { agentStatusText, paletteAgents, sessionMeta, sessionTitle } from "./palette-logic";
 
 type AgentLite = {
   id: string;
@@ -24,6 +25,9 @@ type AgentLite = {
   icon?: string | null;
   publishedVersion?: number | null;
   hasUnpublishedChanges?: boolean;
+  /** false = 别人分享来的(或公开的) */
+  isOwner?: boolean;
+  isPublic?: boolean;
   /** false = 只有市场使用权,不是「我的」智能体 */
   canRead?: boolean;
 };
@@ -49,9 +53,11 @@ export function CommandPalette({
   const router = useRouter();
   const [agents, setAgents] = useState<AgentLite[]>([]);
   const [sessions, setSessions] = useState<SessionLite[]>([]);
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     if (!open) return;
+    setQuery("");
     let alive = true;
     void fetchJson<{ agents?: AgentLite[] }>("/api/agents")
       .then((d) => alive && setAgents((d.agents ?? []).filter((a) => a.canRead !== false)))
@@ -70,6 +76,7 @@ export function CommandPalette({
     router.push(href);
   };
   const agentName = (id: string) => agents.find((a) => a.id === id)?.name ?? id;
+  const agentList = paletteAgents(agents, query);
 
   return (
     <CommandDialog
@@ -78,7 +85,7 @@ export function CommandPalette({
       title="搜索"
       description="搜索页面、智能体与会话"
     >
-      <CommandInput placeholder="搜索页面、智能体、会话…" />
+      <CommandInput placeholder="搜索页面、智能体、会话…" value={query} onValueChange={setQuery} />
       <CommandList>
         <CommandEmpty>没有匹配的页面、智能体或会话</CommandEmpty>
         <NavigationCommands onSelectedAction={() => onOpenChangeAction(false)} />
@@ -86,7 +93,7 @@ export function CommandPalette({
           <>
             <CommandSeparator />
             <CommandGroup heading="智能体">
-              {agents.map((a) => (
+              {agentList.shown.map((a) => (
                 <CommandItem
                   key={a.id}
                   value={`智能体 ${a.name} ${a.id}`}
@@ -99,6 +106,15 @@ export function CommandPalette({
                   </span>
                 </CommandItem>
               ))}
+              {agentList.more && (
+                <CommandItem value="智能体 在工作室查看全部" onSelect={() => go("/agents")}>
+                  <ArrowRight className="text-muted-foreground" />
+                  <span>在工作室查看全部</span>
+                  <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                    共 {agents.length} 个
+                  </span>
+                </CommandItem>
+              )}
             </CommandGroup>
           </>
         )}

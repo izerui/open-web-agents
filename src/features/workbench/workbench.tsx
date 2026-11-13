@@ -281,6 +281,15 @@ export function Workbench() {
     window.history.replaceState(window.history.state, "", url);
   }, []);
 
+  // ⌘K「新会话」带 ?new=1 过来:打开选智能体的弹层(同 /new),读完从地址里去掉
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("new") !== "1") return;
+    url.searchParams.delete("new");
+    window.history.replaceState(window.history.state, "", url);
+    setPickerOpen(true);
+  }, []);
+
   // 右侧面板的状态从上次离开时恢复
   useEffect(() => {
     const right = localStorage.getItem(RIGHT_KEY);
