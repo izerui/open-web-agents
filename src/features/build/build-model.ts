@@ -108,6 +108,23 @@ export function stageBadges(i: BadgeInput): Record<Stage, Badge> {
   };
 }
 
+/** 窄屏(375 宽,一格只放得下约 4 个字)用的阶段徽标短文案;完整文案放在按钮的 title 里 */
+export function shortBadgeText(text: string): string {
+  const rules: [RegExp, string][] = [
+    [/^\d+ 个未运行$/, "未运行"],
+    [/^运行中 (\d+\/\d+)$/, "$1"],
+    [/^用例已改动$/, "需重跑"],
+    [/^(\d+) 个用例$/, "$1 例"],
+    [/^(\d+\/\d+) 通过$/, "$1"],
+    [/^(v\d+)，.*修改$/, "$1 有改"],
+    [/^(v\d+) 已发布$/, "$1"],
+    [/^Key 已签发$/, "已签"],
+    [/^未签 Key$/, "未签"],
+  ];
+  for (const [re, to] of rules) if (re.test(text)) return text.replace(re, to);
+  return text;
+}
+
 /** 发布区里草稿评测状态的说明;发布要求 passed */
 export function draftEvalText(e: EvalSummary | null, cases: number): string {
   if (!e) return "正在读取评测结论…";
@@ -332,25 +349,47 @@ export function canCloneAgent(a: {
     : { ok: false, reason: "只有已上架市场的智能体可以克隆" };
 }
 
-type OwnerInfo = { id: string; isPublic?: boolean; ownerName?: string | null };
+type OwnerInfo = {
+  id: string;
+  isPublic?: boolean;
+  ownerName?: string | null;
+  /** 只能使用(市场条目)时为 false */
+  canRead?: boolean;
+  marketListed?: boolean;
+  isOwner?: boolean;
+  /** 市场作者(邮箱 @ 前那段) */
+  author?: string | null;
+};
 const isBuiltinId = (id: string) => id === "default" || id === "agent-architect";
+
+/** 是从市场来的:只能使用(读不到定义),或已上架市场且不是本人的 */
+export function fromMarket(a: OwnerInfo): boolean {
+  if (isBuiltinId(a.id)) return false;
+  return a.canRead === false || (a.marketListed === true && a.isOwner === false);
+}
+const marketAuthor = (a: OwnerInfo) => a.author || a.ownerName || null;
 
 /** 只读的智能体是怎么到你这里的;有分享人(所有者邮箱前缀)时写明是谁 */
 export function shareModeText(a: OwnerInfo): string {
   if (isBuiltinId(a.id)) return "平台内置";
+  if (fromMarket(a)) {
+    const by = marketAuthor(a);
+    return by ? `市场智能体 · ${by} 发布` : "市场智能体";
+  }
   const by = a.ownerName ? `${a.ownerName} ` : "";
   return a.isPublic ? `${by}公开给所有账号` : `${by}分享给你`;
 }
 
-/** 只读视图「所有者」一栏:内置写平台;接口给了分享人就显示它 */
+/** 只读视图「所有者」一栏:内置写平台;市场来的写市场作者;接口给了分享人就显示它 */
 export function ownerLabel(a: OwnerInfo): string {
   if (isBuiltinId(a.id)) return "平台";
+  if (fromMarket(a)) return marketAuthor(a) ?? "市场作者";
   return a.ownerName || "另一个账号";
 }
 
 /** 页头的只读说明(原型「只读，X 所有」) */
 export function readonlyHeaderText(a: OwnerInfo | null): string {
   if (!a) return "只读，所有者管理";
-  if (!isBuiltinId(a.id) && a.ownerName) return `只读，${a.ownerName} 所有`;
+  if (!isBuiltinId(a.id) && !fromMarket(a) && a.ownerName) return `只读，${a.ownerName} 所有`;
   return `只读，${shareModeText(a)}`;
 }

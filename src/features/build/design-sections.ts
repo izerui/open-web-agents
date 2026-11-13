@@ -215,3 +215,45 @@ export function changeLabel(path: string): string {
   const head = PATH_LABEL[m[1]] ?? m[1];
   return `${head}${m[2] ? ` ${m[2]}` : ""}${m[3] ? `，${m[3]}` : ""}`;
 }
+
+/** 差异卡超过这么多行时默认折叠(设计器栏只有 428px 宽,整段契约 JSON 会刷屏) */
+export const DIFF_FOLD_LINES = 12;
+
+type DiffRow = { op: "add" | "del" | "same"; text: string };
+
+const diffValueText = (v: unknown) => {
+  const s = typeof v === "string" ? v : JSON.stringify(v, null, 2);
+  return s === undefined ? "(空)" : s.length > 2000 ? `${s.slice(0, 2000)}…` : s;
+};
+
+/**
+ * 一处改动要显示的行:有行级差异时只留改动行及上下各一行;否则前后值各一块。
+ * lineCount 按实际换行数算(一个 JSON 值是一行 Line 但会折成很多行),超过 DIFF_FOLD_LINES 记 long。
+ */
+export function changeRows(c: SnapshotChange): {
+  rows: DiffRow[];
+  lineCount: number;
+  long: boolean;
+} {
+  let rows: DiffRow[];
+  if (c.kind === "changed" && c.lines) {
+    const all = c.lines;
+    rows = all.filter(
+      (l, i) =>
+        l.op !== "same" ||
+        (all[i - 1]?.op ?? "same") !== "same" ||
+        (all[i + 1]?.op ?? "same") !== "same",
+    );
+  } else if (c.kind === "changed") {
+    rows = [];
+    if (c.before !== "" && c.before !== undefined)
+      rows.push({ op: "del", text: diffValueText(c.before) });
+    rows.push({ op: "add", text: diffValueText(c.after) });
+  } else if (c.kind === "added") {
+    rows = [{ op: "add", text: diffValueText(c.after) }];
+  } else {
+    rows = [{ op: "del", text: diffValueText(c.before) }];
+  }
+  const lineCount = rows.reduce((n, r) => n + r.text.split("\n").length, 0);
+  return { rows, lineCount, long: lineCount > DIFF_FOLD_LINES };
+}

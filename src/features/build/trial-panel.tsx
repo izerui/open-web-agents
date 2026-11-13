@@ -13,13 +13,15 @@ import { ChatThread, type SubmitAnswer } from "@/features/workbench/conversation
 import { createEventBatcher } from "@/features/workbench/event-batcher";
 import type { Turn } from "@/features/workbench/types";
 import { updateTurnByLocalId } from "@/features/workbench/workbench.logic";
-import { fetchJson } from "@/lib/fetch-json";
+import { errorText, fetchJson } from "@/lib/fetch-json";
 import { creditsAmount } from "@/lib/modules/billing/domain/credits-display";
 import type { FileUIPart } from "ai";
 import { Check, Plus, RotateCcw } from "lucide-react";
+import Link from "next/link";
 import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 import { CaseForm } from "./case-form";
+import { needsRecharge } from "./designer-model";
 import { caseFormFromTrial, trialCaseNote, turnAnswer, turnDurationText } from "./trial-model";
 import { Tag, TextButton } from "./ui";
 
@@ -131,7 +133,7 @@ export function TrialPanel({
         });
       } catch (e) {
         if (!abort.signal.aborted)
-          batcher.push({ kind: "result", status: "failed", summary: String(e), runId });
+          batcher.push({ kind: "result", status: "failed", summary: errorText(e), runId });
       } finally {
         batcher.flush();
         patch((t) => ({ ...t, running: false }));
@@ -190,7 +192,7 @@ export function TrialPanel({
           updateTurnByLocalId(all, localId, (t) => ({
             ...t,
             running: false,
-            events: [...t.events, { kind: "result", status: "failed", summary: String(e) }],
+            events: [...t.events, { kind: "result", status: "failed", summary: errorText(e) }],
           })),
         );
         setFinished((m) => ({ ...m, [localId]: Date.now() }));
@@ -250,7 +252,7 @@ export function TrialPanel({
           updateTurnByLocalId(all, localId, (t) => ({
             ...t,
             running: false,
-            events: [...t.events, { kind: "result", status: "failed", summary: String(e) }],
+            events: [...t.events, { kind: "result", status: "failed", summary: errorText(e) }],
           })),
         );
         setRunning(false);
@@ -329,6 +331,21 @@ export function TrialPanel({
   const renderExtra = (t: Turn) => {
     if (t.running || !agentId) return null;
     const k = keyOf(t);
+    // 积分不足(发起运行就被拒,没有运行 ID,回复下那一行不出现):失败卡片下面给充值入口
+    const result = t.events.find((e) => e.kind === "result");
+    if (
+      result?.kind === "result" &&
+      result.status !== "success" &&
+      needsRecharge(result.summary ?? "")
+    )
+      return (
+        <div className="mt-1 pl-[46px] text-sm max-md:pl-0">
+          <Link href="/account/billing?tab=packages" className="font-medium underline">
+            去充值
+          </Link>
+          <span className="ml-2 text-muted-foreground">充值后回来点发送再试一次</span>
+        </div>
+      );
     if (formFor !== k) return null;
     const ans = turnAnswer(t);
     return (

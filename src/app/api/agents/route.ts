@@ -83,7 +83,7 @@ export async function GET(req: Request) {
       ? await agentActivity.of(readable, Date.now() - ACTIVITY_WINDOW_MS)
       : new Map<string, { runs: number; updatedAt: number }>();
     /*
-     * 分享来的智能体显示分享人:只给邮箱 @ 前那段(与市场作者同一口径,authorOf),
+     * 分享来的智能体显示分享人(市场条目显示作者):只给邮箱 @ 前那段(与市场作者同一口径,authorOf),
      * 不给完整邮箱。所有者本人与本地模式不需要;同一所有者只查一次。
      */
     const ownerIds = localMode
@@ -91,7 +91,11 @@ export async function GET(req: Request) {
       : [
           ...new Set(
             visible
-              .filter((a) => levels.get(a.id) !== "none" && a.ownerId !== subject.userId)
+              .filter(
+                (a) =>
+                  (levels.get(a.id) !== "none" || published.has(a.id)) &&
+                  a.ownerId !== subject.userId,
+              )
               .map((a) => a.ownerId),
           ),
         ];
@@ -114,8 +118,11 @@ export async function GET(req: Request) {
         .map((a) => {
           // use-only 刻意不 spread 实体,防止新增字段意外暴露给市场用户。
           const released = published.get(a.id);
+          // 只能使用的市场条目:作者、使用次数、平均花费与市场列表同一口径;
+          // 统计里没有作者时退回邮箱前缀(构建页写「市场智能体 · X 发布」)
           if (levels.get(a.id) === "none" && released) {
-            return marketSummary(a, released, stats.get(a.id));
+            const summary = marketSummary(a, released, stats.get(a.id));
+            return { ...summary, author: summary.author ?? ownerNames.get(a.ownerId) ?? null };
           }
           // 回调地址可能带接收方令牌:只给网页登录的所有者 / 管理员
           const manage = principal.type === "web" && canManageWebhook(subject, a);

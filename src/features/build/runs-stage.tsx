@@ -52,7 +52,7 @@ export function RunsStage({
         {cell("失败率", stats ? stats.failRate : error ? "—" : "…")}
         {cell("消耗积分（估算）", stats ? creditsText(stats.microCredits) : error ? "—" : "…")}
       </div>
-      <RunsPanel requestedAgent={agentId} platform={false} agentList={agentList} />
+      <RunsPanel requestedAgent={agentId} platform={false} agentList={agentList} inAgent />
     </div>
   );
 }

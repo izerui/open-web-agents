@@ -50,6 +50,7 @@ import {
   type Stage,
   railStatus,
   readonlyHeaderText,
+  shortBadgeText,
   stageBadges,
   stageParam,
 } from "./build-model";
@@ -128,6 +129,11 @@ export function BuildPage({
   );
   /** 设计器底部的「下一步」提示(前端按事件生成) */
   const [next, setNext] = useState<NextStep | null>(null);
+  /** 最近一次应用改动的节(「看看改动」展开它)、这次应用是不是「让设计器修复」带来的 */
+  const appliedRef = useRef<SectionKey | null>(null);
+  const fixingRef = useRef(false);
+  /** 「重新运行评测」:到评测阶段后弹出运行确认(每次加一) */
+  const [evalAsk, setEvalAsk] = useState(0);
   const [evalProgress, setEvalProgress] = useState<{ done: number; total: number } | null>(null);
   const [railQuery, setRailQuery] = useState("");
   const [designerOpen, setDesignerOpen] = useState<boolean | null>(null);
@@ -157,6 +163,8 @@ export function BuildPage({
     publishedVersion: agent?.publishedVersion ?? null,
     hasUnpublishedChanges: agent?.hasUnpublishedChanges === true,
   });
+  const metaRef = useRef(meta.meta);
+  metaRef.current = meta.meta;
   const usage = useAgentUsage(readOnly || !agent ? null : currentId);
   const monthUsed = useMonthUsed(list.loaded);
 
@@ -235,7 +243,11 @@ export function BuildPage({
       void meta.loadVersions();
       const titles = sections.map((k) => SECTIONS.find((s) => s.key === k)?.title ?? k);
       toast.success(`已应用到草稿：${titles.join("、")}`);
-      setNext(nextStepFor({ kind: "applied", sections: titles }));
+      appliedRef.current = sections[0] ?? null;
+      // 修复类改动,或者已经有评测用例:之前的评测结论作废,提示重跑
+      const stale = fixingRef.current || metaRef.current.caseCount > 0;
+      fixingRef.current = false;
+      setNext(nextStepFor({ kind: "applied", sections: titles, stale }));
     },
     onSessionChange: (sid) => {
       sessionRef.current = sid ?? "";
@@ -288,6 +300,7 @@ export function BuildPage({
   const fixWithDesigner = useCallback(
     (prompt: string) => {
       setNext(null);
+      fixingRef.current = true;
       setDesignerOpen(true);
       if (window.matchMedia("(max-width: 1023px)").matches) setMobileDesigner(true);
       designer.setPrompt(prompt);
@@ -340,6 +353,17 @@ export function BuildPage({
       setRtab("trial");
       setWide(false);
       setNext(null);
+      return;
+    }
+    if (to === "review") {
+      setNext(null);
+      goSection(appliedRef.current ?? "prompt");
+      return;
+    }
+    if (to === "rerun") {
+      setStage("eval");
+      setNext(null);
+      setEvalAsk((n) => n + 1);
       return;
     }
     if (to !== "fix") {
@@ -523,22 +547,24 @@ export function BuildPage({
           );
         })}
       </div>
-      <div className="shrink-0 border-t border-line-soft px-5 py-3 text-[13px] text-muted-foreground">
-        {monthUsed !== null ? (
-          <>
-            本月已用{" "}
-            <Link
-              href="/account/billing"
-              className="text-foreground underline-offset-2 hover:underline"
-            >
-              {creditsAmount(monthUsed)}
-            </Link>{" "}
-            积分
-          </>
-        ) : (
-          "本月用量读取中…"
-        )}
-      </div>
+      {monthUsed !== false && (
+        <div className="shrink-0 border-t border-line-soft px-5 py-3 text-[13px] text-muted-foreground">
+          {monthUsed !== null ? (
+            <>
+              本月已用{" "}
+              <Link
+                href="/account/billing"
+                className="text-foreground underline-offset-2 hover:underline"
+              >
+                {creditsAmount(monthUsed)}
+              </Link>{" "}
+              积分
+            </>
+          ) : (
+            "本月用量读取中…"
+          )}
+        </div>
+      )}
     </aside>
   );
 
@@ -572,7 +598,8 @@ export function BuildPage({
                 b.tone === "bad" && "bg-destructive-soft text-destructive",
               )}
             >
-              {b.text}
+              <span className="max-sm:hidden">{b.text}</span>
+              <span className="sm:hidden">{shortBadgeText(b.text)}</span>
             </span>
           </button>
         );
@@ -773,6 +800,7 @@ export function BuildPage({
             goStage={goStage}
             credits={usage.credits}
             onProgress={setEvalProgress}
+            askRun={evalAsk}
           />
         );
       case "publish":
