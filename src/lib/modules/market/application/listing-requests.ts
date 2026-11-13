@@ -77,7 +77,16 @@ export class ListingRequests {
     raw: unknown,
   ): Promise<ListingRequest> {
     this.assertOwner(principal, subject, agent);
-    const note = text(body(raw).note, "申请说明");
+    const b = body(raw);
+    const note = text(b.note, "申请说明");
+    // 申请类别可不填(为空时审核按智能体当前类别);填了必须是市场现有类别
+    let requestedCategory: string | undefined;
+    if (b.category !== undefined && b.category !== null) {
+      if (!validCategory(b.category)) {
+        throw new MarketError(400, "invalid_category", "请选择有效的类别");
+      }
+      requestedCategory = b.category;
+    }
     const published = (await this.deps.releases.publishedOf([agent])).get(agent.id);
     if (!published) throw new MarketError(409, "not_published", "请先发布智能体再申请上架");
     if (agent.marketListed) throw new MarketError(409, "already_listed", "这个智能体已经在市场上");
@@ -87,6 +96,7 @@ export class ListingRequests {
       version: published.version,
       requesterId: subject.userId,
       note,
+      requestedCategory,
       createdAt: this.now(),
     });
     if (!created) {
@@ -133,21 +143,25 @@ export class ListingRequests {
     if (!b || (b.action !== "approve" && b.action !== "reject")) {
       throw new MarketError(400, "invalid_request", "action 须为 approve 或 reject");
     }
-    let category: string | undefined;
     let reason: string | undefined;
-    if (b.action === "approve") {
-      if (!validCategory(b.category))
-        throw new MarketError(400, "invalid_category", "请选择有效类别");
-      category = b.category;
-    } else {
+    if (b.action === "reject") {
       reason = text(b.reason, "驳回理由");
       if (!reason) throw new MarketError(400, "invalid_request", "驳回需要写明理由");
+    } else if (b.category !== undefined && !validCategory(b.category)) {
+      throw new MarketError(400, "invalid_category", "请选择有效类别");
     }
 
     const found = await this.deps.repo.get(id);
     if (!found) throw new MarketError(404, "not_found", "上架申请不存在");
     if (found.status !== "pending") {
       throw new MarketError(409, "not_pending", "这条申请已经处理过了");
+    }
+    // 通过:管理员选的类别优先,没选就用申请里的类别
+    let category: string | undefined;
+    if (b.action === "approve") {
+      const chosen = b.category ?? found.requestedCategory;
+      if (!validCategory(chosen)) throw new MarketError(400, "invalid_category", "请选择有效类别");
+      category = chosen;
     }
     if (category) {
       await this.deps.market.setListing(principal, found.agentId, { listed: true, category });

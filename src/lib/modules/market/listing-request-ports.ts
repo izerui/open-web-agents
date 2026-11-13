@@ -15,6 +15,8 @@ export interface ListingRequest {
   version: number;
   requesterId: string;
   note?: string;
+  /** 所有者申请时选的市场类别;旧申请没有 */
+  requestedCategory?: string;
   status: ListingRequestStatus;
   /** 驳回理由 */
   reason?: string;
@@ -31,6 +33,7 @@ export interface NewListingRequest {
   version: number;
   requesterId: string;
   note?: string;
+  requestedCategory?: string;
   createdAt: number;
 }
 

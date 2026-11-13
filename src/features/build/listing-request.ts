@@ -1,7 +1,10 @@
 // 申请上架市场(gaps A13,所有者端)。接口由平台管理(阶段 7)提供:
 //   GET  /api/agents/[id]/listing-request → { request: ListingRequest | null }
-//   POST /api/agents/[id]/listing-request  body { note? } → 201 { request };409 not_published / pending_exists / already_listed
+//   POST /api/agents/[id]/listing-request  body { note?, category? } → 201 { request };
+//        400 invalid_category;409 not_published / pending_exists / already_listed
 // 调用集中在这里;接口不存在(404)时页面显示「上架申请暂不可用」而不是报错。
+
+import { MARKET_CATEGORIES } from "@/lib/modules/market/domain/catalog";
 
 export interface ListingRequest {
   id: string;
@@ -9,6 +12,9 @@ export interface ListingRequest {
   version: number;
   note?: string | null;
   reason?: string | null;
+  /** 申请时选的类别 */
+  requestedCategory?: string | null;
+  /** 通过时上架到的类别 */
   category?: string | null;
   createdAt: number;
   decidedAt?: number | null;
@@ -43,17 +49,22 @@ const SUBMIT_ERRORS: Record<string, string> = {
   not_published: "需要先发布才能申请上架",
   pending_exists: "已有一条待审核的申请，请等管理员处理",
   already_listed: "已在市场上架",
+  invalid_category: "请选择有效的类别",
 };
 
 export async function submitListingRequest(
   agentId: string,
-  note: string,
+  input: { note?: string; category?: string },
   fetcher: Fetcher = fetch,
 ): Promise<{ ok: true; request: ListingRequest } | { ok: false; message: string }> {
+  const note = input.note?.trim();
   const res = await fetcher(url(agentId), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(note.trim() ? { note: note.trim() } : {}),
+    body: JSON.stringify({
+      ...(note ? { note } : {}),
+      ...(input.category ? { category: input.category } : {}),
+    }),
   });
   if (res.status === 404) return { ok: false, message: "上架申请暂不可用" };
   const data = (await res.json().catch(() => ({}))) as {
@@ -98,13 +109,15 @@ export function listingView(i: {
       canSubmit: true,
       button: "提交申请",
     };
-  if (r.status === "pending")
+  if (r.status === "pending") {
+    const cat = MARKET_CATEGORIES.find((c) => c.id === r.requestedCategory)?.name;
     return {
-      text: `已提交 v${r.version} 的申请，等待审核`,
+      text: `已提交 v${r.version} 的申请${cat ? `（类别：${cat}）` : ""}，等待审核`,
       tone: "warn",
       canSubmit: false,
       button: "等待审核",
     };
+  }
   if (r.status === "rejected")
     return {
       text: `上次申请被驳回：${r.reason || "管理员没有写原因"}`,

@@ -116,6 +116,32 @@ describe("ListingRequests:申请与审核的规则", () => {
     });
   });
 
+  it("申请可带类别(须为市场类别);不带为空", async () => {
+    const r = await service.submit(...OWNER, await agent(), { category: "research" });
+    expect(r.requestedCategory).toBe("research");
+    expect((await service.latest(...OWNER, await agent()))?.requestedCategory).toBe("research");
+    await service.decide(ADMIN[0], r.id, { action: "reject", reason: "x" });
+    for (const category of ["unknown", 3, ""]) {
+      await expect(service.submit(...OWNER, await agent(), { category })).rejects.toMatchObject({
+        status: 400,
+        code: "invalid_category",
+      });
+    }
+    const plain = await service.submit(...OWNER, await agent(), { category: null });
+    expect(plain.requestedCategory).toBeUndefined();
+  });
+
+  it("通过时不传类别就用申请里的类别;传了以管理员选的为准", async () => {
+    const r = await service.submit(...OWNER, await agent(), { category: "content" });
+    const done = await service.decide(ADMIN[0], r.id, { action: "approve" });
+    expect(done).toMatchObject({
+      status: "approved",
+      requestedCategory: "content",
+      category: "content",
+    });
+    expect((await container.agents.get(publishedAgent.id))?.marketCategory).toBe("content");
+  });
+
   it("通过:上架到指定类别并记下处理人;再处理一次 → 409 not_pending", async () => {
     const r = await service.submit(...OWNER, await agent(), {});
     const done = await service.decide(ADMIN[0], r.id, { action: "approve", category: "research" });

@@ -22,6 +22,7 @@ import { errorText, fetchJson } from "@/lib/fetch-json";
 import { formatTime } from "@/lib/format-time";
 import { PUBLIC_PRINCIPAL } from "@/lib/modules/access/domain/grants";
 import type { SnapshotChange } from "@/lib/modules/agent/domain/snapshot-diff";
+import { MARKET_CATEGORIES } from "@/lib/modules/market/domain/catalog";
 import { cn } from "@/lib/utils";
 import {
   Check,
@@ -558,6 +559,8 @@ function SharePanel({
   const [msg, setMsg] = useState("");
   const [listing, setListing] = useState<ListingState>({ kind: "loading" });
   const [listNote, setListNote] = useState("");
+  const [listCategory, setListCategory] = useState("");
+  const [listError, setListError] = useState("");
 
   const reload = useCallback(async () => {
     try {
@@ -664,14 +667,38 @@ function SharePanel({
               {lv.text}
             </div>
             {lv.canSubmit && (
-              <Input
-                aria-label="上架申请备注"
-                className="mt-1.5 max-w-md"
-                value={listNote}
-                maxLength={500}
-                onChange={(e) => setListNote(e.target.value)}
-                placeholder="给审核的管理员留句话（可选）"
-              />
+              <div className="mt-1.5 flex max-w-xl flex-wrap gap-2">
+                <NativeSelect
+                  aria-label="申请上架到的类别"
+                  aria-invalid={listError ? true : undefined}
+                  className="w-40"
+                  value={listCategory}
+                  onChange={(e) => {
+                    setListCategory(e.target.value);
+                    setListError("");
+                  }}
+                >
+                  <option value="">选择类别</option>
+                  {MARKET_CATEGORIES.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </NativeSelect>
+                <Input
+                  aria-label="上架申请备注"
+                  className="min-w-48 flex-1"
+                  value={listNote}
+                  maxLength={500}
+                  onChange={(e) => setListNote(e.target.value)}
+                  placeholder="给审核的管理员留句话（可选）"
+                />
+              </div>
+            )}
+            {lv.canSubmit && listError && (
+              <p className="mt-1 text-[13px] text-destructive" aria-live="assertive">
+                {listError}
+              </p>
             )}
           </div>
           <Button
@@ -679,8 +706,12 @@ function SharePanel({
             variant="outline"
             disabled={!lv.canSubmit || busy}
             onClick={async () => {
+              if (!listCategory) return setListError("先选一个类别，管理员审核时默认上架到这里");
               setBusy(true);
-              const r = await submitListingRequest(agentId, listNote).catch((e) => ({
+              const r = await submitListingRequest(agentId, {
+                note: listNote,
+                category: listCategory,
+              }).catch((e) => ({
                 ok: false as const,
                 message: errorText(e),
               }));
@@ -688,6 +719,7 @@ function SharePanel({
               if (r.ok) {
                 toast.success("已提交上架申请，等待管理员审核");
                 setListNote("");
+                setListCategory("");
                 setListing({ kind: "ok", request: r.request });
               } else {
                 toast.error(r.message);

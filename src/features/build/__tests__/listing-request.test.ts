@@ -38,23 +38,47 @@ describe("上架申请接口封装(A13)", () => {
   });
 
   it("提交:成功与各错误码", async () => {
-    expect(await submitListingRequest("a", "备注", respond(201, { request: req() }))).toEqual({
+    expect(
+      await submitListingRequest("a", { note: "备注" }, respond(201, { request: req() })),
+    ).toEqual({
       ok: true,
       request: req(),
     });
     expect(
-      await submitListingRequest("a", "", respond(409, { code: "pending_exists", error: "x" })),
+      await submitListingRequest("a", {}, respond(409, { code: "pending_exists", error: "x" })),
     ).toEqual({ ok: false, message: "已有一条待审核的申请，请等管理员处理" });
     expect(
-      await submitListingRequest("a", "", respond(409, { code: "not_published", error: "x" })),
+      await submitListingRequest("a", {}, respond(409, { code: "not_published", error: "x" })),
     ).toEqual({ ok: false, message: "需要先发布才能申请上架" });
     expect(
-      await submitListingRequest("a", "", respond(409, { code: "already_listed", error: "x" })),
+      await submitListingRequest("a", {}, respond(409, { code: "already_listed", error: "x" })),
     ).toEqual({ ok: false, message: "已在市场上架" });
-    expect(await submitListingRequest("a", "", respond(404, {}))).toEqual({
+    expect(await submitListingRequest("a", {}, respond(404, {}))).toEqual({
       ok: false,
       message: "上架申请暂不可用",
     });
+  });
+});
+
+describe("申请时带上类别", () => {
+  it("请求体带去掉空白的说明与类别;都没有时是空对象", async () => {
+    const bodies: unknown[] = [];
+    const capture = async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ request: req() }), { status: 201 });
+    };
+    await submitListingRequest("a", { note: "  给财务用 ", category: "research" }, capture);
+    await submitListingRequest("a", { note: "  " }, capture);
+    expect(bodies).toEqual([{ note: "给财务用", category: "research" }, {}]);
+  });
+  it("服务端的无效类别有中文提示", async () => {
+    expect(
+      await submitListingRequest(
+        "a",
+        { category: "x" },
+        respond(400, { code: "invalid_category", error: "x" }),
+      ),
+    ).toEqual({ ok: false, message: "请选择有效的类别" });
   });
 });
 
@@ -77,6 +101,12 @@ describe("listingView:申请状态与按钮", () => {
       "提交申请",
     ],
     [{ state: { kind: "ok", request: req() } }, "已提交 v3 的申请，等待审核", false, "等待审核"],
+    [
+      { state: { kind: "ok", request: req({ requestedCategory: "research" }) } },
+      "已提交 v3 的申请（类别：研究分析），等待审核",
+      false,
+      "等待审核",
+    ],
     [
       { state: { kind: "ok", request: req({ status: "rejected", reason: "说明太简单" }) } },
       "上次申请被驳回：说明太简单",

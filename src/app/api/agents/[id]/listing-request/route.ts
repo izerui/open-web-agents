@@ -26,7 +26,7 @@ export async function GET(req: Request, { params }: Context) {
   }
 }
 
-/** body `{ note?: string }`;版本取当前发布版 */
+/** body `{ note?: string, category?: string }`(category 须为市场类别);版本取当前发布版 */
 export async function POST(req: Request, { params }: Context) {
   const { id } = await params;
   const opened = await openAgent(req, id, "read");
@@ -44,7 +44,12 @@ export async function POST(req: Request, { params }: Context) {
       action: "market.listing_request",
       resource: { type: "agent", id },
       ownerId: opened.agent.ownerId,
-      details: { name: opened.agent.name, version: created.version, note: created.note },
+      details: {
+        name: opened.agent.name,
+        version: created.version,
+        note: created.note,
+        category: created.requestedCategory,
+      },
       req,
     });
     return Response.json({ request: created }, { status: 201 });

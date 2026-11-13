@@ -14,8 +14,13 @@ export class InMemoryListingRequestRepo implements ListingRequestRepo {
     for (const row of this.rows.values()) {
       if (row.agentId === r.agentId && row.status === "pending") return null;
     }
-    const { note, ...rest } = r;
-    const row: ListingRequest = { ...rest, ...(note ? { note } : {}), status: "pending" };
+    const { note, requestedCategory, ...rest } = r;
+    const row: ListingRequest = {
+      ...rest,
+      ...(note ? { note } : {}),
+      ...(requestedCategory ? { requestedCategory } : {}),
+      status: "pending",
+    };
     this.rows.set(r.id, row);
     return { ...row };
   }

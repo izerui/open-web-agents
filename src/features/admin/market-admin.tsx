@@ -36,6 +36,7 @@ import {
   TableCard,
   useTabParam,
 } from "./admin-ui";
+import { categoryLabel, reviewCategory } from "./listing-review";
 
 type ManagedAgent = MarketAgent & {
   ownerEmail?: string;
@@ -586,7 +587,7 @@ function RequestsTab({ onChanged }: { onChanged: () => Promise<void> }) {
         ) : (
           <ul>
             {rows.map((r) => {
-              const category = categories[r.id] ?? r.agentCategory ?? "general";
+              const category = categories[r.id] ?? reviewCategory(r);
               return (
                 <li
                   key={r.id}
@@ -616,9 +617,7 @@ function RequestsTab({ onChanged }: { onChanged: () => Promise<void> }) {
                       <p className="mt-2.5 text-sm text-muted-foreground">没有填写申请说明。</p>
                     )}
                     <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                      <Badge variant="outline">
-                        类别：{r.agentCategory ? categoryName(r.agentCategory) : "未选"}
-                      </Badge>
+                      <Badge variant="outline">{categoryLabel(r)}</Badge>
                       <Badge variant="outline">{r.isPublic ? "已公开" : "未公开"}</Badge>
                       {r.publishedVersion !== undefined && r.publishedVersion !== r.version && (
                         <Badge variant="outline">当前发布版已是 v{r.publishedVersion}</Badge>
@@ -728,7 +727,7 @@ function RequestsTab({ onChanged }: { onChanged: () => Promise<void> }) {
       {previewing && (
         <PreviewDialog
           row={previewing}
-          category={categories[previewing.id] ?? previewing.agentCategory ?? "general"}
+          category={categories[previewing.id] ?? reviewCategory(previewing)}
           onClose={() => setPreviewing(null)}
         />
       )}

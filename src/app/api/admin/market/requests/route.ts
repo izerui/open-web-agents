@@ -75,7 +75,7 @@ async function enrich(ctx: Ctx, list: ListingRequest[]) {
         publishedVersion: agent?.publishedVersion,
         marketListed: agent?.marketListed === true,
         isPublic: publicIds.has(r.agentId),
-        /** 智能体当前的市场类别(申请本身不带类别);没有为 null */
+        /** 智能体当前的市场类别;旧申请没有申请类别时审核以它为默认。没有为 null */
         agentCategory: agent?.marketCategory ?? null,
         deleted: !agent,
         evalState,

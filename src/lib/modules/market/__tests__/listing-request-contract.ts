@@ -70,6 +70,21 @@ export function listingRequestContract(
       });
     });
 
+    it("申请类别原样往返;处理后保留,通过时的类别另记", async () => {
+      await repo.create({ ...row("r1"), requestedCategory: "content" });
+      await repo.create(row("r2", "b"));
+      expect((await repo.get(id("r1")))?.requestedCategory).toBe("content");
+      expect(await repo.get(id("r2"))).not.toHaveProperty("requestedCategory");
+      const done = await repo.decide(id("r1"), {
+        status: "approved",
+        category: "research",
+        decidedBy: "x",
+        decidedAt: 2,
+      });
+      expect(done).toMatchObject({ requestedCategory: "content", category: "research" });
+      expect((await repo.latestFor(id("a")))?.requestedCategory).toBe("content");
+    });
+
     it("decide 只对 pending 生效:第二次处理返回 null,结果不被覆盖", async () => {
       await repo.create(row("r1"));
       expect(

@@ -294,4 +294,25 @@ describe("管理端:申请队列与审核", () => {
     expect(requests[0]).toMatchObject({ isPublic: true });
     expect(requests[0]).toHaveProperty("agentCategory");
   });
+
+  it("所有者申请时选的类别存进申请、出现在队列里;无效类别 400", async () => {
+    const bad = await submit(
+      request("/api/agents/market-agent/listing-request", "owner", { category: "nope" }),
+      agentCtx(),
+    );
+    expect(bad.status).toBe(400);
+    const res = await submit(
+      request("/api/agents/market-agent/listing-request", "owner", {
+        note: "想上架",
+        category: "content",
+      }),
+      agentCtx(),
+    );
+    expect(res.status).toBe(201);
+    expect((await res.json()).request).toMatchObject({ requestedCategory: "content" });
+    const { requests } = await (
+      await queue(request("/api/admin/market/requests?status=pending", "admin"))
+    ).json();
+    expect(requests[0]).toMatchObject({ requestedCategory: "content" });
+  });
 });
