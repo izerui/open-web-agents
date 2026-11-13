@@ -166,8 +166,8 @@ export function ProviderDetail({ id, initialTab }: { id: string; initialTab?: st
                 `/api/admin/providers/${encodeURIComponent(id)}/impact`,
               );
               confirm.ask({
-                title: `停用「${provider.name}」?`,
-                description: `其下所有模型都将不可用，影响 ${impact.agents} 个智能体${impact.aliases.length ? `;别名 ${impact.aliases.join("、")} 指向其下模型` : ""}。进行中的运行不受影响。`,
+                title: `停用「${provider.name}」？`,
+                description: `其下所有模型都将不可用，影响 ${impact.agents} 个智能体${impact.aliases.length ? `；别名 ${impact.aliases.join("、")} 指向其下模型` : ""}。进行中的运行不受影响。`,
                 confirmLabel: "停用",
                 destructive: true,
                 onConfirm: async () => {

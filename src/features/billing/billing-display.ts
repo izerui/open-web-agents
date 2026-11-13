@@ -79,7 +79,7 @@ export function chargeStatus(c: {
       return {
         label: "欠额",
         tone: "destructive",
-        note: `余额不足,欠 ${creditsAmount(c.owedMicro as string)} 积分,充值后自动补扣`,
+        note: `余额不足，欠 ${creditsAmount(c.owedMicro as string)} 积分，充值后自动补扣`,
       };
     }
     return {

@@ -278,8 +278,8 @@ export function RunsPanel({
   const contextError =
     objectMode && agentsLoaded && !agentsError && !selectedAgent
       ? requestedAgent
-        ? "找不到指定的智能体,它可能已被删除或你没有访问权限。"
-        : "链接缺少智能体 ID,请选择智能体后再查看运行。"
+        ? "找不到指定的智能体，它可能已被删除或你没有访问权限。"
+        : "链接缺少智能体 ID，请选择智能体后再查看运行。"
       : null;
 
   const load = useCallback(
@@ -342,10 +342,10 @@ export function RunsPanel({
         { method: "POST" },
       );
       if (r.cancelled) toast.success("运行已取消");
-      else toast.message(r.note ?? "运行已结束,无需取消");
+      else toast.message(r.note ?? "运行已结束，无需取消");
       await Promise.all([load(), openDetail(run.id)]);
     } catch (e) {
-      toast.error(`取消失败:${errorText(e)}`);
+      toast.error(`取消失败：${errorText(e)}`);
     } finally {
       setCancelling(false);
     }
@@ -356,7 +356,7 @@ export function RunsPanel({
       await navigator.clipboard.writeText(text);
       toast.success("taskId 已复制");
     } catch (e) {
-      toast.error(`复制失败:${errorText(e)}`);
+      toast.error(`复制失败：${errorText(e)}`);
     }
   }
 
@@ -367,7 +367,7 @@ export function RunsPanel({
     <>
       {agentsError && (
         <Alert variant="destructive" className="mb-3 flex flex-wrap items-center gap-2">
-          智能体列表加载失败:{agentsError}
+          智能体列表加载失败：{agentsError}
           <Button size="sm" variant="outline" onClick={() => void loadAgents()}>
             重试
           </Button>
@@ -391,7 +391,7 @@ export function RunsPanel({
       )}
       {detailError && (
         <p aria-live="polite" className="mb-3 text-sm text-destructive">
-          运行详情没有读到:{detailError}
+          运行详情没有读到：{detailError}
         </p>
       )}
       {canLoad && (
@@ -561,7 +561,7 @@ export function RunsPanel({
                 </ul>
                 <div className={cn(tb.wrap, "max-sm:hidden")}>
                   <table className={cn(tb.table, platform ? "min-w-[1040px]" : "min-w-[880px]")}>
-                    <caption className="sr-only">运行列表,按回车查看详情</caption>
+                    <caption className="sr-only">运行列表，按回车查看详情</caption>
                     <thead>
                       <tr>
                         <th scope="col" className={cn(tb.th, tb.first)}>
@@ -658,7 +658,7 @@ export function RunsPanel({
                                     <Badge
                                       variant="warning"
                                       className="ml-1"
-                                      title="有模型调用没回报用量,统计不完整"
+                                      title="有模型调用没回报用量，统计不完整"
                                     >
                                       部分
                                     </Badge>

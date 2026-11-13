@@ -392,7 +392,7 @@ function GroupDrawer({
           disabled={busy}
           onClick={() =>
             confirm.ask({
-              title: `删除「${group.name}」?`,
+              title: `删除「${group.name}」？`,
               description: `${members?.length ?? group.memberCount} 位成员会失去经由这个组获得的权限${
                 group.grantCount ? `（涉及 ${group.grantCount} 个智能体）` : ""
               }。删除后不能撤销。`,

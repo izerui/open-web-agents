@@ -6,6 +6,7 @@ import {
   monthlyShare,
   parseRpmDraft,
   rotatedOldKeys,
+  rpmHint,
   rpmRangeText,
 } from "../key-display";
 
@@ -119,5 +120,9 @@ describe("rpmRangeText:签发表单里写明每分钟上限的取值范围", () 
   });
   it("管理员或平台不限时只要求正整数", () => {
     expect(rpmRangeText(0)).toBe("正整数");
+  });
+  it("表单提示:数字与汉字之间留空,「正整数」前不多空格", () => {
+    expect(rpmHint(60)).toBe("每分钟上限填 1 到 60 次，不能高于平台默认，留空用平台默认。");
+    expect(rpmHint(0)).toBe("每分钟上限填正整数，留空用平台默认。");
   });
 });

@@ -50,7 +50,7 @@ export function AccountSecurityView() {
       setNext("");
       setConfirm("");
     } catch (e) {
-      setError(`修改失败:${errorText(e)}`);
+      setError(`修改失败：${errorText(e)}`);
     } finally {
       setBusy(false);
     }

@@ -213,7 +213,7 @@ export function PackageView({
       requestKey.current = null;
       setPurchase(null);
       setView("orders");
-      toast.success(result.replayed ? "已找到原订单,未重复创建" : "订单已创建,等待人工处理");
+      toast.success(result.replayed ? "已找到原订单，未重复创建" : "订单已创建，等待人工处理");
       await loadOrders();
     });
   }
@@ -235,7 +235,7 @@ export function PackageView({
         action.kind === "cancel"
           ? "订单已取消"
           : result.replayed
-            ? "原订单已发放,没有重复入账"
+            ? "原订单已发放，没有重复入账"
             : "积分已发放",
       );
       setAction(null);

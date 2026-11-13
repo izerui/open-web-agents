@@ -48,7 +48,7 @@ export function WebhookDeliveries({
         setCursor(d.nextCursor);
       } catch (e) {
         setItems([]);
-        toast.error(`投递记录加载失败:${errorText(e)}`);
+        toast.error(`投递记录加载失败：${errorText(e)}`);
       }
     },
     [agentId],
@@ -66,8 +66,8 @@ export function WebhookDeliveries({
         `/api/agents/${encodeURIComponent(agentId)}/webhook/test`,
         { method: "POST" },
       );
-      if (d.delivery.ok) toast.success(`测试回调已送达(HTTP ${d.delivery.httpStatus})`);
-      else toast.error(`测试回调失败:${d.delivery.error ?? `HTTP ${d.delivery.httpStatus}`}`);
+      if (d.delivery.ok) toast.success(`测试回调已送达（HTTP ${d.delivery.httpStatus}）`);
+      else toast.error(`测试回调失败：${d.delivery.error ?? `HTTP ${d.delivery.httpStatus}`}`);
       await load();
     } catch (e) {
       toast.error(errorText(e));
@@ -82,7 +82,7 @@ export function WebhookDeliveries({
       await fetchJson(`/api/runs/${encodeURIComponent(runId)}/webhook/redeliver`, {
         method: "POST",
       });
-      toast.success("已放回发件箱,几秒后会重新投递");
+      toast.success("已放回发件箱，几秒后会重新投递");
       setTimeout(() => void load(), 3000);
     } catch (e) {
       toast.error(errorText(e));
@@ -96,7 +96,7 @@ export function WebhookDeliveries({
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-medium text-xs">回调投递记录</span>
         <span className="text-xs text-muted-foreground">
-          {webhookUrl ? "地址在构建器里配置;签名密钥见下方" : "未配置回调地址"}
+          {webhookUrl ? "地址在构建器里配置；签名密钥见下方" : "未配置回调地址"}
         </span>
         <div className="ml-auto flex gap-1">
           <Button size="sm" variant="ghost" className="h-8" onClick={() => void load()}>

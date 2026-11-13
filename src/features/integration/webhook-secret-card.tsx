@@ -46,7 +46,7 @@ export function WebhookSecretCard() {
       toast.success(generate ? "已生成新的签名密钥" : "已改用自定义密钥");
       await refreshMe();
     } catch (error) {
-      toast.error(`保存失败:${errorText(error)}`);
+      toast.error(`保存失败：${errorText(error)}`);
     } finally {
       setSaving(false);
     }
@@ -62,7 +62,7 @@ export function WebhookSecretCard() {
       toast.success("已清除签名密钥");
       await refreshMe();
     } catch (error) {
-      toast.error(`清除失败:${errorText(error)}`);
+      toast.error(`清除失败：${errorText(error)}`);
     } finally {
       setSaving(false);
     }
@@ -70,9 +70,9 @@ export function WebhookSecretCard() {
 
   function useCustom() {
     const v = customSecret.trim();
-    if (!v) return setInputError("请输入密钥,或直接点「生成」");
+    if (!v) return setInputError("请输入密钥，或直接点「生成」");
     if (v.length < MIN_SECRET)
-      return setInputError(`至少 ${MIN_SECRET} 个字符,现在 ${v.length} 个`);
+      return setInputError(`至少 ${MIN_SECRET} 个字符，现在 ${v.length} 个`);
     setInputError("");
     void saveWebhookSecret(false);
   }
@@ -83,7 +83,7 @@ export function WebhookSecretCard() {
       await navigator.clipboard.writeText(revealedSecret);
       toast.success("已复制到剪贴板");
     } catch (error) {
-      toast.error(`复制失败:${errorText(error)}`);
+      toast.error(`复制失败：${errorText(error)}`);
     }
   }
 

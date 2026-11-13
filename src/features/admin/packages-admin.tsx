@@ -588,7 +588,7 @@ export function PackagesAdmin() {
             <DialogTitle>{draft?.version ? "编辑套餐" : "添加套餐"}</DialogTitle>
             <DialogDescription>
               {draft?.version
-                ? `当前 v${draft.version},保存后生成 v${draft.version + 1}。已有订单按原版本，不受影响。`
+                ? `当前 v${draft.version}，保存后生成 v${draft.version + 1}。已有订单按原版本，不受影响。`
                 : "保存后生成 v1。"}
             </DialogDescription>
           </DialogHeader>

@@ -19,7 +19,7 @@ const GAPS: { key: ReconCategory; label: string }[] = [
   { key: "snapshot_provisional", label: "快照暂记" },
   { key: "snapshot_settled", label: "按快照结清" },
   { key: "usage_unknown", label: "用量未知" },
-  { key: "no_usage_zero", label: "未观察到用量(按 0 结清)" },
+  { key: "no_usage_zero", label: "未观察到用量（按 0 结清）" },
   { key: "not_started", label: "未开始" },
   { key: "open", label: "进行中" },
 ];
@@ -69,15 +69,15 @@ function toCsv(lines: Line[]): string {
     "缓存读token",
     "缓存写token",
     "无法计价token",
-    "成本估算(元)",
-    "应扣(积分)",
-    "实际扣除(积分)",
+    "成本估算（元）",
+    "应扣（积分）",
+    "实际扣除（积分）",
   ];
   const rows = lines.map((l) => {
     const u = l.unpricedTokens;
     return [
       l.day,
-      l.providerName ?? "(无锁定价目)",
+      l.providerName ?? "（无锁定价目）",
       l.runs,
       l.counts.complete,
       ...GAPS.map((g) => l.counts[g.key]),
@@ -167,13 +167,15 @@ export function ReconciliationView() {
         </Button>
       </div>
       <p className="text-xs text-muted-foreground">
-        成本估算按每次运行受理时锁定的价目版本、用成本单价计算,用于与上游账单核对;日期按数据库时钟。
-        用量未知、未观察到用量、未开始、进行中只计条数,不计入估算,不代表已核实为零;
+        成本估算按每次运行受理时锁定的价目版本、用成本单价计算，用于与上游账单核对；日期按数据库时钟。
+        用量未知、未观察到用量、未开始、进行中只计条数，不计入估算，不代表已核实为零；
         无法完整计价与快照的运行只计入能算的部分。
       </p>
       {error && <p className="text-sm text-destructive">{error}</p>}
       {truncated && (
-        <p className="text-xs text-warning">区间内运行太多,只汇总了最近的 50,000 次,请缩小区间。</p>
+        <p className="text-xs text-warning">
+          区间内运行太多，只汇总了最近的 50,000 次，请缩小区间。
+        </p>
       )}
       {lines && lines.length === 0 && !error && (
         <p className="py-3 text-sm text-muted-foreground">区间内没有运行</p>
@@ -190,7 +192,7 @@ export function ReconciliationView() {
                   "运行数",
                   "输入 / 输出 token",
                   "缓存读 / 写 token",
-                  "成本估算(元)",
+                  "成本估算（元）",
                   "应扣",
                   "实际扣除",
                   "未完整的数据",
@@ -209,7 +211,7 @@ export function ReconciliationView() {
                   data-testid="recon-line"
                 >
                   <td className="whitespace-nowrap px-2 py-2">{l.day}</td>
-                  <td className="px-2 py-2">{l.providerName ?? "(无锁定价目)"}</td>
+                  <td className="px-2 py-2">{l.providerName ?? "（无锁定价目）"}</td>
                   <td className="px-2 py-2 font-mono">
                     {l.runs}
                     <p className="text-muted-foreground">完整 {l.counts.complete}</p>

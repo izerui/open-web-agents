@@ -54,6 +54,13 @@ export function rpmRangeText(platformMax: number): string {
   return platformMax > 0 ? `1 到 ${platformMax} 次，不能高于平台默认` : "正整数";
 }
 
+/** 签发表单每分钟上限下面的提示句 */
+export function rpmHint(platformMax: number): string {
+  return platformMax > 0
+    ? `每分钟上限填 ${rpmRangeText(platformMax)}，留空用平台默认。`
+    : "每分钟上限填正整数，留空用平台默认。";
+}
+
 /** 认 Key 用的标识:有尾号显示尾号;加列之前签发的旧 Key 退回显示 ID */
 export function keyLabel(k: { id: string; keyHint?: string }): string {
   return k.keyHint || `ID ${k.id.slice(0, 12)}`;

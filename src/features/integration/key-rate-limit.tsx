@@ -63,7 +63,7 @@ export function KeyRateLimit({
       setEditing(false);
       await onSaved();
     } catch (e) {
-      setError(`调整失败:${errorText(e)}`);
+      setError(`调整失败：${errorText(e)}`);
     } finally {
       setSaving(false);
     }

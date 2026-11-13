@@ -437,7 +437,7 @@ function AgentsTab({
                         disabled={busy !== null}
                         onClick={() =>
                           confirm.ask({
-                            title: `下架「${item.name}」?`,
+                            title: `下架「${item.name}」？`,
                             description:
                               "下架后探索页不再展示，用户也不能再从市场「立即使用」或克隆。已经在用的会话、已签发的 API Key 和所有者自己的使用不受影响；「公开」设置保持不变。",
                             confirmLabel: "下架",
@@ -671,7 +671,7 @@ function RequestsTab({ onChanged }: { onChanged: () => Promise<void> }) {
                             disabled={busy !== null || r.deleted}
                             onClick={() =>
                               confirm.ask({
-                                title: `通过并上架「${r.agentName}」?`,
+                                title: `通过并上架「${r.agentName}」？`,
                                 description: `上架到「${categoryName(category)}」。所有者之后发布新版本时，市场自动跟随新的发布版。`,
                                 confirmLabel: "通过并上架",
                                 onConfirm: async () => {

@@ -111,7 +111,9 @@ test.describe("消耗汇总", () => {
       const own = page.getByRole("region", { name: "消耗汇总", exact: true });
       await expect(own.getByLabel("时间范围")).toHaveValue("last_month");
       await expect(own.getByTestId("charge-summary-total").locator("td").nth(2)).toHaveText("100");
-      await expect(own.getByTestId("charge-summary-total").locator("td").nth(2)).not.toHaveText("107");
+      await expect(own.getByTestId("charge-summary-total").locator("td").nth(2)).not.toHaveText(
+        "107",
+      );
       // 运行明细也只看上月
       await page.getByRole("tab", { name: "运行消耗", exact: true }).click();
       await expect(page.getByTestId("run-charge-drill")).toContainText("上月");
@@ -227,9 +229,9 @@ test.describe("消耗汇总", () => {
 
     await page.goto(`${BASE}/account/billing`);
     // 概览页的"本月已用"是汇总的对照口径
-    await expect(
-      page.locator("dt", { hasText: "本月已用 / 月度上限" }).locator("+ dd"),
-    ).toHaveText(/^15\s*\//);
+    await expect(page.locator("dt", { hasText: "本月已用 / 月度上限" }).locator("+ dd")).toHaveText(
+      /^15\s*\//,
+    );
     // 消耗汇总在积分页的「运行消耗」页签
     await page.getByRole("tab", { name: "运行消耗", exact: true }).click();
     const summary = page.getByRole("region", { name: "消耗汇总", exact: true });

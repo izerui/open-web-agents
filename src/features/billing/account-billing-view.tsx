@@ -107,13 +107,14 @@ export function AccountBillingView() {
     };
   }, [load]);
 
-  const name = me?.user?.email ? me.user.email.split("@")[0] : "你";
+  // 本地模式没有邮箱:写「你的积分账户」,不出现「你 的」
+  const owner = me?.user?.email ? `${me.user.email.split("@")[0]} 的` : "你的";
 
   return (
     <SpacePage
       side="account"
       title="积分与套餐"
-      subtitle={`${name} 的积分账户。每次运行发起时先按模型冻结积分，结束后按实际用量扣除，多余的退回可用余额。`}
+      subtitle={`${owner}积分账户。每次运行发起时先按模型冻结积分，结束后按实际用量扣除，多余的退回可用余额。`}
       actions={
         <Button onClick={() => openTab("packages")}>
           <Plus />
@@ -369,7 +370,7 @@ function MonthBySource({ onDrill }: { onDrill: (drill: ChargeDrill) => void }) {
     };
   }, []);
 
-  if (error) return <p className="mb-2 text-xs text-destructive">没读到:{error}</p>;
+  if (error) return <p className="mb-2 text-xs text-destructive">没读到：{error}</p>;
   if (!rows) return <p className="mb-2 text-sm text-muted-foreground">载入中…</p>;
   if (rows.length === 0)
     return <p className="mb-2 text-sm text-muted-foreground">本月还没有运行</p>;

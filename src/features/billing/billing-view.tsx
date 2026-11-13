@@ -221,7 +221,7 @@ export function BillingView({
       setReason("");
       setConfirm(false);
       creditAttempt.current = null;
-      toast.success(result.replayed ? "原请求已处理,未重复入账" : "积分已入账");
+      toast.success(result.replayed ? "原请求已处理，未重复入账" : "积分已入账");
       setStatement((previous) => ({
         ...previous,
         balance: result.balance,

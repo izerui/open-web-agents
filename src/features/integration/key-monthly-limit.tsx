@@ -42,12 +42,12 @@ export function KeyMonthlyLimit({
       });
       if (next === null) toast.success("这把 Key 本月不再单独限额");
       else if (BigInt(parseCredits(next)) <= BigInt(usedMicro || "0"))
-        toast.warning("已保存。本月已用已达上限,这把 Key 本月的新调用会被拒绝");
+        toast.warning("已保存。本月已用已达上限，这把 Key 本月的新调用会被拒绝");
       else toast.success(`月度上限已设为 ${next} 积分`);
       setEditing(false);
       await onSaved();
     } catch (e) {
-      setError(`调整失败:${errorText(e)}`);
+      setError(`调整失败：${errorText(e)}`);
     } finally {
       setSaving(false);
     }
@@ -101,7 +101,7 @@ export function KeyMonthlyLimit({
         try {
           if (BigInt(parseCredits(text)) <= 0n) throw new Error();
         } catch {
-          return setError("填正数,留空表示不限额");
+          return setError("填正数，留空表示不限额");
         }
         void save(text);
       }}
