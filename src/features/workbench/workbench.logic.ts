@@ -152,6 +152,21 @@ export function toastOffsetAbove(viewportHeight: number, composerTop: number): s
   return `${Math.max(28, Math.round(viewportHeight - composerTop + 12))}px`;
 }
 
+/**
+ * 右上角「等你确认」卡片的位置:放在对话卡片里、对话头下方 12px,右边与对话卡片右沿留 12px。
+ * 贴着窗口右上角会盖住对话头的「工作区文件 / 执行详情」开关,右侧面板开着时又会盖住面板。
+ */
+export function cornerNoteOffset(
+  viewportWidth: number,
+  shell: { top: number; right: number },
+  headerHeight: number,
+): { top: string; right: string } {
+  return {
+    top: `${Math.round(shell.top + headerHeight + 12)}px`,
+    right: `${Math.max(12, Math.round(viewportWidth - shell.right + 12))}px`,
+  };
+}
+
 /** 取消排队的提示(chat N4):写出取消的是哪条,过长截断 */
 export function unqueuedText(text: string): string {
   const t = text.trim().replace(/\s+/g, " ");

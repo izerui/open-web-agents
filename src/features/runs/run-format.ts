@@ -41,9 +41,17 @@ export function prettyInput(text: string): string {
   }
 }
 
-/** 运行花费:一律显示积分(实际扣除;还在冻结的写明冻结)。没有扣费记录返回 null,不退回显示美元 */
-export function runCreditsText(credits?: { micro: string; state: string }): string | null {
-  if (!credits) return null;
+/**
+ * 运行花费:一律显示积分(实际扣除;还在冻结的写明冻结),不退回显示美元。没有扣费记录时:已结束的写「未计费」(计费上线前的旧运行、未开计费),
+ * 还没结束或不知道状态的返回 null,不下结论。
+ */
+export function runCreditsText(
+  credits?: { micro: string; state: string },
+  status?: RunStatus,
+): string | null {
+  if (!credits) {
+    return status === "success" || status === "failed" || status === "cancelled" ? "未计费" : null;
+  }
   const amount = `${creditsAmount(credits.micro)} 积分`;
   return credits.state === "open" ? `冻结 ${amount}` : amount;
 }

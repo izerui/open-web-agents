@@ -51,6 +51,7 @@ import { VariablePrompt } from "./variable-prompt";
 import {
   type ToolTimes,
   agentIdFromSearch,
+  cornerNoteOffset,
   errorSummary,
   leftRunningText,
   promptFromSearch,
@@ -88,6 +89,7 @@ import {
 } from "@/components/ui/resizable";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { CornerToaster } from "@/components/ui/sonner";
+import { clearHandedOff, handOffUploaded, handedOffFiles } from "@/lib/attachment-handoff";
 
 import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { modelOf, refreshModelCatalog, useModelCatalog } from "@/features/builder/model-select";
@@ -205,6 +207,17 @@ export function Workbench() {
   /** 已归档的会话(左栏「已归档」视图,可恢复) */
   const [archived, setArchived] = useState<SessionSummary[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  /** 探索首页带来、已在这个会话工作区里的附件(见 lib/attachment-handoff):随下一条消息发出 */
+  const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
+  const workspaceFilesRef = useRef<{ sessionId: string | null; files: string[] }>({
+    sessionId: null,
+    files: [],
+  });
+  useEffect(() => {
+    const files = handedOffFiles(sessionId);
+    workspaceFilesRef.current = { sessionId, files };
+    setWorkspaceFiles(files);
+  }, [sessionId]);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [running, setRunning] = useState(false);
@@ -267,24 +280,38 @@ export function Workbench() {
   /**
    * 底部输入区(审批卡 + 输入框)。全站提示在底部居中,对话页会正好盖住输入框和发送按钮(chat N2):
    * 量出输入区上沿,写进 --toast-offset-bottom 把提示抬到它上方;离开对话页时去掉,别的页面不受影响。
+   * 同时量对话卡片,写 --corner-toast-top / --corner-toast-right 给右上角的「等你确认」卡片。
    */
   const [composerArea, setComposerArea] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!composerArea) return;
     const root = document.documentElement;
-    const update = () =>
+    // 右上角「等你确认」卡片也跟着对话卡片走:对话头下方、对话卡片右沿以内
+    const shell = composerArea.closest<HTMLElement>("[data-conversation-shell]");
+    const update = () => {
       root.style.setProperty(
         "--toast-offset-bottom",
         toastOffsetAbove(window.innerHeight, composerArea.getBoundingClientRect().top),
       );
+      if (shell) {
+        const rect = shell.getBoundingClientRect();
+        const header = shell.firstElementChild?.getBoundingClientRect().height ?? 0;
+        const corner = cornerNoteOffset(window.innerWidth, rect, header);
+        root.style.setProperty("--corner-toast-top", corner.top);
+        root.style.setProperty("--corner-toast-right", corner.right);
+      }
+    };
     update();
     const observer = new ResizeObserver(update);
     observer.observe(composerArea);
+    if (shell) observer.observe(shell);
     window.addEventListener("resize", update);
     return () => {
       observer.disconnect();
       window.removeEventListener("resize", update);
       root.style.removeProperty("--toast-offset-bottom");
+      root.style.removeProperty("--corner-toast-top");
+      root.style.removeProperty("--corner-toast-right");
     };
   }, [composerArea]);
   const noteLeavingRunning = useCallback(() => {
@@ -762,7 +789,9 @@ export function Workbench() {
       const id = await ensureSession(prompt, abort.signal);
       abort.signal.throwIfAborted();
       if (seq !== openSeqRef.current) throw new Error("会话已经切换");
-      const uploadedFiles = await uploadPromptFiles(id, files, abort.signal);
+      const handed =
+        workspaceFilesRef.current.sessionId === id ? workspaceFilesRef.current.files : [];
+      const uploadedFiles = [...handed, ...(await uploadPromptFiles(id, files, abort.signal))];
       abort.signal.throwIfAborted();
       const runPrompt = joinPromptAttachments(prompt, uploadedFiles);
       if (uploadedFiles.length) {
@@ -783,6 +812,11 @@ export function Workbench() {
       if (!runId) throw new Error("运行接口没有返回 runId");
       sendHandle.runId = runId;
       patch((turn) => ({ ...turn, runId }));
+      if (handed.length) {
+        clearHandedOff(id);
+        workspaceFilesRef.current = { sessionId: id, files: [] };
+        setWorkspaceFiles([]);
+      }
       if (clearComposer) setInput("");
 
       // 提交 Promise 在“可靠入队”后就完成，让 PromptInput 此时清附件；
@@ -1531,6 +1565,13 @@ export function Workbench() {
           }}
           contextUsed={contextUsed}
           totalProcessed={totalProcessed}
+          workspaceFiles={workspaceFiles}
+          onRemoveWorkspaceFileAction={(name) => {
+            const rest = workspaceFiles.filter((n) => n !== name);
+            workspaceFilesRef.current = { sessionId, files: rest };
+            setWorkspaceFiles(rest);
+            if (sessionId) handOffUploaded(sessionId, rest);
+          }}
         />
       </div>
     </div>

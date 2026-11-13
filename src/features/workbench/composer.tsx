@@ -10,7 +10,6 @@ import {
   usePromptInputAttachments,
 } from "@/components/ai-elements/prompt-input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { takeAttachments } from "@/lib/attachment-handoff";
 import { cn } from "@/lib/utils";
 import { ArrowUp, Clock, File, Image, Paperclip, Square, X } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -75,15 +74,37 @@ function SlashMenu({
   );
 }
 
-/** 探索首页「立即使用」带来的附件:打开的正是那个会话时放进附件条(见 lib/attachment-handoff) */
-function HandedOffAttachments() {
-  const { add } = usePromptInputAttachments();
-  // biome-ignore lint/correctness/useExhaustiveDependencies: take once on mount
-  useEffect(() => {
-    const files = takeAttachments(new URLSearchParams(window.location.search).get("session"));
-    if (files.length) add(files);
-  }, []);
-  return null;
+/** 已经在会话工作区里的附件(探索首页带来的):发消息时拼进附件清单,不再上传。移除只是不随消息发,文件仍在工作区 */
+function WorkspaceAttachmentChips({
+  files,
+  onRemove,
+}: {
+  files: readonly string[];
+  onRemove: (name: string) => void;
+}) {
+  if (files.length === 0) return null;
+  return (
+    <ul className="flex flex-wrap gap-1.5" aria-label="已在工作区的附件">
+      {files.map((name) => (
+        <li
+          key={name}
+          title="已在工作区，发送时一起交给智能体"
+          className="inline-flex h-[22px] items-center gap-1 rounded-full border border-border pr-0.5 pl-2 text-xs text-muted-foreground"
+        >
+          <File className="size-3" />
+          <span className="max-w-48 truncate">{name}</span>
+          <button
+            type="button"
+            aria-label={`不随消息发送 ${name}`}
+            onClick={() => onRemove(name)}
+            className="flex size-[18px] items-center justify-center rounded-full hover:bg-[#DDD9CF]"
+          >
+            <X className="size-3" />
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 function AttachmentChips() {
@@ -169,6 +190,8 @@ export function Composer({
   onUnqueueAction,
   contextUsed,
   totalProcessed,
+  workspaceFiles = [],
+  onRemoveWorkspaceFileAction = () => {},
 }: {
   input: string;
   onInputChangeAction: (value: string) => void;
@@ -183,6 +206,9 @@ export function Composer({
   onUnqueueAction: (id: string) => void;
   contextUsed: number;
   totalProcessed: number | null;
+  /** 已在工作区、随下一条消息发出的附件(探索首页带来的) */
+  workspaceFiles?: readonly string[];
+  onRemoveWorkspaceFileAction?: (name: string) => void;
 }) {
   const [slashIndex, setSlashIndex] = useState(0);
   /** Esc 只关菜单、不清空输入;再改输入时菜单重新出现 */
@@ -252,7 +278,10 @@ export function Composer({
         >
           <PromptInputHeader className="px-3.5 pt-2.5 pb-0 empty:hidden">
             <AttachmentChips />
-            <HandedOffAttachments />
+            <WorkspaceAttachmentChips
+              files={workspaceFiles}
+              onRemove={onRemoveWorkspaceFileAction}
+            />
           </PromptInputHeader>
           <PromptInputBody>
             <PromptInputTextarea

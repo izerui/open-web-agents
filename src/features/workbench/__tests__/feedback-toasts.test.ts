@@ -1,6 +1,7 @@
 import { sessionLabel } from "@/features/workbench/session-groups";
 import type { Turn } from "@/features/workbench/types";
 import {
+  cornerNoteOffset,
   leftRunningText,
   rerunStartedText,
   toastOffsetAbove,
@@ -22,6 +23,22 @@ describe("对话页底部提示避开输入框（chat N2）", () => {
   });
   it("至少保持全站默认的 28px", () => {
     expect(toastOffsetAbove(900, 899)).toBe("28px");
+  });
+});
+
+describe("右上角「等你确认」卡片放在对话卡片里、对话头下方（不盖对话头开关，也不盖右侧面板）", () => {
+  it("顶部 = 对话卡片上沿 + 对话头高度 + 12；右边 = 对话卡片右沿往里 12", () => {
+    // 1440 宽，对话卡片 x∈[285,1031]、上沿 76，对话头 66 高；右侧面板开着
+    expect(cornerNoteOffset(1440, { top: 76, right: 1031 }, 66)).toEqual({
+      top: "154px",
+      right: "421px",
+    });
+  });
+  it("右侧面板关着时对话卡片贴近窗口右边", () => {
+    expect(cornerNoteOffset(1440, { top: 76, right: 1424 }, 66)).toEqual({
+      top: "154px",
+      right: "28px",
+    });
   });
 });
 

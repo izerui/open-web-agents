@@ -1,5 +1,5 @@
 // 对话页第二轮还原度修复(chat N1–N4、F15、F26、explore-studio N4)的界面核对。
-// 接口全部用 page.route 模拟,不真跑模型、不写库。登录用设计核对账号(整组只登录一次)。
+// 接口全部用 page.route 模拟,不真跑模型。整组注册一个新账号,只用来过登录。
 // 截图目录:OWA_SHOT_DIR(默认 docs/design-demos/coze-v3/implementation/fidelity/chat/after2/)。
 import path from "node:path";
 import { type Page, type Route, expect, test } from "@playwright/test";
@@ -238,8 +238,10 @@ test("N2 + N4:等确认的通知在右上角，底部提示避开输入框；取
   await page.goto("/chat?session=s1");
   const note = page.getByText("差旅报销初审在等你确认");
   await expect(note).toBeVisible();
+  await page.waitForTimeout(600); // 等进场动画走完再量位置
   const noteBox = await note.boundingBox();
-  expect(noteBox && noteBox.y < 160 && noteBox.x > 900).toBe(true);
+  // 右上角、在对话头(顶栏 60 + 对话头 66)之下,不盖住对话头右侧的开关
+  expect(noteBox && noteBox.y > 126 && noteBox.y < 240 && noteBox.x > 900).toBe(true);
   await expect(page.getByText("erp-finance.submit，提交 2 张审批单")).toBeVisible();
 
   // 排队 → 底部提示应在输入区上方

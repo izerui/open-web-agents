@@ -1,29 +1,64 @@
 /**
- * 跨页面带附件:探索首页「立即使用」建好会话后,把首页选的文件交给对话页输入框。
+ * 跨页面带附件:探索首页「立即使用」建好会话后,当场把首页选的文件传进这个会话的工作区,
+ * 再把文件名交给对话页 —— 输入框附件条里显示「已在工作区」的附件,发第一条消息时拼进附件清单,不再重复上传。
  *
- * 【为什么放在内存里】首页到对话页是客户端跳转(router.push),模块状态还在;
- * 文件对象放进地址栏或 sessionStorage 都不合适(大小、序列化)。按会话 id 存,
- * 只有打开的正是那个会话时才取走,取走即删;过期(默认 2 分钟)不再给,免得几分钟后
- * 在别处冒出一个旧附件。整页刷新后自然就没了 —— 那时用户可以重新拖进输入框。
+ * 【为什么用 sessionStorage 存文件名】文件已经在服务端了,交接的只是几个文件名;
+ * 存在本标签页的 sessionStorage 里,整页刷新后附件条还在,换标签页不会串到别处。
+ * 按会话 id 分开存;发送成功后由对话页清掉。
  */
 
-const TTL_MS = 2 * 60 * 1000;
+type HandoffStorage = Pick<Storage, "getItem" | "setItem" | "removeItem"> | null;
 
-let pending: { sessionId: string; files: File[]; at: number } | null = null;
+const keyOf = (sessionId: string) => `owa.handoff.${sessionId}`;
 
-export function handOffAttachments(sessionId: string, files: File[], now = Date.now()): void {
-  pending = files.length ? { sessionId, files: [...files], at: now } : null;
+function defaultStorage(): HandoffStorage {
+  try {
+    return typeof window === "undefined" ? null : window.sessionStorage;
+  } catch {
+    // 隐私模式等禁用了存储
+    return null;
+  }
 }
 
-/** 取走交给这个会话的附件;没有、会话不对或已过期时返回空数组 */
-export function takeAttachments(sessionId: string | null, now = Date.now()): File[] {
-  if (!pending || !sessionId) return [];
-  if (now - pending.at > TTL_MS) {
-    pending = null;
+/** 记下已经传进这个会话工作区的附件(空列表等于清空) */
+export function handOffUploaded(
+  sessionId: string,
+  names: readonly string[],
+  storage: HandoffStorage = defaultStorage(),
+): void {
+  if (!storage) return;
+  try {
+    if (names.length) storage.setItem(keyOf(sessionId), JSON.stringify(names));
+    else storage.removeItem(keyOf(sessionId));
+  } catch {
+    // 存储满或被禁用:附件仍在工作区,只是附件条里不显示
+  }
+}
+
+/** 交给这个会话、还没随消息发出的附件文件名 */
+export function handedOffFiles(
+  sessionId: string | null,
+  storage: HandoffStorage = defaultStorage(),
+): string[] {
+  if (!sessionId || !storage) return [];
+  try {
+    const parsed: unknown = JSON.parse(storage.getItem(keyOf(sessionId)) ?? "[]");
+    return Array.isArray(parsed)
+      ? parsed.filter((n): n is string => typeof n === "string" && n.length > 0)
+      : [];
+  } catch {
     return [];
   }
-  if (pending.sessionId !== sessionId) return [];
-  const { files } = pending;
-  pending = null;
-  return files;
+}
+
+/** 附件已随消息发出(或用户移除了全部)后清掉 */
+export function clearHandedOff(
+  sessionId: string,
+  storage: HandoffStorage = defaultStorage(),
+): void {
+  try {
+    storage?.removeItem(keyOf(sessionId));
+  } catch {
+    // 忽略
+  }
 }

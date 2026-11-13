@@ -24,6 +24,9 @@ function Toaster() {
         right: "16px",
       }}
       gap={8}
+      // 多条同时出现时逐条排开(最多 3 条),不叠成一摞 —— 胶囊宽度随文字,叠起来会露出参差的边
+      expand
+      visibleToasts={3}
       // sonner 在 ≤600px 时把列表设成 width:100%(再加左右偏移会溢出)、提示设成整行宽;改回随文字收窄居中
       className="max-[600px]:!w-auto"
       toastOptions={{
@@ -52,14 +55,19 @@ function Toaster() {
 /**
  * 右上角的白色卡片通知区(可选,默认不挂):页面自己挂一个带 id 的,
  * 再用 `toast.custom(jsx, { toasterId: id })` 往里放卡片。用于需要人处理、又不能挡住底部输入框的常驻通知
- * (对话页「智能体在等你确认」,原型 .ch-note:顶栏下 12px、右边 24px)。卡片外观由调用方的 jsx 决定。
+ * (对话页「智能体在等你确认」,原型 .ch-note)。卡片外观由调用方的 jsx 决定。
  */
 function CornerToaster({ id }: { id: string }) {
   return (
     <SonnerToaster
       id={id}
       position="top-right"
-      offset={{ top: "72px", right: "24px" }}
+      // 页面可用 --corner-toast-top / --corner-toast-right 指定位置(对话页放在对话卡片里、对话头下方,
+      // 不盖住对话头开关和右侧面板);不设时在顶栏下方 12px、右边 24px
+      offset={{
+        top: "var(--corner-toast-top, 72px)",
+        right: "var(--corner-toast-right, 24px)",
+      }}
       gap={10}
       toastOptions={{ unstyled: true, classNames: { toast: "w-[360px] max-w-[calc(100vw-32px)]" } }}
     />

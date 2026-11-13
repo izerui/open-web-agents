@@ -10,7 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { chatHref, startedText } from "@/features/explore/explore-logic";
-import { handOffAttachments } from "@/lib/attachment-handoff";
+import { handOffUploaded } from "@/lib/attachment-handoff";
 import { errorText, fetchJson } from "@/lib/fetch-json";
 import { agentHref } from "@/lib/nav/routes";
 import { cn } from "@/lib/utils";
@@ -19,6 +19,17 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
+
+/** 把文件传进会话工作区,返回工作区里的文件名(同名时服务端会改名) */
+async function uploadToSession(sessionId: string, files: File[]): Promise<string[]> {
+  const form = new FormData();
+  for (const f of files) form.append("files", f, f.name);
+  const body = await fetchJson<{ files: string[] }>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/files`,
+    { method: "POST", body: form },
+  );
+  return body.files;
+}
 
 /**
  * 用一个智能体新建会话。
@@ -76,14 +87,22 @@ export function useAgentActions() {
         question?: string;
         name?: string;
         version?: number | null;
-        /** 探索首页选的附件:建好会话后交给对话页,进去时已在输入框附件条里 */
+        /** 探索首页选的附件:建好会话后当场传进它的工作区,进对话页时已在输入框附件条里 */
         files?: File[];
       } = {},
     ) =>
       guard("start", async () => {
         try {
           const s = await startAgentSession(agentId, opts.mode);
-          if (opts.files?.length) handOffAttachments(s.id, opts.files);
+          if (opts.files?.length) {
+            // 会话已建好:附件当场传进工作区(刷新也不会丢),对话页只拿文件名。
+            // 上传失败不拦着进对话,提示用户进去后再拖进输入框
+            try {
+              handOffUploaded(s.id, await uploadToSession(s.id, opts.files));
+            } catch (error) {
+              toast.error(`附件没有传上去：${errorText(error)}。进对话后再把文件拖进输入框`);
+            }
+          }
           toast.success(
             startedText(
               s.name ?? opts.name,

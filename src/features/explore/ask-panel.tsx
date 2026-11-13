@@ -242,7 +242,7 @@ function Suggestions({
           {file && (
             <p className="mx-3 mt-1.5 mb-1 rounded-lg bg-[#F6F5F1] px-3 py-2 text-[13px] text-[#4D4A43]">
               附件「{file.name}
-              」会一起带过去：用设计器创建时交给设计器；交给现成的智能体时放进对话输入框，随第一条消息上传。
+              」会一起带过去：用设计器创建时交给设计器；交给现成的智能体时先传进会话的工作区，发第一条消息时一起交给它。
             </p>
           )}
           {result.items.map((a) => (

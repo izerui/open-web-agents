@@ -73,6 +73,15 @@ describe("runCreditsText:运行花费一律显示积分", () => {
   it("没有扣费记录返回 null(不退回显示美元)", () => {
     expect(runCreditsText(undefined)).toBeNull();
   });
+  it("已结束且没有扣费记录的运行(计费上线前的旧运行、未开计费)写「未计费」,不留空", () => {
+    expect(runCreditsText(undefined, "success")).toBe("未计费");
+    expect(runCreditsText(undefined, "failed")).toBe("未计费");
+    expect(runCreditsText(undefined, "cancelled")).toBe("未计费");
+  });
+  it("还没结束的运行没有扣费记录时不下结论", () => {
+    expect(runCreditsText(undefined, "pending")).toBeNull();
+    expect(runCreditsText(undefined, "running")).toBeNull();
+  });
 });
 
 describe("hasChatTranscript:哪些运行能在对话里查看", () => {

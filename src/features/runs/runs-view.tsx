@@ -535,7 +535,7 @@ export function RunsPanel({
                 {/* 窄屏:卡片列表,状态与花费不会被挤到屏幕外 */}
                 <ul className="divide-y divide-line-soft sm:hidden" aria-label="运行列表">
                   {items.map((r) => {
-                    const credits = runCreditsText(r.credits);
+                    const credits = runCreditsText(r.credits, r.status);
                     return (
                       <li key={r.id}>
                         <button
@@ -622,7 +622,7 @@ export function RunsPanel({
                     <tbody>
                       {items.map((r) => {
                         const tokens = tokensText(r.cost);
-                        const credits = runCreditsText(r.credits);
+                        const credits = runCreditsText(r.credits, r.status);
                         return (
                           <tr
                             key={r.id}
@@ -764,7 +764,9 @@ export function RunsPanel({
                   <StatusBadge status={detail.status} />
                   <span className="text-xs text-muted-foreground">
                     {tokensText(detail.cost) ?? "没有用量记录"}
-                    {runCreditsText(detail.credits) ? `，${runCreditsText(detail.credits)}` : ""}
+                    {runCreditsText(detail.credits, detail.status)
+                      ? `，${runCreditsText(detail.credits, detail.status)}`
+                      : ""}
                     {detail.cost?.partial ? "（部分，统计不完整）" : ""}
                   </span>
                   {canCancelRun(detail.status) && (
