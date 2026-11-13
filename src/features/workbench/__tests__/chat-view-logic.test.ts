@@ -82,8 +82,8 @@ describe("filterSessions", () => {
     expect(filterSessions(list, names, "sql").map((s) => s.id)).toEqual(["s2", "abcdef123"]);
   });
 
-  it("没有标题的会话按显示出来的 id 前缀也能搜到", () => {
-    expect(filterSessions(list, names, "abcdef").map((s) => s.id)).toEqual(["abcdef123"]);
+  it("没有标题的会话按显示出来的「新对话」也能搜到(不再显示 id)", () => {
+    expect(filterSessions(list, names, "新对话").map((s) => s.id)).toEqual(["abcdef123"]);
   });
 });
 

@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { Archive, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { sessionLabel } from "./session-groups";
 import type { SessionSummary } from "./types";
 
 /**
@@ -49,7 +50,7 @@ export function SessionActions({
   const [dialog, setDialog] = useState<"rename" | "delete" | null>(null);
   const [title, setTitle] = useState(session.title ?? "");
   const [busy, setBusy] = useState(false);
-  const label = session.title || session.id.slice(0, 12);
+  const label = sessionLabel(session);
 
   async function patch(body: Record<string, unknown>, done: string) {
     setBusy(true);
@@ -78,7 +79,7 @@ export function SessionActions({
   }
 
   async function archive() {
-    if (await patch({ archived: true }, `已归档「${label}」,可在左下角「已归档」里恢复`)) {
+    if (await patch({ archived: true }, `已归档「${label}」，可在左下角「已归档」里恢复`)) {
       onRemoved(session.id);
     }
   }
@@ -175,7 +176,7 @@ export function SessionActions({
       <Dialog open={dialog === "delete"} onOpenChange={(o) => !o && setDialog(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>删除这个会话?</DialogTitle>
+            <DialogTitle>删除这个会话？</DialogTitle>
             <DialogDescription>「{label}」将被永久删除，不能恢复：</DialogDescription>
           </DialogHeader>
           <ul className="list-disc space-y-1 pl-5 text-sm leading-[1.8] text-muted-foreground">

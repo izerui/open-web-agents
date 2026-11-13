@@ -230,8 +230,12 @@ describe("F15 新会话弹层的说明", () => {
     expect(
       pickerNote({ ...base, canWrite: false, isPublic: true, ownerName: "luojing" }, "分享给我"),
     ).toBe("luojing 公开，只读，跑已发布 v2");
-    expect(pickerNote({ ...base, canRead: false, avgCredits: 12 } as never, "市场")).toBe(
-      "市场，跑已发布 v2，平均每次约 12 积分",
+    expect(pickerNote({ ...base, canRead: false, avgCredits: 12 }, "市场")).toBe(
+      "市场，跑已发布 v2，约 12 积分/次",
+    );
+    // 与市场卡片同一显示口径:接口给的是原始平均值,不能把一长串小数直接写出来
+    expect(pickerNote({ ...base, canRead: false, avgCredits: 3.48291 }, "市场")).toBe(
+      "市场，跑已发布 v2，约 3.5 积分/次",
     );
     expect(pickerNote({ ...base, canRead: false }, "市场")).toBe("市场，跑已发布 v2");
   });

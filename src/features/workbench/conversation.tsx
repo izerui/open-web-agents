@@ -22,6 +22,7 @@ import {
   type QuestionEvent,
   type QuestionState,
   answerText,
+  answersAsMessage,
   questionState,
 } from "./question-state";
 import type { Turn } from "./types";
@@ -498,11 +499,10 @@ function QuestionBlock({
       return;
     }
     onAnswer?.(
-      e.questions
-        .map((q, i) =>
-          e.questions.length > 1 ? `${q.header ?? q.question}:${answers[i]}` : answers[i],
-        )
-        .join("\n"),
+      answersAsMessage(
+        e.questions.map((q) => q.question),
+        answers,
+      ),
     );
   };
   const decline = async () => {

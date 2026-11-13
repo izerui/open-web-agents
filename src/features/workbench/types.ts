@@ -63,6 +63,8 @@ export interface AgentSummary {
   } | null;
   /** 是否已公开分享 */
   isPublic?: boolean;
+  /** 市场条目:近 50 次成功运行的平均实扣积分(没有样本为 null),新会话弹层显示单价 */
+  avgCredits?: number | null;
   /** 当前用户能否修改 */
   canWrite?: boolean;
   canRead?: boolean;

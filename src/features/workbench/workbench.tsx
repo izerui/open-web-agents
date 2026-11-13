@@ -52,16 +52,23 @@ import {
   type ToolTimes,
   agentIdFromSearch,
   errorSummary,
+  leftRunningText,
   promptFromSearch,
   recordToolTime,
   rerunEstimateMicro,
+  rerunStartedText,
   sessionIdFromSearch,
   stopConfirmBody,
   submitGate,
+  toastOffsetAbove,
+  unqueuedText,
   updateTurnByLocalId,
   withSessionInUrl,
 } from "./workbench.logic";
 import { makeWorkspaceFileDropHandlers } from "./workspace-file-drop";
+
+/** 对话页右上角通知区的 id:等确认的常驻通知放这里,不挡底部输入框(chat N2) */
+const APPROVAL_TOASTER = "chat-approval";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -80,6 +87,7 @@ import {
   useDefaultLayout,
 } from "@/components/ui/resizable";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { CornerToaster } from "@/components/ui/sonner";
 
 import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { modelOf, refreshModelCatalog, useModelCatalog } from "@/features/builder/model-select";
@@ -254,16 +262,46 @@ export function Workbench() {
   /** 打开会话的序号:用来丢弃"切走之后才回来"的过期响应。 */
   const openSeqRef = useRef(0);
   const initialSessionAppliedRef = useRef(false);
+  /** 当前会话正在运行时它的名字(离开时提示「X」还在后台运行);不在运行为 null */
+  const runningTitleRef = useRef<string | null>(null);
+  /**
+   * 底部输入区(审批卡 + 输入框)。全站提示在底部居中,对话页会正好盖住输入框和发送按钮(chat N2):
+   * 量出输入区上沿,写进 --toast-offset-bottom 把提示抬到它上方;离开对话页时去掉,别的页面不受影响。
+   */
+  const [composerArea, setComposerArea] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!composerArea) return;
+    const root = document.documentElement;
+    const update = () =>
+      root.style.setProperty(
+        "--toast-offset-bottom",
+        toastOffsetAbove(window.innerHeight, composerArea.getBoundingClientRect().top),
+      );
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(composerArea);
+    window.addEventListener("resize", update);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+      root.style.removeProperty("--toast-offset-bottom");
+    };
+  }, [composerArea]);
+  const noteLeavingRunning = useCallback(() => {
+    if (runningTitleRef.current) toast(leftRunningText(runningTitleRef.current));
+    runningTitleRef.current = null;
+  }, []);
 
   useEffect(
     () => () => {
+      noteLeavingRunning();
       openSeqRef.current += 1;
       abortRef.current?.abort();
       abortRef.current = null;
       activeRunRef.current = null;
       pendingSteerRef.current.clear();
     },
-    [],
+    [noteLeavingRunning],
   );
 
   const syncSessionUrl = useCallback((nextSessionId: string | null) => {
@@ -420,6 +458,7 @@ export function Workbench() {
   /** 开一个新会话(还没发消息时只在本地,发第一条时才真正创建) */
   const startNewSession = useCallback(
     (nextAgentId: string) => {
+      noteLeavingRunning();
       detach();
       setSessionId(null);
       setAgentId(nextAgentId);
@@ -433,7 +472,7 @@ export function Workbench() {
       setHistoryError(null);
       setListView("active");
     },
-    [detach],
+    [detach, noteLeavingRunning],
   );
 
   /**
@@ -512,6 +551,7 @@ export function Workbench() {
    * 所以这个"不重复"必须由结构保证,而不是靠去重逻辑兜。
    */
   async function openSession(id: string) {
+    if (id !== sessionId) noteLeavingRunning();
     // 切走之前必须断掉上一条流,否则旧会话的事件会继续灌进来 —— 而界面已经是新会话了
     abortRef.current?.abort();
     abortRef.current = null;
@@ -627,6 +667,7 @@ export function Workbench() {
   const activeSession = sessionId
     ? (sessions.find((s) => s.id === sessionId) ?? archived.find((s) => s.id === sessionId))
     : undefined;
+  runningTitleRef.current = running && sessionId ? sessionLabel(activeSession ?? {}) : null;
 
   /** 有没填的必填变量时提示并打开填写弹窗;返回是否拦下 */
   function blockForMissingVars(): boolean {
@@ -789,6 +830,7 @@ export function Workbench() {
     const localId = crypto.randomUUID();
     const seq = openSeqRef.current;
     const targetSessionId = sessionId;
+    const turnsAtStart = turns;
     setTurns((currentTurns) => [
       ...currentTurns,
       {
@@ -830,14 +872,17 @@ export function Workbench() {
         error?: string;
         code?: string;
       } | null;
+      let fresh = false;
       if (res.status === 409 && data?.code === "rewind_unavailable") {
         toast.message("这一轮之前的对话状态无法精确定位（较早的记录），改为干净上下文重跑");
+        fresh = true;
         res = await branch("fresh");
         data = (await res.json().catch(() => null)) as typeof data;
       }
       if (!res.ok || !data?.runId) {
         throw new Error(data?.error ?? `重跑失败（HTTP ${res.status}）`);
       }
+      if (!fresh) toast(rerunStartedText(turnsAtStart, fromRunId));
       rerunHandle.runId = data.runId;
       patch((turn) => ({ ...turn, runId: data.runId }));
 
@@ -1129,7 +1174,7 @@ export function Workbench() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ archived: false }),
       });
-      const label = sessionLabel(archived.find((s) => s.id === id) ?? { id });
+      const label = sessionLabel(archived.find((s) => s.id === id) ?? {});
       toast.success(`已恢复「${label}」`);
       if (id === sessionId) {
         setSessions((all) => [
@@ -1449,11 +1494,13 @@ export function Workbench() {
       />
       {bars}
       <div className="relative flex min-h-0 flex-1 flex-col">{stream}</div>
-      <div className="shrink-0 pt-1">
+      <div ref={setComposerArea} className="shrink-0 pt-1">
         <ApprovalBar
           key={sessionId ?? "new"}
           sessionId={sessionId}
           running={running}
+          cornerToasterId={APPROVAL_TOASTER}
+          agentName={current?.name}
           onQuestionsChange={setPendingQuestions}
           onApprovalsChange={setAwaitingTools}
           refreshKey={approvalRefresh}
@@ -1468,7 +1515,11 @@ export function Workbench() {
           onStopAction={() => setStopConfirm(true)}
           commands={slashCommands}
           queued={queued}
-          onUnqueueAction={(id) => setQueued((all) => all.filter((x) => x.id !== id))}
+          onUnqueueAction={(id) => {
+            const target = queued.find((x) => x.id === id);
+            setQueued((all) => all.filter((x) => x.id !== id));
+            if (target) toast(unqueuedText(target.text));
+          }}
           contextUsed={contextUsed}
           totalProcessed={totalProcessed}
         />
@@ -1567,6 +1618,8 @@ export function Workbench() {
         runningTitle={runningSession}
         onPickAction={pickAgent}
       />
+
+      <CornerToaster id={APPROVAL_TOASTER} />
 
       <Dialog open={stopConfirm} onOpenChange={setStopConfirm}>
         <DialogContent className="sm:max-w-[440px]">

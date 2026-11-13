@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { answerText, parseAnswered, questionState } from "../question-state";
+import { answerText, answersAsMessage, parseAnswered, questionState } from "../question-state";
 
 const q = (...texts: string[]) => ({
   kind: "question" as const,
@@ -85,5 +85,25 @@ describe("questionState:结构化回答优先", () => {
       ],
     });
     expect(s).toMatchObject({ kind: "answered", answers: ["完整的甲", "完整的乙"] });
+  });
+});
+
+describe("answersAsMessage：「作为新消息发送」带上问题（chat N3）", () => {
+  it("单题照原型写成「关于「Q」：按 A。」", () => {
+    expect(answersAsMessage(["外币发票按哪天的汇率换算？"], ["开票日"])).toBe(
+      "关于「外币发票按哪天的汇率换算？」：按开票日。",
+    );
+  });
+
+  it("多题每题一行，同样格式", () => {
+    expect(answersAsMessage(["汇率按哪天？", "超标怎么处理？"], ["开票日", "退回、抄送主管"])).toBe(
+      "关于「汇率按哪天？」：按开票日。\n关于「超标怎么处理？」：按退回、抄送主管。",
+    );
+  });
+
+  it("回答自己带了句末标点就不再补句号", () => {
+    expect(answersAsMessage(["汇率按哪天？"], ["开票日！"])).toBe(
+      "关于「汇率按哪天？」：按开票日！",
+    );
   });
 });

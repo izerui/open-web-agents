@@ -1,5 +1,6 @@
 // 对话页(/chat)界面上的判断:会话列表分组与搜索、版本徽标、新会话弹层的分组与说明、跳转地址。
 // 纯函数,不碰 React,方便单测。
+import { formatPerRun } from "@/lib/modules/market/domain/display";
 import { agentHref } from "@/lib/nav/routes";
 import { activityOf, sessionLabel } from "./session-groups";
 import type { AgentSummary, SessionSummary } from "./types";
@@ -145,8 +146,8 @@ export function pickerNote(agent: AgentSummary, group: PickerGroup): string {
     return `${by}${agent.canWrite ? "可编辑" : "只读"}，${target}`;
   }
   if (group === "市场") {
-    const avg = (agent as AgentSummary & { avgCredits?: number | null }).avgCredits;
-    return `市场，${target}${avg ? `，平均每次约 ${avg} 积分` : ""}`;
+    const price = formatPerRun(agent.avgCredits);
+    return `市场，${target}${price ? `，${price}` : ""}`;
   }
   return target;
 }

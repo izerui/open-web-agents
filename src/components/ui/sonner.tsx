@@ -10,14 +10,19 @@ import { Toaster as SonnerToaster } from "sonner";
  * 定位仍交给 sonner(绝对定位 + 堆叠动画),这里只用 inset-x-0 + mx-auto + w-fit 让胶囊居中收窄 ——
  * 不能用 translate 居中,sonner 的进出场动画占用了 transform。
  * 手机上底部有标签栏(约 64px),提示抬到它上面。
+ * 页面底部有常驻输入框时(对话页),页面可设 CSS 变量 --toast-offset-bottom 把提示抬到输入框上方;不设时位置不变。
  */
 function Toaster() {
   return (
     <SonnerToaster
       theme="dark"
       position="bottom-center"
-      offset={{ bottom: "28px" }}
-      mobileOffset={{ bottom: "calc(env(safe-area-inset-bottom) + 80px)", left: "16px", right: "16px" }}
+      offset={{ bottom: "var(--toast-offset-bottom, 28px)" }}
+      mobileOffset={{
+        bottom: "var(--toast-offset-bottom, calc(env(safe-area-inset-bottom) + 80px))",
+        left: "16px",
+        right: "16px",
+      }}
       gap={8}
       // sonner 在 ≤600px 时把列表设成 width:100%(再加左右偏移会溢出)、提示设成整行宽;改回随文字收窄居中
       className="max-[600px]:!w-auto"
@@ -44,4 +49,21 @@ function Toaster() {
   );
 }
 
-export { Toaster };
+/**
+ * 右上角的白色卡片通知区(可选,默认不挂):页面自己挂一个带 id 的,
+ * 再用 `toast.custom(jsx, { toasterId: id })` 往里放卡片。用于需要人处理、又不能挡住底部输入框的常驻通知
+ * (对话页「智能体在等你确认」,原型 .ch-note:顶栏下 12px、右边 24px)。卡片外观由调用方的 jsx 决定。
+ */
+function CornerToaster({ id }: { id: string }) {
+  return (
+    <SonnerToaster
+      id={id}
+      position="top-right"
+      offset={{ top: "72px", right: "24px" }}
+      gap={10}
+      toastOptions={{ unstyled: true, classNames: { toast: "w-[360px] max-w-[calc(100vw-32px)]" } }}
+    />
+  );
+}
+
+export { CornerToaster, Toaster };

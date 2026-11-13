@@ -114,3 +114,16 @@ export function questionState(
 export function answerText(picked: string[], other: string): string {
   return [...picked, ...(other.trim() ? [other.trim()] : [])].join("、");
 }
+
+/**
+ * 提问已过期时「作为新消息发送」放进输入框的文字:带上问题,智能体才知道在答哪一题。
+ * 照原型写成「关于「Q」：按 A。」,多题每题一行;回答自带句末标点就不再补句号。
+ */
+export function answersAsMessage(questions: string[], answers: string[]): string {
+  return questions
+    .map((q, i) => {
+      const a = answers[i] ?? "";
+      return `关于「${q}」：按${a}${/[。！？!?.…]$/.test(a) ? "" : "。"}`;
+    })
+    .join("\n");
+}

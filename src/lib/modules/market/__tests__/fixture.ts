@@ -110,6 +110,8 @@ export async function fixture() {
     agentActivity: { of: async () => new Map<string, { runs: number; updatedAt: number }>() },
     // GET /api/agents 给非所有者带分享人(邮箱前缀);这里没有账号表
     users: { get: async (_id: string): Promise<{ id: string; email: string } | null> => null },
+    // GET /api/agents 给市场条目带平均花费(与市场列表同一来源);这里没有运行记录
+    marketStats: { forAgents: async () => new Map() },
     audit: {
       record: vi.fn(async () => {}),
     },

@@ -45,7 +45,7 @@ const ACTIVITY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** 列出调用方可见的智能体:自己的 + 被分享的 + 公开的(admin 看全部)。 */
 export async function GET(req: Request) {
-  const { agents, grants, auth, env, releases, agentActivity, users } = getContainer();
+  const { agents, grants, auth, env, releases, agentActivity, users, marketStats } = getContainer();
   try {
     // 保留 principal:API Key 只能看到它绑定的智能体,且永远按只读者对待(见 agentAccessLevel)
     const principal = await auth.resolveWeb(req);
@@ -101,13 +101,22 @@ export async function GET(req: Request) {
       ),
     );
 
+    /*
+     * 只有市场使用权的条目带上作者、使用次数与平均花费(新会话弹层写「平均每次约 X 积分」),
+     * 与市场列表同一口径、同一缓存;没有市场条目时不查。
+     */
+    const marketOnly = visible.filter((a) => levels.get(a.id) === "none" && published.has(a.id));
+    const stats = marketOnly.length ? await marketStats.forAgents(marketOnly) : new Map();
+
     return Response.json({
       agents: visible
         .filter((a) => levels.get(a.id) !== "none" || published.has(a.id))
         .map((a) => {
           // use-only 刻意不 spread 实体,防止新增字段意外暴露给市场用户。
           const released = published.get(a.id);
-          if (levels.get(a.id) === "none" && released) return marketSummary(a, released);
+          if (levels.get(a.id) === "none" && released) {
+            return marketSummary(a, released, stats.get(a.id));
+          }
           // 回调地址可能带接收方令牌:只给网页登录的所有者 / 管理员
           const manage = principal.type === "web" && canManageWebhook(subject, a);
           const canWrite = levels.get(a.id) === "write";

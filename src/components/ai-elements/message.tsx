@@ -14,6 +14,7 @@ import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import type { ComponentProps, HTMLAttributes, ReactElement, ReactNode } from "react";
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { Streamdown, defaultRemarkPlugins } from "streamdown";
+import { ExternalLinkDialog } from "./external-link-dialog";
 import { WORKSPACE_LINK_TAG, remarkWorkspaceLinks } from "./workspace-link";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
@@ -281,6 +282,11 @@ export type MessageResponseProps = ComponentProps<typeof Streamdown> & {
 const streamdownPlugins = { cjk, code, math, mermaid };
 const workspaceRemarkPlugins = [...Object.values(defaultRemarkPlugins), remarkWorkspaceLinks];
 const workspaceAllowedTags = { [WORKSPACE_LINK_TAG]: ["path"] };
+/** 外链点击先弹中文确认框（chat N1），替换 Streamdown 自带的英文框；调用方传 linkSafety 可覆盖 */
+const chineseLinkSafety = {
+  enabled: true,
+  renderModal: (modalProps) => <ExternalLinkDialog {...modalProps} />,
+};
 
 export const MessageResponse = memo(
   ({ className, onOpenWorkspaceFile, ...props }: MessageResponseProps) => {
@@ -310,6 +316,7 @@ export const MessageResponse = memo(
       <Streamdown
         className={cn("size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0", className)}
         plugins={streamdownPlugins}
+        linkSafety={chineseLinkSafety}
         {...fileLinks}
         {...props}
         components={fileLinks ? { ...fileLinks.components, ...props.components } : props.components}

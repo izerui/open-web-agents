@@ -144,6 +144,33 @@ export function branchLabel(turns: readonly Turn[], branchedFrom: string): strin
   return index === 0 ? "从会话开头分叉重跑" : `从第 ${index} 轮之后分叉重跑`;
 }
 
+/**
+ * 对话页把底部提示抬到输入区上方(chat N2):输入区上沿到视口底的距离再加 12px 间隔,
+ * 至少保持全站默认的 28px。返回值写进 CSS 变量 --toast-offset-bottom。
+ */
+export function toastOffsetAbove(viewportHeight: number, composerTop: number): string {
+  return `${Math.max(28, Math.round(viewportHeight - composerTop + 12))}px`;
+}
+
+/** 取消排队的提示(chat N4):写出取消的是哪条,过长截断 */
+export function unqueuedText(text: string): string {
+  const t = text.trim().replace(/\s+/g, " ");
+  if (!t) return "已取消排队";
+  return `已取消排队：${t.length > 20 ? `${t.slice(0, 20)}…` : t}`;
+}
+
+/** 重跑开始的提示(chat N4):重跑第 N 轮 = 回到第 N 轮之前的状态 */
+export function rerunStartedText(turns: readonly Turn[], fromRunId: string): string {
+  const index = turns.findIndex((t) => t.runId === fromRunId);
+  if (index < 0) return "正在重跑这一轮";
+  return index === 0 ? "已回到会话开头，正在重跑" : `已回到第 ${index + 1} 轮之前的状态，正在重跑`;
+}
+
+/** 离开运行中的会话(切会话、开新会话、离开对话页)时的提示(chat N4) */
+export function leftRunningText(title: string): string {
+  return `「${title}」还在后台运行`;
+}
+
 export type ToolTimes = Record<string, { start: number; end?: number }>;
 
 /**

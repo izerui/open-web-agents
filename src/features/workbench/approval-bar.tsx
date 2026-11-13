@@ -56,6 +56,42 @@ interface Grant {
   label: string;
 }
 
+/** 右上角的等确认通知卡片(原型 .ch-note):批准 / 拒绝 / 稍后(只收起通知,输入框上方的审批卡还在) */
+function ApprovalNote({
+  title,
+  detail,
+  onApprove,
+  onDeny,
+  onLater,
+}: {
+  title: string;
+  detail: string;
+  onApprove: () => void;
+  onDeny: () => void;
+  onLater: () => void;
+}) {
+  return (
+    <div className="flex w-full items-start gap-2.5 rounded-2xl border border-[#E7C78C] bg-background px-4 py-3.5 text-sm text-foreground shadow-[0_14px_40px_rgb(40_35_25/16%)]">
+      <ShieldAlert className="mt-0.5 size-[18px] shrink-0 text-warning-text" />
+      <div className="min-w-0 flex-1">
+        <div className="font-semibold">{title}</div>
+        <div className="mt-0.5 mb-2.5 break-words text-[13px] text-muted-foreground">{detail}</div>
+        <div className="flex items-center gap-2">
+          <Button size="sm" onClick={onApprove}>
+            批准
+          </Button>
+          <Button size="sm" variant="outline" onClick={onDeny}>
+            拒绝
+          </Button>
+          <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={onLater}>
+            稍后
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** 10 分钟的窗口显示成 "600s" 没法读,超过一分钟就用 mm:ss。 */
 function formatLeft(ms: number): string {
   const total = Math.max(0, Math.round(ms / 1000));
@@ -72,6 +108,8 @@ export function ApprovalBar({
   onQuestionsChange,
   onApprovalsChange,
   refreshKey,
+  cornerToasterId,
+  agentName,
 }: {
   sessionId: string | null;
   running: boolean;
@@ -81,6 +119,13 @@ export function ApprovalBar({
   onQuestionsChange?: (questions: PendingQuestion[]) => void;
   /** 变化时立刻重新拉取(提问卡片作答后) */
   refreshKey?: number;
+  /**
+   * 页面挂了右上角通知区(CornerToaster)时传它的 id:等确认的常驻通知改成右上角白卡片,
+   * 不再停在底部挡住输入框(chat N2)。不传时仍用底部的全站提示。
+   */
+  cornerToasterId?: string;
+  /** 右上角卡片标题里的智能体名(「X 在等你确认」) */
+  agentName?: string;
 }) {
   const [pending, setPending] = useState<Pending[]>([]);
   const [grants, setGrants] = useState<Grant[]>([]);
@@ -266,6 +311,27 @@ export function ApprovalBar({
       // 窄屏的审批卡固定在输入框上方,一直看得到;常驻通知在窄屏贴着顶栏,会挡住对话头
       // (会话列表、执行详情等开关),不再重复弹
       if (isNarrow) continue;
+      if (cornerToasterId) {
+        toast.custom(
+          (t) => (
+            <ApprovalNote
+              title={`${agentName || "智能体"}在等你确认`}
+              detail={p.summary ? `${p.toolName}，${p.summary}` : p.toolName}
+              onApprove={() => {
+                toast.dismiss(t);
+                void decide(p.id, "approved");
+              }}
+              onDeny={() => {
+                toast.dismiss(t);
+                void decide(p.id, "denied");
+              }}
+              onLater={() => toast.dismiss(t)}
+            />
+          ),
+          { id: p.id, toasterId: cornerToasterId, duration: Number.POSITIVE_INFINITY },
+        );
+        continue;
+      }
       toast.warning(`智能体在等你确认：${p.toolName}`, {
         id: p.id,
         description: p.summary,
@@ -275,7 +341,7 @@ export function ApprovalBar({
         cancel: { label: "拒绝", onClick: () => void decide(p.id, "denied") },
       });
     }
-  }, [pending, decide]);
+  }, [pending, decide, cornerToasterId, agentName]);
 
   // 组件卸载(切会话、离开页面)时把残留通知清掉
   useEffect(
@@ -464,7 +530,7 @@ export function ApprovalBar({
                     variant="outline"
                     onClick={() => void decide(p.id, "approved", { remember: "session" })}
                     disabled={busy === p.id}
-                    title="之后本会话里同一类调用直接放行;可在上方随时撤销"
+                    title="之后本会话里同一类调用直接放行；可在上方随时撤销"
                     className="h-auto min-h-8 py-1 whitespace-normal text-left max-md:min-h-11"
                   >
                     批准，本会话内 {p.scopes.map((s) => s.label).join("、")} 不再询问

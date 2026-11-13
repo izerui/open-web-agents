@@ -21,6 +21,7 @@ const state = vi.hoisted(() => ({
   authRequired: true,
   users: {} as Record<string, { id: string; email: string }>,
   userGets: [] as string[],
+  statsCalls: [] as string[][],
 }));
 
 vi.mock("@/lib/container", () => ({
@@ -79,6 +80,14 @@ vi.mock("@/lib/container", () => ({
         return state.users[id] ?? null;
       },
     },
+    marketStats: {
+      forAgents: async (list: { id: string }[]) => {
+        state.statsCalls.push(list.map((a) => a.id));
+        return new Map(
+          list.map((a) => [a.id, { author: "author", useCount: 12, avgCredits: 3.5 }]),
+        );
+      },
+    },
     audit: { record: async () => {} },
     modelCatalogView: async () => undefined,
   }),
@@ -93,6 +102,7 @@ beforeEach(() => {
   state.authRequired = true;
   state.users = {};
   state.userGets = [];
+  state.statsCalls = [];
 });
 
 async function list() {
@@ -138,6 +148,24 @@ describe("GET /api/agents —— 工作室字段", () => {
     const since = state.activityCalls[0]?.since ?? 0;
     expect(since).toBeGreaterThanOrEqual(before - 7 * DAY - 1000);
     expect(since).toBeLessThanOrEqual(Date.now() - 7 * DAY);
+  });
+
+  it("市场条目带回平均花费(与市场列表同一口径),只为市场条目查一次统计", async () => {
+    state.agents = [
+      mk("mine", "me"),
+      mk("listed", "author", { marketListed: true, publishedVersion: 2 }),
+    ];
+    const { agents } = await list();
+    const by = new Map(agents.map((a) => [a.id, a]));
+    expect(by.get("listed")).toMatchObject({ avgCredits: 3.5, useCount: 12, author: "author" });
+    expect(by.get("mine")).not.toHaveProperty("avgCredits");
+    expect(state.statsCalls).toEqual([["listed"]]);
+  });
+
+  it("没有市场条目时不查市场统计", async () => {
+    state.agents = [mk("mine", "me")];
+    await list();
+    expect(state.statsCalls).toEqual([]);
   });
 
   it("本地模式(不要求登录)下匿名管理员算所有者:工作室不会把全部智能体都算成「分享给我的」", async () => {
