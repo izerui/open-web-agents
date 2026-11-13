@@ -225,6 +225,74 @@ describe("AgentDesigner", () => {
     await expect(h.designer.inspect(owner, "design")).rejects.toMatchObject({ status: 404 });
   });
 
+  it("recordOutcomes:按轮次存改动的处理结果,同一节覆盖;不改 revision / previewToken,预览里带回", async () => {
+    const h = await setup({ target });
+    const before = await h.inspect();
+    expect(before.outcomes).toEqual({});
+    await h.designer.recordOutcomes(owner, "design", {
+      turnKey: "run-1",
+      outcomes: [
+        { section: "prompt", count: 2, applied: true },
+        { section: "contract", count: 1, applied: false },
+      ],
+    });
+    const out = await h.designer.recordOutcomes(owner, "design", {
+      turnKey: "run-1",
+      outcomes: [{ section: "prompt", count: 3, applied: false }],
+    });
+    expect(out["run-1"]).toEqual([
+      { section: "contract", count: 1, applied: false },
+      { section: "prompt", count: 3, applied: false },
+    ]);
+    const after = await h.inspect();
+    expect(after.outcomes).toEqual(out);
+    // 记录不算草稿变化:revision 与 previewToken 不变,正在进行的按节应用不会因此失败
+    expect(after.revision).toBe(before.revision);
+    expect(after.previewToken).toBe(before.previewToken);
+    // 载入当前草稿、应用之后记录仍在
+    await h.designer.update(owner, "design", { revision: after.revision, reset: true });
+    expect((await h.inspect()).outcomes).toEqual(out);
+  });
+
+  it("recordOutcomes:只有本人的设计会话;输入不合法 400", async () => {
+    const h = await setup();
+    const ok = { turnKey: "run-1", outcomes: [{ section: "prompt", count: 1, applied: true }] };
+    await expect(
+      h.designer.recordOutcomes({ userId: "other" }, "design", ok),
+    ).rejects.toMatchObject({ status: 404 });
+    for (const bad of [
+      { turnKey: "", outcomes: ok.outcomes },
+      { turnKey: "a/b", outcomes: ok.outcomes },
+      { turnKey: "x".repeat(65), outcomes: ok.outcomes },
+      { turnKey: "run-1", outcomes: [] },
+      { turnKey: "run-1", outcomes: "no" },
+      { turnKey: "run-1", outcomes: [{ section: "prompt", count: -1, applied: true }] },
+      { turnKey: "run-1", outcomes: [{ section: "prompt", count: 1.5, applied: true }] },
+      { turnKey: "run-1", outcomes: [{ section: "<b>", count: 1, applied: true }] },
+      { turnKey: "run-1", outcomes: [{ section: "prompt", count: 1, applied: "yes" }] },
+      { turnKey: "run-1", outcomes: Array.from({ length: 21 }, () => ok.outcomes[0]) },
+    ]) {
+      await expect(h.designer.recordOutcomes(owner, "design", bad)).rejects.toMatchObject({
+        status: 400,
+      });
+    }
+    expect((await h.inspect()).outcomes).toEqual({});
+  });
+
+  it("recordOutcomes:只保留最近 200 轮", async () => {
+    const h = await setup();
+    for (let i = 0; i < 205; i++) {
+      await h.designer.recordOutcomes(owner, "design", {
+        turnKey: `run-${i}`,
+        outcomes: [{ section: "prompt", count: 1, applied: true }],
+      });
+    }
+    const keys = Object.keys((await h.inspect()).outcomes ?? {});
+    expect(keys).toHaveLength(200);
+    expect(keys[0]).toBe("run-5");
+    expect(keys.at(-1)).toBe("run-204");
+  });
+
   it("rechecks target write access on every operation", async () => {
     const h = await setup({ target });
     const view = await h.inspect();

@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  addOutcome,
   copiedFrom,
   needsRecharge,
   nextStepFor,
-  parseOutcomes,
   pendingAnchor,
   shouldAutoSend,
 } from "../designer-model";
@@ -46,25 +44,6 @@ describe("pendingAnchor:待确认改动挂在哪一轮下面", () => {
   it("没有轮次:-1", () => {
     expect(pendingAnchor([])).toBe(-1);
     expect(pendingAnchor([{ running: true }])).toBe(-1);
-  });
-});
-
-describe("处理结果留在对话历史里", () => {
-  it("按轮次累加,同一节再处理时覆盖", () => {
-    let m = addOutcome({}, "run-1", { section: "prompt", count: 2, applied: true });
-    m = addOutcome(m, "run-1", { section: "contract", count: 1, applied: false });
-    m = addOutcome(m, "run-1", { section: "prompt", count: 3, applied: false });
-    expect(m["run-1"]).toEqual([
-      { section: "contract", count: 1, applied: false },
-      { section: "prompt", count: 3, applied: false },
-    ]);
-  });
-  it("存储内容坏了就当没有", () => {
-    expect(parseOutcomes("{bad")).toEqual({});
-    expect(parseOutcomes(null)).toEqual({});
-    expect(parseOutcomes('{"a":[{"section":"prompt","count":1,"applied":true}]}')).toEqual({
-      a: [{ section: "prompt", count: 1, applied: true }],
-    });
   });
 });
 

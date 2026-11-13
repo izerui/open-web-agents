@@ -15,6 +15,86 @@ export interface DesignState {
   aiIssue?: string;
   /** 载入时 MCP 的脱敏快照，apply 时比较草稿与此值判断哪些字段被修改。 */
   mcpBaseline?: McpDef[];
+  /**
+   * 每一轮设计器提议的处理结果(已应用到草稿 / 没有应用),按轮次先后排列,构建页据此在对话里留痕。
+   * 用数组而不是对象:MySQL 的 JSON 列会重排对象键,保留「最近 N 轮」要靠顺序。不参与 revision。
+   */
+  outcomes?: DesignTurnOutcomes[];
+}
+
+/** 某一轮里某一节改动的处理结果 */
+export interface DesignOutcome {
+  section: string;
+  count: number;
+  applied: boolean;
+}
+
+export interface DesignTurnOutcomes {
+  /** 轮次:运行 ID(没有时前端用 turn-序号) */
+  turnKey: string;
+  items: DesignOutcome[];
+}
+
+/** 处理记录最多保留多少轮 */
+export const MAX_OUTCOME_TURNS = 200;
+
+/** 校验写入的处理结果;不合法抛错(信息给用户看) */
+export function parseOutcomeInput(raw: {
+  turnKey?: unknown;
+  outcomes?: unknown;
+}): DesignTurnOutcomes {
+  const { turnKey, outcomes } = raw;
+  if (typeof turnKey !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(turnKey))
+    throw new Error("turnKey 须是 1~64 位字母、数字、下划线或连字符");
+  if (!Array.isArray(outcomes) || outcomes.length === 0 || outcomes.length > 20)
+    throw new Error("outcomes 须是 1~20 项");
+  const items = outcomes.map((o): DesignOutcome => {
+    const v = (o ?? {}) as Record<string, unknown>;
+    if (typeof v.section !== "string" || !/^[a-z]{1,32}$/.test(v.section))
+      throw new Error("section 不合法");
+    if (
+      typeof v.count !== "number" ||
+      !Number.isInteger(v.count) ||
+      v.count < 0 ||
+      v.count > 10_000
+    )
+      throw new Error("count 须是 0~10000 的整数");
+    if (typeof v.applied !== "boolean") throw new Error("applied 须是布尔值");
+    return { section: v.section, count: v.count, applied: v.applied };
+  });
+  return { turnKey, items };
+}
+
+/** 合并进已有记录:同一轮同一节以新的为准;只保留最近 MAX_OUTCOME_TURNS 轮 */
+export function mergeOutcomes(
+  list: readonly DesignTurnOutcomes[] | undefined,
+  next: DesignTurnOutcomes,
+): DesignTurnOutcomes[] {
+  const all = [...(list ?? [])];
+  const i = all.findIndex((t) => t.turnKey === next.turnKey);
+  if (i < 0) all.push({ turnKey: next.turnKey, items: [] });
+  const at = i < 0 ? all.length - 1 : i;
+  let items = all[at]?.items ?? [];
+  for (const o of next.items) items = [...items.filter((x) => x.section !== o.section), o];
+  all[at] = { turnKey: next.turnKey, items };
+  return all.slice(-MAX_OUTCOME_TURNS);
+}
+
+/** 接口里给前端的形状:轮次 → 处理结果 */
+export function outcomesView(list: readonly DesignTurnOutcomes[] | undefined) {
+  return Object.fromEntries((list ?? []).map((t) => [t.turnKey, t.items]));
+}
+
+/** 草稿的版本号:处理记录不算草稿内容,写入它不让正在进行的编辑 / 应用失效 */
+export function designRevision(state: DesignState): string {
+  const { outcomes: _outcomes, ...rest } = state;
+  return designHash(rest);
+}
+
+/** 参与 previewToken 的设计状态(去掉处理记录) */
+export function stateForToken(state: DesignState): Omit<DesignState, "outcomes"> {
+  const { outcomes: _outcomes, ...rest } = state;
+  return rest;
 }
 
 export interface DesignDraft {

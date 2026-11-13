@@ -1,6 +1,8 @@
 // 智能体设计器栏的纯逻辑:带描述进来时自动开始(取舍 1)、待确认改动挂在哪一轮、
 // 处理结果留在对话里、各阶段之后的「下一步」提示(前端生成,不调模型)、积分不足、复制进来的资源来源。
 
+import type { DesignOutcome } from "@/lib/modules/agent/domain/design";
+
 /** 新建页带 ?desc= 进来:会话已载入、还没有任何轮次、这次还没试过 —— 自动把描述发给设计器 */
 export function shouldAutoSend(i: {
   desc: string | undefined;
@@ -28,30 +30,10 @@ export function pendingAnchor(turns: readonly { running?: boolean }[]): number {
   return -1;
 }
 
-/** 某一轮里某一节改动的处理结果 */
-export interface Outcome {
-  section: string;
-  count: number;
-  applied: boolean;
-}
+/** 某一轮里某一节改动的处理结果(存在设计会话的服务端状态里,见 POST /api/agents/design/[id]/outcomes) */
+export type Outcome = DesignOutcome;
+/** 轮次(运行 ID)→ 处理结果 */
 export type Outcomes = Record<string, Outcome[]>;
-
-export function addOutcome(m: Outcomes, turnKey: string, o: Outcome): Outcomes {
-  const rest = (m[turnKey] ?? []).filter((x) => x.section !== o.section);
-  return { ...m, [turnKey]: [...rest, o] };
-}
-
-export function parseOutcomes(raw: string | null): Outcomes {
-  if (!raw) return {};
-  try {
-    const v = JSON.parse(raw) as unknown;
-    return v && typeof v === "object" && !Array.isArray(v) ? (v as Outcomes) : {};
-  } catch {
-    return {};
-  }
-}
-
-export const outcomesKey = (sessionId: string) => `owa.designer-outcomes.${sessionId}`;
 
 export type NextTarget = "trial" | "eval" | "publish" | "access" | "fix";
 export interface NextAction {
